@@ -13,7 +13,8 @@ Angular 22 app in packages/renderer (standalone components, signals, zoneless if
 ## Acceptance criteria
 - [~] `npm run build -w packages/renderer` produces a static build that works from `file://` (relative base href)
   - skipped (2026-11-16 18:52+0100 by dell26/agent-1): Loading in Electron not run: launching the Electron 45 binary (installed in out/electron-check) needed an interactive approval nobody could give. What was checked at 044a8e7: npm run build -w packages/renderer -> production build in packages/renderer/dist, index.html at top level, <base href="./">, script/style refs relative and present (node structural check), no external URLs. Electron file:// load is left to the electron-shell/e2e tasks (assumption recorded).
-- [ ] `npm run dev -w packages/renderer` serves it for development
+- [x] `npm run dev -w packages/renderer` serves it for development
+  - verified (2026-11-16 18:52+0100 by dell26/agent-1): npm run dev -w packages/renderer -- --port 4317 (ng serve, development config) -> 'Local: http://localhost:4317/', node fetch GET / -> 200 with app-root + vite client, GET /main.js -> 200 text/javascript; then stopped
 - [ ] Unit test for the root component runs in `npm run check`
 - [ ] No external network resources (fonts are bundled locally, no CDN)
 
