@@ -1216,4 +1216,109 @@ describe('SidebarTree', () => {
       }
     });
   });
+
+  describe('create prompts on lists not loaded yet (round 3)', () => {
+    async function key(target: Element, k: string): Promise<void> {
+      target.dispatchEvent(
+        new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }),
+      );
+      await settle();
+    }
+
+    it('does not request the collections again while the list from the prompt still loads', async () => {
+      let release!: () => void;
+      fake.handle(
+        'coll.list',
+        ({ db }) =>
+          new Promise((resolve) => {
+            release = () => resolve({ collections: collections[db] ?? [] });
+          }),
+      );
+      await start();
+      await click(node('conn', 'Profile p1'));
+      await menu(node('db', 'shop'));
+      await click(must('menu-create-coll'));
+      await key(must('prompt-coll'), 'Escape');
+      expect(el.textContent).toContain('Loading collections…');
+      await menu(node('db', 'shop'));
+      await click(must('menu-create-coll'));
+      await key(must('prompt-coll'), 'Escape');
+      expect(fake.requestsFor('coll.list')).toHaveLength(1);
+
+      release();
+      await settle();
+      expect(nodes('coll')).toEqual(['big_orders', 'orders', 'ticks']);
+      expect(el.textContent).not.toContain('Loading collections…');
+    });
+
+    it('keeps the created collection when the list started by the prompt answers last', async () => {
+      const pending: (() => void)[] = [];
+      fake.handle('coll.list', ({ db }) => {
+        const snapshot = [...(collections[db] ?? [])];
+        // The first answer (started when the prompt opened) is held back; later ones answer at once.
+        if (fake.requestsFor('coll.list').length > 1) return { collections: snapshot };
+        return new Promise((resolve) => pending.push(() => resolve({ collections: snapshot })));
+      });
+      fake.handle('coll.create', ({ db, coll: name }) => {
+        collections[db] = [...(collections[db] ?? []), coll(name)];
+        return {};
+      });
+      await start();
+      await click(node('conn', 'Profile p1'));
+      await menu(node('db', 'shop'));
+      await click(must('menu-create-coll'));
+      await type('prompt-coll', 'fresh');
+      await click(must('prompt-ok'));
+      expect(byTestId('tree-prompt')).toBeNull();
+      expect(fake.requestsFor('coll.list')).toHaveLength(2);
+      expect(nodes('coll')).toEqual(['big_orders', 'fresh', 'orders', 'ticks']);
+
+      // The older list (without "fresh") answers now and must not replace the newer one.
+      pending.forEach((answer) => answer());
+      await settle();
+      expect(nodes('coll')).toEqual(['big_orders', 'fresh', 'orders', 'ticks']);
+    });
+
+    it('keeps the created database when the list started by the prompt answers last', async () => {
+      fake.respond('conn.status', { connections: [{ profileId: 'p1', state: 'connected' }] });
+      const pending: (() => void)[] = [];
+      fake.handle('db.listDatabases', ({ profileId }) => {
+        const snapshot = (databases[profileId] ?? []).map((name) => ({ name }));
+        if (fake.requestsFor('db.listDatabases').length > 1) return { databases: snapshot };
+        return new Promise((resolve) => pending.push(() => resolve({ databases: snapshot })));
+      });
+      fake.handle('db.create', ({ db }) => {
+        databases['p1']?.push(db);
+        collections[db] = [coll('first')];
+        return {};
+      });
+      await start();
+      await menu(node('conn', 'Profile p1'));
+      await click(must('menu-create-db'));
+      expect(el.textContent).toContain('Loading databases…');
+      await type('prompt-db', 'newdb');
+      await type('prompt-coll', 'first');
+      await click(must('prompt-ok'));
+      expect(byTestId('tree-prompt')).toBeNull();
+      expect(fake.requestsFor('conn.open')).toHaveLength(0);
+      expect(fake.requestsFor('db.listDatabases')).toHaveLength(2);
+      expect(nodes('db')).toEqual(['admin', 'newdb', 'shop']);
+
+      pending.forEach((answer) => answer());
+      await settle();
+      expect(nodes('db')).toEqual(['admin', 'newdb', 'shop']);
+      expect(el.textContent).not.toContain('Loading databases…');
+    });
+
+    it('a failed list started by the prompt shows the error with a retry after cancelling', async () => {
+      fake.fail('coll.list', { code: 'INTERNAL', message: 'listCollections failed' });
+      await start();
+      await click(node('conn', 'Profile p1'));
+      await menu(node('db', 'shop'));
+      await click(must('menu-create-coll'));
+      await click(must('prompt-cancel'));
+      expect(el.textContent).not.toContain('Loading collections…');
+      expect(el.textContent).toContain('listCollections failed');
+    });
+  });
 });
