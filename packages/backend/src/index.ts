@@ -4,6 +4,7 @@ export const WORKSPACE = '@thicket/backend';
 export * from './browse';
 export * from './connections';
 export * from './docs/query';
+export * from './docs/write';
 export * from './guard';
 export * from './server/backend';
 export * from './server/handlers';

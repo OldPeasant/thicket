@@ -3,6 +3,7 @@ import { methods, type Profile } from '@thicket/contract';
 import { browseHandlers } from '../browse';
 import { ConnectionManager, connHandlers } from '../connections';
 import { docsQueryHandlers } from '../docs/query';
+import { docsWriteHandlers } from '../docs/write';
 import { guardWrites } from '../guard';
 import { wiringHandlers, type PrivilegedLink } from './handlers';
 import { fromMainPort, type MainPortLike } from './ports';
@@ -53,6 +54,7 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
       ...connHandlers(connections),
       ...browseHandlers(connections),
       ...docsQueryHandlers(connections),
+      ...docsWriteHandlers(connections),
     },
     loadProfile,
   );
