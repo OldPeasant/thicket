@@ -369,6 +369,131 @@ describe('maskText scanner boundaries', () => {
   });
 });
 
+// Fourth test pass: the round-3 scanner changes (a secret option value runs on across raw
+// whitespace to the next '&', '#' or line break; ':' + digits is a port only before a host
+// delimiter).
+describe('maskText secret option values across whitespace', () => {
+  it('masks the whole value with several spaces and tabs, up to the next option', () => {
+    const uri = 'mongodb://h/?proxyHost=p&proxyPassword=a b\tc multiSecret&tls=true';
+    // The URL parser drops the tab, the spaces stay.
+    expect(parseConnectionString(uri).proxy.password).toBe('a bc multiSecret');
+    expect(maskText(`log: ${uri} failed`)).toBe(
+      `log: mongodb://h/?proxyHost=p&proxyPassword=${MASK}&tls=true failed`,
+    );
+  });
+
+  it('continues after a fragment that ends the secret value', () => {
+    expect(maskText('x mongodb://h/?proxyPassword=a fragSpSecret#frag y')).toBe(
+      `x mongodb://h/?proxyPassword=${MASK} y`,
+    );
+  });
+
+  it('swallows the rest of the line when no option follows (over-masking, no leak)', () => {
+    expect(maskText('x mongodb://h/?proxyPassword=a eolSecret then more prose')).toBe(
+      `x mongodb://h/?proxyPassword=${MASK}`,
+    );
+  });
+
+  it('stops the value at a line break and keeps the next line', () => {
+    for (const nl of ['\n', '\r\n']) {
+      expect(maskText(`x mongodb://h/?proxyPassword=a nlSecret${nl}next line`)).toBe(
+        `x mongodb://h/?proxyPassword=${MASK}${nl}next line`,
+      );
+    }
+  });
+
+  it('still masks a later connection string after the secret value ends at "&"', () => {
+    const masked = maskText(
+      'x mongodb://h/?proxyPassword=a b1Secret&appName=x then mongodb://u:after2Secret@h2 y',
+    );
+    expectNoLeak(masked, ['b1Secret', 'after2Secret']);
+    expect(masked).toBe(
+      `x mongodb://h/?proxyPassword=${MASK}&appName=x then mongodb://u:${MASK}@h2 y`,
+    );
+  });
+
+  it('does not leak a connection string swallowed into a secret value', () => {
+    expectNoLeak(
+      maskText(
+        'x mongodb://h/?proxyPassword=a b then mongodb://u:swallowSecret@h2/db?w=1&tls=true',
+      ),
+      ['swallowSecret'],
+    );
+  });
+
+  it('masks two secret values with spaces in one connection string', () => {
+    const uri =
+      'mongodb://u:pw@h/?proxyHost=p&proxyPassword=p one1Secret&tlsCertificateKeyFilePassword=k two2Secret';
+    expectNoLeak(maskText(`log: ${uri} failed`), ['one1Secret', 'two2Secret']);
+  });
+
+  it('masks an AWS session token with a space followed by another property', () => {
+    const uri =
+      'mongodb://h/?authMechanism=MONGODB-AWS&authMechanismProperties=AWS_SESSION_TOKEN:t ok1Secret,SERVICE_NAME:svc';
+    expect(parseConnectionString(uri).auth.mechanismProperties?.AWS_SESSION_TOKEN).toBe(
+      't ok1Secret',
+    );
+    expectNoLeak(maskText(`log: ${uri} failed`), ['ok1Secret']);
+  });
+
+  it('does not run a non-secret option value on past whitespace', () => {
+    expect(maskText('x mongodb://u:pw@h/?appName=my app is down')).toBe(
+      `x mongodb://u:${MASK}@h/?appName=my app is down`,
+    );
+  });
+
+  // The driver keeps a raw space in any option value, so a secret option may follow a non-secret
+  // value that contains one (e.g. a hand-typed appName "my app").
+  it.each([
+    ['mongodb://h/?appName=my app&proxyHost=p&proxyPassword=afterApp1Secret', 'afterApp1Secret'],
+    [
+      'mongodb://u:pw@h/?appName=my app&tls=true&tlsCertificateKeyFilePassword=afterApp2Secret',
+      'afterApp2Secret',
+    ],
+    [
+      'mongodb://h/?authMechanism=MONGODB-AWS&authMechanismProperties=SERVICE_NAME:a b,AWS_SESSION_TOKEN:afterSvc3Secret',
+      'afterSvc3Secret',
+    ],
+  ])('masks a secret option after a non-secret value with a raw space: %s', (uri, secret) => {
+    expect(() => parseConnectionString(uri)).not.toThrow();
+    expectNoLeak(mask(uri), [secret]);
+    expectNoLeak(maskText(`log: ${uri} failed`), [secret]);
+  });
+});
+
+describe('maskText port detection', () => {
+  it.each([',', '/', '?', '#', ' ', '"', "'", '`', ')', ']', '}', '>'])(
+    'splits at a scheme after a port followed by %j',
+    (delim) => {
+      const masked = maskText(`mongodb://h:27017${delim}mongodb://b:portSecret@h2`);
+      expectNoLeak(masked, ['portSecret']);
+      expect(masked).toContain(`mongodb://b:${MASK}@h2`);
+    },
+  );
+
+  it.each(['-', '.', ';', '_', 'x'])(
+    'does not split after ":" + digits + %j in the authority (password, not port)',
+    (c) => {
+      const uri = `mongodb://u:123${c}mongodb://digit${c === 'x' ? 'X' : ''}TailSecret@h`;
+      expectNoLeak(maskText(`x ${uri} y`), ['TailSecret']);
+    },
+  );
+
+  it('masks rather than leaks joined strings after a port and an unlisted delimiter', () => {
+    // ";" is not a host delimiter: the two strings stay together and mask() hides more.
+    expectNoLeak(maskText('mongodb://h:27017;mongodb://b:semiSecret@h2'), ['semiSecret']);
+    expectNoLeak(maskText('mongodb://h:27017;mongodb://h2/?proxyPassword=semiPpSecret'), [
+      'semiPpSecret',
+    ]);
+  });
+
+  it('still treats an IPv6 literal with a port as hosts', () => {
+    expect(maskText('mongodb://[fe80::1%25eth0]:27017,mongodb://b:v6Secret@h2')).toBe(
+      `mongodb://[fe80::1%25eth0]:27017,mongodb://b:${MASK}@h2`,
+    );
+  });
+});
+
 describe('mask edge cases', () => {
   it('keeps leading whitespace and masks the password after it', () => {
     expect(mask('  mongodb://u:wsSecret@h')).toBe(`  mongodb://u:${MASK}@h`);
