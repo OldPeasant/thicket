@@ -195,6 +195,7 @@ describe('pendingSave', () => {
     key: documentKey(original) ?? '',
     original,
     current,
+    partial: false,
   });
 
   it('counts the update operations of an update', () => {

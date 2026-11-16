@@ -279,6 +279,19 @@ describe('DocumentActions', () => {
       );
     });
 
+    it('still refuses when the document was edited under a projection that is cleared now', async () => {
+      edits.edit(loaded, withFields('"b":"y","a":"x","addr":{"city":"Bonn"},"tags":["p"]'), true);
+      projection = undefined;
+      expect(await actions.save(keyOf(1))).toBe(false);
+      expect(fake.requests).toHaveLength(0);
+      expect(actions.message()?.text).toBe(PROJECTION_REFUSED);
+      // Undo and redo keep the flag.
+      edits.undo();
+      edits.redo();
+      expect(edits.get(keyOf(1))?.partial).toBe(true);
+      expect(await actions.save(keyOf(1))).toBe(false);
+    });
+
     it('still sends docs.replace without a projection', async () => {
       projection = undefined;
       edits.edit(loaded, withFields('"b":"y","a":"x","addr":{"city":"Bonn"},"tags":["p"]'));

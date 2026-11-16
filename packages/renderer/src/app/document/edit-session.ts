@@ -8,6 +8,11 @@ export interface EditedDocument {
   readonly key: string;
   readonly original: BsonDocument;
   readonly current: BsonDocument;
+  /**
+   * Loaded with a query projection, so `original` may be partial: Save must not replace what it
+   * hides (see `DocumentActions.save`).
+   */
+  readonly partial: boolean;
 }
 
 /** What Save would send for one document, or why it can't be saved. */
@@ -25,6 +30,7 @@ interface Step {
   readonly original: BsonDocument;
   readonly before: BsonDocument;
   readonly after: BsonDocument;
+  readonly partial: boolean;
 }
 
 /** Most edits kept for undo (per collection tab). */
@@ -91,17 +97,19 @@ export class DocumentEdits {
    * Records an edit of the loaded document `original` (as shown, i.e. maybe already edited) to
    * `edited`. Returns false when nothing changed or the document has no `_id`. Editing a
    * document back to its loaded version clears its modified state (the edit can still be undone).
+   * `partial`: the document was loaded with a projection (sticks to the document until saved).
    */
-  edit(original: BsonDocument, edited: BsonDocument): boolean {
+  edit(original: BsonDocument, edited: BsonDocument, partial = false): boolean {
     const key = documentKey(original);
     if (key === null) return false;
     const entry = this.entries().get(key);
     const base = entry?.original ?? original;
     const before = entry?.current ?? original;
     if (bsonEquals(before, edited)) return false;
-    this.apply(key, base, edited);
+    const isPartial = (entry?.partial ?? false) || partial;
+    this.apply(key, base, edited, isPartial);
     this.undoStack.update((s) =>
-      [...s, { key, original: base, before, after: edited }].slice(-UNDO_LIMIT),
+      [...s, { key, original: base, before, after: edited, partial: isPartial }].slice(-UNDO_LIMIT),
     );
     this.redoStack.set([]);
     return true;
@@ -113,7 +121,7 @@ export class DocumentEdits {
     const step = stack.at(-1);
     if (step === undefined) return;
     this.undoStack.set(stack.slice(0, -1));
-    this.apply(step.key, step.original, step.before);
+    this.apply(step.key, step.original, step.before, step.partial);
     this.redoStack.update((s) => [...s, step]);
   }
 
@@ -123,7 +131,7 @@ export class DocumentEdits {
     const step = stack.at(-1);
     if (step === undefined) return;
     this.redoStack.set(stack.slice(0, -1));
-    this.apply(step.key, step.original, step.after);
+    this.apply(step.key, step.original, step.after, step.partial);
     this.undoStack.update((s) => [...s, step]);
   }
 
@@ -150,7 +158,7 @@ export class DocumentEdits {
   rebase(key: string, saved: BsonDocument): void {
     const entry = this.entries().get(key);
     if (entry === undefined) return;
-    this.apply(key, saved, entry.current);
+    this.apply(key, saved, entry.current, entry.partial);
     this.undoStack.update((s) => s.filter((step) => step.key !== key));
     this.redoStack.update((s) => s.filter((step) => step.key !== key));
   }
@@ -162,11 +170,16 @@ export class DocumentEdits {
     this.redoStack.set([]);
   }
 
-  private apply(key: string, original: BsonDocument, current: BsonDocument): void {
+  private apply(
+    key: string,
+    original: BsonDocument,
+    current: BsonDocument,
+    partial: boolean,
+  ): void {
     this.entries.update((map) => {
       const next = new Map(map);
       if (bsonEquals(original, current)) next.delete(key);
-      else next.set(key, { key, original, current });
+      else next.set(key, { key, original, current, partial });
       return next;
     });
   }

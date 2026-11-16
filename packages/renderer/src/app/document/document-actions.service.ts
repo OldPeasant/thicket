@@ -113,7 +113,8 @@ export class DocumentActions {
       id: stringifyEJson(id),
     };
     const diff = pending.diff;
-    if (host.projection() !== undefined && overwritesHiddenData(diff, entry.original)) {
+    const partial = entry.partial || host.projection() !== undefined;
+    if (partial && overwritesHiddenData(diff, entry.original)) {
       this.messageState.set({ kind: 'error', text: PROJECTION_REFUSED });
       return false;
     }

@@ -347,7 +347,10 @@ export class CollectionView {
   protected docChanged(index: number, tree: unknown): void {
     const original = this.docs()[index];
     const edited = this.toDocument(tree);
-    if (original && edited !== null) this.edits.edit(original, edited);
+    // With a projection the loaded document may be partial: Save then refuses edits that would
+    // replace what the projection hides, also after the projection was cleared.
+    const partial = this.results.query().projection !== undefined;
+    if (original && edited !== null) this.edits.edit(original, edited, partial);
   }
 
   protected keydown(event: KeyboardEvent): void {
