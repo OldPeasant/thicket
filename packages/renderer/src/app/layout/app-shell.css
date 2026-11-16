@@ -19,30 +19,6 @@
   background: var(--bg-panel);
 }
 
-.sidebar-title {
-  margin: 0;
-  padding: 0.625rem 0.875rem 0.5rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-muted);
-  letter-spacing: var(--heading-tracking);
-  text-transform: var(--heading-transform);
-}
-
-.sidebar-empty {
-  padding: 0.25rem 0.875rem;
-  font-size: 0.85em;
-  color: var(--text-faint);
-}
-
-.sidebar-empty p {
-  margin: 0 0 0.375rem;
-}
-
-.sidebar-empty a {
-  color: var(--accent);
-}
-
 /* Production accent: a red edge down the sidebar's outer side while the active view is production. */
 :host(.production) .sidebar {
   box-shadow: inset 3px 0 0 var(--production);

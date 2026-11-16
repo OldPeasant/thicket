@@ -13,15 +13,14 @@ import {
   NavigationSkipped,
   NavigationSkippedCode,
   Router,
-  RouterLink,
   RouterOutlet,
 } from '@angular/router';
 import { SIDEBAR_WIDTH } from '@thicket/contract';
 import { filter } from 'rxjs';
 
 import { ConfirmDialog } from '../safety/confirm-dialog';
+import { SidebarTree } from '../sidebar/sidebar-tree';
 import { ConfirmService } from '../safety/confirm.service';
-import { NAV } from './navigation';
 import { SidebarWidthService } from './sidebar-width.service';
 import { StatusBar } from './status-bar';
 import { StatusService } from './status.service';
@@ -44,7 +43,7 @@ export const SIDEBAR_KEY_STEP = 16;
 @Component({
   selector: 'app-shell',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ConfirmDialog, NgComponentOutlet, RouterLink, RouterOutlet, StatusBar, TabBar],
+  imports: [ConfirmDialog, NgComponentOutlet, RouterOutlet, SidebarTree, StatusBar, TabBar],
   host: {
     '[style.--sidebar-width.px]': 'sidebar.width()',
     '[class.production]': 'production()',
@@ -58,11 +57,7 @@ export const SIDEBAR_KEY_STEP = 16;
       aria-label="Connections"
       [attr.inert]="modal() ? '' : null"
     >
-      <h2 class="sidebar-title">Connections</h2>
-      <div class="sidebar-empty">
-        <p>No connections yet.</p>
-        <a [routerLink]="nav.newConnection" data-testid="sidebar-new">New connection</a>
-      </div>
+      <app-sidebar-tree />
     </aside>
     <div
       class="splitter"
@@ -119,7 +114,6 @@ export class AppShell {
   protected readonly sidebar = inject(SidebarWidthService);
   private readonly views = inject(TAB_VIEWS);
   private readonly tabBar = viewChild.required(TabBar);
-  protected readonly nav = NAV;
   protected readonly min = SIDEBAR_WIDTH.min;
   protected readonly max = SIDEBAR_WIDTH.max;
   protected readonly defaultWidth = SIDEBAR_WIDTH.default;

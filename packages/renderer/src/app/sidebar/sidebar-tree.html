@@ -1,0 +1,288 @@
+<header class="head">
+  <h2 class="title">Connections</h2>
+  <button
+    type="button"
+    class="icon-btn"
+    data-testid="sidebar-refresh"
+    title="Reload connections"
+    aria-label="Reload connections"
+    (click)="tree.reloadProfiles()"
+  >
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M13 8a5 5 0 1 1-1.5-3.55M13 2.5v3h-3" />
+    </svg>
+  </button>
+  <a
+    class="icon-btn"
+    data-testid="sidebar-add"
+    title="New connection"
+    aria-label="New connection"
+    [routerLink]="nav.newConnection"
+  >
+    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg>
+  </a>
+</header>
+
+@if (notice(); as text) {
+  <div class="notice" role="alert" data-testid="sidebar-notice">
+    <span>{{ text }}</span>
+    <button type="button" class="link" (click)="dismissNotice()">Dismiss</button>
+  </div>
+}
+
+@switch (tree.profiles().status) {
+  @case ('loading') {
+    <p class="empty" data-testid="sidebar-loading">Loading connections…</p>
+  }
+  @case ('error') {
+    <div class="empty error" data-testid="sidebar-error">
+      <p>Connections could not be loaded. {{ profilesError() }}</p>
+      <button type="button" class="link" (click)="tree.reloadProfiles()">Try again</button>
+    </div>
+  }
+  @default {
+    @if (tree.profileList().length === 0) {
+      <div class="empty" data-testid="sidebar-empty">
+        <p>No connections yet.</p>
+        <a [routerLink]="nav.newConnection" data-testid="sidebar-new">New connection</a>
+      </div>
+    } @else {
+      <ul class="tree" role="tree" aria-label="Connections" data-testid="sidebar-tree">
+        @for (row of rows(); track row.key) {
+          @switch (row.kind) {
+            @case ('conn') {
+              <li
+                class="node conn"
+                role="treeitem"
+                data-testid="tree-conn"
+                [attr.data-node-key]="row.key"
+                [attr.data-name]="row.profile.name"
+                [attr.data-state]="row.state"
+                [attr.aria-level]="1"
+                [attr.aria-expanded]="row.expanded"
+                [attr.aria-selected]="focusKey() === row.key"
+                [attr.tabindex]="tabStop() === row.key ? 0 : -1"
+                [class.production]="row.profile.production"
+                [style.--conn-color]="connColor(row.profile)"
+                (click)="activate(row)"
+                (contextmenu)="openMenu(row, $event)"
+                (keydown)="onTreeKeydown($event, row)"
+                (focus)="onNodeFocus(row)"
+              >
+                <span class="twisty" [class.open]="row.expanded" aria-hidden="true"></span>
+                <span class="dot" [attr.data-state]="row.state" aria-hidden="true"></span>
+                <span class="name" [title]="row.profile.name">{{ row.profile.name }}</span>
+                <span class="sr-only">, {{ stateLabel[row.state] }}</span>
+                @if (row.profile.readOnly) {
+                  <span class="badge readonly" data-testid="badge-readonly">read-only</span>
+                }
+                @if (row.profile.production) {
+                  <span class="badge production" data-testid="badge-production">prod</span>
+                }
+              </li>
+            }
+            @case ('db') {
+              <li
+                class="node db"
+                role="treeitem"
+                data-testid="tree-db"
+                [attr.data-node-key]="row.key"
+                [attr.data-name]="row.db"
+                [attr.aria-level]="2"
+                [attr.aria-expanded]="row.expanded"
+                [attr.aria-selected]="focusKey() === row.key"
+                [attr.tabindex]="tabStop() === row.key ? 0 : -1"
+                [style.--conn-color]="tree.profile(row.profileId)?.color ?? null"
+                (click)="activate(row)"
+                (contextmenu)="openMenu(row, $event)"
+                (keydown)="onTreeKeydown($event, row)"
+                (focus)="onNodeFocus(row)"
+              >
+                <span class="twisty" [class.open]="row.expanded" aria-hidden="true"></span>
+                <svg class="glyph" viewBox="0 0 16 16" aria-hidden="true">
+                  <ellipse cx="8" cy="4" rx="5" ry="2" />
+                  <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2" />
+                </svg>
+                <span class="name" [title]="row.db">{{ row.db }}</span>
+                @if (dbStatsText(row); as stats) {
+                  <span
+                    class="stats"
+                    data-testid="node-stats"
+                    [title]="statsTitle(row.profileId, row.db) ?? stats"
+                    >{{ stats }}</span
+                  >
+                }
+              </li>
+            }
+            @case ('coll') {
+              <li
+                class="node coll"
+                role="treeitem"
+                data-testid="tree-coll"
+                [attr.data-node-key]="row.key"
+                [attr.data-name]="row.info.name"
+                [attr.data-type]="row.info.type"
+                [attr.aria-level]="3"
+                [attr.aria-selected]="focusKey() === row.key"
+                [attr.tabindex]="tabStop() === row.key ? 0 : -1"
+                [style.--conn-color]="tree.profile(row.profileId)?.color ?? null"
+                (click)="activate(row)"
+                (contextmenu)="openMenu(row, $event)"
+                (keydown)="onTreeKeydown($event, row)"
+                (focus)="onNodeFocus(row)"
+              >
+                <span class="twisty none" aria-hidden="true"></span>
+                @switch (row.info.type) {
+                  @case ('view') {
+                    <svg class="glyph" viewBox="0 0 16 16" aria-hidden="true">
+                      <path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z" />
+                      <circle cx="8" cy="8" r="2" />
+                    </svg>
+                  }
+                  @case ('timeseries') {
+                    <svg class="glyph" viewBox="0 0 16 16" aria-hidden="true">
+                      <path d="M2 13h12M2 10l3-3 3 2 5-5" />
+                    </svg>
+                  }
+                  @default {
+                    <svg class="glyph" viewBox="0 0 16 16" aria-hidden="true">
+                      <rect x="2.5" y="3" width="11" height="10" rx="1" />
+                      <path d="M2.5 6.5h11M2.5 9.75h11" />
+                    </svg>
+                  }
+                }
+                <span class="name" [title]="row.info.name">{{ row.info.name }}</span>
+                @if (row.info.type !== 'collection') {
+                  <span class="sr-only">, {{ typeLabel[row.info.type] }}</span>
+                }
+                @if (collStatsText(row); as stats) {
+                  <span
+                    class="stats"
+                    data-testid="node-stats"
+                    [title]="statsTitle(row.profileId, row.db, row.info.name) ?? stats"
+                    >{{ stats }}</span
+                  >
+                }
+              </li>
+            }
+            @case ('status') {
+              <li
+                class="status"
+                role="none"
+                data-testid="tree-status"
+                [attr.data-tone]="row.tone"
+                [style.--level]="row.level"
+              >
+                <span class="status-text" [attr.role]="row.tone === 'error' ? 'alert' : null">{{
+                  row.text
+                }}</span>
+                @if (row.retry) {
+                  <button
+                    type="button"
+                    class="link"
+                    data-testid="tree-retry"
+                    (click)="row.retry()"
+                  >
+                    {{ row.tone === 'error' ? 'Retry' : 'Connect' }}
+                  </button>
+                }
+              </li>
+            }
+          }
+        }
+      </ul>
+    }
+  }
+}
+
+@if (menu(); as m) {
+  <div
+    class="menu"
+    role="menu"
+    data-testid="tree-menu"
+    [attr.aria-label]="'Actions'"
+    [style.left.px]="m.x"
+    [style.top.px]="m.y"
+    (keydown)="onMenuKeydown($event)"
+  >
+    @for (item of m.items; track item.id) {
+      @if (item.write) {
+        <button
+          type="button"
+          role="menuitem"
+          class="item"
+          [class.danger]="item.danger"
+          [attr.data-testid]="'menu-' + item.id"
+          [appWriteControl]="m.row.kind === 'conn' ? m.row.profile.id : m.row.profileId"
+          [disabledWhen]="item.disabled === true"
+          (click)="chooseItem(item, m.row)"
+        >
+          {{ item.label }}
+        </button>
+      } @else {
+        <button
+          type="button"
+          role="menuitem"
+          class="item"
+          [attr.data-testid]="'menu-' + item.id"
+          [disabled]="item.disabled === true"
+          (click)="chooseItem(item, m.row)"
+        >
+          {{ item.label }}
+        </button>
+      }
+    }
+  </div>
+}
+
+@if (prompt(); as p) {
+  <div class="backdrop" (mousedown)="$event.preventDefault()"></div>
+  <form
+    class="prompt"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="prompt-title"
+    data-testid="tree-prompt"
+    novalidate
+    (submit)="submitPrompt($event)"
+    (keydown)="onPromptKeydown($event)"
+  >
+    <h2 id="prompt-title" class="prompt-title">{{ p.title }}</h2>
+    <p class="prompt-context">{{ p.context }}</p>
+    @for (field of p.fields; track field.key) {
+      <label class="field">
+        <span class="field-label">{{ field.label }}</span>
+        <input
+          [type]="field.secret ? 'password' : 'text'"
+          autocomplete="off"
+          spellcheck="false"
+          [attr.data-testid]="'prompt-' + field.key"
+          [value]="promptValues()[field.key] ?? ''"
+          [attr.aria-invalid]="promptTouched() && fieldProblem(field) !== null"
+          [disabled]="promptBusy()"
+          (input)="onPromptInput(field, $event)"
+        />
+        @if (promptTouched() && fieldProblem(field); as problem) {
+          <span class="field-problem" data-testid="prompt-problem">{{ problem }}</span>
+        }
+      </label>
+    }
+    @if (promptError(); as error) {
+      <p class="prompt-error" role="alert" data-testid="prompt-error">{{ error }}</p>
+    }
+    <div class="actions">
+      <button
+        type="button"
+        class="btn"
+        data-testid="prompt-cancel"
+        [disabled]="promptBusy()"
+        (click)="closePrompt()"
+      >
+        Cancel
+      </button>
+      <button type="submit" class="btn primary" data-testid="prompt-ok" [disabled]="promptBusy()">
+        {{ p.submitLabel }}
+      </button>
+    </div>
+  </form>
+}

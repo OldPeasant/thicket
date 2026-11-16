@@ -836,7 +836,7 @@ describe('AppShell', () => {
       await start();
       ws.open(tab('a'));
       await settle();
-      el.querySelector<HTMLElement>('[data-testid="sidebar-new"]')?.click();
+      el.querySelector<HTMLElement>('[data-testid="sidebar-add"]')?.click();
       await settle();
       expect(TestBed.inject(Router).url).toBe(NAV.newConnection);
       expect(ws.activeId()).toBeNull();
@@ -848,7 +848,7 @@ describe('AppShell', () => {
       ws.open(tab('a'));
       await settle();
       expect(ws.activeId()).toBe('a');
-      el.querySelector<HTMLElement>('[data-testid="sidebar-new"]')?.click();
+      el.querySelector<HTMLElement>('[data-testid="sidebar-add"]')?.click();
       await settle();
       expect(TestBed.inject(Router).url).toBe(NAV.newConnection);
       expect(ws.activeId()).toBeNull();
