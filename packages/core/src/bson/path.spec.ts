@@ -28,6 +28,10 @@ describe('getAt', () => {
   it('returns undefined for negative or fractional array indexes', () => {
     expect(getAt(ROOT, ['a', 'b', -1])).toBeUndefined();
     expect(getAt(ROOT, ['a', 'b', 1.5])).toBeUndefined();
+    expect(getAt(ROOT, ['a', 'b', NaN])).toBeUndefined();
+    expect(getAt(ROOT, ['a', 'b', Infinity])).toBeUndefined();
+    expect(getAt(ROOT, ['a', 'b', -0, 'nope'])).toBeUndefined();
+    expect(getAt(ROOT, ['a', 'b', -0])).toEqual(int(10));
   });
 
   it('addresses the first of repeated keys', () => {

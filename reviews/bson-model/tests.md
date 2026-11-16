@@ -4,132 +4,113 @@ Date: 2026-11-16
 
 Task: bson-model - Core: BSON value model with lossless EJSON round trip
 
-Scope: base `ed95d7e3c8e0c3798e189970964380e6b495cfe3` .. HEAD `cc82bfdebffdc59efc9eb6f5feafde2267c2fae4` (single task commit cc82bfd "Add BSON value model with lossless canonical EJSON round trip, conversions and path API"; the parent named it 1222614, the checkout's HEAD is cc82bfd with exactly the file list the parent gave). Branch `main`. Production files in scope: `packages/core/src/bson/{model,json-tree,ejson,iso-date,convert,path,index}.ts`, `packages/core/src/index.ts`. Uncommitted inputs at measurement time: only test files written by this run (listed below); no uncommitted production changes.
+Scope: second pass on the final code. Base `ed95d7e3c8e0c3798e189970964380e6b495cfe3` .. HEAD `e5ddbe41165a2efc285ca1bbfdeb61b4f624a630`, branch `main`. Task-owned code commits (from `git log ed95d7e..HEAD` and the parent's instructions): `e6a1a96` (implementation), `efe5a9c` (first-pass tests and reports), `e5ddbe4` (fixer: `convert.ts`, `ejson.ts`, `path.ts`, `iso-date.ts` and their specs, see `reviews/bson-model/fixes.md`). The other commits in the range are other tasks merged from main (`electron-shell`, heartbeats, claims), outside this scope. Production files in scope: `packages/core/src/bson/{model,json-tree,ejson,iso-date,convert,path,index}.ts`, `packages/core/src/index.ts`. Uncommitted inputs: the three spec files this pass edited (listed below). `reviews/bson-model/review.md` also shows as modified in the working tree. This pass did not change it (another helper did), and it does not affect the measurement.
 
 Requirements:
 - `tasks/bson-model.md` acceptance criteria and recorded assumptions
 - `SPEC.md` "Documents and BSON"
 - `docs/ARCHITECTURE.md` "Coverage" and "Conventions"
-- Parent instructions (conversions must stay at 100% branch coverage; model.ts constructors uncovered)
+- `reviews/bson-model/fixes.md` (fixes for TW-1, CR-1..CR-4, OBS-1..OBS-3) and the parent's instructions (convert.ts must stay at 100% branches)
 
 ## Test files changed
 
-- `packages/core/src/bson/model.spec.ts` (new)
-- `packages/core/src/bson/json-tree.spec.ts` (new)
-- `packages/core/src/bson/ejson.spec.ts` (extended)
+This pass:
 - `packages/core/src/bson/convert.spec.ts` (extended)
+- `packages/core/src/bson/iso-date.spec.ts` (extended)
 - `packages/core/src/bson/path.spec.ts` (extended)
+
+Earlier passes (committed): `model.spec.ts`, `json-tree.spec.ts`, `ejson.spec.ts`, `convert.spec.ts`, `path.spec.ts` (first test-writer pass); the fixer's spec additions in `e5ddbe4`.
 
 ## Tests added or updated
 
-Count: 86 (core test count 100 -> 186, counting each `it.each` row; no existing test was changed except the import lines in `ejson.spec.ts`)
+Count: 15 new test cases in this pass (core tests 204 -> 219, counting each `it.each` row), plus 6 extra assertions added to 2 existing tests. No existing assertion was changed or removed.
 
-Added coverage, by area:
-- model.ts: `int32` range edges, -0 normalization, fractions/NaN/Infinity rejected; `int64` range edges and values beyond 2^53; `double` keeps -0/NaN/Infinity; `str`/`bool`/`nil`/`doc`/`arr`; `BSON_TYPES`/`DEPRECATED_TYPES`; `BsonModelError`.
-- json-tree.ts: key order/repeated keys/`__proto__`/raw number text, no prototype pollution, whitespace and escapes, top-level scalars, depth limit (1000 accepted, deeper rejected), 12 malformed inputs, error position.
-- ejson.ts: doubles compared against `bson` canonical output (0.1, 1e-7, 2^53+2, 1e21, max double, -5e-324, ...), Int64 around +-2^53, escaped/empty/emoji keys, nested wrappers in arrays and `$scope`, round trip through indented output, indent clamping, normalization of 13 accepted non-canonical wrapper forms, Int32/Int64/Double boundaries for plain numbers, 17 more invalid wrapper values, base64/hex helpers for every padding length.
-- convert.ts: String->ObjectId empty/untrimmed, Int32<->Int64 boundary round trip, Int64->Int32 overflow at Int64 extremes, Double->Int32 for -0/Infinity, Double->Decimal128->Double value round trip, Decimal128 integral values -> Int32/Int64 (exposes TW-1), Decimal overflow/NaN/Infinity, String->Int64 `+5` and Int64 min, Date->String->Date round trip for years 0001-9999, zone-less ISO rejected, UUID case normalization and 15-byte binary rejected, input not mutated.
-- path.ts: `$`-prefixed, `__proto__` and repeated keys with get/set/remove/move/rename/insert (first match, others kept, byte-exact output), moving a `$oid` field keeps a document, immutability of every write op, structural sharing, scalar root, empty containers, append at index=length, non-integer positions, no-op move, root-level errors, array root, error messages naming the failing prefix.
+Review of the fixer's tests: each fix has a test that fails without it (checked by reading the diff `efe5a9c..e5ddbe4`). The TW-1 test from the first pass is unchanged and now passes. The one changed existing assertion (Regex `/a+/i` -> String) used to encode the silent loss of options that CR-2 rejects. The new assertion checks the specified behavior, so this does not weaken the test. Gaps I found in the fix tests, and what this pass added for them:
+
+- TW-1/CR-1 (Decimal128 with trailing fractional zeros -> Int32/Int64). New `convert.spec.ts` tests:
+  - "Decimal128 with fractional zeros keeps the Int32/Int64 range checks": `2147483647.0`, `-2147483648.00` and `-9223372036854775808.0` convert; `2147483648.0` overflows Int32; `9223372036854775808.0` overflows Int64; `-0.0` -> 0; `1200.01` is not an integer.
+  - "Decimal128 parsed from EJSON in non-canonical form converts to Int32 (TW-1 regression)": the end-to-end path. `{"$numberDecimal":"12000E-1"}` is parsed to the stored form `1200.0` and converts to 1200.
+- CR-2 (String -> Double overflow; Regex -> String option loss). New tests:
+  - "String -> Double: trimmed specials convert, padded overflow and junk fail": `' -Infinity '`, `+Infinity`, `' 2e308 '`, `Infinityx`, `nan`. This covers the reordered regex checks.
+  - "Regex -> String fails for every non-empty option set": `imsx` fails; an empty pattern with empty options converts.
+- OBS-3 (UUID from Binary subtype 4 of the wrong length): the existing test now also covers an empty payload and a 17-byte payload.
+- CR-4 (canonical base64), as it affects conversions. New test "Binary subtype 4 parsed with non-canonical base64 converts to UUID text": a `$binary` subtype 04 whose last base64 character differs only in padding bits is stored canonically and converts to the expected UUID and UUID text.
+- OBS-1 (extended ISO years). New `parseIsoDate` rows:
+  - accepted: `0000-01-01T00:00:00Z`, the date-only `+010000-01-01`, `+010000-…+01:00` with an offset, and the JS minimum `-271821-04-20T00:00:00Z` with and without an offset;
+  - rejected: one millisecond before the JS minimum, the date-only `-000000-01-01`, `+010000-02-30`, a 7-digit `+0010000`, and an unsigned 6-digit `010000`.
+- CR-3/OBS-2 (`getAt` with an invalid array index): the existing test now also covers `NaN`, `Infinity` and `-0` (which behaves like index 0).
 
 ## Requirement coverage
 
 | Requirement | Tests | Command | Result |
 |---|---|---|---|
-| AC1 Round trip of a fixture with every BSON type (deprecated, Binary subtypes, UUID, -0, NaN/Infinity, Int64 > 2^53) is byte-identical | `ejson.spec.ts` "EJSON round trip" (existing), "EJSON round trip edge cases" (doubles vs bson, Int64 around 2^53, escaped keys, nested wrappers, indented round trip) | `cd packages/core && npx vitest run src/bson` | Pass |
-| AC2 Field order preserved incl. `$`-prefixed / duplicate-looking keys | `ejson.spec.ts` "field order" (existing), `json-tree.spec.ts` key-order test, `path.spec.ts` "path API with $-prefixed and repeated keys", `model.spec.ts` "compose into a document that keeps field order" | same | Pass |
-| AC3 Conversion table: String->ObjectId valid/invalid, Int32->Int64, Int64->Int32 overflow, Double->Decimal128, String<->Date ISO, Binary(4)<->UUID | `convert.spec.ts` "table from the acceptance criteria" (existing) and "convert: edge cases" | same | Pass for every listed pair; 1 Fail in an adjacent conversion (Decimal128 -> Int32/Int64), see TW-1 |
-| AC4 Path API get/set/insert/remove/move with tests | `path.spec.ts` (existing + 2 new describe blocks, 15 new tests) | same | Pass |
-| AC4 100% branch coverage on conversions | coverage run below | see Coverage | Pass: convert.ts 145/145 branches (fresh run that includes the failing TW-1 test, see Coverage status) |
-| No Node APIs in core (renderer) | not a behavioral test; checked by reading: no `Buffer`/`node:` imports in scope, base64 is hand-written | n/a | Not testable as a unit test (static property); see Unable to test |
+| AC1 Round trip of a fixture with every BSON type (deprecated, Binary subtypes, UUID, -0, NaN/Infinity, Int64 > 2^53) is byte-identical | `ejson.spec.ts` "EJSON round trip", "EJSON round trip edge cases", "Binary base64 canonicalization" | `npx vitest run --project core` (repo root) | Pass |
+| AC2 Field order preserved incl. `$`-prefixed / duplicate-looking keys | `ejson.spec.ts` "field order", `json-tree.spec.ts` key-order test, `path.spec.ts` "path API with $-prefixed and repeated keys", `model.spec.ts` field-order test | same | Pass |
+| AC3 Conversion table: String->ObjectId valid/invalid, Int32->Int64, Int64->Int32 overflow, Double->Decimal128, String<->Date ISO, Binary(4)<->UUID | `convert.spec.ts` "table from the acceptance criteria", "every target", "edge cases" (incl. the TW-1 regression, extended-year Date<->String, the UUID length and canonical base64 tests) | same | Pass |
+| AC4 Path API get/set/insert/remove/move with tests | `path.spec.ts` (incl. the negative/fractional/NaN/Infinity `getAt` test) | same | Pass |
+| AC4 100% branch coverage on conversions | coverage run below | see Coverage | Pass: convert.ts 148/148 branches |
+| Task assumption / module contract: lossy conversions are errors | `convert.spec.ts` overflow tests (String->Double, Decimal->Int, Int64->Int32), Regex option loss | `npx vitest run --project core` | Pass (see OBS-4 for underflow) |
+| No Node APIs in core (runs in the renderer) | not a behavioral test; checked by reading: only `bson` and relative imports, hand-written base64 | n/a | Not testable as a unit test (static property) |
 
 ## Focused test execution
 
 Command:
 
-`cd packages/core && npx vitest run src/bson`
+`npx vitest run src/bson` (repo root)
 
 Result:
 
-Fail - 6 files, 185 tests: 184 passed, 1 failed (`convert.spec.ts > convert: edge cases > Decimal128 with an exact integral value converts to Int32 and Int64`, production defect TW-1).
+Pass: 6 files, 218 tests.
 
-Also run (repo root): `npx eslint packages/core --max-warnings 0` -> Pass (no output); `npx prettier --check packages/core` -> Pass ("All matched files use Prettier code style!", after `prettier --write` on the three spec files this run edited); `npm run typecheck -w packages/core` -> Pass (`tsc -p tsconfig.json`, no errors).
+Also run (repo root):
+- `npx eslint packages/core --max-warnings 0` -> Pass (no output)
+- `npx prettier --check packages/core` -> Pass ("All matched files use Prettier code style!", after `npx prettier --write packages/core/src/bson/convert.spec.ts` on this pass's edits)
+- `npm run typecheck -w packages/core` -> Pass (`tsc -p tsconfig.json`, no errors)
 
 ## Full test execution
 
 Command:
 
-`npm run check` (repository root; lint, type check, unit tests of all workspaces)
+`npm run check` (repo root; `npm run lint && npm run typecheck && npm run test`)
 
 Result:
 
-Fail - lint and type check passed; Vitest: 11 files, 784 tests, 783 passed, 1 failed (the same TW-1 test). No other test in the repository failed.
+Fail (exit 2), for an environment reason outside this task. `lint` passed (eslint plus `prettier --check .`). `typecheck` failed only in the `@thicket/desktop` workspace: `TS2307: Cannot find module 'electron'` / `'playwright-core'` in `apps/desktop/src/main/index.ts`, `window.ts`, `src/preload/index.ts` and `apps/desktop/test/*.ts`, plus TS7006 errors that follow from them. Those dependencies came from the `electron-shell` task (commit `0358b98`, merged from main) and are not installed in this clone: `node_modules/electron` and `node_modules/playwright-core` do not exist. The test-writer may not install dependencies. The `core`, `contract`, `backend` and `renderer` type checks passed. Because `&&` stops after the typecheck failure, the test stage was run separately:
+
+`npm run test` (repo root) -> Pass: Vitest 18 files / 956 tests passed; renderer `ng test` 5 files / 181 tests passed.
+
+Follow-up for the parent: run `npm install` (or `npm ci`) so the lockfile's `electron`/`playwright-core` are present, then re-run `npm run check`. This must pass before `tasks.py done`.
 
 ## .taskcheck
 
 Result:
 
-Fail - `.taskcheck` is `if [ -f package.json ]; then npm run check; ...`; `npm run check` was run directly (above) and fails only on TW-1. It passes once TW-1 is fixed in production code.
+Not run directly. `.taskcheck` runs `npm run check`, which was run directly above. It fails at the desktop typecheck because of the missing installed dependencies, not because of bson-model code.
 
 ## Bugs found
 
-### Decimal128 values with an exact integer value in plain notation cannot convert to Int32/Int64
-
-Finding ID:
-
-`TW-1`
-
-Test:
-
-`packages/core/src/bson/convert.spec.ts` > `convert: edge cases` > `Decimal128 with an exact integral value converts to Int32 and Int64`
-
-Production source:
-
-`packages/core/src/bson/convert.ts:157-182` (`toInteger` cases `decimal`/`string` and `decimalInteger`)
-
-Requirement:
-
-Conversion contract in `convert.ts` ("A conversion either produces an exactly corresponding value or throws"), task assumption "Lossy conversions are errors (... fractional->int)", SPEC "the type dropdown converts explicitly". The implementation explicitly intends integral Decimal128 values to convert (the existing test accepts `12000E-1` -> 1200, and `1.200E+3` -> 1200).
-
-Expected behavior:
-
-`convert({type:'decimal', value:'1200.0'}, 'int')` returns `{type:'int', value:1200}`; `convert({type:'decimal', value:'-7.00'}, 'long')` returns `{type:'long', value:-7n}`; `'7.50'` still fails as not an integer.
-
-Actual behavior:
-
-Throws `ConversionError: Cannot convert decimal to int: "1200.0" is not an integer`. `INT_TEXT` rejects the `.0` and `decimalInteger` only matches strings with an `E` exponent. The model always stores bson's canonical Decimal128 string, and bson writes `12000E-1` as `"1200.0"` (confirmed by the new ejson normalization test). So every value parsed from EJSON hits this path, and the passing existing test `dec('12000E-1')` uses a form the model never holds. Affects any Decimal128 with trailing fractional zeros, e.g. `"5.0"` and `"42.00"`. The failure is safe (an error, no data loss) but it rejects a lossless conversion.
-
-Severity:
-
-Low
-
-Fix required:
-
-`Yes — production code must be fixed by the parent worker / fixer.`
+No new production defects. All first-pass findings (TW-1, OBS-1..OBS-3) are fixed and their tests pass.
 
 ### Observations (no failing test added; requirement not specified, parent decides)
 
-- OBS-1 (Low): `convert(date, 'string')` for dates outside years 0000-9999 produces extended ISO text (`+010000-01-01T00:00:00.000Z`, `-000001-...`) that `convert(string, 'date')` / `parseIsoDate` rejects (the regex accepts only 4-digit years), so Date->String->Date does not round-trip there. Within 0001-9999 it does (test added). `convert.ts:126-131`, `iso-date.ts:3-4,42-47`.
-- OBS-2 (Low): `getAt(root, ['arr', -1])` or `['arr', 1.5]` throws `BsonModelError` (from `indexIn`), while other missing or mistyped segments return `undefined` (existing test "returns undefined for missing or mistyped segments"). `path.ts:46-58`. Not asserted either way, because the expected behavior is not specified.
-- OBS-3 (Low): `convert(binary subtype 4, 'uuid')` returns the value unchanged even when its payload is not 16 bytes, while other subtypes are length-checked. `convert.ts:279`. `uuidOf` returns null for such values, so nothing is displayed wrongly.
+- OBS-4 (Low): String -> Double and Decimal128 -> Double still underflow silently. `convert(s('1e-400'), 'double')` returns `0`, and `convert(dec('1E-6177'), 'double')` returns `0` (`convert.ts:196-210`). The module comment says a conversion "never silently truncates or overflows", and CR-2 made overflow an error. Underflow to 0 (or to a subnormal) is a precision loss, not an overflow, and every decimal-to-double conversion rounds anyway (e.g. `0.1`). So this is not asserted either way. Only flag it if the parent reads "truncates" as covering a non-zero value that becomes 0.
 
 ## Coverage
 
-Status: partial-failed. The run is fresh and complete for the scope (every scoped file instrumented, all 186 tests executed), but the command exited non-zero because of the TW-1 test. The report was emitted with `--coverage.reportOnFailure`. The numbers are therefore diagnostic. They will be valid for sign-off once TW-1 is fixed and coverage is re-run.
+Status: verified. The run is fresh, all 219 core tests passed, exit 0, and every scoped file was instrumented.
 
 Metric: whole-file coverage of task-changed production files.
 Changed-line coverage: not measured separately. Every scoped file is new in this task except `packages/core/src/index.ts` (one added re-export line), so whole-file coverage equals changed-line coverage for the new files.
 
 Evidence:
-- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: `bson-model`; base `ed95d7e3c8e0c3798e189970964380e6b495cfe3`; HEAD `cc82bfdebffdc59efc9eb6f5feafde2267c2fae4`; task-owned commit cc82bfd only (`git log ed95d7e..HEAD`); file scope from `git diff --stat ed95d7e..HEAD` and parent instructions (same list).
-- Source/test snapshot identifier (including uncommitted inputs): HEAD cc82bfd plus uncommitted spec files with sha256: convert.spec.ts `9cbec57e6c40d5df3995de2de16f77eda665e0703cd99bcb3af071da8bada117`, ejson.spec.ts `7cff9ea5fa9b6671bccd6d448dbd0766f97921e3b2f02db5e4bbd97c6a0ee6c0`, json-tree.spec.ts `e0200f3b5ff4a2914ed46a946ac4af41bd12bc871e188c9b0e99a7b04005db70`, model.spec.ts `498ba375622402f486c772cb5666884d73e51742051766ccb03c371bd63b06fb`, path.spec.ts `42e29536153ecefbb7efcddebf2bb7bfe4e4c4d423404b098c18786e7b53cdc3`, iso-date.spec.ts (unchanged) `6bd6bbff49e89ccdc7a2b930c6981d1e5028c4fc3777df76cd2e59e2f86afa9e`. Production files unchanged from HEAD (`git status` shows no modified production file): convert.ts `7d9b91a92cf90184ded52531dc1484789a6bf661eb1f594d9a784e0bdeac3319`, ejson.ts `2bc9abdb5aac1575f20f668d33203c27507b8dab33597bd92ce49c1f50441a96`, json-tree.ts `2241ad0293f285d6da75c5de9e6439764819252ede81695f1f66f48cb8a6ed75`, model.ts `8dc667f03e61016bd5abec9c602e85847dc78f69817c10ef52e11c9b8b9e0f0e`, path.ts `c4f4c84c2b07e946665af36b90f5c66712930dcf87c9ac48dfb5fae16594cbbe`, iso-date.ts `d82f61b232e173dc53894bdfc64c519c3d69f97f4296a76c1fe3b6fceaaa1ccf`.
-- Exact included files; renamed/deleted/excluded files and reasons: included `src/bson/model.ts`, `json-tree.ts`, `ejson.ts`, `iso-date.ts`, `convert.ts`, `path.ts`, `index.ts`, `src/index.ts`. Excluded: `packages/core/package.json` and `package-lock.json` (dependency config, no executable behavior), all `*.spec.ts`. No renames or deletions.
-- Provider/version, command, working directory, and test selection: Vitest v5.1.0 with `@vitest/coverage-v8` (v8 provider); cwd `packages/core`; `npx vitest run --coverage --coverage.reportOnFailure --coverage.reportsDirectory=coverage/tw-final --coverage.include='src/bson/model.ts' --coverage.include='src/bson/json-tree.ts' --coverage.include='src/bson/ejson.ts' --coverage.include='src/bson/iso-date.ts' --coverage.include='src/bson/convert.ts' --coverage.include='src/bson/path.ts' --coverage.include='src/bson/index.ts' --coverage.include='src/index.ts' --coverage.reporter=json-summary --coverage.reporter=json --coverage.reporter=text`; test selection: all core specs (7 files, 186 tests).
-- Run start/completion time and exit status: started 2026-11-16 19:35:10 local, duration 227 ms; exit non-zero (1 failed test, TW-1).
-- Generated report paths and report hashes/run identifier: `packages/core/coverage/tw-final/coverage-summary.json` sha256 `4710e61e261dc253136fb3864fd2151e440e457f105da237589b82fd9311624b`; `packages/core/coverage/tw-final/coverage-final.json` sha256 `70c4463a5d3dc348fb0f127897993b3b561cf32d0ebf0320514dd089d2e12d81` (git-ignored).
-- Evidence outputs are fresh and inputs stayed unchanged: new output directory `coverage/tw-final` created by this run; sha256 of all scoped source and spec files identical before and after the coverage and `npm run check` runs.
-- Final run after latest test additions and production fixes: yes for the test additions; no production fix exists yet (TW-1 open). After the fixer changes `convert.ts` this coverage is stale and must be re-run.
-
-Baseline before this run's tests (same command, `coverage/tw-baseline`, all 100 tests passing): model.ts 9/21 statements, 0/13 branches, 0/8 functions; json-tree.ts 33/35 branches; ejson.ts 162/164 branches; path.ts 86/87 branches; convert.ts and iso-date.ts already 100%.
+- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: `bson-model`; base `ed95d7e3c8e0c3798e189970964380e6b495cfe3`; HEAD `e5ddbe41165a2efc285ca1bbfdeb61b4f624a630`; task-owned commits `e6a1a96`, `efe5a9c`, `e5ddbe4` (parent instructions plus `git log`); file scope from the first pass and `git diff efe5a9c e5ddbe4 -- packages/core` (no new production files).
+- Source/test snapshot identifier (including uncommitted inputs): HEAD e5ddbe4 plus uncommitted spec edits. sha256 of the specs: convert.spec.ts `e99515ce71ca43bb4c2a494775e47845c76f248ae69ec4157adc996f1098cca8`, iso-date.spec.ts `fa21e7b13b1bc5fdf375e203225f434f75b42bbe408c94f3a302798f5ae00ebd`, path.spec.ts `d0adf39619b8e9788e2d53833f8853fcf2b79b3f512c72abbeb777ea3693a14b`, ejson.spec.ts `43dd069fa6c6656074a79caf480c55d1a09f2cbd20de64f1b9c05568341bf888`, json-tree.spec.ts `e0200f3b5ff4a2914ed46a946ac4af41bd12bc871e188c9b0e99a7b04005db70`, model.spec.ts `498ba375622402f486c772cb5666884d73e51742051766ccb03c371bd63b06fb`. Production files are as committed at HEAD: convert.ts `c8bbd2f2109ce054740c81eb588d20fd7e52c3829e0d2fb11d6d0000ca34ba5d`, ejson.ts `09ebb536a7db5eb2c9cb389c1929235896dea98b8ee695868ca9c3d8c89caebc`, iso-date.ts `92c15a37db74937c8c8261d2f48e678f60681eb3708989e0bc13c1c59aed045e`, path.ts `9f316ea448f924425539fd8765edfc8ecf4d14c822983a2a060bc3bd750f8e17`, json-tree.ts `2241ad0293f285d6da75c5de9e6439764819252ede81695f1f66f48cb8a6ed75`, model.ts `8dc667f03e61016bd5abec9c602e85847dc78f69817c10ef52e11c9b8b9e0f0e`, bson/index.ts `df1b43c542ba79ccbd140e929e931fff376942a4da6ca129e43bbb1eaa2b2ec2`, src/index.ts `2309da5b43ac670850d7518aeb9431b3925fd9a342fdc521a0734c7511f57035`.
+- Exact included files; renamed/deleted/excluded files and reasons: included `src/bson/model.ts`, `json-tree.ts`, `ejson.ts`, `iso-date.ts`, `convert.ts`, `path.ts`, `index.ts`, and `src/index.ts`. Excluded: `*.spec.ts`, plus `packages/core/package.json` and `package-lock.json` (dependency configuration, no executable behavior). No files were renamed or deleted.
+- Provider/version, command, working directory, and test selection: Vitest v5.1.0 with `@vitest/coverage-v8`. Working directory: repo root. Command: `npx vitest run --project core --coverage --coverage.include='src/bson/*.ts' --coverage.include='src/index.ts' --coverage.exclude='**/*.spec.ts' --coverage.reportsDirectory=packages/core/coverage/tw-pass2 --coverage.reporter=json-summary --coverage.reporter=json --coverage.reporter=text`. Test selection: all core specs (7 files, 219 tests). The include globs resolve against the `core` project root (`packages/core`). The command the parent suggested, `--coverage.include='packages/core/src/bson/*.ts'` from the repo root, matched no files and reported `0/0` ("Unknown%"). It also passed 219 tests, but its coverage output is not evidence.
+- Run start/completion time and exit status: started 19:41:45 local (2026-11-16), duration 186 ms, exit 0.
+- Generated report paths and report hashes/run identifier: `packages/core/coverage/tw-pass2/coverage-summary.json` sha256 `6d2c558a4e15f7e7e32829670c7a91693dbca3074453d69c3a44138529156221`; `packages/core/coverage/tw-pass2/coverage-final.json` sha256 `6514158374f368b664f2f3577491b4e8364db994085a3256b30421ae151f4346` (git-ignored).
+- Evidence outputs are fresh and inputs stayed unchanged: this run created the new output directory `coverage/tw-pass2`. The sha256 of every scoped source and spec file was identical before the coverage run and after `npm run test`.
+- Final run after latest test additions and production fixes: yes. It ran after the fixer's commit `e5ddbe4` and after this pass's test additions.
 
 Values below use covered/total (percentage); zero-denominator or unsupported metrics are N/A.
 
@@ -138,23 +119,22 @@ Values below use covered/total (percentage); zero-denominator or unsupported met
 | `packages/core/src/bson/model.ts` | 21/21 (100%) | 13/13 (100%) | 8/8 (100%) | 21/21 (100%) |
 | `packages/core/src/bson/json-tree.ts` | 93/93 (100%) | 35/35 (100%) | 7/7 (100%) | 84/84 (100%) |
 | `packages/core/src/bson/ejson.ts` | 188/188 (100%) | 164/164 (100%) | 29/29 (100%) | 160/160 (100%) |
-| `packages/core/src/bson/iso-date.ts` | 24/24 (100%) | 24/24 (100%) | 2/2 (100%) | 22/22 (100%) |
-| `packages/core/src/bson/convert.ts` | 151/151 (100%) | 145/145 (100%) | 14/14 (100%) | 129/129 (100%) |
-| `packages/core/src/bson/path.ts` | 109/109 (100%) | 86/87 (98.85%) | 24/24 (100%) | 92/92 (100%) |
-| `packages/core/src/bson/index.ts` | N/A (0/0, re-exports only) | N/A | N/A | N/A |
+| `packages/core/src/bson/iso-date.ts` | 24/24 (100%) | 26/26 (100%) | 2/2 (100%) | 22/22 (100%) |
+| `packages/core/src/bson/convert.ts` | 156/156 (100%) | 148/148 (100%) | 14/14 (100%) | 131/131 (100%) |
+| `packages/core/src/bson/path.ts` | 110/110 (100%) | 89/90 (98.89%) | 24/24 (100%) | 92/92 (100%) |
+| `packages/core/src/bson/index.ts` | N/A (0/0, re-exports only) | N/A (0/0) | N/A (0/0) | N/A (0/0) |
 | `packages/core/src/index.ts` | 1/1 (100%) | N/A (0/0) | N/A (0/0) | 1/1 (100%) |
-| Aggregate (summed counters, all 8 files, none missing or excluded) | 587/587 (100%) | 467/468 (99.78%) | 84/84 (100%) | 509/509 (100%) |
+| Aggregate (summed counters, all 8 files, none missing or excluded) | 593/593 (100%) | 475/476 (99.79%) | 84/84 (100%) | 511/511 (100%) |
 
 | File and uncovered lines/branch locations | Required behavior or risk | Action/test added or reason left uncovered |
 |---|---|---|
-| `packages/core/src/bson/path.ts:43` (falsy arm of `value ? ... : 'does not exist'` in `asContainer`) | none: `updateContainer` only recurses into an existing child (it checks `i < 0` first) and the root is always a value, so `value` is never undefined here | Justified gap: defensive code, unreachable through the public API |
-| `packages/core/src/bson/convert.ts:157-182` | covered, but the decimal-with-fraction-zeros path is wrong | TW-1 failing test kept |
+| `packages/core/src/bson/path.ts:43` (falsy arm of `value ? ... : 'does not exist'` in `asContainer`) | None. `updateContainer` only recurses into an existing child (it checks `i < 0` first), and the root is always a value, so `value` is never undefined here. | Justified gap: defensive code that the public API cannot reach (unchanged since the first pass) |
 
 ## Unable to test
 
-- "No Node APIs (runs in the renderer)": a static property, not observable in a unit test under Vitest's `node` environment. Checked by reading the scoped files (only `bson` and relative imports; base64 is hand-written without `Buffer`). Lint or bundling rules would have to enforce it; no follow-up is needed for this task.
-- Coverage numbers are diagnostic (partial-failed) until TW-1 is fixed. Re-run the coverage command above after the fix.
+- "No Node APIs (runs in the renderer)" is a static property. A unit test under Vitest's `node` environment cannot observe it. I checked it by reading the code instead. No follow-up is needed for this task.
+- The full `npm run check` / `.taskcheck` could not pass in this clone because the desktop dependencies (`electron`, `playwright-core`) from the merged `electron-shell` task are not installed. The parent needs to install them and re-run the check (see Full test execution).
 
 ## Summary
 
-Tests added; production defects were discovered and must be passed to the `fixer` before task completion.
+Tests and task-scoped coverage are sufficient; no production defects found. The fixes are tested, and this pass added boundary and end-to-end tests. convert.ts is at 148/148 branches. Before `done`, the parent must get `npm run check` passing in an environment where the desktop dependencies are installed.

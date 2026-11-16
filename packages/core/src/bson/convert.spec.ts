@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { convert, ConversionError, uuidOf, type ConversionTarget } from './convert';
+import { parseEJson } from './ejson';
 import type { BsonValue } from './model';
 
 const s = (value: string): BsonValue => ({ type: 'string', value });
@@ -255,6 +256,24 @@ describe('convert: edge cases', () => {
     fails(dec('-0.5'), 'long', 'not an integer');
   });
 
+  it('Decimal128 with fractional zeros keeps the Int32/Int64 range checks', () => {
+    expect(convert(dec('2147483647.0'), 'int')).toEqual(i32(2147483647));
+    expect(convert(dec('-2147483648.00'), 'int')).toEqual(i32(-2147483648));
+    fails(dec('2147483648.0'), 'int', 'overflows Int32');
+    expect(convert(dec('-9223372036854775808.0'), 'long')).toEqual(i64(-(2n ** 63n)));
+    fails(dec('9223372036854775808.0'), 'long', 'overflows Int64');
+    expect(convert(dec('-0.0'), 'int')).toEqual(i32(0));
+    fails(dec('1200.01'), 'long', 'not an integer');
+  });
+
+  it('Decimal128 parsed from EJSON in non-canonical form converts to Int32 (TW-1 regression)', () => {
+    // bson stores 12000E-1 as "1200.0": the form every parsed value has.
+    const parsed = parseEJson('{"$numberDecimal":"12000E-1"}');
+    expect(parsed).toEqual(dec('1200.0'));
+    expect(convert(parsed, 'int')).toEqual(i32(1200));
+    expect(convert(parseEJson('{"$numberDecimal":"-7.000"}'), 'long')).toEqual(i64(-7n));
+  });
+
   it('Decimal128 integers beyond Int64 overflow; specials are not integers', () => {
     fails(dec('1E+19'), 'long', 'overflows Int64');
     fails(dec('NaN'), 'int', 'not an integer');
@@ -295,8 +314,35 @@ describe('convert: edge cases', () => {
     expect(convert(s('1.7976931348623157e308'), 'double')).toEqual(dbl(1.7976931348623157e308));
   });
 
+  it('String → Double: trimmed specials convert, padded overflow and junk fail', () => {
+    expect(convert(s(' -Infinity '), 'double')).toEqual(dbl(-Infinity));
+    expect(convert(s('+Infinity'), 'double')).toEqual(dbl(Infinity));
+    fails(s(' 2e308 '), 'double', '" 2e308 " overflows Double');
+    fails(s('Infinityx'), 'double', 'not a number');
+    fails(s('nan'), 'double', 'not a number');
+  });
+
+  it('Regex → String fails for every non-empty option set', () => {
+    fails(
+      { type: 'regex', pattern: '^a', options: 'imsx' },
+      'string',
+      'options "imsx" would be lost',
+    );
+    expect(convert({ type: 'regex', pattern: '', options: '' }, 'string')).toEqual(s(''));
+  });
+
   it('Binary subtype 4 → UUID requires 16 bytes', () => {
     fails(bin(4, 'AQID'), 'uuid', 'a UUID has 16 bytes');
+    fails(bin(4, ''), 'uuid', 'a UUID has 16 bytes');
+    fails(bin(4, 'AAAAAAAAAAAAAAAAAAAAAAA='), 'uuid', 'a UUID has 16 bytes');
+  });
+
+  it('Binary subtype 4 parsed with non-canonical base64 converts to UUID text', () => {
+    // "h" and "g" differ only in the padding bits of the last base64 char; parsing canonicalizes.
+    const parsed = parseEJson('{"$binary":{"base64":"D4+tW9nLRp+hZXCGdyiVDh==","subType":"04"}}');
+    expect(parsed).toEqual(bin(4, UUID_B64));
+    expect(convert(parsed, 'uuid')).toEqual(bin(4, UUID_B64));
+    expect(convert(parsed, 'string')).toEqual(s(UUID));
   });
 
   it('String → Date accepts the documented forms and rejects zone-less date-times', () => {
