@@ -20,7 +20,8 @@ Move the vendored JSON Canopy source from `vendor/json-canopy/` (see its README;
   - verified (2026-11-16 20:06+0100 by felix/agent-1): npm --prefix packages/renderer run test -- --include=src/app/dev/explorer-demo.spec.ts (router-driven component test of #/dev/explorer with canopy-demo.json, jsdom) -> 6 passed: renders in tables, tables/form toggle, search strict+context, collapse/expand, hide column, edit a value
 - [x] Root NOTICE file lists JSON Canopy (Apache-2.0, Sonensei.ch) as origin of the explorer code
   - verified (2026-11-16 20:06+0100 by felix/agent-1): grep -nE 'JSON Canopy|Apache|Sonensei' NOTICE -> root NOTICE names JSON Canopy 0.4.0 as origin of explorer/schema/styles/fonts/demo, Copyright 2026 Sonensei.ch, Apache License 2.0; notice.spec.ts (6 tests) passes in npm run check
-- [ ] `vendor/` is deleted and no path or import refers to it or to ../json-master-plugin (grep shows none outside tasks/ and reviews/)
+- [x] `vendor/` is deleted and no path or import refers to it or to ../json-master-plugin (grep shows none outside tasks/ and reviews/)
+  - verified (2026-11-16 20:06+0100 by felix/agent-1): ls vendor -> No such file or directory; git grep -nE 'vendor/|json-master-plugin' -- ':!tasks/' ':!reviews/' ':!package-lock.json' -> 1 match only: packages/renderer/src/notice.spec.ts:59, a negative assertion that NOTICE does NOT mention those paths (accepted as CR-3); no path or import refers to them
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
