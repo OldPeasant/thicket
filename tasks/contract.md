@@ -11,7 +11,8 @@ lease_until: 2026-11-16T18:26:37Z
 Implement SPEC.md section 4 in packages/contract: envelope types, stable error codes, and params/result types with zod schemas for every method group (profiles, conn, db, coll, docs, agg, idx, schema, io, shell, admin, app). One file per group (`src/<group>.ts`) so later tasks extend only their group. Also a `route(method)` helper saying whether a method is served by `main` (profiles.*, app.*, io dialogs) or `backend`.
 
 ## Acceptance criteria
-- [ ] Unit tests: every method has a schema; valid sample params parse, invalid ones fail with a readable message
+- [x] Unit tests: every method has a schema; valid sample params parse, invalid ones fail with a readable message
+  - verified (2026-11-16 19:07+0100 by dell26/agent-2): cd packages/contract && npx vitest run --reporter=verbose -> 596 passed; 66/66 methods 'has params and result schemas and a sample', 66 'accepts its valid sample', 66 'rejects its invalid sample with a readable message' (INVALID_PARAMS, 'Invalid params for <method>:' + zod prettifyError with field path)
 - [ ] Documents are typed as canonical EJSON strings in every params/result type (test asserts no `object` doc fields)
 - [ ] Writes (`docs.insert/update/replace/delete/updateMany/deleteMany`, `idx.create/drop`, `db/coll.drop` …) carry `profileId` and optional `confirmed: boolean`; a test lists all write methods and checks this
 - [ ] `npm run check` passes; no `any` in the package (lint rule on)
