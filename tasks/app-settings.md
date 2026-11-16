@@ -5,7 +5,7 @@ owner: dell26/agent-1
 deps: [electron-shell]
 touches: [apps/desktop/src/settings]
 prio: 1
-lease_until: 2026-11-16T19:22:23Z
+lease_until: 2026-11-16T19:27:26Z
 ---
 ## Goal
 Persist app settings (style, mode, page size, number default, update check on/off …) in userData/settings.json with schema version and defaults; serve `app.settings.get/set` and push `app.settings.changed` events.
@@ -15,7 +15,8 @@ Persist app settings (style, mode, page size, number default, update check on/of
   - verified (2026-11-16 20:04+0100 by dell26/agent-1): cd apps/desktop && npx vitest run src/settings/store.spec.ts -> 56 passed (defaults, unknown keys dropped incl. __proto__, corrupt layouts -> defaults + settings.json.corrupt-<time> backup with the original content, also when that rename fails at load: backup before first write)
 - [x] Writes are atomic (temp file + rename) — test simulates a crash between write and rename
   - verified (2026-11-16 20:04+0100 by dell26/agent-1): cd apps/desktop && npx vitest run src/settings/store.spec.ts -t 'atomic|crash' -> 10 passed: writes settings.json.tmp (flush) then renames; injected fs fails the rename (crash between write and rename) -> previous settings.json byte-identical, next start loads it and removes the stale temp file
-- [ ] Renderer gets `app.settings.changed` after a set (integration test from electron-shell's harness)
+- [x] Renderer gets `app.settings.changed` after a set (integration test from electron-shell's harness)
+  - verified (2026-11-16 20:04+0100 by dell26/agent-1): npm run test:electron (Linux, built Electron app via Playwright _electron, THICKET_USER_DATA=tmpdir) after merging main -> 22 passed; settings.electron.spec.ts: renderer thicket.on('app.settings.changed') gets one data event with the full settings after app.settings.set; file written; persists across restart
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.

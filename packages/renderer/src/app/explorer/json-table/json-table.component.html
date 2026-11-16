@@ -1,0 +1,481 @@
+@if (problems.length) {
+  <span
+    class="problem-badge"
+    [attr.data-problem-key]="uid"
+    [title]="problemTitle"
+    (click)="$event.stopPropagation()"
+    >⚠</span
+  >
+}
+
+@if (!(showChip && !isContainer)) {
+  <app-editable-value [value]="value" [uid]="uid" (valueChange)="onSelfChange($event)" />
+}
+
+@if (showChip) {
+  <button
+    type="button"
+    class="collapsed-chip"
+    [class.has-problems]="chipProblemCount > 0"
+    (click)="setCollapsed($event, false)"
+    title="Click to expand. Shift+click: expand all related nodes too"
+  >
+    ▸ {{ chipLabel }}
+    @if (chipProblemCount) {
+      ⚠ {{ chipProblemCount }}
+    }
+  </button>
+}
+
+@if (type === 'object' && !showChip) {
+  @if (objEntries.length === 0) {
+    <span class="val empty">&#123;&#125;</span>
+  } @else {
+    <div class="tw" [class.is-v]="orientation === 'v'" (click)="toggle($event)">
+      <button
+        type="button"
+        class="node-toggle"
+        (click)="setCollapsed($event, true)"
+        title="Click to collapse. Shift+click: collapse all related nodes too"
+      >
+        ▾
+      </button>
+      <app-column-menu [keys]="objKeys" [path]="path" />
+      <table>
+        @if (orientation === 'h') {
+          <thead>
+            <tr>
+              @for (k of visibleObjKeys; track k) {
+                <th
+                  [attr.data-col-key]="colKey(k)"
+                  [class.dim]="objDim(k)"
+                  [class.deprecated]="isDeprecated(objChildUid(k))"
+                >
+                  <app-hl [text]="k" /><app-schema-info [nodeKey]="objChildUid(k)" />
+                  @if (canEdit) {
+                    <button
+                      type="button"
+                      class="del-btn"
+                      (click)="$event.stopPropagation(); onEntryDelete(k)"
+                      title="Delete key"
+                    >
+                      &times;
+                    </button>
+                  }
+                </th>
+              }
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              @for (e of visibleObjEntries; track e[0]) {
+                <td [attr.data-col-key]="colKey(e[0])">
+                  <app-json-table
+                    [value]="e[1]"
+                    [path]="objChildPath(e[0])"
+                    [forceVisible]="entryForceVisible(e[0], e[1])"
+                    [filterCollapsed]="entryCollapsed(e[0], e[1])"
+                    [uid]="objChildUid(e[0])"
+                    (valueChange)="onEntryChange(e[0], $event)"
+                  />
+                </td>
+              }
+            </tr>
+          </tbody>
+        } @else {
+          <tbody>
+            @for (e of visibleObjEntries; track e[0]) {
+              <tr>
+                <th
+                  [attr.data-col-key]="colKey('__k__')"
+                  [class.dim]="objDim(e[0])"
+                  [class.deprecated]="isDeprecated(objChildUid(e[0]))"
+                >
+                  <app-hl [text]="e[0]" /><app-schema-info [nodeKey]="objChildUid(e[0])" />
+                  @if (canEdit) {
+                    <button
+                      type="button"
+                      class="del-btn"
+                      (click)="$event.stopPropagation(); onEntryDelete(e[0])"
+                      title="Delete key"
+                    >
+                      &times;
+                    </button>
+                  }
+                </th>
+                <td [attr.data-col-key]="colKey('__v__')">
+                  <app-json-table
+                    [value]="e[1]"
+                    [path]="objChildPath(e[0])"
+                    [forceVisible]="entryForceVisible(e[0], e[1])"
+                    [filterCollapsed]="entryCollapsed(e[0], e[1])"
+                    [uid]="objChildUid(e[0])"
+                    (valueChange)="onEntryChange(e[0], $event)"
+                  />
+                </td>
+              </tr>
+            }
+          </tbody>
+        }
+      </table>
+      @if (hasMoreItems) {
+        <div class="reveal-bar" (click)="$event.stopPropagation()">
+          <span class="reveal-info">{{ revealedCount }} / {{ totalFilteredCount }}</span>
+          @for (batch of reveal.batches; track batch) {
+            <button type="button" class="reveal-btn" (click)="revealMoreItems(batch)">
+              +{{ batch }}
+            </button>
+          }
+          <button type="button" class="reveal-btn" (click)="revealAllItems()">
+            Show all {{ totalFilteredCount }}
+          </button>
+        </div>
+      }
+    </div>
+  }
+  @if (ghosts.length) {
+    <span class="ghost-row" (click)="$event.stopPropagation()">
+      @for (g of ghosts; track g.key) {
+        <button
+          type="button"
+          class="ghost-chip"
+          [class.required]="g.required"
+          [title]="ghostTitle(g)"
+          (click)="addGhost(g)"
+        >
+          ⊕ {{ g.key }}
+          @if (g.required) {
+            <b>*</b>
+          }
+        </button>
+      }
+    </span>
+  }
+  @if (canEdit) {
+    <span class="add-row" (click)="$event.stopPropagation()">
+      <input
+        #newKey
+        class="add-input"
+        placeholder="key…"
+        (keydown.enter)="addEntry(newKey.value); newKey.value = ''"
+      />
+      <button
+        type="button"
+        class="add-btn"
+        (click)="addEntry(newKey.value); newKey.value = ''"
+        title="Add key"
+      >
+        +
+      </button>
+    </span>
+  }
+} @else if (type === 'array' && !showChip) {
+  @if (arr.length === 0) {
+    <span class="val empty">[]</span>
+  } @else if (isArrayOfObjects) {
+    <div class="tw" [class.is-v]="orientation === 'v'" (click)="toggle($event)">
+      <button
+        type="button"
+        class="node-toggle"
+        (click)="setCollapsed($event, true)"
+        title="Click to collapse. Shift+click: collapse all related nodes too"
+      >
+        ▾
+      </button>
+      <app-column-menu [keys]="arrayKeys" [path]="path" />
+      <table>
+        @if (orientation === 'h') {
+          <thead>
+            <tr>
+              @for (k of visibleArrayKeys; track k) {
+                <th
+                  [attr.data-col-key]="colKey(k)"
+                  [class.dim]="columnDim(k)"
+                  [class.deprecated]="isDeprecated(columnUid(k), false)"
+                  [class.ghost]="isGhostColumn(k)"
+                  [attr.title]="isGhostColumn(k) ? GHOST_COLUMN_TITLE : null"
+                >
+                  <app-hl [text]="k" /><app-schema-info [nodeKey]="columnUid(k)" [wide]="true" />
+                </th>
+              }
+              @if (hasNonObjectItems) {
+                <th [attr.data-col-key]="colKey('__val__')">value</th>
+              }
+              @if (canEdit) {
+                <th class="corner"></th>
+              }
+            </tr>
+          </thead>
+          <tbody>
+            @for (i of visibleArrayIndices; track i) {
+              <tr>
+                @for (k of visibleArrayKeys; track k) {
+                  <td>
+                    @if ($first && rowProblemTitle(i); as title) {
+                      <span
+                        class="problem-badge"
+                        [attr.data-problem-key]="itemUid(i)"
+                        [title]="title"
+                        (click)="$event.stopPropagation()"
+                        >⚠</span
+                      >
+                    }
+                    @if (hasCell(arr[i], k)) {
+                      <app-json-table
+                        [value]="cell(arr[i], k)"
+                        [path]="arrCellPath(k)"
+                        [forceVisible]="cellForceVisible(arr[i], k)"
+                        [filterCollapsed]="cellCollapsed(arr[i], k)"
+                        [uid]="cellUid(i, k)"
+                        (valueChange)="onCellChange(i, k, $event)"
+                      />
+                      @if (canEdit) {
+                        <button
+                          type="button"
+                          class="del-btn cell-del"
+                          (click)="$event.stopPropagation(); onCellDelete(i, k)"
+                          title="Delete key from this row"
+                        >
+                          &times;
+                        </button>
+                      }
+                    } @else if (canEdit && isObjectItem(arr[i]) && canAddCell(i, k)) {
+                      <button
+                        type="button"
+                        class="add-cell-btn"
+                        [class.in-ghost]="isGhostColumn(k)"
+                        (click)="$event.stopPropagation(); addCellLike(i, k)"
+                        title="Add '{{ k }}', shaped like other rows"
+                      >
+                        +
+                      </button>
+                    }
+                  </td>
+                }
+                @if (hasNonObjectItems) {
+                  <td [attr.data-col-key]="colKey('__val__')">
+                    @if (!isObjectItem(arr[i])) {
+                      <app-json-table
+                        [value]="arr[i]"
+                        [path]="arrItemPath()"
+                        [forceVisible]="itemForceVisible(arr[i])"
+                        [uid]="itemUid(i)"
+                        (valueChange)="onItemChange(i, $event)"
+                      />
+                    }
+                  </td>
+                }
+                @if (canEdit) {
+                  <td class="row-actions">
+                    <button
+                      type="button"
+                      class="del-btn"
+                      (click)="$event.stopPropagation(); onItemDelete(i)"
+                      title="Delete item"
+                    >
+                      &times;
+                    </button>
+                  </td>
+                }
+              </tr>
+            }
+          </tbody>
+        } @else {
+          <thead>
+            <tr>
+              <th class="corner"></th>
+              @for (i of visibleArrayIndices; track i) {
+                <th class="idx">
+                  @if (rowProblemTitle(i); as title) {
+                    <span
+                      class="problem-badge"
+                      [attr.data-problem-key]="itemUid(i)"
+                      [title]="title"
+                      (click)="$event.stopPropagation()"
+                      >⚠</span
+                    >
+                  }
+                  #{{ i }}
+                  @if (canEdit) {
+                    <button
+                      type="button"
+                      class="del-btn"
+                      (click)="$event.stopPropagation(); onItemDelete(i)"
+                      title="Delete item"
+                    >
+                      &times;
+                    </button>
+                  }
+                </th>
+              }
+            </tr>
+          </thead>
+          <tbody>
+            @for (k of visibleArrayKeys; track k) {
+              <tr>
+                <th
+                  [attr.data-col-key]="colKey('__k__')"
+                  [class.dim]="columnDim(k)"
+                  [class.deprecated]="isDeprecated(columnUid(k), false)"
+                  [class.ghost]="isGhostColumn(k)"
+                  [attr.title]="isGhostColumn(k) ? GHOST_COLUMN_TITLE : null"
+                >
+                  <app-hl [text]="k" /><app-schema-info [nodeKey]="columnUid(k)" [wide]="true" />
+                </th>
+                @for (i of visibleArrayIndices; track i) {
+                  <td>
+                    @if (hasCell(arr[i], k)) {
+                      <app-json-table
+                        [value]="cell(arr[i], k)"
+                        [path]="arrCellPath(k)"
+                        [forceVisible]="cellForceVisible(arr[i], k)"
+                        [filterCollapsed]="cellCollapsed(arr[i], k)"
+                        [uid]="cellUid(i, k)"
+                        (valueChange)="onCellChange(i, k, $event)"
+                      />
+                      @if (canEdit) {
+                        <button
+                          type="button"
+                          class="del-btn cell-del"
+                          (click)="$event.stopPropagation(); onCellDelete(i, k)"
+                          title="Delete key from this row"
+                        >
+                          &times;
+                        </button>
+                      }
+                    } @else if (canEdit && isObjectItem(arr[i]) && canAddCell(i, k)) {
+                      <button
+                        type="button"
+                        class="add-cell-btn"
+                        [class.in-ghost]="isGhostColumn(k)"
+                        (click)="$event.stopPropagation(); addCellLike(i, k)"
+                        title="Add '{{ k }}', shaped like other rows"
+                      >
+                        +
+                      </button>
+                    }
+                  </td>
+                }
+              </tr>
+            }
+            @if (hasNonObjectItems) {
+              <tr>
+                <th [attr.data-col-key]="colKey('__val__')">value</th>
+                @for (i of visibleArrayIndices; track i) {
+                  <td>
+                    @if (!isObjectItem(arr[i])) {
+                      <app-json-table
+                        [value]="arr[i]"
+                        [path]="arrItemPath()"
+                        [forceVisible]="itemForceVisible(arr[i])"
+                        [uid]="itemUid(i)"
+                        (valueChange)="onItemChange(i, $event)"
+                      />
+                    }
+                  </td>
+                }
+              </tr>
+            }
+          </tbody>
+        }
+      </table>
+      @if (hasMoreItems) {
+        <div class="reveal-bar" (click)="$event.stopPropagation()">
+          <span class="reveal-info">{{ revealedCount }} / {{ totalFilteredCount }}</span>
+          @for (batch of reveal.batches; track batch) {
+            <button type="button" class="reveal-btn" (click)="revealMoreItems(batch)">
+              +{{ batch }}
+            </button>
+          }
+          <button type="button" class="reveal-btn" (click)="revealAllItems()">
+            Show all {{ totalFilteredCount }}
+          </button>
+        </div>
+      }
+    </div>
+  } @else {
+    <div class="tw" [class.is-v]="orientation === 'v'" (click)="toggle($event)">
+      <button
+        type="button"
+        class="node-toggle"
+        (click)="setCollapsed($event, true)"
+        title="Click to collapse. Shift+click: collapse all related nodes too"
+      >
+        ▾
+      </button>
+      <table>
+        @if (orientation === 'h') {
+          <tbody>
+            <tr>
+              @for (i of visibleArrItemIndices; track i) {
+                <td>
+                  <app-json-table
+                    [value]="arr[i]"
+                    [path]="arrItemPath()"
+                    [forceVisible]="itemForceVisible(arr[i])"
+                    [uid]="itemUid(i)"
+                    (valueChange)="onItemChange(i, $event)"
+                  />
+                  @if (canEdit) {
+                    <button
+                      type="button"
+                      class="del-btn"
+                      (click)="$event.stopPropagation(); onItemDelete(i)"
+                      title="Delete item"
+                    >
+                      &times;
+                    </button>
+                  }
+                </td>
+              }
+            </tr>
+          </tbody>
+        } @else {
+          <tbody>
+            @for (i of visibleArrItemIndices; track i) {
+              <tr>
+                <td>
+                  <app-json-table
+                    [value]="arr[i]"
+                    [path]="arrItemPath()"
+                    [forceVisible]="itemForceVisible(arr[i])"
+                    [uid]="itemUid(i)"
+                    (valueChange)="onItemChange(i, $event)"
+                  />
+                  @if (canEdit) {
+                    <button
+                      type="button"
+                      class="del-btn"
+                      (click)="$event.stopPropagation(); onItemDelete(i)"
+                      title="Delete item"
+                    >
+                      &times;
+                    </button>
+                  }
+                </td>
+              </tr>
+            }
+          </tbody>
+        }
+      </table>
+      @if (hasMoreItems) {
+        <div class="reveal-bar" (click)="$event.stopPropagation()">
+          <span class="reveal-info">{{ revealedCount }} / {{ totalFilteredCount }}</span>
+          @for (batch of reveal.batches; track batch) {
+            <button type="button" class="reveal-btn" (click)="revealMoreItems(batch)">
+              +{{ batch }}
+            </button>
+          }
+          <button type="button" class="reveal-btn" (click)="revealAllItems()">
+            Show all {{ totalFilteredCount }}
+          </button>
+        </div>
+      }
+    </div>
+  }
+  @if (canEdit) {
+    <span class="add-row" (click)="$event.stopPropagation()">
+      <button type="button" class="add-btn" (click)="addItem()" title="Add item">+</button>
+    </span>
+  }
+}

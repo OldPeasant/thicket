@@ -18,7 +18,6 @@ export default tseslint.config(
       '**/out/**',
       '**/coverage/**',
       '**/.angular/**',
-      'vendor/**',
     ],
   },
   js.configs.recommended,
@@ -44,6 +43,10 @@ export default tseslint.config(
     ignores: ['packages/renderer/*.config.ts'],
     languageOptions: {
       globals: { ...globals.browser },
+    },
+    rules: {
+      // Angular components, directives and services may be empty classes: the decorator is the content.
+      '@typescript-eslint/no-extraneous-class': ['error', { allowWithDecorator: true }],
     },
   },
   {

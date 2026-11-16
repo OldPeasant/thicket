@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "task": "explorer-copy",
+  "reviewed_revision": "aa8d214d9cdb4ee044819f6b81849e6e21624894",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/explorer-copy/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/explorer-copy/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/explorer-copy/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "R1-CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "round 1: CSP font-src 'self' blocked the inlined data: fonts; fonts now ship as woff2 files under src/assets/fonts"},
+    {"id": "R1-CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "round 1: stale IntelliJ/IDE host comments removed"},
+    {"id": "R1-CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "round 1: NOTICE copyright line and modification statement corrected"},
+    {"id": "R1-CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "round 1: mergeTwo uses Object.hasOwn/defineProperty (same as TW-1)"},
+    {"id": "TW-1", "source": "test-writer", "severity": "Low", "disposition": "fixed",
+     "note": "mergeTwo treated inherited names as existing properties; fixed with R1-CR-4"},
+    {"id": "TW-2", "source": "test-writer", "severity": "Low", "disposition": "fixed",
+     "note": "document keys named like Object.prototype members resolved to prototype functions; ownEntry/setOwn and Object.hasOwn in ownChild, seed, switchVariant, selectorValues, ghostKeys, fits"},
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "deferred",
+     "note": "SIL OFL 1.1 text not shipped with the extracted fonts; follow-up task font-license"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "deferred",
+     "note": "docs/ARCHITECTURE.md:41 still says fonts come from npm packages; follow-up task font-license"},
+    {"id": "CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "AC4 grep hits notice.spec.ts:59, a negative assertion that NOTICE does not mention vendor/ or json-master-plugin; not a reference to those paths"}
+  ],
+  "validation": [
+    {"command": "sh .taskcheck (npm run check)", "result": "pass"},
+    {"command": "npm --prefix packages/renderer run test -- --include=src/app/dev/explorer-demo.spec.ts", "result": "pass"}
+  ]
+}
