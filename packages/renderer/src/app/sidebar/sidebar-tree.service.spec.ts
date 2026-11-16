@@ -567,6 +567,59 @@ describe('SidebarTreeService', () => {
       expect(tree.conn('p1').state).toBe('connected');
     });
 
+    it('a conn.open cancelled by Disconnect while connecting leaves the profile not connected', async () => {
+      const pending = deferred<{ error: { code: string; message: string } }>();
+      fake.handle('conn.open', () => pending.promise as never);
+      const attempt = tree.connect('p1');
+      expect(tree.conn('p1').state).toBe('connecting');
+      await tree.disconnect('p1');
+      pending.resolve({ error: { code: 'CANCELLED', message: 'The operation was cancelled.' } });
+      const view = await attempt;
+      expect(view).toEqual({ state: 'disconnected' });
+      expect(tree.conn('p1')).toEqual({ state: 'disconnected' });
+      expect(fake.requestsFor('db.listDatabases')).toHaveLength(0);
+    });
+
+    it('a late success of a conn.open made stale by Disconnect is ignored', async () => {
+      const pending = deferred<ResultOf<'conn.open'>>();
+      fake.handle('conn.open', () => pending.promise);
+      const attempt = tree.connect('p1');
+      await tree.disconnect('p1');
+      pending.resolve({ profileId: 'p1', state: 'connected' });
+      await attempt;
+      expect(tree.conn('p1').state).toBe('disconnected');
+      expect(tree.databases('p1')).toBeUndefined();
+      expect(fake.requestsFor('db.listDatabases')).toHaveLength(0);
+    });
+
+    it('a late failure of an older conn.open does not mark a reconnected profile failed', async () => {
+      const old = deferred<{ error: { code: string; message: string } }>();
+      const fresh = deferred<ResultOf<'conn.open'>>();
+      fake.handle('conn.open', inOrder<never>(old as never, fresh as never));
+      const first = tree.connect('p1');
+      await tree.disconnect('p1');
+      const second = tree.connect('p1');
+      fresh.resolve({ profileId: 'p1', state: 'connected' });
+      expect(await second).toEqual({ state: 'connected' });
+      old.resolve({ error: { code: 'CANCELLED', message: 'The operation was cancelled.' } });
+      await first;
+      expect(tree.conn('p1')).toEqual({ state: 'connected' });
+      expect(tree.databases('p1')).toMatchObject({ status: 'loaded' });
+    });
+
+    it('a newer connect makes the older attempt stale without a disconnect', async () => {
+      const old = deferred<{ error: { code: string; message: string } }>();
+      const fresh = deferred<ResultOf<'conn.open'>>();
+      fake.handle('conn.open', inOrder<never>(old as never, fresh as never));
+      const first = tree.connect('p1');
+      const second = tree.connect('p1');
+      fresh.resolve({ profileId: 'p1', state: 'connected' });
+      await second;
+      old.resolve({ error: { code: 'CONNECT_FAILED', message: 'old attempt failed' } });
+      await first;
+      expect(tree.conn('p1')).toEqual({ state: 'connected' });
+    });
+
     it('a failed conn.open becomes an error state, not a rejection, and loads nothing', async () => {
       fake.fail('conn.open', { code: 'AUTH_FAILED', message: 'Authentication failed' });
       const view = await tree.connect('p1');

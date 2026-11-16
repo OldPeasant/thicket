@@ -112,7 +112,10 @@ export class SidebarTreeService {
    */
   readonly promptOpen = this.promptOpenState.asReadonly();
 
-  /** Requests of the latest load per list, so a slow older answer never overwrites a newer one. */
+  /**
+   * Requests of the latest load per list (and of the latest `conn.open` per profile), so a slow
+   * older answer never overwrites a newer one.
+   */
   private readonly generation = new Map<string, number>();
   private started = false;
 
@@ -205,17 +208,22 @@ export class SidebarTreeService {
 
   /**
    * Opens the connection (`conn.open`) and loads its databases. Resolves with the new state;
-   * failures are shown on the node (and returned), not thrown.
+   * failures are shown on the node (and returned), not thrown. The answer of an attempt that a
+   * disconnect or a newer connect made stale is ignored (it resolves with the current state).
    */
   async connect(profileId: string, password?: string): Promise<ConnView> {
+    const key = `conn:${profileId}`;
+    const gen = this.next(key);
     this.setConn(profileId, { state: 'connecting' });
     try {
       const status = await this.api.request(
         'conn.open',
         password === undefined ? { profileId } : { profileId, password },
       );
+      if (!this.current(key, gen)) return this.conn(profileId);
       this.applyStatus(status);
     } catch (error) {
+      if (!this.current(key, gen)) return this.conn(profileId);
       this.setConn(profileId, { state: 'error', message: describeError(error) });
     }
     const view = this.conn(profileId);
