@@ -19,3 +19,4 @@ Angular 22 app in packages/renderer (standalone components, signals, zoneless if
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 18:44+0100 by dell26/agent-1): Renderer specs run with the Angular CLI (ng test, @angular/build:unit-test, Vitest runner, jsdom) instead of a root Vitest project, so copied Canopy specs with templateUrl/styleUrl compile (AOT); root 'test' = 'vitest run && npm run test -w packages/renderer'. Alternative would be @analogjs/vite-plugin-angular in the root projects.
+- ASSUMPTION (2026-11-16 18:44+0100 by dell26/agent-1): file:// loading verified structurally (base href ./, all asset refs relative and present, no external URLs); actually loading dist/index.html in Electron 45 was prepared but launching the Electron binary needed an interactive approval that nobody could give at night. Electron loads ES module scripts from file:// via loadFile (as electron-vite apps do); electron-shell/e2e tasks will exercise it.
