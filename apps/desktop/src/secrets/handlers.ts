@@ -26,7 +26,13 @@ export function secretsHandlers(store: SecretsStore): Record<string, Handler> {
   const clearSecret = async (
     params: ParamsOf<'profiles.clearSecret'>,
   ): Promise<ResultOf<'profiles.clearSecret'>> => {
-    await store.delete(params.profileId, params.kind);
+    try {
+      await store.delete(params.profileId, params.kind);
+    } catch (error) {
+      if (error instanceof SecretStorageUnavailableError)
+        throw new RpcError('UNSUPPORTED', error.message);
+      throw error;
+    }
     return {};
   };
 

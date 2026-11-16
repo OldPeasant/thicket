@@ -60,13 +60,20 @@ const PLATFORM_BACKENDS: Partial<Record<NodeJS.Platform, string>> = {
   win32: 'dpapi',
 };
 
-/** Thrown when secrets cannot be saved at all (`level: 'unavailable'`). */
+/**
+ * Thrown when secrets cannot be changed: no encryption at all (`level: 'unavailable'`), or
+ * `secrets.bin` was written with an OS keyring that is not available in this session.
+ */
 export class SecretStorageUnavailableError extends Error {
-  constructor() {
-    super('No encryption is available to save secrets on this system');
+  constructor(message = 'No encryption is available to save secrets on this system') {
+    super(message);
     this.name = 'SecretStorageUnavailableError';
   }
 }
+
+const LOCKED_MESSAGE =
+  'secrets.bin was encrypted with an OS keyring that is not available now; ' +
+  'saved secrets cannot be read or changed until it is available again';
 
 function isSecretKind(value: string): value is SecretKind {
   return (SECRET_KINDS as readonly string[]).includes(value);
@@ -109,9 +116,15 @@ function serialize(secrets: Secrets): string {
  *
  * - Loaded on first use and kept in memory; every change rewrites the file atomically (temp
  *   file + rename, mode 0600).
- * - A file that cannot be decrypted or parsed (corrupt, or encrypted with another keychain key) is
- *   moved aside to `secrets.bin.corrupt-<timestamp>` and the store starts empty: the user has to
- *   enter the passwords again, but the app keeps working and the old file is not lost.
+ * - A file that decrypts but is not a valid secrets file, or that cannot be decrypted with a
+ *   `secure` backend (the key is the real one, so the file is unusable), is moved aside to
+ *   `secrets.bin.corrupt-<timestamp>` and the store starts empty: the user has to enter the
+ *   passwords again, but the app keeps working and the old file is not lost.
+ * - With a `weak` backend a file that cannot be decrypted was most likely written with an OS
+ *   keyring that is not available in this session. It is left in place and the store is locked
+ *   for the session: reads are empty, `set`/`delete` throw `SecretStorageUnavailableError`.
+ * - While no encryption is available (`unavailable`) the file is left alone, reads are empty, and
+ *   `set` (and `delete` while the file exists) throw `SecretStorageUnavailableError`.
  * - Operations run one after another, so concurrent writes never interleave.
  */
 export class SecretsStore {
@@ -122,6 +135,8 @@ export class SecretsStore {
   private readonly log: (message: string) => void;
   private readonly now: () => Date;
   private data: Secrets | undefined;
+  /** `secrets.bin` could not be decrypted with the weak key: kept in place, store reads empty. */
+  private locked = false;
   private queue: Promise<unknown> = Promise.resolve();
   private statusPromise: Promise<SecretStorageStatus> | undefined;
 
@@ -186,16 +201,27 @@ export class SecretsStore {
   set(profileId: string, kind: SecretKind, value: string): Promise<void> {
     return this.run(async () => {
       if ((await this.status()).level === 'unavailable') throw new SecretStorageUnavailableError();
-      const next = new Map(await this.load());
+      const loaded = await this.load();
+      if (this.locked) throw new SecretStorageUnavailableError(LOCKED_MESSAGE);
+      const next = new Map(loaded);
       next.set(profileId, { ...next.get(profileId), [kind]: value });
       await this.save(next);
     });
   }
 
-  /** Removes one secret, or all of a profile's secrets without `kind`. */
+  /**
+   * Removes one secret, or all of a profile's secrets without `kind`. Throws
+   * `SecretStorageUnavailableError` when `secrets.bin` exists but cannot be changed (no encryption,
+   * or locked), so a secret is never reported as removed while it stays in the file.
+   */
   delete(profileId: string, kind?: SecretKind): Promise<void> {
     return this.run(async () => {
+      if ((await this.status()).level === 'unavailable') {
+        if (await this.fileExists()) throw new SecretStorageUnavailableError();
+        return;
+      }
       const loaded = await this.load();
+      if (this.locked) throw new SecretStorageUnavailableError(LOCKED_MESSAGE);
       const current = loaded.get(profileId);
       if (!current || (kind !== undefined && current[kind] === undefined)) return;
       const next = new Map(loaded);
@@ -206,6 +232,16 @@ export class SecretsStore {
       else next.set(profileId, rest);
       await this.save(next);
     });
+  }
+
+  private async fileExists(): Promise<boolean> {
+    try {
+      await this.fs.readFile(this.file);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw error;
+    }
   }
 
   private run<T>(operation: () => Promise<T>): Promise<T> {
@@ -231,15 +267,21 @@ export class SecretsStore {
       this.data = new Map();
       return this.data;
     }
-    let parsed: Secrets | undefined;
-    let reEncrypt = false;
+    let decrypted: { result: string; shouldReEncrypt: boolean } | undefined;
     try {
-      const decrypted = await this.safeStorage.decryptStringAsync(raw);
-      parsed = parseSecretsFile(decrypted.result);
-      reEncrypt = decrypted.shouldReEncrypt;
+      decrypted = await this.safeStorage.decryptStringAsync(raw);
     } catch {
-      parsed = undefined;
+      decrypted = undefined;
     }
+    if (!decrypted && (await this.status()).level === 'weak') {
+      // Most likely written with a real keyring this session can't reach: keep the file.
+      this.log(`${LOCKED_MESSAGE}; leaving it in place`);
+      this.locked = true;
+      this.data = new Map();
+      return this.data;
+    }
+    const parsed = decrypted ? parseSecretsFile(decrypted.result) : undefined;
+    const reEncrypt = decrypted?.shouldReEncrypt ?? false;
     if (!parsed) {
       const aside = `${this.file}.corrupt-${this.now().toISOString().replace(/[:.]/g, '-')}`;
       await this.fs.rename(this.file, aside);

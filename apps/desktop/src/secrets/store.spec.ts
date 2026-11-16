@@ -180,7 +180,35 @@ describe('SecretsStore with a corrupt file', () => {
     expect(await reopened.get('p')).toEqual({ password: 'fresh' });
   });
 
-  it('a file from another keychain key (decrypt throws) is moved aside too', async () => {
+  it('weak backend, undecryptable file: left in place, reads empty, set/delete refused', async () => {
+    const keyringFile = Buffer.from('v11-keyring-ciphertext');
+    await writeFile(file, keyringFile);
+    const { store, log } = makeStore(new FakeSafeStorage({ backend: 'basic_text' }));
+    expect((await store.status()).level).toBe('weak');
+    expect(await store.get('p')).toBeNull();
+    expect(await store.kinds('p')).toEqual([]);
+    const refused = store.set('p', 'password', 'x');
+    await expect(refused).rejects.toBeInstanceOf(SecretStorageUnavailableError);
+    await expect(refused).rejects.toThrow(/OS keyring that is not available now/);
+    await expect(store.delete('p')).rejects.toBeInstanceOf(SecretStorageUnavailableError);
+    await expect(store.delete('p', 'password')).rejects.toThrow(/OS keyring/);
+    expect(await readFile(file)).toEqual(keyringFile);
+    expect(await readdir(dir)).toEqual(['secrets.bin']);
+    const lockedLogs = log.mock.calls.filter(([message]) => message.includes('OS keyring'));
+    expect(lockedLogs).toHaveLength(1);
+    expect(log).not.toHaveBeenCalledWith(expect.stringContaining('moved aside'));
+  });
+
+  it('weak backend, decrypts but invalid: moved aside like on a secure backend', async () => {
+    await writeFile(file, await new FakeSafeStorage().encryptStringAsync('not json'));
+    const { store } = makeStore(new FakeSafeStorage({ backend: 'basic_text' }));
+    expect(await store.get('p')).toBeNull();
+    expect(await readdir(dir)).toEqual(['secrets.bin.corrupt-2026-11-16T10-20-30-456Z']);
+    await store.set('p', 'password', 'fresh');
+    expect(await store.get('p')).toEqual({ password: 'fresh' });
+  });
+
+  it('a file from another keychain key (decrypt throws) on a secure backend is moved aside', async () => {
     await writeFile(file, Buffer.from('v11-other-key-ciphertext'));
     const { store } = makeStore();
     expect(await store.kinds('p')).toEqual([]);
@@ -403,15 +431,27 @@ describe('SecretsStore edge cases', () => {
     expect(await reopened.get('p')).toEqual({ password: 'c' });
   });
 
-  it('while encryption is unavailable, delete leaves an existing file untouched', async () => {
+  it('while encryption is unavailable, delete refuses and leaves an existing file untouched', async () => {
     const { store } = makeStore();
     await store.set('p', 'password', 'pw');
     const before = await readFile(file);
     const { store: locked } = makeStore(new FakeSafeStorage({ available: false }));
-    await locked.delete('p');
-    await locked.delete('p', 'password');
+    await expect(locked.delete('p')).rejects.toBeInstanceOf(SecretStorageUnavailableError);
+    await expect(locked.delete('p', 'password')).rejects.toBeInstanceOf(
+      SecretStorageUnavailableError,
+    );
     expect(await readFile(file)).toEqual(before);
     expect(await readdir(dir)).toEqual(['secrets.bin']);
+    // The secret is still there once encryption works again.
+    const { store: later } = makeStore();
+    expect(await later.get('p')).toEqual({ password: 'pw' });
+  });
+
+  it('while encryption is unavailable, delete without a file is a no-op', async () => {
+    const { store } = makeStore(new FakeSafeStorage({ available: false }));
+    await store.delete('p');
+    await store.delete('p', 'password');
+    expect(await readdir(dir)).toEqual([]);
   });
 
   it('a write into a missing folder rejects with the write error and stays consistent', async () => {

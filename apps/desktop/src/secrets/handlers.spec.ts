@@ -1,6 +1,6 @@
 import { RpcError } from '@thicket/backend';
 import { parseResult } from '@thicket/contract';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -104,6 +104,29 @@ describe('secrets handlers', () => {
     expect(await store.get('p')).toEqual({ sshPassword: 'ssh' });
     expect(await call('profiles.clearSecret', { profileId: 'p' })).toEqual({});
     expect(await store.get('p')).toBeNull();
+  });
+
+  it('profiles.clearSecret without encryption fails with UNSUPPORTED when a file exists', async () => {
+    const { store } = setup();
+    await store.set('p', 'password', 'pw');
+    const { store: locked, call } = setup(new FakeSafeStorage({ available: false }));
+    const error: unknown = await call('profiles.clearSecret', { profileId: 'p' }).catch(
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(RpcError);
+    expect((error as RpcError).code).toBe('UNSUPPORTED');
+    expect(await locked.get('p')).toBeNull();
+    expect(await setup().store.get('p')).toEqual({ password: 'pw' });
+  });
+
+  it('profiles.clearSecret on a weak backend with an undecryptable file fails with UNSUPPORTED', async () => {
+    await writeFile(path.join(dir, 'secrets.bin'), Buffer.from('v11-keyring-ciphertext'));
+    const { call } = setup(new FakeSafeStorage({ backend: 'basic_text' }));
+    const error: unknown = await call('profiles.clearSecret', { profileId: 'p' }).catch(
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(RpcError);
+    expect((error as RpcError).code).toBe('UNSUPPORTED');
   });
 
   it('secrets.get (privileged) returns the stored secrets or null', async () => {

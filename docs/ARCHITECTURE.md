@@ -115,8 +115,12 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
 - Secrets (`src/secrets/`): `SecretsStore` keeps `secrets.bin` in `userData` — one JSON document
   `{ version: 1, profiles: { <profileId>: { <SecretKind>: value } } }` encrypted as a whole with
   `safeStorage`'s async API, rewritten atomically (temp file + rename, mode 0600), operations
-  serialized. A file that can't be decrypted or parsed is renamed to `secrets.bin.corrupt-<time>`
-  and the store starts empty; while encryption is unavailable the file is left alone. `status()`
+  serialized. A file that decrypts but isn't valid, or can't be decrypted with a `secure` backend,
+  is renamed to `secrets.bin.corrupt-<time>` and the store starts empty. With a `weak` backend an
+  undecryptable file (likely written with a keyring not available now) is left in place and the
+  store is locked for the session: reads are empty, `setSecret`/`clearSecret` → `UNSUPPORTED`.
+  While encryption is unavailable the file is left alone; `setSecret`, and `clearSecret` while the
+  file exists, answer `UNSUPPORTED`. `status()`
   (`profiles.secretStorage`): `secure` (keychain, DPAPI, libsecret, KWallet), `weak` (Linux
   `basic_text` or `unknown`: Electron's plain-text key is switched on, `defaultSecretMode: 'ask'`,
   `setSecret` answers `secureStorage: false`), `unavailable` (`setSecret` → `UNSUPPORTED`).
