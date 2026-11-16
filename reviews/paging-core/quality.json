@@ -1,0 +1,87 @@
+{
+  "schema": 1,
+  "task": "paging-core",
+  "reviewed_revision": "7ad3671c26e79b18b48b87e0d6022ece5fcc6155",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/paging-core/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/paging-core/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/paging-core/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "CR-1 (first review)",
+      "source": "code-reviewer",
+      "severity": "P1",
+      "disposition": "fixed",
+      "note": "null/missing sort values dropped on the 'lower' side; lower bounds now also match $eq null, first-key prefix only on the greater side"
+    },
+    {
+      "id": "TW-2",
+      "source": "test-writer",
+      "severity": "Medium",
+      "disposition": "fixed",
+      "note": "same defect as CR-1, failing tests now pass"
+    },
+    {
+      "id": "CR-2 (first review)",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "canNext relies on isLast and exact count, not on a short page"
+    },
+    {
+      "id": "TW-1",
+      "source": "test-writer",
+      "severity": "Medium",
+      "disposition": "fixed",
+      "note": "same defect as CR-2"
+    },
+    {
+      "id": "CR-3 (first review)",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "projectionWithSortKeys keeps sort keys in results; documented as required for range paging"
+    },
+    {
+      "id": "CR-4 (first review)",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "non-default collation forces skip mode"
+    },
+    {
+      "id": "CR-5 (first review)",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "lastPage behaviour for opaque sort without count documented; empty-sort branch reachable via collation and tested"
+    },
+    {
+      "id": "CR-1 (re-review)",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "accepted",
+      "note": "empty 'before' page then Next skips page 1 rows; rare (estimated-count misalignment), recorded assumption: UI reloads firstPage"
+    },
+    {
+      "id": "TW-3",
+      "source": "test-writer",
+      "severity": "Low",
+      "disposition": "accepted",
+      "note": "same as re-review CR-1; covered by recorded assumption"
+    },
+    {
+      "id": "TW-4",
+      "source": "test-writer",
+      "severity": "Low",
+      "disposition": "accepted",
+      "note": "skip mode with non-unique sort: tie order at the last-page edge is not stable; inherent MongoDB limitation of non-unique sorts"
+    }
+  ],
+  "validation": [
+    { "command": "cd packages/core && npx vitest run src/paging", "result": "pass" },
+    { "command": "sh .taskcheck (npm run check)", "result": "pass" }
+  ]
+}
