@@ -7,6 +7,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./bson": "./src/bson/index.ts",
     "./testing": "./src/bson/fixtures.ts"
   },
   "scripts": {

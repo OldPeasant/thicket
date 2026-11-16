@@ -1,6 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { BSON_TYPES, parseEJsonDocument, type BsonDocument, type BsonValue } from '@thicket/core';
+import {
+  BSON_TYPES,
+  parseEJsonDocument,
+  type BsonDocument,
+  type BsonValue,
+} from '@thicket/core/bson';
 import { ALL_TYPES_EJSON } from '@thicket/core/testing';
 import { describe, expect, it } from 'vitest';
 import { ProblemIndex } from '../schema';

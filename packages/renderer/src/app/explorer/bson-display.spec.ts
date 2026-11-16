@@ -1,6 +1,6 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
-import { parseEJsonDocument } from '@thicket/core';
+import { parseEJsonDocument } from '@thicket/core/bson';
 import { ALL_TYPES_EJSON, ALL_TYPES_FIELDS } from '@thicket/core/testing';
 import { beforeEach, describe, expect, it } from 'vitest';
 

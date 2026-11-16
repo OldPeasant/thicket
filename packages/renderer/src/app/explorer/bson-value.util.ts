@@ -9,7 +9,7 @@ import {
   type BsonDocument,
   type BsonType,
   type BsonValue,
-} from '@thicket/core';
+} from '@thicket/core/bson';
 
 // The explorer walks plain JS trees (objects, arrays, strings, numbers,
 // booleans, null). A BSON document is shown by turning it into such a tree
@@ -178,10 +178,17 @@ export function badgeOf(value: unknown): Badge {
   return { type, label, title };
 }
 
-/** `--bson-<type>` token name for a BSON type (`objectId` → `object-id`, `binary` → `bin-data`). */
+/**
+ * `--bson-<type>` token name for a BSON type (`objectId` → `object-id`,
+ * `binary` → `bin-data`; Code with scope shares the `javascript` token).
+ */
 export function badgeColorVar(type: BsonType): string {
   const name =
-    type === 'binary' ? 'bin-data' : type.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+    type === 'binary'
+      ? 'bin-data'
+      : type === 'javascriptWithScope'
+        ? 'javascript'
+        : type.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
   return `var(--bson-${name})`;
 }
 
@@ -259,26 +266,50 @@ export function formatDate(ms: bigint, dates: DateDisplay): string {
   if (ms > DATE_LIMIT_MS || ms < -DATE_LIMIT_MS) return `${ms} ms since 1970 (out of date range)`;
   const t = Number(ms);
   if (dates.utc) return new Date(t).toISOString();
-  const zone = dates.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const zone = dates.timeZone ?? systemTimeZone();
   const offsetMs = zoneOffsetMs(t, zone);
   const local = t + offsetMs;
-  if (Math.abs(local) > Number(DATE_LIMIT_MS)) return new Date(t).toISOString();
+  // Near the JS date limits the zone's wall clock can lie outside the JS range
+  // (the offset is then NaN, or the local time passes the limit): show UTC.
+  if (!Number.isFinite(local) || Math.abs(local) > Number(DATE_LIMIT_MS)) {
+    return new Date(t).toISOString();
+  }
   const iso = new Date(local).toISOString().slice(0, -1);
   return `${iso}${formatOffset(offsetMs)} ${zone}`;
 }
 
+let systemZone: string | undefined;
+
+/** The system time zone, resolved once. */
+function systemTimeZone(): string {
+  systemZone ??= Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return systemZone;
+}
+
+/** Wall-clock formatters per time zone: building one is costly, so they are reused. */
+const zoneFormats = new Map<string, Intl.DateTimeFormat>();
+
+function zoneFormat(timeZone: string): Intl.DateTimeFormat {
+  let format = zoneFormats.get(timeZone);
+  if (!format) {
+    format = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hourCycle: 'h23',
+      era: 'short',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      second: 'numeric',
+    });
+    zoneFormats.set(timeZone, format);
+  }
+  return format;
+}
+
 function zoneOffsetMs(t: number, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    hourCycle: 'h23',
-    era: 'short',
-    year: 'numeric',
-    month: 'numeric',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: 'numeric',
-    second: 'numeric',
-  }).formatToParts(new Date(t));
+  const parts = zoneFormat(timeZone).formatToParts(new Date(t));
   const get = (type: Intl.DateTimeFormatPartTypes): number =>
     Number(parts.find((p) => p.type === type)?.value ?? 0);
   const era = parts.find((p) => p.type === 'era')?.value ?? 'AD';
