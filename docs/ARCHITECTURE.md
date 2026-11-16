@@ -84,6 +84,45 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
 - The renderer CSP: `default-src 'self'; script-src 'self'` (+ `'unsafe-eval'` only if Ajv's
   runtime compilation is kept for `$jsonSchema` validation; prefer validating in the backend).
 
+### Electron shell (`apps/desktop`, M0)
+- Build: `scripts/build.mjs` (esbuild) bundles `src/main/index.ts` → `dist/main.cjs` (the package's
+  `main`), `src/preload/index.ts` → `dist/preload.cjs` (sandboxed: CommonJS, only `electron` is
+  required at runtime) and `packages/backend/src/server/entry.ts` → `dist/backend.cjs` (the
+  utilityProcess). `npm run start` (root) builds the renderer and these bundles and starts Electron;
+  `npm run dev` (root) bundles, starts `ng serve` and Electron with `THICKET_DEV_SERVER` (renderer
+  live reload; main/preload/backend changes need a restart).
+- The renderer is served from `thicket://app/index.html` (`protocol.handle`, files from
+  `packages/renderer/dist` or `THICKET_RENDERER_DIR`) with the CSP as a response header; every
+  http(s) response (dev server) gets it via `onHeadersReceived`. Window settings, CSP, navigation /
+  `window.open` / webview / permission guards are pure functions in `src/main/security.ts`.
+- Ports: per window (and per reload) main creates two `MessageChannelMain`s and sends one end of
+  each to the preload on IPC channel `thicket:port` with `{ target: 'main' | 'backend' }`. Main
+  serves its end with `serve()` (`packages/backend/src/server/rpc.ts`); the backend gets the other
+  end of the backend channel as a `{ type: 'renderer' }` control message on `process.parentPort`.
+- Preload (`src/preload/bridge.ts`): `thicket.request({ id, method, params })` resolves with the
+  `Response` (never rejects for contract errors), routed by `route(method)`; requests wait until
+  their port arrives. `thicket.cancel(id)` goes to the owner of a request id or stream id (map
+  filled from responses with a `streamId`). `thicket.on(stream, listener)` or `thicket.on(listener)`
+  (every event); early events of a new stream are buffered until someone listens.
+- Backend restarts (`src/main/backend-host.ts`): on the utilityProcess `exit` main starts a new one
+  (immediately; with back-off 250 ms … 10 s when it keeps dying within 10 s) and hands every window
+  a new backend port with `restarted` info; the preload fails the old process's requests
+  (`INTERNAL`) and streams (`error` event) and emits `backend.restarted` (`BackendRestarted`).
+- Privileged port: one `MessageChannelMain` per backend process, `{ type: 'privileged' }`; main
+  serves `privilegedMethods` (contract `backend.ts`: `main.ping`, `secrets.get` — a stub until the
+  secrets store exists) on it. These methods are not in `methods`, so `route()` and the backend's
+  renderer-facing `serve()` refuse them (`UNKNOWN_METHOD`).
+- Wiring diagnostics in the contract: `app.ping` (main), `backend.ping` (backend; also checks the
+  privileged port), `backend.sleep` (cancellable wait for tests).
+- Tests: unit specs next to the code; `npm run test:electron` (root: builds the renderer first)
+  starts the real app with Playwright's `_electron` driver (`playwright-core`) and checks pings,
+  cancel, restart after `SIGKILL`, the CSP header and the navigation guards. On Linux it needs a
+  display: `xvfb-run -a npm run test:electron`, or without one it uses `--ozone-platform=headless`
+  (also forced with `THICKET_TEST_HEADLESS=1`). Not part of `npm run check`.
+- The Electron binary is downloaded by the `electron` package's postinstall; if
+  `node_modules/electron/dist` is missing (install scripts disabled), run
+  `node node_modules/electron/install.js`.
+
 ## API between parts
 See SPEC.md section 4. `packages/contract` is the single source of truth; renderer and backend both
 import it. Every new method gets: types, zod schema, a backend handler, a contract test.
@@ -155,6 +194,8 @@ Windows: run `.taskcheck` and npm scripts from Git for Windows' bash (TFP runs t
 | `npm run test:int` | integration tests against containers | slow, own tasks |
 | `npm run test:e2e` | Playwright against the built Electron app | slow, own tasks |
 | `npm run dev` | renderer dev server + Electron with reload | |
+| `npm run start` | build renderer + bundles, start Electron | |
+| `npm run test:electron` | the built app under Playwright's Electron driver | ~10 s, not in the check |
 | `npm run dist` | installers for the current OS into `dist/` | |
 
 ## Integration tests

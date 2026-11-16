@@ -118,7 +118,7 @@ export class BackendHost<P> {
     };
 
     for (const sink of this.sinks.values()) this.broker(child, sink, restarted);
-    this.log(`backend started (pid ${String(child.pid)})`);
+    this.log(restarted ? `backend restarted (${String(restarted.restarts)})` : 'backend started');
   }
 
   private broker(child: BackendProcess<P>, sink: Sink<P>, restarted: BackendRestarted | undefined) {

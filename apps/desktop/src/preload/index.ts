@@ -2,6 +2,7 @@
  * Preload of every Thicket window (sandboxed; bundled to `dist/preload.cjs`). Exposes only
  * `window.thicket.request / cancel / on`; the ports to main and the backend arrive over IPC.
  */
+import type { Event } from '@thicket/contract';
 import { contextBridge, ipcRenderer } from 'electron';
 
 import { Bridge, type ThicketApi } from './bridge';
@@ -18,7 +19,10 @@ ipcRenderer.on(PORT_CHANNEL, (event, data: unknown) => {
 const api: ThicketApi = {
   request: (request) => bridge.request(request),
   cancel: (id) => bridge.cancel(id),
-  on: (stream, listener) => bridge.on(stream, listener),
+  on: ((streamOrListener: string | ((event: Event) => void), listener?: (event: Event) => void) =>
+    typeof streamOrListener === 'function'
+      ? bridge.on(streamOrListener)
+      : bridge.on(streamOrListener, listener as (event: Event) => void)) as ThicketApi['on'],
 };
 
 contextBridge.exposeInMainWorld('thicket', api);

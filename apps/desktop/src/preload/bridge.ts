@@ -19,8 +19,12 @@ export interface ThicketApi {
   request(request: Request): Promise<Response>;
   /** Cancels a running request or stream by its request id or stream id. */
   cancel(id: string): void;
-  /** Listens to a stream (a `streamId` or a broadcast stream); returns an unsubscribe function. */
+  /**
+   * Listens to the events of one stream (a `streamId` or a broadcast stream name), or to every
+   * event when called with just a listener. Returns an unsubscribe function.
+   */
   on(stream: string, listener: (event: Event) => void): () => void;
+  on(listener: (event: Event) => void): () => void;
 }
 
 type Listener = (event: Event) => void;
@@ -49,6 +53,8 @@ export class Bridge implements ThicketApi {
   private readonly streamOwners = new Map<string, Route>();
   private readonly buffered = new Map<string, Event[]>();
   private readonly listeners = new Map<string, Set<Listener>>();
+  /** Listeners of every event (`on(listener)`). */
+  private readonly everything = new Set<Listener>();
 
   constructor(private readonly report: (error: unknown) => void = () => undefined) {}
 
@@ -122,9 +128,18 @@ export class Bridge implements ThicketApi {
     this.ports.get(target)?.port.send({ cancel: id });
   }
 
-  on(stream: string, listener: Listener): () => void {
+  on(stream: string, listener: Listener): () => void;
+  on(listener: Listener): () => void;
+  on(streamOrListener: string | Listener, maybeListener?: Listener): () => void {
+    if (typeof streamOrListener === 'function' && maybeListener === undefined) {
+      const listener = streamOrListener;
+      this.everything.add(listener);
+      return () => void this.everything.delete(listener);
+    }
+    const stream = streamOrListener;
+    const listener = maybeListener;
     if (typeof stream !== 'string' || typeof listener !== 'function') {
-      throw new TypeError('thicket.on needs a stream name and a listener');
+      throw new TypeError('thicket.on needs a listener, or a stream name and a listener');
     }
     let set = this.listeners.get(stream);
     if (!set) {
@@ -153,7 +168,10 @@ export class Bridge implements ThicketApi {
         const streamId = (asResponse.data.result as { streamId?: unknown } | null)?.streamId;
         if (typeof streamId === 'string' && streamId.length > 0) {
           this.streamOwners.set(streamId, target);
-          if (!this.listeners.has(streamId)) this.buffered.set(streamId, []);
+          // Events can arrive before the renderer subscribes to the new stream: keep them.
+          if (!this.listeners.has(streamId) && this.everything.size === 0) {
+            this.buffered.set(streamId, []);
+          }
         }
       }
       this.settle(asResponse.data.id, asResponse.data);
@@ -170,11 +188,13 @@ export class Bridge implements ThicketApi {
   private emit(event: Event): void {
     const last = event.kind !== 'data';
     const set = this.listeners.get(event.stream);
+    for (const listener of [...this.everything]) this.call(listener, event);
     if (set && set.size > 0) {
       for (const listener of [...set]) this.call(listener, event);
     } else {
       const buffer = this.buffered.get(event.stream);
-      if (buffer && buffer.length < MAX_BUFFERED_EVENTS) buffer.push(event);
+      if (buffer && this.everything.size > 0) this.buffered.delete(event.stream);
+      else if (buffer && buffer.length < MAX_BUFFERED_EVENTS) buffer.push(event);
       else if (buffer) this.report(new Error(`Dropped an event of stream ${event.stream}`));
     }
     if (last) this.streamOwners.delete(event.stream);
