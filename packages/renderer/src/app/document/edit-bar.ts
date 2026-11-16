@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 
 import { EditModeService } from '../explorer/services/edit-mode.service';
 import { WriteControl } from '../safety/write-control.directive';
@@ -129,8 +129,6 @@ export function plural(n: number, one: string, many = `${one}s`): string {
 export class EditBar {
   /** Profile the documents are written to (write controls follow its read-only flag). */
   readonly profileId = input.required<string>();
-  /** Insert document was pressed (a draft was added). */
-  readonly inserted = output<void>();
 
   protected readonly edits = inject(DocumentEdits);
   protected readonly actions = inject(DocumentActions);
@@ -150,7 +148,6 @@ export class EditBar {
   protected insert(): void {
     this.actions.newDocument();
     if (!this.editMode.enabled()) this.editMode.toggle();
-    this.inserted.emit();
   }
 
   protected save(): void {

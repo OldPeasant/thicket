@@ -105,7 +105,12 @@ export class DocumentActions {
     }
     const id = idOf(entry.original);
     if (id === null) return false;
-    const base = { profileId: host.profileId, db: host.db, coll: host.coll, id: stringifyEJson(id) };
+    const base = {
+      profileId: host.profileId,
+      db: host.db,
+      coll: host.coll,
+      id: stringifyEJson(id),
+    };
     const diff = pending.diff;
     return this.write(key, async () => {
       if (diff.kind === 'update') {
@@ -184,10 +189,7 @@ export class DocumentActions {
   cloneDocument(doc: BsonDocument): DraftDocument {
     const id = idOf(doc);
     const fields: BsonField[] = [newIdField(), ...doc.fields.filter((f) => f.key !== '_id')];
-    return this.addDraft(
-      { type: 'object', fields },
-      id === null ? 'Copy' : `Copy of ${label(id)}`,
-    );
+    return this.addDraft({ type: 'object', fields }, id === null ? 'Copy' : `Copy of ${label(id)}`);
   }
 
   /** Replaces a draft's document (edited in the form). */

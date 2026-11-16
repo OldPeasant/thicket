@@ -12,7 +12,11 @@ export interface EditedDocument {
 
 /** What Save would send for one document, or why it can't be saved. */
 export type PendingSave =
-  | { readonly ok: true; readonly diff: Exclude<DocumentDiff, { kind: 'none' }>; readonly changes: number }
+  | {
+      readonly ok: true;
+      readonly diff: Exclude<DocumentDiff, { kind: 'none' }>;
+      readonly changes: number;
+    }
   | { readonly ok: false; readonly error: string; readonly changes: number };
 
 /** One edit, for undo and redo. */
@@ -96,7 +100,9 @@ export class DocumentEdits {
     const before = entry?.current ?? original;
     if (bsonEquals(before, edited)) return false;
     this.apply(key, base, edited);
-    this.undoStack.update((s) => [...s, { key, original: base, before, after: edited }].slice(-UNDO_LIMIT));
+    this.undoStack.update((s) =>
+      [...s, { key, original: base, before, after: edited }].slice(-UNDO_LIMIT),
+    );
     this.redoStack.set([]);
     return true;
   }
