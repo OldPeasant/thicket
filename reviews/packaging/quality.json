@@ -1,0 +1,59 @@
+{
+  "schema": 1,
+  "task": "packaging",
+  "reviewed_revision": "6685b93f31ca13a347f68a652e79ec357777b39c",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/packaging/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/packaging/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/packaging/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "mac identity '-' (ad-hoc signing), hardenedRuntime false"
+    },
+    {
+      "id": "CR-2",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "workspace dist/dist:dir build the renderer first; root dist delegates"
+    },
+    {
+      "id": "CR-3",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "deferred",
+      "note": "Electron fuses and ignoring dev env hooks when packaged: follow-up task packaged-hardening"
+    },
+    {
+      "id": "CR-4",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "smoke script launches inside try; cleanup and FAILED output on launch failure"
+    },
+    {
+      "id": "CR-5",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "accepted",
+      "note": "spec imports electron-builder's own config loader (internal path, hoisted deps) on purpose to validate the effective config; an upgrade that moves it fails npm run check loudly with module-not-found and is a one-line fix"
+    }
+  ],
+  "validation": [
+    { "command": "npm run check", "result": "pass" },
+    {
+      "command": "podman run node:24-bookworm (+apt rpm): npm run dist -> AppImage, deb, rpm",
+      "result": "pass"
+    },
+    {
+      "command": "cd apps/desktop && node scripts/smoke-packaged.mjs release/thicket-0.0.0-linux-x86_64.AppImage",
+      "result": "pass"
+    }
+  ]
+}
