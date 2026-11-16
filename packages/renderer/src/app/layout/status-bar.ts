@@ -13,6 +13,10 @@ const STATE_TEXT = {
 @Component({
   selector: 'app-status-bar',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: {
+    '[class.production]': 'status.connection()?.production === true',
+    '[class.readonly]': 'status.connection()?.readonly === true',
+  },
   template: `
     <div class="connection" data-testid="status-connection">
       @if (status.connection(); as conn) {
@@ -67,6 +71,16 @@ const STATE_TEXT = {
       border-top: 1px solid var(--border);
       white-space: nowrap;
     }
+    /* Production connection: a red band on top and a tinted bar. */
+    :host(.production) {
+      color: var(--production-text);
+      background: var(--production-bg);
+      border-top: 2px solid var(--production);
+    }
+    :host(.production) .name {
+      color: var(--production-text);
+      font-weight: 600;
+    }
     .connection,
     .operations {
       display: flex;
@@ -106,6 +120,8 @@ const STATE_TEXT = {
     .flag.production {
       color: var(--production-text);
       background: var(--production-bg);
+      box-shadow: inset 0 0 0 1px var(--production);
+      font-weight: 600;
     }
     .flag.readonly {
       color: var(--readonly-text);

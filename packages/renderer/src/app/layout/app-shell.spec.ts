@@ -200,6 +200,32 @@ describe('AppShell', () => {
       expect(el.querySelector('[data-tab-id="p"]')?.classList).toContain('production');
     });
 
+    it('shows the production accent while the active view is production', async () => {
+      await start();
+      const shell = () => (el.tagName === 'APP-SHELL' ? el : el.querySelector('app-shell'));
+      expect(shell()?.hasAttribute('data-production')).toBe(false);
+      TestBed.inject(StatusService).setConnection({
+        name: 'prod',
+        state: 'connected',
+        production: true,
+      });
+      await settle();
+      // Start page: the status bar's connection decides.
+      expect(shell()?.classList).toContain('production');
+      expect(el.querySelector('app-status-bar')?.classList).toContain('production');
+      ws.open(tab('dev'));
+      await settle();
+      expect(shell()?.classList).not.toContain('production');
+      ws.open(tab('p', { production: true }));
+      await settle();
+      expect(shell()?.hasAttribute('data-production')).toBe(true);
+    });
+
+    it('hosts the confirm dialog', async () => {
+      await start();
+      expect(el.querySelector('app-confirm-dialog')).not.toBeNull();
+    });
+
     it('following a link shows the routed page instead of the active tab', async () => {
       await start();
       ws.open(tab('a'));

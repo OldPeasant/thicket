@@ -74,6 +74,17 @@ describe('StatusBar', () => {
     expect(bar()?.getAttribute('aria-valuenow')).toBe('0');
   });
 
+  it('tints the bar for production and marks read-only connections', async () => {
+    const host = fixture.nativeElement as HTMLElement;
+    status.setConnection({ name: 'dev', state: 'connected' });
+    await render();
+    expect(host.classList).not.toContain('production');
+    status.setConnection({ name: 'prod', state: 'connected', production: true, readonly: true });
+    await render();
+    expect(host.classList).toContain('production');
+    expect(host.classList).toContain('readonly');
+  });
+
   it('counts the other running operations', async () => {
     status.begin('A');
     status.begin('B');

@@ -3,6 +3,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
+  computed,
   inject,
   viewChild,
   type Type,
@@ -18,9 +19,11 @@ import {
 import { SIDEBAR_WIDTH } from '@thicket/contract';
 import { filter } from 'rxjs';
 
+import { ConfirmDialog } from '../safety/confirm-dialog';
 import { NAV } from './navigation';
 import { SidebarWidthService } from './sidebar-width.service';
 import { StatusBar } from './status-bar';
+import { StatusService } from './status.service';
 import { START_PANEL_DOM_ID, START_TAB_DOM_ID, TabBar, tabDomId, tabPanelDomId } from './tab-bar';
 import { TAB_VIEWS } from './tab-views';
 import { TabPlaceholder } from './tab-placeholder';
@@ -33,14 +36,18 @@ export const SIDEBAR_KEY_STEP = 16;
  * The main window: resizable sidebar, tab strip with the open tabs (or the routed start page when
  * no tab is shown) and the status bar. Keyboard: Ctrl/Cmd+W closes the active tab,
  * Ctrl+Tab / Ctrl+Shift+Tab (and Ctrl+PageDown / Ctrl+PageUp) cycle through the tabs,
- * Ctrl+Shift+PageDown / Ctrl+Shift+PageUp move the active tab.
+ * Ctrl+Shift+PageDown / Ctrl+Shift+PageUp move the active tab. Hosts the write confirm dialog
+ * (`ConfirmDialog`) and shows the production accent while the active view is on a production
+ * connection.
  */
 @Component({
   selector: 'app-shell',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NgComponentOutlet, RouterLink, RouterOutlet, StatusBar, TabBar],
+  imports: [ConfirmDialog, NgComponentOutlet, RouterLink, RouterOutlet, StatusBar, TabBar],
   host: {
     '[style.--sidebar-width.px]': 'sidebar.width()',
+    '[class.production]': 'production()',
+    '[attr.data-production]': 'production() ? "" : null',
     '(document:keydown)': 'onKeydown($event)',
   },
   template: `
@@ -96,6 +103,7 @@ export const SIDEBAR_KEY_STEP = 16;
       </main>
     </div>
     <app-status-bar class="status" />
+    <app-confirm-dialog />
   `,
   styleUrl: './app-shell.css',
 })
@@ -112,6 +120,16 @@ export class AppShell {
   protected readonly startPanelId = START_PANEL_DOM_ID;
   protected readonly tabId = tabDomId;
   protected readonly panelId = tabPanelDomId;
+
+  private readonly status = inject(StatusService);
+  /**
+   * The active view belongs to a production connection: the active tab's flag, or (on the start
+   * page) the status bar's connection. Draws the red accent along the sidebar and status bar.
+   */
+  protected readonly production = computed(() => {
+    const tab = this.workspace.active();
+    return tab ? tab.production === true : this.status.connection()?.production === true;
+  });
 
   private drag: { pointerId: number; startX: number; startWidth: number } | null = null;
 
