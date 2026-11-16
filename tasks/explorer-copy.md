@@ -5,7 +5,7 @@ owner: felix/agent-1
 deps: [renderer-scaffold]
 touches: [packages/renderer/src/app/explorer,packages/renderer/src/app/schema,packages/renderer/src/styles.css,vendor]
 prio: 1
-lease_until: 2026-11-16T19:19:38Z
+lease_until: 2026-11-16T19:24:39Z
 releases: 0
 extended: 
 hold: 
