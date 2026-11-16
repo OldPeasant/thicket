@@ -39,7 +39,10 @@ async function createUser(uri: string): Promise<void> {
   }
 }
 
-function profile(id: string, fields: Partial<Profile> & Pick<Profile, 'connectionString'>): Profile {
+function profile(
+  id: string,
+  fields: Partial<Profile> & Pick<Profile, 'connectionString'>,
+): Profile {
   return { id, name: `Profile ${id}`, readOnly: false, production: false, ...fields };
 }
 
@@ -71,13 +74,15 @@ async function failure(promise: Promise<unknown>): Promise<RpcError> {
     await promise;
   } catch (error) {
     if (error instanceof RpcError) return error;
-    throw new Error(`expected an RpcError, got ${String(error)}`);
+    throw new Error(`expected an RpcError, got ${String(error)}`, { cause: error });
   }
   throw new Error('expected a failure');
 }
 
 beforeAll(async () => {
-  await Promise.all([...STANDALONES, 'mongo8rs' as const].map((name) => createUser(mongo[name].uri)));
+  await Promise.all(
+    [...STANDALONES, 'mongo8rs' as const].map((name) => createUser(mongo[name].uri)),
+  );
 });
 
 describe.each(STANDALONES)('SCRAM on %s', (name) => {
@@ -160,7 +165,12 @@ describe('replica set fixture', () => {
   it('reports the replicaSet topology and authenticates with SCRAM', async () => {
     const p = profile('rs', {
       connectionString: mongo.mongo8rs.uri,
-      auth: { mechanism: 'SCRAM-SHA-256', username: USER, authSource: 'admin', secretMode: 'saved' },
+      auth: {
+        mechanism: 'SCRAM-SHA-256',
+        username: USER,
+        authSource: 'admin',
+        secretMode: 'saved',
+      },
     });
     const { manager } = setup([p], { rs: { password: PASSWORD } });
     await manager.open('rs', undefined);
@@ -272,9 +282,10 @@ describe('several connections', () => {
     expect(await call('conn.status', { profileId: 'm7' })).toEqual({
       connections: [{ profileId: 'm7', state: 'disconnected' }],
     });
-    expect((await failure(Promise.resolve().then(() => call('conn.serverInfo', { profileId: 'm7' })))).code).toBe(
-      'NOT_CONNECTED',
-    );
+    expect(
+      (await failure(Promise.resolve().then(() => call('conn.serverInfo', { profileId: 'm7' }))))
+        .code,
+    ).toBe('NOT_CONNECTED');
     // The others still work.
     for (const id of ['m8', 'rs', 'tls']) {
       const ping = await manager.client(id).db('admin').command({ ping: 1 });
@@ -290,8 +301,6 @@ describe('several connections', () => {
     await call('conn.close', { profileId: 'm8' });
     const status = (await call('conn.status', {})) as { connections: { profileId: string }[] };
     expect(status.connections.map((c) => c.profileId).sort()).toEqual(['m7', 'rs', 'tls']);
-    expect(
-      (await manager.client('m7').db('admin').command({ ping: 1 }))['ok'],
-    ).toBe(1);
+    expect((await manager.client('m7').db('admin').command({ ping: 1 }))['ok']).toBe(1);
   });
 });
