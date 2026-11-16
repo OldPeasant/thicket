@@ -264,6 +264,57 @@ Lint/type-check/build:
 Remaining unresolved findings:
 0
 
+## Round 5
+
+Date: 2026-11-16
+
+Scope: finding CR-9 (`reviews/uri-model/review.md`) = TW-8 (`reviews/uri-model/tests.md`) on revision `b464230`, plus the dead line the test-writer noted in `endsInSecretOption`; only `packages/core/src/uri/mask.ts`.
+
+### Fixed findings
+
+#### CR-9 / TW-8 — `maskText()` is quadratic on a long line after a query part
+
+Files changed:
+- `packages/core/src/uri/mask.ts`
+
+Problem:
+In the `uriEnd` loop, every whitespace inside a query started another iteration. Each iteration called `endsInQuery(text.slice(start, runEnd))`, which copied and rescanned the whole token so far, and `inner.exec(text)` from `end`, which searched to the end of the text when no later scheme existed. That is O(words x line length). Confirmed: the TW-8 test failed on `b464230`.
+
+Fix:
+- The next embedded scheme is searched once before the loop and kept (`next`). It is only advanced by `inner.exec` after it has been consumed inside a run, so the scheme regex scans the text once.
+- The "in the query part" state (`inQuery`, from the first `?` of the body with no `#` after it) is updated only from the newly scanned run `text.slice(scanned, runEnd)`. The `endsInQuery` helper was removed.
+- The work per run is now proportional to the run, so the loop is linear in the line length. The result is unchanged: the body is the same text as before (`text.slice(bodyStart, runEnd)`), and the token stops at the same `?`/`#` positions.
+
+Dead code:
+- `endsInSecretOption` (former mask.ts:135): `if (body.search(/[/?#]/) < 0) return false;` was removed. Without any `/`, `?` or `#`, the next line's `indexOf('?')` is -1 and the function returns `false` anyway. Its only caller, `endsInSecret`, also calls it only when that search is >= 0. So the line never changed the result.
+
+Validation:
+- `npx vitest run --root packages/core` — Pass (TW-8 test `masks a long line of prose after a query in linear time` passes)
+- One-off differential check (temporary spec, deleted afterwards, not committed): 200,000 seeded random strings built from schemes, `:`, `@`, `/`, `?`, `#`, `&`, `=`, spaces, tabs, line breaks, secret option names, `%ZZ`, ports, IPv6 brackets and quotes. `maskText` output was identical to the `b464230` implementation for every string — Pass
+
+### Not fixed
+
+None.
+
+Note (not a finding, no change): `endsInSecret` still checks the prefix from the start of the connection string for each embedded scheme. That costs O(prefix) per scheme only when many schemes sit inside one secret value. This is a separate, adversarial case outside CR-9 (the reviewer measured 40,000 embedded schemes that split off at 17 ms).
+
+### Validation summary (Round 5)
+
+Focused tests:
+- `npx vitest run --root packages/core` (repo root) — Pass: 3 files, 308 tests passed (was 1 failed | 307 passed)
+
+Full test suite:
+- `npm run check` (repo root: eslint `--max-warnings 0`, prettier, typecheck, root `vitest run` 7 files / 906 tests, renderer 5 files / 181 tests) — Pass
+
+Lint/type-check/build:
+- Included in `npm run check` — Pass
+
+`.taskcheck`:
+- Runs `npm run check` (result above) — Pass; `.taskcheck` itself was not run directly by the fixer, and `tasks.py done` was not run
+
+Remaining unresolved findings:
+0
+
 ## Final status
 
 All validated findings fixed and validation passed.

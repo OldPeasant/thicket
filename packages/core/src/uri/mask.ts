@@ -132,7 +132,6 @@ function endsInSecret(prefix: string): boolean {
  */
 function endsInSecretOption(prefix: string, undecodable = true): boolean {
   const body = prefix.replace(SCHEME, '');
-  if (body.search(/[/?#]/) < 0) return false;
   const q = body.indexOf('?');
   if (q < 0 || body.lastIndexOf('#') > q) return false;
   const last =
@@ -170,13 +169,19 @@ function uriEnd(text: string, start: number, bodyStart: number): number {
   // it; a quote after the hosts just stays in the token and `mask()` keeps it as it is.
   const ws = /\s/g;
   const inner = new RegExp(SCHEME_SOURCE, 'gi');
+  inner.lastIndex = end;
+  // CR-9: the next embedded scheme at or after `end`, searched once and kept across runs, and
+  // whether the token so far is in its query part, updated only from newly scanned text. Both
+  // keep the loop linear in the length of the line.
+  let next = inner.exec(text);
+  let inQuery = false;
+  let scanned = bodyStart;
   for (;;) {
     ws.lastIndex = end;
     const runEnd = ws.exec(text)?.index ?? text.length;
-    inner.lastIndex = end;
-    for (let m = inner.exec(text); m !== null && m.index < runEnd; m = inner.exec(text)) {
+    for (; next !== null && next.index < runEnd; next = inner.exec(text)) {
       // TW-4: a scheme inside a secret value is part of it, not a new connection string.
-      if (!endsInSecret(text.slice(start, m.index))) return m.index;
+      if (!endsInSecret(text.slice(start, next.index))) return next.index;
     }
     // TW-6 / TW-7: the driver also keeps a raw space or tab in any option value (`appName=my app`),
     // and a secret option may follow it. So inside the query part (after '?', before '#'),
@@ -186,16 +191,19 @@ function uriEnd(text: string, start: number, bodyStart: number): number {
     // lies in a secret value. Prose after a query is swallowed too, and `mask()` keeps non-secret
     // text as it is: masking more is acceptable, leaking is not.
     if (runEnd >= text.length || /[\r\n]/.test(text.charAt(runEnd))) return runEnd;
-    if (!endsInQuery(text.slice(start, runEnd))) return runEnd;
+    // In the query part: after the first '?' of the body, before any '#' after it.
+    const run = text.slice(scanned, runEnd);
+    if (!inQuery) {
+      const q = run.indexOf('?');
+      if (q < 0) return runEnd;
+      inQuery = true;
+      if (run.indexOf('#', q) >= 0) return runEnd;
+    } else if (run.includes('#')) {
+      return runEnd;
+    }
+    scanned = runEnd;
     end = runEnd + 1;
   }
-}
-
-/** True when `prefix` (a connection string cut anywhere) ends in its query part. */
-function endsInQuery(prefix: string): boolean {
-  const body = prefix.replace(SCHEME, '');
-  const q = body.indexOf('?');
-  return q >= 0 && body.indexOf('#', q) < 0;
 }
 
 /** Masks every MongoDB connection string inside free text (log lines, error messages). */
