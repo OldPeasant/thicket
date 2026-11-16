@@ -25,8 +25,8 @@
     "test:electron": "node scripts/build.mjs && vitest run --config vitest.electron.config.ts",
     "coverage": "vitest run --coverage",
     "icon": "node scripts/make-icon.mjs",
-    "dist": "node scripts/build.mjs && electron-builder --config electron-builder.yml --publish never",
-    "dist:dir": "node scripts/build.mjs && electron-builder --config electron-builder.yml --publish never --dir"
+    "dist": "npm run build -w @thicket/renderer && node scripts/build.mjs && electron-builder --config electron-builder.yml --publish never",
+    "dist:dir": "npm run build -w @thicket/renderer && node scripts/build.mjs && electron-builder --config electron-builder.yml --publish never --dir"
   },
   "devDependencies": {
     "@thicket/backend": "0.0.0",

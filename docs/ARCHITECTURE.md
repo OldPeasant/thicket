@@ -166,10 +166,12 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   checks the `npm run dev` path (`ng serve` + `THICKET_DEV_SERVER`). On Linux it needs a
   display: `xvfb-run -a npm run test:electron`, or without one it uses `--ozone-platform=headless`
   (also forced with `THICKET_TEST_HEADLESS=1`). Not part of `npm run check`.
-- Packaging (`apps/desktop/electron-builder.yml`): `npm run dist` (root) builds the renderer, the
-  bundles and unsigned installers for the current OS into `apps/desktop/release/`: AppImage, deb
-  and rpm on Linux (rpm needs `rpmbuild`, package `rpm`), dmg (arm64 + x64) on macOS, NSIS + zip
-  (x64) on Windows (building NSIS on Linux needs wine). App id `io.github.oldpeasant.thicket`,
+- Packaging (`apps/desktop/electron-builder.yml`): `npm run dist` (root, delegates to
+  `npm run dist -w apps/desktop`) builds the renderer, the bundles and unsigned installers for the
+  current OS into `apps/desktop/release/`: AppImage, deb and rpm on Linux (rpm needs `rpmbuild`,
+  package `rpm`), dmg (arm64 + x64, ad-hoc signed with `identity: '-'`, no Developer ID) on macOS,
+  NSIS + zip (x64) on Windows (building NSIS on Linux needs wine). `npm run dist:dir -w
+  apps/desktop` builds the same but only the unpacked app (`release/linux-unpacked/` etc.). App id `io.github.oldpeasant.thicket`,
   product name Thicket (also `productName` in `package.json`, so `userData` is `…/Thicket`).
   The asar holds only `dist/*.cjs` and `package.json`: everything else is bundled, so the
   `@thicket/*` packages are devDependencies. The renderer goes to `resources/renderer` (main uses

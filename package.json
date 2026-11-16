@@ -26,7 +26,7 @@
     "test:electron": "npm run build -w packages/renderer && npm run test:electron -w apps/desktop",
     "dev": "npm run dev -w apps/desktop",
     "start": "npm run build -w packages/renderer && npm run start -w apps/desktop",
-    "dist": "npm run build -w packages/renderer && npm run dist -w apps/desktop",
+    "dist": "npm run dist -w apps/desktop",
     "coverage": "npm run coverage --workspaces --if-present"
   },
   "devDependencies": {

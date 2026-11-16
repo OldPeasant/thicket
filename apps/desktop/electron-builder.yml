@@ -49,8 +49,13 @@ mac:
       arch: [arm64, x64]
   category: public.app-category.developer-tools
   icon: build/icon.png
-  # Unsigned for now (SPEC: signing and notarization later).
-  identity: null
+  # No Developer ID yet (SPEC: signing and notarization later). '-' = ad-hoc signing
+  # (app-builder-lib 26.18 MacTargetHelper.findSigningIdentity): electron-builder modifies the
+  # Electron bundle, and an unsigned modified bundle is reported as "damaged" on Apple Silicon;
+  # ad-hoc signed, users get the normal unidentified-developer Gatekeeper warning instead.
+  # `null` would skip signing entirely. Ad-hoc signing needs hardenedRuntime off (library
+  # validation would reject Electron's frameworks).
+  identity: '-'
   hardenedRuntime: false
 dmg:
   sign: false

@@ -24,22 +24,22 @@ const headless =
 const userData = mkdtempSync(join(tmpdir(), 'thicket-smoke-'));
 const output = [];
 
-const app = await _electron.launch({
-  executablePath: resolve(executable),
-  args: headless ? ['--ozone-platform=headless'] : [],
-  env: {
-    ...process.env,
-    ELECTRON_ENABLE_LOGGING: '1',
-    APPIMAGE_EXTRACT_AND_RUN: '1',
-    THICKET_USER_DATA: userData,
-  },
-  timeout: 60_000,
-});
-app.process().stdout?.on('data', (chunk) => output.push(chunk.toString()));
-app.process().stderr?.on('data', (chunk) => output.push(chunk.toString()));
-
+let app;
 let failed = false;
 try {
+  app = await _electron.launch({
+    executablePath: resolve(executable),
+    args: headless ? ['--ozone-platform=headless'] : [],
+    env: {
+      ...process.env,
+      ELECTRON_ENABLE_LOGGING: '1',
+      APPIMAGE_EXTRACT_AND_RUN: '1',
+      THICKET_USER_DATA: userData,
+    },
+    timeout: 60_000,
+  });
+  app.process().stdout?.on('data', (chunk) => output.push(chunk.toString()));
+  app.process().stderr?.on('data', (chunk) => output.push(chunk.toString()));
   const page = await app.firstWindow({ timeout: 60_000 });
   await page.waitForLoadState('load');
   // Runs in the renderer, where the preload exposes `thicket` on the window.
@@ -79,7 +79,7 @@ try {
   failed = true;
   console.error(`smoke: ${String(error)}`);
 } finally {
-  await app.close().catch((error) => console.error(`smoke: close failed: ${String(error)}`));
+  await app?.close().catch((error) => console.error(`smoke: close failed: ${String(error)}`));
   rmSync(userData, { recursive: true, force: true });
 }
 
