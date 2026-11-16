@@ -11,7 +11,8 @@ lease_until: 2026-11-16T23:16:36Z
 docs.insert/update/replace/delete; update takes the diff and expected values and returns CONFLICT plus the current server document when nothing matched; updateMany/deleteMany with a `preview` step (count + sample) and an execute step; all through the write guard.
 
 ## Acceptance criteria
-- [ ] Integration tests: update succeeds; concurrent change → CONFLICT with server doc; delete; insert returns _id
+- [x] Integration tests: update succeeds; concurrent change → CONFLICT with server doc; delete; insert returns _id
+  - verified (2026-11-16 23:59+0100 by felix/agent-2): npx vitest run --config test/integration/vitest.config.ts docs-write (Podman, mongo 8.x replica set fixture, handlers behind guardWrites + contract validation) -> 20 passed; covers update ok, concurrent change -> CONFLICT with current server doc (and null when deleted), delete by _id, insert returns _ids (generated ObjectId + given)
 - [ ] updateMany/deleteMany preview count equals the affected count of the execute step (int test)
 - [ ] Read-only and unconfirmed-production writes refused (int test)
 
