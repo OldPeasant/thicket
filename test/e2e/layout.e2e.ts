@@ -105,7 +105,11 @@ for (const [style, mode] of [
     await expect(root).toHaveAttribute('data-style', style);
     await expect(root).toHaveAttribute('data-theme', mode);
     await expect(window.getByTestId('welcome-new')).toBeVisible();
-    await window.evaluate(() => document.fonts.ready);
+    // The root tsconfig has no DOM lib: reach `document` through `globalThis`.
+    await window.evaluate(async () => {
+      await (globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }).document
+        .fonts.ready;
+    });
     // Let the theme transition settle before the picture.
     await window.waitForTimeout(400);
     await mkdir(SHOTS, { recursive: true });

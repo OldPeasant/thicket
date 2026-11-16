@@ -1,9 +1,9 @@
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { provideRouter, withHashLocation } from '@angular/router';
+import { Router, provideRouter, withHashLocation } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { BROADCAST_STREAMS, type Settings } from '@thicket/contract';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
 import { routes } from '../app.routes';
@@ -386,6 +386,202 @@ describe('AppShell', () => {
       });
       await settle();
       expect(width()).toBe('444px');
+    });
+  });
+
+  describe('sidebar width edge cases', () => {
+    const width = () => getComputedStyle(el).getPropertyValue('--sidebar-width');
+    const splitter = () => must(el.querySelector<HTMLElement>('[data-testid="splitter"]'));
+    const pointer = (
+      type: string,
+      clientX: number,
+      init: { button?: number; id?: number } = {},
+    ) => {
+      const event = new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        clientX,
+        button: init.button ?? 0,
+      });
+      Object.defineProperty(event, 'pointerId', { value: init.id ?? 1 });
+      splitter().dispatchEvent(event);
+      return event;
+    };
+
+    afterEach(() => vi.restoreAllMocks());
+
+    it('exposes the range on the separator', async () => {
+      await start();
+      expect(splitter().getAttribute('role')).toBe('separator');
+      expect(splitter().getAttribute('aria-valuemin')).toBe('180');
+      expect(splitter().getAttribute('aria-valuemax')).toBe('560');
+    });
+
+    it('ignores other keys on the splitter', async () => {
+      await start();
+      const event = new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true });
+      splitter().dispatchEvent(event);
+      await settle();
+      expect(event.defaultPrevented).toBe(false);
+      expect(fake.requestsFor('app.settings.set')).toHaveLength(0);
+    });
+
+    it('ignores drags with a button other than the primary one', async () => {
+      await start();
+      expect(pointer('pointerdown', 500, { button: 2 }).defaultPrevented).toBe(false);
+      pointer('pointermove', 600);
+      pointer('pointerup', 600);
+      await settle();
+      expect(width()).toBe('300px');
+      expect(fake.requestsFor('app.settings.set')).toHaveLength(0);
+    });
+
+    it('ignores moves without a drag and pointers other than the dragging one', async () => {
+      await start();
+      pointer('pointermove', 900);
+      await settle();
+      expect(width()).toBe('300px');
+      pointer('pointerdown', 500);
+      pointer('pointermove', 600, { id: 2 });
+      pointer('pointerup', 600, { id: 2 });
+      await settle();
+      expect(width()).toBe('300px');
+      expect(fake.requestsFor('app.settings.set')).toHaveLength(0);
+      pointer('pointermove', 520);
+      pointer('pointerup', 520);
+      await settle();
+      expect(stored.sidebarWidth).toBe(320);
+    });
+
+    it('a cancelled pointer saves the width reached so far', async () => {
+      await start();
+      pointer('pointerdown', 500);
+      pointer('pointermove', 450);
+      pointer('pointercancel', 450);
+      await settle();
+      expect(stored.sidebarWidth).toBe(250);
+    });
+
+    it('a click on the splitter without moving saves nothing', async () => {
+      await start();
+      pointer('pointerdown', 500);
+      pointer('pointerup', 500);
+      await settle();
+      expect(fake.requestsFor('app.settings.set')).toHaveLength(0);
+    });
+
+    it('a failed save is logged and the stored width is shown again', async () => {
+      await start();
+      const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      fake.fail('app.settings.set', { code: 'INTERNAL', message: 'settings locked' });
+      pointer('pointerdown', 500);
+      pointer('pointermove', 600);
+      await settle();
+      expect(width()).toBe('400px');
+      pointer('pointerup', 600);
+      await settle();
+      await vi.waitFor(() => expect(log).toHaveBeenCalled());
+      await settle();
+      expect(width()).toBe('300px');
+      expect(stored.sidebarWidth).toBe(300);
+    });
+  });
+
+  describe('keyboard edge cases', () => {
+    it('Ctrl+Shift+PageUp/PageDown on the start page moves nothing', async () => {
+      await start();
+      ['a', 'b'].forEach((id) => ws.open(tab(id)));
+      ws.showHome();
+      await settle();
+      expect(key({ key: 'PageUp', ctrlKey: true, shiftKey: true }).defaultPrevented).toBe(true);
+      key({ key: 'PageDown', ctrlKey: true, shiftKey: true });
+      await settle();
+      expect(tabIds()).toEqual(['a', 'b']);
+      expect(ws.activeId()).toBeNull();
+    });
+
+    it('moving the first tab further left or the last further right keeps the order', async () => {
+      await start();
+      ['a', 'b'].forEach((id) => ws.open(tab(id)));
+      key({ key: 'PageDown', ctrlKey: true, shiftKey: true });
+      ws.activate('a');
+      key({ key: 'PageUp', ctrlKey: true, shiftKey: true });
+      await settle();
+      expect(tabIds()).toEqual(['a', 'b']);
+    });
+
+    it('Cmd+PageDown (no Ctrl) is left to the system', async () => {
+      await start();
+      ['a', 'b'].forEach((id) => ws.open(tab(id)));
+      ws.activate('a');
+      await settle();
+      expect(key({ key: 'PageDown', metaKey: true }).defaultPrevented).toBe(false);
+      expect(ws.activeId()).toBe('a');
+    });
+
+    it('Ctrl+Tab with no tab open stays on the start page', async () => {
+      await start();
+      key({ key: 'Tab', ctrlKey: true });
+      await settle();
+      expect(ws.activeId()).toBeNull();
+      expect(el.querySelector('app-welcome')?.closest<HTMLElement>('.pane')?.hidden).toBe(false);
+    });
+
+    it('Ctrl+W on the start page with tabs open closes none of them', async () => {
+      await start();
+      ['a', 'b'].forEach((id) => ws.open(tab(id)));
+      ws.showHome();
+      await settle();
+      expect(key({ key: 'w', ctrlKey: true }).defaultPrevented).toBe(true);
+      await settle();
+      expect(tabIds()).toEqual(['a', 'b']);
+    });
+
+    it('closing the last tab with Ctrl+W shows the welcome screen again', async () => {
+      await start();
+      ws.open(tab('a'));
+      await settle();
+      key({ key: 'w', ctrlKey: true });
+      await settle();
+      expect(el.querySelector('app-welcome')?.closest<HTMLElement>('.pane')?.hidden).toBe(false);
+      expect(el.querySelector('[data-testid="tab-home"]')?.getAttribute('aria-selected')).toBe(
+        'true',
+      );
+    });
+  });
+
+  describe('tab views', () => {
+    it('the placeholder shows the detail of a tab without a registered view', async () => {
+      await start();
+      ws.open(tab('s', { kind: 'admin', title: 'Current operations', detail: 'local / admin' }));
+      await settle();
+      const panel = el.querySelector('[data-testid="tab-panel"][data-tab-id="s"]');
+      expect(panel?.getAttribute('role')).toBe('tabpanel');
+      expect(panel?.getAttribute('aria-label')).toBe('Current operations');
+      expect(panel?.querySelector('app-tab-placeholder .detail')?.textContent).toBe(
+        'local / admin',
+      );
+    });
+
+    it('keeps the views of background tabs alive while switching', async () => {
+      await start();
+      ['a', 'b'].forEach((id) => ws.open(tab(id)));
+      await settle();
+      const viewA = el.querySelector('[data-tab-id="a"] .test-view');
+      ws.activate('a');
+      await settle();
+      expect(el.querySelector('[data-tab-id="a"] .test-view')).toBe(viewA);
+    });
+
+    it('the sidebar "New connection" link opens the connection editor page', async () => {
+      await start();
+      ws.open(tab('a'));
+      await settle();
+      el.querySelector<HTMLElement>('[data-testid="sidebar-new"]')?.click();
+      await settle();
+      expect(TestBed.inject(Router).url).toBe(NAV.newConnection);
+      expect(ws.activeId()).toBeNull();
+      expect(el.querySelector('[data-testid="page-heading"]')?.textContent).toBe('New connection');
     });
   });
 

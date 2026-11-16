@@ -6,6 +6,7 @@ import {
   ERROR_CODES,
   MAX_SLEEP_MS,
   METHOD_NAMES,
+  SIDEBAR_WIDTH,
   WRITE_METHODS,
   cancel,
   ejsonSchemas,
@@ -19,6 +20,7 @@ import {
   request,
   response,
   route,
+  settings,
   settingsChanged,
   type MethodDef,
   type MethodName,
@@ -639,6 +641,39 @@ describe('envelope', () => {
     expect(settingsChanged.safeParse({ settings: { ...full, pageSize: 30 } }).success).toBe(false);
     expect(settingsChanged.safeParse({ settings: { ...full, extra: 1 } }).success).toBe(false);
     expect(settingsChanged.safeParse({}).success).toBe(false);
+  });
+
+  it('settings.sidebarWidth is a whole number of pixels within SIDEBAR_WIDTH', () => {
+    expect(SIDEBAR_WIDTH).toEqual({ min: 180, max: 560, default: 260 });
+    const full = settings.parse({
+      style: 'business',
+      mode: 'system',
+      pageSize: 50,
+      nestedPageSize: 100,
+      defaultIntegerType: 'int32',
+      dateDisplay: 'local',
+      checkForUpdates: true,
+      schemaSampleSize: 1000,
+      sidebarWidth: SIDEBAR_WIDTH.default,
+    });
+    for (const ok of [180, 181, 260, 559, 560]) {
+      expect(settings.safeParse({ ...full, sidebarWidth: ok }).success).toBe(true);
+    }
+    for (const bad of [179, 561, 260.5, '260', null, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(settings.safeParse({ ...full, sidebarWidth: bad }).success).toBe(false);
+    }
+    const withoutWidth: Partial<typeof full> = { ...full };
+    delete withoutWidth.sidebarWidth;
+    expect(settings.safeParse(withoutWidth).success).toBe(false);
+  });
+
+  it('app.settings.set accepts sidebarWidth alone and refuses it out of range', () => {
+    const set = (sidebarWidth: unknown) =>
+      parseParams('app.settings.set', { settings: { sidebarWidth } });
+    expect(set(300)).toEqual({ ok: true, data: { settings: { sidebarWidth: 300 } } });
+    expect(set(100).ok).toBe(false);
+    expect(set(600).ok).toBe(false);
+    expect(set(300.5).ok).toBe(false);
   });
 
   it('has the stable error codes named in SPEC.md', () => {

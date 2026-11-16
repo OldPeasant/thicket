@@ -48,6 +48,67 @@ describe('SettingsStore defaults', () => {
   });
 });
 
+describe('SettingsStore sidebarWidth', () => {
+  it('defaults to 260 px', async () => {
+    const store = await SettingsStore.open(file);
+    expect(DEFAULT_SETTINGS.sidebarWidth).toBe(260);
+    expect(store.get().sidebarWidth).toBe(260);
+  });
+
+  it('a settings.json written before sidebarWidth existed keeps its settings and gets the default', async () => {
+    await fs.writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        settings: { ...DEFAULT_SETTINGS, sidebarWidth: undefined, style: 'tron' },
+      }),
+    );
+    const store = await SettingsStore.open(file);
+    expect(store.get()).toEqual({ ...DEFAULT_SETTINGS, style: 'tron', sidebarWidth: 260 });
+  });
+
+  it('saves a width and reads it back after a restart', async () => {
+    const store = await SettingsStore.open(file);
+    const listener = vi.fn();
+    store.onChange(listener);
+    await expect(store.set({ sidebarWidth: 412 })).resolves.toMatchObject({ sidebarWidth: 412 });
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ sidebarWidth: 412 }));
+    expect(await readJson(file)).toMatchObject({ settings: { sidebarWidth: 412 } });
+    const reopened = await SettingsStore.open(file);
+    expect(reopened.get().sidebarWidth).toBe(412);
+  });
+
+  it('accepts both ends of the range', async () => {
+    const store = await SettingsStore.open(file);
+    await expect(store.set({ sidebarWidth: 180 })).resolves.toMatchObject({ sidebarWidth: 180 });
+    await expect(store.set({ sidebarWidth: 560 })).resolves.toMatchObject({ sidebarWidth: 560 });
+  });
+
+  it.each([179, 561, 300.5, 0, -1, Number.NaN])(
+    'refuses sidebarWidth %s: nothing written, the width stays',
+    async (width) => {
+      const store = await SettingsStore.open(file);
+      await store.set({ sidebarWidth: 300 });
+      const before = await fs.readFile(file, 'utf8');
+      await expect(store.set({ sidebarWidth: width })).rejects.toThrow();
+      expect(store.get().sidebarWidth).toBe(300);
+      expect(await fs.readFile(file, 'utf8')).toBe(before);
+    },
+  );
+
+  it.each([[179], [561], [300.5], ['300'], [null]])(
+    'a stored sidebarWidth of %j is replaced by the default, the other settings are kept',
+    async (width) => {
+      await fs.writeFile(
+        file,
+        JSON.stringify({ version: 1, settings: { mode: 'dark', sidebarWidth: width } }),
+      );
+      const store = await SettingsStore.open(file);
+      expect(store.get()).toEqual({ ...DEFAULT_SETTINGS, mode: 'dark' });
+    },
+  );
+});
+
 describe('SettingsStore unknown keys', () => {
   it('drops unknown keys when loading and does not write them back', async () => {
     await fs.writeFile(
@@ -801,6 +862,13 @@ describe('SettingsStore change listeners', () => {
     // The queue is not blocked by the refused change.
     await expect(store.set({ pageSize: 20 })).resolves.toMatchObject({ pageSize: 20 });
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('undefined values in set() keep the current value (sidebarWidth too)', async () => {
+    const store = await SettingsStore.open(file);
+    await store.set({ sidebarWidth: 320 });
+    await store.set({ sidebarWidth: undefined, mode: 'light' });
+    expect(store.get()).toMatchObject({ sidebarWidth: 320, mode: 'light' });
   });
 
   it('undefined values in set() keep the current value', async () => {
