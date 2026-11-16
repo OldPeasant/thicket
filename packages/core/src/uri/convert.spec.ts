@@ -216,4 +216,170 @@ describe('toConnectionString', () => {
       expect(() => toConnectionString(m), JSON.stringify(m.hosts)).toThrow(ConnectionStringError);
     }
   });
+
+  it('accepts the port boundaries 1 and 65535 and rejects 65536', () => {
+    const base = emptyConnectionModel();
+    expect(toConnectionString({ ...base, hosts: [{ host: 'h', port: 1 }] })).toBe('mongodb://h:1');
+    expect(toConnectionString({ ...base, hosts: [{ host: 'h', port: 65535 }] })).toBe(
+      'mongodb://h:65535',
+    );
+    expect(() => toConnectionString({ ...base, hosts: [{ host: 'h', port: 65536 }] })).toThrow(
+      ConnectionStringError,
+    );
+  });
+
+  it('writes a user name without a password and no ":"', () => {
+    const m = { ...emptyConnectionModel(), username: 'reader' };
+    expect(toConnectionString(m)).toBe('mongodb://reader@localhost:27017');
+    expect(parseConnectionString(toConnectionString(m))).toEqual(m);
+  });
+
+  it('encodes a "/" in the database name so it stays one path segment', () => {
+    const m = { ...emptyConnectionModel(), database: 'a/b?c' };
+    const uri = toConnectionString(m);
+    expect(uri).toBe('mongodb://localhost:27017/a%2Fb%3Fc');
+    expect(parseConnectionString(uri).database).toBe('a/b?c');
+  });
+
+  it('encodes "&", "=" and "#" in option values and extra keys', () => {
+    const m: ConnectionUriModel = {
+      ...emptyConnectionModel(),
+      appName: 'a&b=c#d',
+      extra: { 'my opt': 'x=y&z' },
+    };
+    const uri = toConnectionString(m);
+    expect(uri).toBe('mongodb://localhost:27017/?appName=a%26b%3Dc%23d&my%20opt=x%3Dy%26z');
+    expect(parseConnectionString(uri)).toEqual(m);
+  });
+
+  it('writes w=0 as a number', () => {
+    const m = parseConnectionString('mongodb://h/?w=0');
+    expect(m.writeConcern).toEqual({ w: 0 });
+    expect(toConnectionString(m)).toBe('mongodb://h/?w=0');
+  });
+
+  it('writes an extra array value as a repeated key, after the known options', () => {
+    const m: ConnectionUriModel = {
+      ...emptyConnectionModel(),
+      appName: 'x',
+      extra: { foo: ['1', '2'], bar: 'b' },
+    };
+    expect(toConnectionString(m)).toBe('mongodb://localhost:27017/?appName=x&foo=1&foo=2&bar=b');
+  });
+});
+
+describe('parseConnectionString edge cases', () => {
+  it('reads port boundaries and drops leading zeros', () => {
+    expect(parseConnectionString('mongodb://h:1,g:65535,k:027017').hosts).toEqual([
+      { host: 'h', port: 1 },
+      { host: 'g', port: 65535 },
+      { host: 'k', port: 27017 },
+    ]);
+  });
+
+  it('rejects port 0, 65536 and malformed IPv6 hosts with ConnectionStringError', () => {
+    for (const uri of [
+      'mongodb://h:0',
+      'mongodb://h:65536',
+      'mongodb://[::1',
+      'mongodb://[::1]x',
+      'mongodb://[]:27017',
+    ]) {
+      expect(() => parseConnectionString(uri), uri).toThrow(ConnectionStringError);
+    }
+  });
+
+  it('rejects invalid percent-encoding in the host or database name', () => {
+    expect(() => parseConnectionString('mongodb://h%ZZ')).toThrow(
+      new ConnectionStringError('Invalid percent-encoding in the host'),
+    );
+    expect(() => parseConnectionString('mongodb://h/db%ZZ')).toThrow(
+      new ConnectionStringError('Invalid percent-encoding in the database name'),
+    );
+  });
+
+  it('rejects a password with an unescaped ":" without echoing it', () => {
+    let error: unknown;
+    try {
+      parseConnectionString('mongodb://user:pa:ssColonSecret@host');
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(ConnectionStringError);
+    expect((error as Error).name).toBe('ConnectionStringError');
+    expect((error as Error).message).not.toContain('ssColonSecret');
+  });
+
+  it('reads a user name without a password', () => {
+    const m = parseConnectionString('mongodb://reader@h');
+    expect(m.username).toBe('reader');
+    expect(m.password).toBeUndefined();
+    expect(toConnectionString(m)).toBe('mongodb://reader@h');
+  });
+
+  it('treats an empty query as no options', () => {
+    const m = parseConnectionString('mongodb://h/?');
+    expect(m.extra).toEqual({});
+    expect(toConnectionString(m)).toBe('mongodb://h');
+  });
+
+  it('keeps numbers beyond the safe integer range verbatim in extra', () => {
+    const uri = 'mongodb://h/?connectTimeoutMS=99999999999999999999&wtimeoutMS=1.5';
+    const m = parseConnectionString(uri);
+    expect(m.timeouts).toEqual({});
+    expect(m.writeConcern).toEqual({});
+    expect(m.extra).toEqual({ connectTimeoutMS: '99999999999999999999', wtimeoutMS: '1.5' });
+    expect(toConnectionString(m)).toBe(uri);
+  });
+
+  it('keeps empty w and authMechanismProperties values verbatim in extra', () => {
+    const uri = 'mongodb://h/?authMechanismProperties=&w=';
+    const m = parseConnectionString(uri);
+    expect(m.auth).toEqual({});
+    expect(m.writeConcern).toEqual({});
+    expect(m.extra).toEqual({ authMechanismProperties: '', w: '' });
+    expect(toConnectionString(m)).toBe(uri);
+  });
+
+  it('keeps a repeated authMechanismProperties key verbatim in extra', () => {
+    const uri = 'mongodb://h/?authMechanismProperties=SERVICE_NAME:a,SERVICE_NAME:b';
+    const m = parseConnectionString(uri);
+    expect(m.auth).toEqual({});
+    expect(m.extra).toEqual({ authMechanismProperties: 'SERVICE_NAME:a,SERVICE_NAME:b' });
+    expect(toConnectionString(m)).toBe(uri);
+  });
+
+  it('returns a fresh model each time (no state shared between parses)', () => {
+    const a = parseConnectionString('mongodb://h/?foo=1');
+    a.extra['foo'] = 'changed';
+    a.hosts.push({ host: 'other' });
+    const b = parseConnectionString('mongodb://h/?foo=1');
+    expect(b.extra).toEqual({ foo: '1' });
+    expect(b.hosts).toEqual([{ host: 'h' }]);
+    expect(emptyConnectionModel().extra).toEqual({});
+  });
+});
+
+describe('unknown options named like Object.prototype members', () => {
+  // Option keys come from user input; a key that matches a built-in property of a plain object
+  // must still be preserved verbatim (TW-1, TW-2 in reviews/uri-model/tests.md).
+  it.each(['toString', 'constructor', 'hasOwnProperty', 'valueOf', '__proto__'])(
+    'preserves ?%s=x in extra and on the round trip',
+    (key) => {
+      const uri = `mongodb://h/?${key}=x`;
+      const m = parseConnectionString(uri);
+      expect(Object.entries(m.extra)).toEqual([[key, 'x']]);
+      expect(toConnectionString(m)).toBe(uri);
+    },
+  );
+
+  it('preserves an authMechanismProperties entry named __proto__', () => {
+    const uri = 'mongodb://h/?authMechanismProperties=__proto__:x';
+    expect(toConnectionString(parseConnectionString(uri))).toBe(uri);
+  });
+
+  it('preserves a readPreferenceTags entry named __proto__', () => {
+    const uri = 'mongodb://h/?readPreferenceTags=__proto__:x';
+    expect(toConnectionString(parseConnectionString(uri))).toBe(uri);
+  });
 });

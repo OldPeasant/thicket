@@ -120,4 +120,92 @@ describe('maskText', () => {
   it('leaves text without connection strings unchanged', () => {
     expect(maskText('nothing to see: password=x')).toBe('nothing to see: password=x');
   });
+
+  it('masks connection strings with an upper-case scheme and followed by punctuation', () => {
+    expect(maskText('see MONGODB://u:upTxtSecret@h, and mongodb://v:pw2Secret@h2.')).toBe(
+      `see MONGODB://u:${MASK}@h, and mongodb://v:${MASK}@h2.`,
+    );
+  });
+});
+
+describe('mask and maskText on passwords with special characters', () => {
+  // Every printable ASCII character except letters and digits, as typed into the form. The
+  // connection string is the one Thicket itself writes, i.e. what ends up in logs and errors.
+  const specials = [...'!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~ '];
+
+  it.each(specials)('hides a password containing %j', (c) => {
+    const secret = `ab${c}cdSecret`;
+    const uri = toConnectionString({
+      ...parseConnectionString('mongodb://host.example.com'),
+      username: 'u',
+      password: secret,
+    });
+    expect(parseConnectionString(uri).password).toBe(secret);
+    expectNoLeak(mask(uri), [secret]);
+    expectNoLeak(maskText(`connect ${uri} failed`), [secret]);
+    expectNoLeak(maskText(`connect '${uri}' failed`), [secret]);
+  });
+
+  it('hides proxyPassword and tlsCertificateKeyFilePassword containing special characters', () => {
+    const uri = toConnectionString({
+      ...parseConnectionString('mongodb://h'),
+      proxy: { host: 'p', password: "px&y='Secret" },
+      tls: { certificateKeyFilePassword: 'k#e y%Secret' },
+    });
+    const masked = mask(uri);
+    expectNoLeak(masked, ["px&y='Secret", 'k#e y%Secret']);
+    expect(masked).toBe(
+      `mongodb://h/?tlsCertificateKeyFilePassword=${MASK}&proxyHost=p&proxyPassword=${MASK}`,
+    );
+  });
+});
+
+describe('mask edge cases', () => {
+  it('keeps leading whitespace and masks the password after it', () => {
+    expect(mask('  mongodb://u:wsSecret@h')).toBe(`  mongodb://u:${MASK}@h`);
+  });
+
+  it('masks a mixed-case scheme', () => {
+    expect(mask('MongoDB+SRV://u:upSrvSecret@c.example.net')).toBe(
+      `MongoDB+SRV://u:${MASK}@c.example.net`,
+    );
+  });
+
+  it('masks an empty password marker without leaking anything', () => {
+    expect(mask('mongodb://u:@h')).toBe(`mongodb://u:${MASK}@h`);
+  });
+
+  it('keeps a user name without a password unchanged', () => {
+    expect(mask('mongodb://reader@h/db')).toBe('mongodb://reader@h/db');
+  });
+
+  it('masks the AWS session token whatever the key case, next to entries without a colon', () => {
+    const masked = mask(
+      'mongodb://h/?authMechanismProperties=FLAG,Aws_Session_Token:mixTokSecret&authMechanism=MONGODB-AWS',
+    );
+    expect(masked).not.toContain('mixTokSecret');
+    expect(decodeURIComponent(masked)).toBe(
+      `mongodb://h/?authMechanismProperties=FLAG,Aws_Session_Token:${MASK}&authMechanism=MONGODB-AWS`,
+    );
+  });
+
+  it('masks every repeated secret option', () => {
+    const masked = mask('mongodb://h/?proxyPassword=one1Secret&proxyPassword=two2Secret');
+    expect(masked).toBe(`mongodb://h/?proxyPassword=${MASK}&proxyPassword=${MASK}`);
+  });
+
+  it('masks a secret option in a string that also has credentials', () => {
+    const masked = mask('mongodb://u:credSecret@h/?tlsCertificateKeyFilePassword=keySecret#frag');
+    expect(masked).toBe(`mongodb://u:${MASK}@h/?tlsCertificateKeyFilePassword=${MASK}`);
+  });
+
+  it('does not mask an "@" after the hosts when no ":" comes before it', () => {
+    expect(mask('mongodb://host/x@y:z')).toBe('mongodb://host/x@y:z');
+  });
+
+  it('does not treat the user name as a secret', () => {
+    expect(mask('mongodb://alice@h/?proxyUsername=bob')).toBe(
+      'mongodb://alice@h/?proxyUsername=bob',
+    );
+  });
 });
