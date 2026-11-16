@@ -1,10 +1,11 @@
 ---
 title: M0: Electron main, preload, backend utilityProcess and port broker
-status: todo
-owner:
+status: in_progress
+owner: dell26/agent-2
 deps: [contract,renderer-scaffold]
 touches: [apps/desktop/src/main,apps/desktop/src/preload,apps/desktop/package.json,packages/backend/src/server]
 prio: 1
+lease_until: 2026-11-16T18:28:38Z
 ---
 ## Goal
 Electron app that opens a sandboxed window with the renderer build, starts the backend in a utilityProcess, brokers a MessagePort between them, and routes requests by `route(method)` to main or backend. Exposes only `window.thicket.request/cancel/on` in the preload.
