@@ -1,11 +1,11 @@
 ---
 title: M0: Monorepo scaffold with npm workspaces and the check
-status: in_progress
+status: done
 owner: dell26/agent-1
 deps: []
 touches: [package.json,package-lock.json,tsconfig.base.json,eslint.config.mjs,vitest.workspace.ts,apps,packages,README.md]
 prio: 1
-lease_until: 2026-11-16T17:40:57Z
+lease_until: 
 ---
 ## Goal
 Create the npm-workspaces monorepo described in docs/ARCHITECTURE.md (apps/desktop, packages/contract, packages/core, packages/backend, packages/renderer as empty but buildable workspaces) with TypeScript strict, ESLint, Prettier, Vitest and V8 coverage.
@@ -32,3 +32,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 18:14+0100 by dell26/agent-1): Workspace packages are named @thicket/<folder> and export src/index.ts directly (no build step) until a build/packaging task needs compiled output
 - ASSUMPTION (2026-11-16 18:14+0100 by dell26/agent-1): Prettier check is part of npm run lint and ignores *.md (human-written docs keep their formatting), tasks/, reviews/, .claude/, dashboard/
 - ASSUMPTION (2026-11-16 18:14+0100 by dell26/agent-1): ESLint uses typescript-eslint strict+stylistic without type-aware rules to keep the check well under 2 min; core gets a no-restricted-imports rule for node:* and electron
+- done by dell26/agent-1: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 3s on b20a70d21; criteria verified 6/6
