@@ -5,7 +5,7 @@ owner: felix/agent-2
 deps: [conn-manager,diff-ops]
 touches: [packages/backend/src/docs/write]
 prio: 1
-lease_until: 2026-11-16T23:01:30Z
+lease_until: 2026-11-16T23:06:32Z
 ---
 ## Goal
 docs.insert/update/replace/delete; update takes the diff and expected values and returns CONFLICT plus the current server document when nothing matched; updateMany/deleteMany with a `preview` step (count + sample) and an execute step; all through the write guard.
