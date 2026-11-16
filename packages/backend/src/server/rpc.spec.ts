@@ -504,6 +504,24 @@ describe('serve: streams', () => {
     }
   });
 
+  it('stop() after a cancel clears the grace timer: no CANCELLED is sent later', async () => {
+    vi.useFakeTimers();
+    try {
+      const s = streaming(() => deferred<number>().promise);
+      s.client.send({ id: 'f1', method: 'docs.find', params: FIND });
+      await vi.advanceTimersByTimeAsync(5);
+      const streamId = (s.received[0]?.result as { streamId: string }).streamId;
+      s.client.send({ cancel: streamId });
+      await vi.advanceTimersByTimeAsync(10);
+      s.stop();
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(STREAM_CANCEL_GRACE_MS + 10);
+      expect(s.eventsOf(streamId)).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('a stream is not started when its request fails after opening it', async () => {
     const producer = vi.fn(() => Promise.resolve(0));
     const thrown = streaming(producer, vi.fn(), (_p, ctx) => {

@@ -189,17 +189,25 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   `stream` schema; `signal`) and resolves with the delivered count → `end` event (`{ delivered }`),
   or rejects → `error` event. A `{ cancel: streamId }` aborts the signal; the `CANCELLED` error
   event is sent once the producer settled (after its cleanup), at the latest after
-  `STREAM_CANCEL_GRACE_MS` (5 s).
+  `STREAM_CANCEL_GRACE_MS` (5 s). After `serve()`'s stop function, running streams are aborted
+  and send nothing more (like requests); their grace timers are cleared.
 - Document reads (`packages/backend/src/docs/query/`, `docsQueryHandlers`): `docs.find` (streamed
   `{ docs }` batches of `batchSize`, default 100, in display order), `docs.count` (aggregation
   `$match`/`$limit`/`$group`), `docs.estimatedCount` (`count` command), `docs.get` (with
-  `sliceAbove`: top-level array sizes are read on the server, longer arrays come back `$slice`d),
-  `docs.getSlice` (`$slice`/`$size` in an aggregation, so only the items travel; no array indexes
-  in the path). `docs.find` turns `after`/`before`/`fromEnd` into the server query with
-  paging-core's `findPlan` and widens the projection with `projectionWithSortKeys` for sorts of
-  plain directions. Raw commands like `browse` (lossless EJSON). Every command of one operation
-  carries a `comment` (`thicket:<random>`); a cancel finds it in `currentOp` (`$ownOps` when not
-  allowed otherwise), `killOp`s it and `killCursors` an open cursor (`Operation`).
+  `sliceAbove`: top-level array sizes are read on the server, longer arrays come back `$slice`d,
+  keeping the user's projection: the `$slice` operator for exclusion projections, the `$slice`
+  expression for inclusion ones, classified with core's `isInclusion`), `docs.getSlice`
+  (`$slice`/`$size` in an aggregation, so only the items travel; numeric path components are
+  `INVALID_PARAMS`, a path through an array or a non-document parent is `NOT_FOUND`). `docs.get`
+  and `docs.getSlice` match `{_id: {$eq: id}}`. `docs.find` turns `after`/`before`/`fromEnd`
+  into the server query with paging-core's `findPlan` (`before`/`fromEnd` need a `limit` > 0:
+  their rows are buffered to be sent in display order) and widens the projection with
+  `projectionWithSortKeys` for sorts of plain directions; a find whose connection `conn.close`
+  closed ends `CANCELLED`. Raw commands like `browse` (lossless EJSON). Every command of one
+  operation carries a `comment` (`thicket:<random>`); a cancel finds it in `currentOp`
+  (`$ownOps` when not allowed otherwise; probed every 100 ms until it shows up or the command
+  settles, at most 4 s), `killOp`s it and `killCursors` an open cursor, also one returned by a
+  late reply (`Operation`).
 - Write guard (`packages/backend/src/guard/`): `startBackend` wraps every handler of a
   `WRITE_METHODS` method with `guardWrites()`, which loads the profile from main (fresh, per
   write) and throws `READ_ONLY` for read-only profiles (even when confirmed), and

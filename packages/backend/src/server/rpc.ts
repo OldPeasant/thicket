@@ -105,9 +105,10 @@ interface PendingStream {
 }
 
 interface RunningStream {
-  controller: AbortController;
-  /** Sends the final event once; later calls do nothing. */
-  finish(event: Event): void;
+  /** Aborts the producer; `CANCELLED` follows when it settles (or after the grace time). */
+  cancel(): void;
+  /** Aborts the producer and ends the stream without sending anything (serving stopped). */
+  drop(): void;
 }
 
 const cancelledInfo = (): ErrorInfo => ({
@@ -121,7 +122,8 @@ const cancelledInfo = (): ErrorInfo => ({
  * whatever the handler returns later is dropped. Streams opened by a handler
  * (`context.openStream`) send `data` events, then `end` (`{ delivered }`) or `error`; a cancel of
  * the stream id aborts its producer and ends it with an `error` event of code `CANCELLED`.
- * Returns a function that stops serving and aborts every running request and stream.
+ * Returns a function that stops serving and aborts every running request and stream; nothing more
+ * is sent for them afterwards.
  */
 export function serve(port: Port, options: ServeOptions): () => void {
   const running = new Map<string, AbortController>();
@@ -133,13 +135,33 @@ export function serve(port: Port, options: ServeOptions): () => void {
     const def = Object.hasOwn(options.table, method) ? options.table[method] : undefined;
     let over = false;
     let delivered = 0;
-    const finish = (event: Event) => {
-      if (over) return;
+    let grace: ReturnType<typeof setTimeout> | undefined;
+    /** Marks the stream over once; true for the call that did. */
+    const end = (): boolean => {
+      if (over) return false;
       over = true;
       streams.delete(id);
-      port.send(event);
+      if (grace !== undefined) clearTimeout(grace);
+      return true;
     };
-    streams.set(id, { controller, finish });
+    const finish = (event: Event) => {
+      if (end()) port.send(event);
+    };
+    streams.set(id, {
+      cancel() {
+        controller.abort();
+        if (grace !== undefined) return;
+        grace = setTimeout(
+          () => finish({ stream: id, kind: 'error', payload: cancelledInfo() }),
+          STREAM_CANCEL_GRACE_MS,
+        );
+        (grace as { unref?: () => void }).unref?.();
+      },
+      drop() {
+        controller.abort();
+        end();
+      },
+    });
     const sink: StreamSink = {
       streamId: id,
       signal: controller.signal,
@@ -189,12 +211,7 @@ export function serve(port: Port, options: ServeOptions): () => void {
   const cancelStream = (id: string): boolean => {
     const stream = streams.get(id);
     if (!stream) return false;
-    stream.controller.abort();
-    const timer = setTimeout(
-      () => stream.finish({ stream: id, kind: 'error', payload: cancelledInfo() }),
-      STREAM_CANCEL_GRACE_MS,
-    );
-    (timer as { unref?: () => void }).unref?.();
+    stream.cancel();
     return true;
   };
 
@@ -304,7 +321,8 @@ export function serve(port: Port, options: ServeOptions): () => void {
     unsubscribe();
     for (const controller of running.values()) controller.abort();
     running.clear();
-    for (const stream of streams.values()) stream.controller.abort();
+    // Like requests: nothing more is sent for running streams, and their grace timers stop.
+    for (const stream of [...streams.values()]) stream.drop();
     streams.clear();
   };
 }

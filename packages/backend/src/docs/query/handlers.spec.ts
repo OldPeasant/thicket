@@ -143,12 +143,42 @@ describe('docsQueryHandlers', () => {
         filter: '{}',
         sort: '{"s":{"$meta":"textScore"}}',
         fromEnd: true,
+        limit: 10,
       }),
     ).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
     await expect(call('docs.find', { ...base, filter: '{"a":' })).rejects.toMatchObject({
       code: 'INVALID_PARAMS',
     });
     expect(producers).toEqual([]);
+  });
+
+  it('docs.find ends CANCELLED when conn.close closed its connection meanwhile', async () => {
+    let failFind: (error: Error) => void = () => undefined;
+    const { call, producers, manager } = await setup((db, command) =>
+      'find' in command
+        ? new Promise<Document>((_resolve, reject) => (failFind = reject))
+        : defaultAnswer(db, command),
+    );
+    await call('docs.find', { ...base, filter: '{}' });
+    const running = producers[0]?.(sink());
+    await manager.close('p1');
+    failFind(new Error('Topology is closed'));
+    await expect(running).rejects.toMatchObject({
+      code: 'CANCELLED',
+      message: 'The connection was closed',
+    });
+  });
+
+  it('docs.find passes a failure on unchanged while its connection is open', async () => {
+    const { call, producers } = await setup((db, command) => {
+      if ('find' in command) throw new Error('boom');
+      return defaultAnswer(db, command);
+    });
+    await call('docs.find', { ...base, filter: '{}' });
+    await expect(producers[0]?.(sink())).rejects.toMatchObject({
+      code: 'INTERNAL',
+      message: 'Unexpected error while browsing: boom',
+    });
   });
 
   it('docs.find needs a streaming server', async () => {

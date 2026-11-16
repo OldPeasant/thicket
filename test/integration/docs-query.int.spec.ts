@@ -288,8 +288,23 @@ describe('docs.find details', () => {
         filter: '{}',
         sort: '{"score":{"$meta":"textScore"}}',
         fromEnd: true,
+        limit: 10,
       }),
-    ).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
+    ).rejects.toMatchObject({ code: 'INVALID_PARAMS', message: /plain directions/ });
+  });
+
+  it('refuses before and fromEnd without a limit', async () => {
+    for (const extra of [{ fromEnd: true }, { before: '{"_id":{"$numberInt":"5"}}' }]) {
+      await expect(
+        backend.call('docs.find', {
+          profileId: PROFILE.id,
+          db: DB,
+          coll: 'items',
+          filter: '{}',
+          ...extra,
+        }),
+      ).rejects.toMatchObject({ code: 'INVALID_PARAMS', message: /need a limit/ });
+    }
   });
 
   it('ends the stream with SERVER_ERROR for a bad filter', async () => {
@@ -369,6 +384,23 @@ describe('cancel', () => {
     expect(await serverOps(SLOW)).toEqual([]);
   });
 
+  it('cancelling right after the docs.find response (op not yet in currentOp) leaves nothing behind', async () => {
+    // Several rounds: the cancel races the find's way to the server (pool checkout, network).
+    for (let round = 0; round < 3; round++) {
+      const { streamId } = await backend.call('docs.find', {
+        profileId: PROFILE.id,
+        db: DB,
+        coll: SLOW,
+        filter: slowFilter,
+      });
+      backend.clientPort.send({ cancel: streamId });
+      const outcome = await backend.finished(streamId);
+      expect(outcome.error?.code).toBe('CANCELLED');
+      // CANCELLED comes after the cleanup: no running op and no idle cursor is left.
+      expect(await serverOps(SLOW)).toEqual([]);
+    }
+  });
+
   it('cancelling between batches kills the open cursor', async () => {
     const { streamId } = await backend.call('docs.find', {
       profileId: PROFILE.id,
@@ -408,6 +440,32 @@ describe('cancel', () => {
       (list) => list.length === 0,
     );
     expect(ops).toEqual([]);
+  });
+
+  it('conn.close during a running find ends its stream with CANCELLED', async () => {
+    // A separate collection: the closed client cannot kill its own operation on the server.
+    const CLOSING = 'slow_close';
+    await direct
+      .db(DB)
+      .collection<Document>(CLOSING)
+      .insertMany(Array.from({ length: 40 }, (_, i): Document => ({ _id: i })));
+    const { streamId } = await backend.call('docs.find', {
+      profileId: PROFILE.id,
+      db: DB,
+      coll: CLOSING,
+      filter: slowFilter,
+    });
+    await waitFor(
+      () => serverOps(CLOSING),
+      (ops) => ops.length > 0,
+    );
+    try {
+      await backend.manager.close(PROFILE.id);
+      const outcome = await backend.finished(streamId);
+      expect(outcome.error).toEqual({ code: 'CANCELLED', message: 'The connection was closed' });
+    } finally {
+      await backend.manager.open(PROFILE.id, undefined);
+    }
   });
 });
 
@@ -484,6 +542,91 @@ describe('docs.get and docs.getSlice on a 50 000-item array', () => {
     expect(doc['tags']).toEqual(['a', 'b']);
     expect(doc['title']).toBe('large');
     expect(lastResponseSize()).toBeLessThan(20_000);
+  });
+
+  it.each([
+    ['{"items":{"$numberInt":"1"}}', ['_id', 'items']],
+    ['{"_id":{"$numberInt":"0"},"items":{"$numberInt":"1"}}', ['items']],
+    ['{"items":{"$numberInt":"1"},"title":{"$numberInt":"1"}}', ['_id', 'items', 'title']],
+  ])('docs.get with sliceAbove keeps the inclusion projection %s', async (projection, fields) => {
+    const result = await backend.call('docs.get', {
+      profileId: PROFILE.id,
+      db: DB,
+      coll: BIG,
+      id: idText,
+      projection,
+      sliceAbove: 100,
+    });
+    expect(result.sliced).toEqual([{ path: 'items', total: ITEMS, loaded: 100 }]);
+    const doc = BSON.EJSON.parse(result.doc ?? 'null', { relaxed: true }) as Document;
+    expect(Object.keys(doc).sort()).toEqual(fields);
+    expect((doc['items'] as { n: number }[]).map((x) => x.n)).toEqual(
+      Array.from({ length: 100 }, (_, i) => i),
+    );
+    expect(lastResponseSize()).toBeLessThan(20_000);
+  });
+
+  it('docs.get with sliceAbove and an exclusion projection slices and keeps the exclusions', async () => {
+    const result = await backend.call('docs.get', {
+      profileId: PROFILE.id,
+      db: DB,
+      coll: BIG,
+      id: idText,
+      projection: '{"tags":{"$numberInt":"0"}}',
+      sliceAbove: 100,
+    });
+    expect(result.sliced).toEqual([{ path: 'items', total: ITEMS, loaded: 100 }]);
+    const doc = BSON.EJSON.parse(result.doc ?? 'null', { relaxed: true }) as Document;
+    expect(Object.keys(doc).sort()).toEqual(['_id', 'items', 'title']);
+    expect(doc['items']).toHaveLength(100);
+  });
+
+  it('docs.get and getSlice match an operator-looking id literally', async () => {
+    const base = { profileId: PROFILE.id, db: DB, coll: BIG, id: '{"$ne":null}' };
+    await expect(backend.call('docs.get', base)).resolves.toEqual({ doc: null, sliced: [] });
+    await expect(backend.call('docs.get', { ...base, sliceAbove: 10 })).resolves.toEqual({
+      doc: null,
+      sliced: [],
+    });
+    await expect(
+      backend.call('docs.getSlice', { ...base, path: 'items', skip: 0, limit: 1 }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND', message: 'No document with this _id' });
+  });
+
+  it('getSlice follows nested documents but refuses paths through arrays and array indexes', async () => {
+    const nestedId = 'nested';
+    await direct
+      .db(DB)
+      .collection<{ _id: string } & Document>(BIG)
+      .insertOne({
+        _id: nestedId,
+        obj: { inner: { list: [1, 2, 3, 4, 5] } },
+        lines: [{ items: [1, 2, 3] }, { items: [4] }],
+        matrix: [
+          [1, 2],
+          [3, 4],
+        ],
+      });
+    const base = { profileId: PROFILE.id, db: DB, coll: BIG, id: ejson(nestedId) };
+    const nested = await backend.call('docs.getSlice', {
+      ...base,
+      path: 'obj.inner.list',
+      skip: 1,
+      limit: 2,
+    });
+    expect(nested).toEqual({ items: ejson([2, 3]), total: 5 });
+    // `$lines.items` would be the array of every element's `items`: refused, not a wrong slice.
+    await expect(
+      backend.call('docs.getSlice', { ...base, path: 'lines.items', skip: 0, limit: 5 }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND', message: /nested documents only/ });
+    await expect(
+      backend.call('docs.getSlice', { ...base, path: 'obj.missing.list', skip: 0, limit: 5 }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    for (const path of ['lines.0.items', 'matrix.1']) {
+      await expect(
+        backend.call('docs.getSlice', { ...base, path, skip: 0, limit: 5 }),
+      ).rejects.toMatchObject({ code: 'INVALID_PARAMS', message: /array indexes/ });
+    }
   });
 
   it('docs.get without sliceAbove returns the whole document; unknown ids give null', async () => {

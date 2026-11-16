@@ -245,7 +245,7 @@ describe('buildFind', () => {
     ['fromEnd', { fromEnd: true }],
   ])('refuses %s with an opaque sort', (_name, extra) => {
     const error = thrown(() =>
-      buildFind(findParams({ sort: '{"score":{"$meta":"textScore"}}', ...extra })),
+      buildFind(findParams({ sort: '{"score":{"$meta":"textScore"}}', limit: 10, ...extra })),
     );
     expect(error.code).toBe('INVALID_PARAMS');
     expect(error.message).toMatch(/needs a sort of plain directions/);
@@ -272,6 +272,7 @@ describe('buildFind', () => {
         findParams({
           sort: '{"score":{"$numberInt":"1"},"_id":{"$numberInt":"1"}}',
           [side]: '{"_id":{"$numberInt":"4"}}',
+          limit: 10,
         }),
       ),
     );
@@ -280,8 +281,25 @@ describe('buildFind', () => {
   });
 
   it('a bound for the default sort must carry _id', () => {
-    const error = thrown(() => buildFind(findParams({ before: '{"score":{"$numberInt":"1"}}' })));
+    const error = thrown(() =>
+      buildFind(findParams({ before: '{"score":{"$numberInt":"1"}}', limit: 10 })),
+    );
     expect(error.message).toBe('before has no value for sort key "_id"');
+  });
+
+  it.each([
+    ['before without limit', { before: '{"_id":{"$numberInt":"4"}}' }],
+    ['before with limit 0', { before: '{"_id":{"$numberInt":"4"}}', limit: 0 }],
+    ['fromEnd without limit', { fromEnd: true }],
+    ['fromEnd with limit 0', { fromEnd: true, limit: 0 }],
+  ])('refuses %s (the backward read would buffer everything)', (_name, extra) => {
+    const error = thrown(() => buildFind(findParams(extra)));
+    expect(error.code).toBe('INVALID_PARAMS');
+    expect(error.message).toBe('before and fromEnd need a limit (the page size)');
+  });
+
+  it('after needs no limit (rows stream in sort order)', () => {
+    expect(() => buildFind(findParams({ after: '{"_id":{"$numberInt":"4"}}' }))).not.toThrow();
   });
 
   it('a bound key whose value is null still counts as present', () => {
@@ -332,7 +350,7 @@ describe('buildFind', () => {
 
     it('leaves no projection when only sort keys were excluded', () => {
       const { command } = buildFind(
-        findParams({ fromEnd: true, projection: '{"_id":{"$numberInt":"0"}}' }),
+        findParams({ fromEnd: true, limit: 5, projection: '{"_id":{"$numberInt":"0"}}' }),
       );
       expect(command).not.toHaveProperty('projection');
     });
@@ -597,7 +615,58 @@ describe('Operation cancel', () => {
     expect(settled).toBe(false);
     await vi.advanceTimersByTimeAsync(200);
     expect(await outcome).toBe('CANCELLED');
-    expect(commandsOf(client)).toEqual(['find', 'currentOp']);
+    // The operation never showed up in currentOp: probed every 100 ms until the settle time.
+    const [first, ...probes] = commandsOf(client);
+    expect(first).toBe('find');
+    expect(probes.length).toBeGreaterThanOrEqual(30);
+    expect(probes.length).toBeLessThanOrEqual(41);
+    expect(new Set(probes)).toEqual(new Set(['currentOp']));
+  });
+
+  it('an operation not yet in currentOp is probed again until it shows up, then killed', async () => {
+    const find = deferred<Document>();
+    let probes = 0;
+    const client = fakeClient((_db, command) => {
+      if ('find' in command) return find.promise;
+      if ('currentOp' in command) {
+        probes++;
+        return { inprog: probes < 3 ? [] : [{ opid: 9 }], ok: 1 };
+      }
+      if ('killOp' in command) {
+        find.reject(new MongoServerError({ ok: 0, code: 11601, codeName: 'Interrupted' }));
+      }
+      return { ok: 1 };
+    });
+    const controller = new AbortController();
+    const running = streamFind(client, findParams(), () => undefined, controller.signal);
+    await vi.waitFor(() => expect(commandsOf(client)).toEqual(['find']));
+    controller.abort();
+    expect((await rejection(running)).code).toBe('CANCELLED');
+    expect(commandsOf(client)).toEqual(['find', 'currentOp', 'currentOp', 'currentOp', 'killOp']);
+    expect(client.sent.at(-1)?.command).toEqual({ killOp: 1, op: 9 });
+  });
+
+  it('a cursor of a reply arriving after the settle time is still killed', async () => {
+    vi.useFakeTimers();
+    const find = deferred<Document>();
+    const client = cancellable(find.promise, []);
+    const controller = new AbortController();
+    const running = streamFind(client, findParams(), () => undefined, controller.signal);
+    const outcome = running.then(
+      () => 'resolved',
+      (error: unknown) => (error as RpcError).code,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(4_200);
+    expect(await outcome).toBe('CANCELLED');
+    expect(commandsOf(client)).not.toContain('killCursors');
+    find.resolve(cursorReply(BSON.Long.fromNumber(31), docs(1)));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.sent.at(-1)?.command).toEqual({
+      killCursors: 'orders',
+      cursors: [BSON.Long.fromNumber(31)],
+    });
   });
 
   it('falls back to $ownOps when currentOp is unauthorized', async () => {
@@ -623,13 +692,13 @@ describe('Operation cancel', () => {
     const other = fakeClient(() => {
       throw new MongoServerError({ ok: 0, code: 2, codeName: 'BadValue', errmsg: 'x' });
     });
-    await expect(killOperations(other, 'thicket:x')).resolves.toBeUndefined();
+    await expect(killOperations(other, 'thicket:x')).resolves.toBe(0);
     expect(commandsOf(other)).toEqual(['currentOp']);
 
     const denied = fakeClient(() => {
       throw unauthorized();
     });
-    await expect(killOperations(denied, 'thicket:x')).resolves.toBeUndefined();
+    await expect(killOperations(denied, 'thicket:x')).resolves.toBe(0);
     expect(commandsOf(denied)).toEqual(['currentOp', 'currentOp']);
   });
 
@@ -638,11 +707,11 @@ describe('Operation cancel', () => {
       if ('currentOp' in command) return { inprog: [{ opid: 1 }, { opid: 2 }], ok: 1 };
       throw new Error('kill failed');
     });
-    await expect(killOperations(failing, 'thicket:x')).resolves.toBeUndefined();
+    await expect(killOperations(failing, 'thicket:x')).resolves.toBe(2);
     expect(commandsOf(failing)).toEqual(['currentOp', 'killOp', 'killOp']);
 
     const empty = fakeClient(() => ({ ok: 1 }));
-    await killOperations(empty, 'thicket:x');
+    await expect(killOperations(empty, 'thicket:x')).resolves.toBe(0);
     expect(commandsOf(empty)).toEqual(['currentOp']);
   });
 
@@ -814,7 +883,7 @@ describe('getDocument', () => {
     expect(commandsOf(client)).toEqual(['find']);
     expect(client.sent[0]?.command).toEqual({
       find: 'orders',
-      filter: { _id: OID },
+      filter: { _id: { $eq: OID } },
       limit: 1,
       singleBatch: true,
       comment: expect.stringMatching(/^thicket:/),
@@ -855,7 +924,7 @@ describe('getDocument', () => {
     expect(commandsOf(client)).toEqual(['aggregate', 'find']);
     const aggregate = client.sent[0]?.command as Document;
     const pipeline = aggregate['pipeline'] as Document[];
-    expect(pipeline.slice(0, 2)).toEqual([{ $match: { _id: OID } }, { $limit: 1 }]);
+    expect(pipeline.slice(0, 2)).toEqual([{ $match: { _id: { $eq: OID } } }, { $limit: 1 }]);
     expect(JSON.stringify(pipeline[2])).toContain('"$gt":["$$this.n",100]');
     expect(findOf(client)?.['projection']).toEqual({ items: { $slice: 100 } });
     // Both commands belong to one operation.
@@ -917,13 +986,64 @@ describe('getDocument', () => {
       sliceAbove: 10,
       projection: '{"items":true,"title":{"$numberInt":"1"},"log.at":{"$numberInt":"1"}}',
     });
-    // `events` is not included at all; `log` only through a sub-path.
+    // `events` is not included at all; `log` only through a sub-path. The expression form keeps
+    // `items` included.
     expect(findOf(client)?.['projection']).toEqual({
-      items: { $slice: 10 },
+      items: { $cond: [{ $isArray: '$items' }, { $slice: ['$items', 10] }, '$items'] },
       title: 1,
       'log.at': 1,
     });
     expect(result.sliced).toEqual([{ path: 'items', total: 500, loaded: 10 }]);
+  });
+
+  it.each([
+    ['{"items":{"$numberInt":"1"}}', {}],
+    ['{"_id":{"$numberInt":"0"},"items":{"$numberInt":"1"}}', { _id: 0 }],
+  ])(
+    'an inclusion projection of only the large array %s stays an inclusion',
+    async (projection, rest) => {
+      const client = docClient([{ k: 'items', n: 500 }], { _id: OID, items: items(10) });
+      const result = await getDocument(client, { ...target, id: ID, sliceAbove: 10, projection });
+      // `{items: {$slice: 10}}` alone would be an exclusion projection (every field returned).
+      expect(findOf(client)?.['projection']).toEqual({
+        ...rest,
+        items: { $cond: [{ $isArray: '$items' }, { $slice: ['$items', 10] }, '$items'] },
+      });
+      expect(result.sliced).toEqual([{ path: 'items', total: 500, loaded: 10 }]);
+    },
+  );
+
+  it('an inclusion projection of _id alone includes no array: nothing is sliced', async () => {
+    const client = docClient([{ k: 'items', n: 500 }], { _id: OID });
+    const result = await getDocument(client, {
+      ...target,
+      id: ID,
+      sliceAbove: 10,
+      projection: '{"_id":{"$numberInt":"1"}}',
+    });
+    expect(findOf(client)?.['projection']).toEqual({ _id: 1 });
+    expect(result.sliced).toEqual([]);
+  });
+
+  it('field names with a dot or a leading $ are not sliced (a projection cannot name them)', async () => {
+    const client = docClient(
+      [
+        { k: 'a.b', n: 500 },
+        { k: '$odd', n: 500 },
+      ],
+      { _id: OID },
+    );
+    const result = await getDocument(client, { ...target, id: ID, sliceAbove: 10 });
+    expect(findOf(client)).not.toHaveProperty('projection');
+    expect(result.sliced).toEqual([]);
+  });
+
+  it('matches the id literally, also when it looks like a query operator', async () => {
+    const client = docClient([], { _id: { $ne: null } });
+    await getDocument(client, { ...target, id: '{"$ne":null}', sliceAbove: 10 });
+    const pipeline = client.sent[0]?.command['pipeline'] as Document[];
+    expect(pipeline[0]).toEqual({ $match: { _id: { $eq: { $ne: null } } } });
+    expect(findOf(client)?.['filter']).toEqual({ _id: { $eq: { $ne: null } } });
   });
 
   it('an inclusion projection with _id: 0 alone counts as exclusion', async () => {
@@ -1007,11 +1127,12 @@ describe('getSlice', () => {
     expect(client.sent[0]?.command).toEqual({
       aggregate: 'orders',
       pipeline: [
-        { $match: { _id: 'order-1' } },
+        { $match: { _id: { $eq: 'order-1' } } },
         { $limit: 1 },
         {
           $project: {
             _id: 0,
+            parentsOk: { $literal: true },
             isArray: { $isArray: '$items' },
             total: { $cond: [{ $isArray: '$items' }, { $size: '$items' }, 0] },
             items: { $cond: [{ $isArray: '$items' }, { $slice: ['$items', 20, 5] }, []] },
@@ -1031,6 +1152,43 @@ describe('getSlice', () => {
     });
     expect(JSON.stringify(client.sent[0]?.command)).toContain('"$isArray":"$a.b"');
   });
+
+  it('a dotted path requires every parent to be a document (not an array)', async () => {
+    const client = fakeClient(() => cursorReply(0, [{ isArray: true, total: 1, items: [1] }]));
+    await getSlice(client, params({ path: 'a.b.c' }));
+    const pipeline = client.sent[0]?.command['pipeline'] as Document[];
+    const parents = [{ $eq: [{ $type: '$a' }, 'object'] }, { $eq: [{ $type: '$a.b' }, 'object'] }];
+    const isArray = { $and: [...parents, { $isArray: '$a.b.c' }] };
+    expect(pipeline[2]).toEqual({
+      $project: {
+        _id: 0,
+        parentsOk: { $and: parents },
+        isArray,
+        total: { $cond: [isArray, { $size: '$a.b.c' }, 0] },
+        items: { $cond: [isArray, { $slice: ['$a.b.c', 20, 5] }, []] },
+      },
+    });
+  });
+
+  it('a path through an array (or a missing parent) is NOT_FOUND with its own message', async () => {
+    const client = fakeClient(() =>
+      cursorReply(0, [{ parentsOk: false, isArray: false, total: 0, items: [] }]),
+    );
+    const error = await rejection(getSlice(client, params({ path: 'lines.items' })));
+    expect(error.code).toBe('NOT_FOUND');
+    expect(error.message).toContain('"lines.items" does not lead through nested documents only');
+  });
+
+  it.each(['items.3', '0', 'a.10.b'])(
+    'refuses the numeric component in %j (array index) with INVALID_PARAMS',
+    async (path) => {
+      const client = fakeClient(() => ({ ok: 1 }));
+      const error = await rejection(getSlice(client, params({ path })));
+      expect(error.code).toBe('INVALID_PARAMS');
+      expect(error.message).toContain('array indexes are not supported');
+      expect(client.sent).toEqual([]);
+    },
+  );
 
   it.each(['a..b', '.a', 'a.', '$items', 'a.$b'])(
     'refuses the path %j with INVALID_PARAMS before sending',

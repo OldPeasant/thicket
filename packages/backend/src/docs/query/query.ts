@@ -4,6 +4,8 @@ import type { ParsedParamsOf, ResultOf, SlicedArray } from '@thicket/contract';
 import {
   DEFAULT_SORT,
   findPlan,
+  isIncluded,
+  isInclusion,
   parseSort,
   projectionWithSortKeys,
   sortDocument,
@@ -23,11 +25,15 @@ import { RpcError } from '../../server/rpc';
  *
  * Cancelling: every command carries a `comment` unique to the operation. On abort the caller
  * stops waiting at once; the running server operation is found by that comment in `currentOp`
- * and killed (`killOp`), and an open cursor is killed (`killCursors`) once its id is known.
+ * (probed again until it shows up or the command settles) and killed (`killOp`), and an open
+ * cursor is killed (`killCursors`) once its id is known, also when the reply comes late.
  */
 
 /** How long cleanup after a cancel waits for the interrupted command's answer. */
 const CANCEL_SETTLE_MS = 4000;
+
+/** Interval of the `currentOp` probes while a cancelled command is not visible there yet. */
+const KILL_RETRY_MS = 100;
 
 const UNAUTHORIZED = 13;
 
@@ -89,9 +95,10 @@ function isUnauthorized(error: unknown): boolean {
 
 /**
  * Kills the server operations carrying `comment`. Users without the `inprog` privilege see (and
- * may kill) their own operations with `$ownOps`. Best effort: failures are ignored.
+ * may kill) their own operations with `$ownOps`. Best effort: failures are ignored. Resolves with
+ * the number of operations found (0 when none, or `currentOp` failed).
  */
-export async function killOperations(client: ClientLike, comment: string): Promise<void> {
+export async function killOperations(client: ClientLike, comment: string): Promise<number> {
   let reply: Document;
   try {
     try {
@@ -105,14 +112,14 @@ export async function killOperations(client: ClientLike, comment: string): Promi
       });
     }
   } catch {
-    return;
+    return 0;
   }
   const ops = Array.isArray(reply['inprog']) ? (reply['inprog'] as Document[]) : [];
+  const ids = ops.map((op) => op['opid']).filter((opid) => opid !== undefined);
   await Promise.all(
-    ops
-      .filter((op) => op['opid'] !== undefined)
-      .map((op) => command(client, 'admin', { killOp: 1, op: op['opid'] }).catch(() => undefined)),
+    ids.map((opid) => command(client, 'admin', { killOp: 1, op: opid }).catch(() => undefined)),
   );
+  return ids.length;
 }
 
 interface CursorReply {
@@ -162,18 +169,31 @@ export class Operation {
     }
   }
 
+  /**
+   * After an abort: kills the interrupted command's server operation and any cursor it opens.
+   * The command may not be in `currentOp` yet (pool checkout, connection setup, network), so the
+   * kill is retried every {@link KILL_RETRY_MS} until it found the operation or the command
+   * settled, for at most {@link CANCEL_SETTLE_MS}. A cursor of a reply that comes later still is
+   * killed whenever that reply arrives; only the wait is bounded.
+   */
   private async cleanUp(pending: Promise<Document>): Promise<void> {
-    const settled = pending.then(
-      (reply) => {
-        const cursor = reply['cursor'] as Document | undefined;
-        return cursor?.['id'];
+    let settled = false;
+    const late = pending.then(
+      async (reply) => {
+        settled = true;
+        const id = (reply['cursor'] as Document | undefined)?.['id'];
+        if (isOpen(id)) await this.killCursorId(id);
       },
-      () => undefined,
+      () => {
+        settled = true;
+      },
     );
-    await killOperations(this.client, this.comment);
-    const id = await Promise.race([settled, sleep(CANCEL_SETTLE_MS).then(() => undefined)]);
-    if (isOpen(id)) this.cursorId = id;
-    await this.killCursor();
+    const deadline = Date.now() + CANCEL_SETTLE_MS;
+    while (!settled && Date.now() < deadline) {
+      if ((await killOperations(this.client, this.comment)) > 0) break;
+      await Promise.race([late, sleep(Math.min(KILL_RETRY_MS, deadline - Date.now()))]);
+    }
+    await Promise.race([late, sleep(Math.max(0, deadline - Date.now()))]);
   }
 
   /** First batch of a cursor command; remembers the cursor id. */
@@ -202,6 +222,10 @@ export class Operation {
     const id = this.cursorId;
     if (id === undefined) return;
     this.cursorId = undefined;
+    await this.killCursorId(id);
+  }
+
+  private async killCursorId(id: unknown): Promise<void> {
     await command(this.client, this.db, { killCursors: this.collection, cursors: [id] }).catch(
       () => undefined,
     );
@@ -229,7 +253,8 @@ export interface FindCommand {
  * Builds the `find` command for `docs.find` params with paging-core's `findPlan`: range bounds
  * (`after`/`before`) and `fromEnd` read with the (reversed) sort and a filter on the sort keys;
  * `skip`/`limit` are passed through. With a sort of plain directions the projection is widened to
- * contain every sort key.
+ * contain every sort key. `before` and `fromEnd` need a `limit` > 0 (`INVALID_PARAMS` otherwise):
+ * their rows are read backwards and buffered until the page is complete.
  */
 export function buildFind(p: ParsedParamsOf<'docs.find'>): FindCommand {
   const filter = parseDocument(p.filter, 'filter');
@@ -242,6 +267,10 @@ export function buildFind(p: ParsedParamsOf<'docs.find'>): FindCommand {
         ? parseDocument(p.before, 'before')
         : undefined;
   const ranged = bound !== undefined || p.fromEnd === true;
+  if ((p.before !== undefined || p.fromEnd === true) && !(p.limit !== undefined && p.limit > 0)) {
+    // Rows read backwards are buffered until the cursor ends: without a limit, that is everything.
+    throw new RpcError('INVALID_PARAMS', 'before and fromEnd need a limit (the page size)');
+  }
   if (ranged && parsedSort === null) {
     throw new RpcError(
       'INVALID_PARAMS',
@@ -366,23 +395,31 @@ export async function estimatedCount(
   return { count: Math.max(0, Math.trunc(toNumber(reply['n']) ?? 0)) };
 }
 
-const isIncluded = (v: unknown): boolean => v === true || (typeof v === 'number' && v !== 0);
-
-/** True when the projection lists the fields to return (rather than those to leave out). */
-function isInclusion(projection: Document): boolean {
-  return Object.entries(projection).some(
-    ([k, v]) =>
-      k !== '_id' && (isIncluded(v) || (typeof v === 'object' && v !== null && !('$slice' in v))),
-  );
-}
+/** Matches `_id` literally: an id such as `{"$ne": null}` is a value, not a query operator. */
+const idFilter = (id: unknown): Document => ({ _id: { $eq: id } });
 
 const relatedPath = (a: string, b: string): boolean =>
   a === b || a.startsWith(`${b}.`) || b.startsWith(`${a}.`);
 
 /**
+ * The projection entry that loads the first `n` items of the top-level array `field`. In an
+ * exclusion projection (or none) that is the `$slice` operator. In an inclusion projection it is
+ * the `$slice` expression: the operator alone would turn `{items: 1}` into an exclusion
+ * projection (every other field returned); an expression keeps the field included. A value that
+ * is no longer an array is returned as is.
+ */
+function sliceEntry(field: string, n: number, inclusion: boolean): Document {
+  if (!inclusion) return { $slice: n };
+  const ref = `$${field}`;
+  return { $cond: [{ $isArray: ref }, { $slice: [ref, n] }, ref] };
+}
+
+/**
  * `docs.get`: one document by `_id`. With `sliceAbove`, top-level arrays longer than that are
  * loaded with `$slice` (their sizes are read on the server first, so the full arrays never
- * travel) and listed in `sliced`. Arrays the user's projection names otherwise are left alone.
+ * travel) and listed in `sliced`, keeping the user's projection: with an inclusion projection only
+ * arrays it includes as a whole are sliced, with an exclusion projection only arrays it doesn't
+ * mention. Field names with `.` or a leading `$` can't be addressed in a projection: not sliced.
  */
 export async function getDocument(
   client: ClientLike,
@@ -400,7 +437,7 @@ export async function getDocument(
       const [sizes] = await op.open({
         aggregate: p.coll,
         pipeline: [
-          { $match: { _id: id } },
+          { $match: idFilter(id) },
           { $limit: 1 },
           {
             $project: {
@@ -438,16 +475,17 @@ export async function getDocument(
     const fields: Document = { ...projection };
     const inclusion = projection !== undefined && isInclusion(projection);
     for (const { path, total } of large) {
+      if (path.includes('.') || path.startsWith('$')) continue;
       const named = Object.entries(fields).filter(([k]) => relatedPath(k, path));
       // Inclusion: only arrays included as a whole; exclusion: only arrays not mentioned.
       const sliceable = inclusion
         ? named.length === 1 && named[0]?.[0] === path && isIncluded(named[0][1])
         : named.length === 0;
       if (!sliceable || p.sliceAbove === undefined) continue;
-      fields[path] = { $slice: p.sliceAbove };
+      fields[path] = sliceEntry(path, p.sliceAbove, inclusion);
       sliced.push({ path, total, loaded: Math.min(total, p.sliceAbove) });
     }
-    const cmd: Document = { find: p.coll, filter: { _id: id }, limit: 1, singleBatch: true };
+    const cmd: Document = { find: p.coll, filter: idFilter(id), limit: 1, singleBatch: true };
     if (Object.keys(fields).length > 0) cmd['projection'] = fields;
     const [doc] = await op.open(cmd);
     if (!doc) return { doc: null, sliced: [] };
@@ -460,23 +498,27 @@ export async function getDocument(
   }
 }
 
-/** `$a.b` for a dotted path; components must be plain field names. */
-function fieldExpression(path: string): string {
+/**
+ * The components of a dotted path of nested documents. Empty, `$` and numeric components (array
+ * indexes) are refused: aggregation paths don't index arrays.
+ */
+function pathParts(path: string): string[] {
   const parts = path.split('.');
-  if (parts.some((part) => part.length === 0 || part.startsWith('$'))) {
+  if (parts.some((part) => part.length === 0 || part.startsWith('$') || /^\d+$/.test(part))) {
     throw new RpcError(
       'INVALID_PARAMS',
-      `path "${path}" must be a dotted field path without empty or "$" components`,
+      `path "${path}" must be a dotted path of field names (no empty, "$" or numeric components: array indexes are not supported)`,
     );
   }
-  return `$${path}`;
+  return parts;
 }
 
 /**
  * `docs.getSlice`: items `skip … skip+limit-1` of the array at `path` and its total length,
  * computed on the server (`$slice`/`$size` in an aggregation), so only those items travel.
- * `NOT_FOUND` when there is no such document or no array at `path`. Array indexes inside the
- * path (`items.3.sub`) are not supported: aggregation paths don't index arrays.
+ * `NOT_FOUND` when there is no such document, no array at `path`, or the path runs through an
+ * array (every parent must be a document: `$a.b` over an array of documents would collect the
+ * `b` of every element instead). Numeric components (array indexes) are `INVALID_PARAMS`.
  */
 export async function getSlice(
   client: ClientLike,
@@ -484,20 +526,27 @@ export async function getSlice(
   signal?: AbortSignal,
 ): Promise<ResultOf<'docs.getSlice'>> {
   const id = parseEjson(p.id, 'id');
-  const field = fieldExpression(p.path);
+  const parts = pathParts(p.path);
+  const field = `$${p.path}`;
+  const parents = parts
+    .slice(0, -1)
+    .map((_, i) => ({ $eq: [{ $type: `$${parts.slice(0, i + 1).join('.')}` }, 'object'] }));
+  const isArray =
+    parents.length > 0 ? { $and: [...parents, { $isArray: field }] } : { $isArray: field };
   const op = new Operation(client, p.db, p.coll, signal);
   try {
     const [doc] = await op.open({
       aggregate: p.coll,
       pipeline: [
-        { $match: { _id: id } },
+        { $match: idFilter(id) },
         { $limit: 1 },
         {
           $project: {
             _id: 0,
-            isArray: { $isArray: field },
-            total: { $cond: [{ $isArray: field }, { $size: field }, 0] },
-            items: { $cond: [{ $isArray: field }, { $slice: [field, p.skip, p.limit] }, []] },
+            parentsOk: parents.length > 0 ? { $and: parents } : { $literal: true },
+            isArray,
+            total: { $cond: [isArray, { $size: field }, 0] },
+            items: { $cond: [isArray, { $slice: [field, p.skip, p.limit] }, []] },
           },
         },
       ],
@@ -505,7 +554,12 @@ export async function getSlice(
     });
     if (!doc) throw new RpcError('NOT_FOUND', 'No document with this _id');
     if (doc['isArray'] !== true) {
-      throw new RpcError('NOT_FOUND', `The document has no array at "${p.path}"`);
+      throw new RpcError(
+        'NOT_FOUND',
+        doc['parentsOk'] === false
+          ? `"${p.path}" does not lead through nested documents only (a parent is missing, an array or another value)`
+          : `The document has no array at "${p.path}"`,
+      );
     }
     const items = (doc['items'] ?? []) as unknown[];
     return {

@@ -3,7 +3,8 @@ import type { SortSpec } from './sort';
 /** A MongoDB find projection document. */
 export type Projection = Readonly<Record<string, unknown>>;
 
-const isIncluded = (v: unknown): boolean => v === true || (typeof v === 'number' && v !== 0);
+/** A projection value that includes its field (`1`, any non-zero number, `true`). */
+export const isIncluded = (v: unknown): boolean => v === true || (typeof v === 'number' && v !== 0);
 const isExcluded = (v: unknown): boolean => v === 0 || v === false;
 
 /** `$slice` / `$meta` alone neither restrict a projection to listed fields nor exclude any. */
@@ -19,8 +20,12 @@ const relatedPath = (key: string, path: string): boolean =>
   coversPath(key, path) || isParentPath(path, key);
 const underId = (path: string): boolean => coversPath('_id', path);
 
-/** True for an inclusion projection (only the listed fields, plus `_id`, are returned). */
-function isInclusion(projection: Projection): boolean {
+/**
+ * True for an inclusion projection (only the listed fields, plus `_id`, are returned): a field
+ * included or given an expression/operator other than `$slice`/`$meta` alone, or `_id` included
+ * with nothing excluded.
+ */
+export function isInclusion(projection: Projection): boolean {
   const entries = Object.entries(projection).filter(([k]) => k !== '_id');
   if (entries.some(([, v]) => isIncluded(v) || (!isExcluded(v) && !isNeutral(v)))) return true;
   return !entries.some(([, v]) => isExcluded(v)) && isIncluded(projection['_id']);

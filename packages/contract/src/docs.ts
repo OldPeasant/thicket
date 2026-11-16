@@ -68,11 +68,16 @@ export const docsMethods = defineMethods({
          * e.g. `{"_id":{"$oid":"..."}}`); the backend continues after them in sort order.
          */
         after: ejsonDocument('range start').optional(),
-        /** Range paging backwards: continue before these sort-key values. */
+        /**
+         * Range paging backwards: continue before these sort-key values. Needs a `limit` > 0
+         * (the backend refuses it otherwise with `INVALID_PARAMS`: it reads backwards and must
+         * buffer the page to send it in display order).
+         */
         before: ejsonDocument('range end').optional(),
         /**
          * Read the last `limit` documents of the sorted result (with the reversed sort, no deep
-         * skip). Needs a sort of plain directions (an empty sort means `{_id: 1}`).
+         * skip). Needs a sort of plain directions (an empty sort means `{_id: 1}`) and a `limit`
+         * > 0 (refused with `INVALID_PARAMS` otherwise, like `before`).
          */
         fromEnd: z.boolean().optional(),
         batchSize: z.number().int().positive().optional(),
