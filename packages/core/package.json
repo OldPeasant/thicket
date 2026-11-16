@@ -12,5 +12,8 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "mongodb-connection-string-url": "^7.0.3"
   }
 }
