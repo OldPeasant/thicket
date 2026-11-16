@@ -323,6 +323,18 @@ describe('params validation', () => {
     expect(Array.isArray(parsed.error.detail)).toBe(true);
   });
 
+  it('docs.find takes fromEnd alone, not with skip, after or before', () => {
+    const base = { ...NS, filter: '{}', limit: 50 };
+    expect(parseParams('docs.find', { ...base, fromEnd: true }).ok).toBe(true);
+    expect(parseParams('docs.find', { ...base, fromEnd: false, skip: 50 }).ok).toBe(true);
+    for (const extra of [{ skip: 50 }, { after: '{"_id":1}' }, { before: '{"_id":1}' }]) {
+      const parsed = parseParams('docs.find', { ...base, fromEnd: true, ...extra });
+      expect(parsed.ok).toBe(false);
+      if (parsed.ok) continue;
+      expect(parsed.error.message).toContain('fromEnd without skip, after or before');
+    }
+  });
+
   it('names the field and the expectation', () => {
     const parsed = parseParams('docs.find', { ...NS, filter: '[1]' });
     expect(parsed.ok).toBe(false);

@@ -183,6 +183,23 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   `SERVER_ERROR`; messages start with a readable prefix and are masked (`maskText` + the
   connect's secret values), as is every log line. Later handlers get a connected client with
   `manager.client(profileId)` (`NOT_CONNECTED` otherwise).
+- Streams (`serve()` in `packages/backend/src/server/rpc.ts`): a streaming handler calls
+  `context.openStream(producer)` and returns `{ streamId }`. The producer starts after the
+  response was sent, gets a `StreamSink` (`send(payload)`, validated against the method's
+  `stream` schema; `signal`) and resolves with the delivered count → `end` event (`{ delivered }`),
+  or rejects → `error` event. A `{ cancel: streamId }` aborts the signal; the `CANCELLED` error
+  event is sent once the producer settled (after its cleanup), at the latest after
+  `STREAM_CANCEL_GRACE_MS` (5 s).
+- Document reads (`packages/backend/src/docs/query/`, `docsQueryHandlers`): `docs.find` (streamed
+  `{ docs }` batches of `batchSize`, default 100, in display order), `docs.count` (aggregation
+  `$match`/`$limit`/`$group`), `docs.estimatedCount` (`count` command), `docs.get` (with
+  `sliceAbove`: top-level array sizes are read on the server, longer arrays come back `$slice`d),
+  `docs.getSlice` (`$slice`/`$size` in an aggregation, so only the items travel; no array indexes
+  in the path). `docs.find` turns `after`/`before`/`fromEnd` into the server query with
+  paging-core's `findPlan` and widens the projection with `projectionWithSortKeys` for sorts of
+  plain directions. Raw commands like `browse` (lossless EJSON). Every command of one operation
+  carries a `comment` (`thicket:<random>`); a cancel finds it in `currentOp` (`$ownOps` when not
+  allowed otherwise), `killOp`s it and `killCursors` an open cursor (`Operation`).
 - Write guard (`packages/backend/src/guard/`): `startBackend` wraps every handler of a
   `WRITE_METHODS` method with `guardWrites()`, which loads the profile from main (fresh, per
   write) and throws `READ_ONLY` for read-only profiles (even when confirmed), and

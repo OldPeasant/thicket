@@ -2,7 +2,14 @@ import type { ParsedParamsOf, ResultOf } from '@thicket/contract';
 
 import { abortable, type ConnectionManager } from '../../connections/manager';
 import { RpcError, type Handler, type HandlerContext } from '../../server/rpc';
-import { countDocuments, estimatedCount, getDocument, getSlice, streamFind } from './query';
+import {
+  buildFind,
+  countDocuments,
+  estimatedCount,
+  getDocument,
+  getSlice,
+  streamFind,
+} from './query';
 
 /**
  * Handlers of `docs.find` (streamed), `docs.count`, `docs.estimatedCount`, `docs.get` and
@@ -15,8 +22,10 @@ export function docsQueryHandlers(manager: ConnectionManager): Record<string, Ha
     'docs.find': (p: ParsedParamsOf<'docs.find'>, c: HandlerContext): ResultOf<'docs.find'> => {
       const client = manager.client(p.profileId);
       if (!c.openStream) throw new RpcError('INTERNAL', 'docs.find needs a streaming server');
+      // Invalid params fail the request itself, before a stream exists.
+      const built = buildFind(p);
       const streamId = c.openStream((sink) =>
-        streamFind(client, p, (batch) => sink.send(batch), sink.signal),
+        streamFind(client, p, (batch) => sink.send(batch), sink.signal, built),
       );
       return { streamId };
     },

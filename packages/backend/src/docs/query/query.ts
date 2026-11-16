@@ -296,14 +296,16 @@ export const DEFAULT_EVENT_BATCH = 100;
 /**
  * Runs `docs.find` and sends the documents as `{ docs }` batches in display order. Resolves with
  * the number of documents sent. Rows read backwards are collected (at most `limit`) and reversed.
+ * `built` is the command from {@link buildFind} when the caller validated the params already.
  */
 export async function streamFind(
   client: ClientLike,
   p: ParsedParamsOf<'docs.find'>,
   send: (batch: { docs: string[] }) => void,
   signal?: AbortSignal,
+  built: FindCommand = buildFind(p),
 ): Promise<number> {
-  const { command: cmd, reverse } = buildFind(p);
+  const { command: cmd, reverse } = built;
   const op = new Operation(client, p.db, p.coll, signal);
   const size = p.batchSize ?? DEFAULT_EVENT_BATCH;
   let delivered = 0;
