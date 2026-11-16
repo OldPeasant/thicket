@@ -44,6 +44,13 @@ describe('root NOTICE: JSON Canopy attribution', () => {
     expect(text).not.toMatch(/inlined in/);
   });
 
+  it('points to the shipped SIL OFL text for the fonts', () => {
+    expect(text).toContain(
+      'licence text and copyright notices in packages/renderer/src/assets/fonts/OFL.txt',
+    );
+    expect(existsSync(join(ROOT, 'packages/renderer/src/assets/fonts/OFL.txt'))).toBe(true);
+  });
+
   it('refers only to repository paths that exist', () => {
     const paths = [...notice.matchAll(/packages\/[\w./-]+[\w/]/g)].map((m) => m[0]);
     expect(paths).toEqual(
