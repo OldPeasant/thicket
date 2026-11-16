@@ -11,7 +11,8 @@ lease_until: 2026-11-16T20:55:51Z
 The main window layout: resizable sidebar, tabbed workspace (tabs for collections, shell, admin views), status bar (connection, operation progress), welcome screen with "New connection" and "Import from Compass". Use the frontend-design skill for the visual direction; respect the Business and Tron tokens (no hard-coded colors).
 
 ## Acceptance criteria
-- [ ] Tabs open/close/reorder; sidebar width persists in settings (component tests)
+- [x] Tabs open/close/reorder; sidebar width persists in settings (component tests)
+  - verified (2026-11-16 21:36+0100 by felix/agent-1): cd packages/renderer && npx ng test --include='src/app/layout/**/*.spec.ts' at e48d66a -> 7 files, 142 passed (tab-bar/workspace open, close, reorder by drag and Ctrl+Shift+PageUp/Down; sidebar-width.service.spec and desktop store.spec persist sidebarWidth in settings.json)
 - [ ] Keyboard: Ctrl/Cmd+W closes a tab, Ctrl/Cmd+Tab cycles (test)
 - [ ] Welcome screen buttons emit the right navigation (test); e2e screenshot in Business light and Tron dark
 
