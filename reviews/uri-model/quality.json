@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "task": "uri-model",
+  "reviewed_revision": "c3766283cdd4b1af8de031b824a7de7132673fa3",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/uri-model/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/uri-model/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/uri-model/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P1", "disposition": "fixed", "note": "maskText leaked passwords next to quotes, <, > or backticks"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "empty user info handling"},
+    {"id": "CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "socket paths with ':' no longer bracketed"},
+    {"id": "CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "prototype-safe extra map"},
+    {"id": "CR-5", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "raw whitespace in password masked by maskText"},
+    {"id": "CR-6", "source": "code-reviewer", "severity": "P3", "disposition": "accepted", "note": "compact JSON host is over-masked by maskText; no secret leaks, SPEC 6 prefers over-masking"},
+    {"id": "CR-7", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "secret option values with raw spaces (same as TW-6)"},
+    {"id": "CR-8", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "secret option after raw space in a non-secret value (same as TW-7)"},
+    {"id": "CR-9", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "quadratic maskText after a query part made linear (same as TW-8)"},
+    {"id": "CR-10", "source": "code-reviewer", "severity": "P3", "disposition": "accepted", "note": "endsInSecretOption keeps an always-true undecodable parameter; cosmetic, no behaviour impact, not worth another review round"},
+    {"id": "TW-1", "source": "test-writer", "severity": "Medium", "disposition": "fixed", "note": "round 1 maskText leak"},
+    {"id": "TW-2", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "round 1 finding"},
+    {"id": "TW-3", "source": "test-writer", "severity": "High", "disposition": "fixed", "note": "round 1 finding"},
+    {"id": "TW-4", "source": "test-writer", "severity": "Medium", "disposition": "fixed", "note": "maskText secret containing a scheme"},
+    {"id": "TW-5", "source": "test-writer", "severity": "Medium", "disposition": "fixed", "note": "digits followed by a scheme in a password no longer taken as a port"},
+    {"id": "TW-6", "source": "test-writer", "severity": "Medium", "disposition": "fixed", "note": "same as CR-7"},
+    {"id": "TW-7", "source": "test-writer", "severity": "Medium", "disposition": "fixed", "note": "same as CR-8"},
+    {"id": "TW-8", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "same as CR-9"}
+  ],
+  "validation": [
+    {"command": "npx vitest run --root packages/core", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}
