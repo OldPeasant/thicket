@@ -2,6 +2,7 @@
 import js from '@eslint/js';
 import prettier from 'eslint-config-prettier';
 import globals from 'globals';
+import { builtinModules } from 'node:module';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
@@ -23,8 +24,24 @@ export default tseslint.config(
   ...tseslint.configs.strict,
   ...tseslint.configs.stylistic,
   {
+    // Node runs these: the main process, the backend and the config files.
+    // packages/core and packages/contract get no runtime globals beyond ES.
+    files: [
+      'apps/desktop/**/*.ts',
+      'packages/backend/**/*.ts',
+      '**/*.config.ts',
+      '**/*.mjs',
+      'vitest.shared.ts',
+    ],
     languageOptions: {
       globals: { ...globals.node },
+    },
+  },
+  {
+    files: ['packages/renderer/**/*.ts'],
+    ignores: ['packages/renderer/*.config.ts'],
+    languageOptions: {
+      globals: { ...globals.browser },
     },
   },
   {
@@ -36,7 +53,7 @@ export default tseslint.config(
         {
           patterns: [
             {
-              group: ['node:*', 'electron', 'electron/*'],
+              group: [...builtinModules, 'node:*', 'electron', 'electron/*'],
               message: 'packages/core must stay free of Node and Electron APIs',
             },
           ],
