@@ -11,7 +11,8 @@ lease_until: 2026-11-16T20:00:02Z
 `npm run dist` produces unsigned installers for the current OS: AppImage/deb/rpm on Linux, dmg on macOS, NSIS + zip on Windows; native modules rebuilt for Electron.
 
 ## Acceptance criteria
-- [ ] On Linux: `npm run dist` produces AppImage, deb and rpm; the AppImage starts and shows the window (`xvfb-run` + screenshot or log line)
+- [x] On Linux: `npm run dist` produces AppImage, deb and rpm; the AppImage starts and shows the window (`xvfb-run` + screenshot or log line)
+  - verified (2026-11-16 20:42+0100 by felix/agent-1): podman run node:24-bookworm (+apt rpm) on rev 88c6803 (patch-identical to final): npm run dist -> release/thicket-0.0.0-linux-x86_64.AppImage, thicket-0.0.0-linux-amd64.deb, thicket-0.0.0-linux-x86_64.rpm; host Fedora 44 (Wayland, no xvfb): node apps/desktop/scripts/smoke-packaged.mjs release/thicket-0.0.0-linux-x86_64.AppImage -> smoke OK (window visible 1280x800, thicket://app/#/, name Thicket, isPackaged, app.ping=main, backend.ping=backend, screenshot shows the Thicket page). Host npm run dist without rpmbuild builds AppImage+deb then fails at rpm (needs package rpm)
 - [ ] App id `io.github.oldpeasant.thicket`, product name Thicket, placeholder icon set in build/
 - [ ] macOS/Windows targets configured; verifying them needs those OSes → skip with reason if not available here
 
