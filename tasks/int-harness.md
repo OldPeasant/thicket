@@ -5,7 +5,7 @@ owner: dell26/agent-3
 deps: [scaffold]
 touches: [test/integration/fixtures,test/integration/vitest.config.ts,package.json]
 prio: 1
-lease_until: 2026-11-16T18:16:34Z
+lease_until: 2026-11-16T18:21:36Z
 ---
 ## Goal
 Testcontainers fixtures for MongoDB Community 8.x (replica set and standalone) and 7.0 (standalone), with TLS variants using a CA and server cert generated at test time; `npm run test:int` runs test/integration.
