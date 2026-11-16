@@ -77,6 +77,19 @@ describe('describeError', () => {
     );
   });
 
+  it('describes a plain Error as INTERNAL followed by its message', () => {
+    expect(describeError(new Error('port closed'))).toBe(`${ERROR_MESSAGES.INTERNAL}\nport closed`);
+  });
+
+  it('describes an ApiError by its code', () => {
+    const error = new ApiError({ code: 'SSH_ERROR', message: 'connect ECONNREFUSED' });
+    expect(describeError(error)).toBe(`${ERROR_MESSAGES.SSH_ERROR}\nconnect ECONNREFUSED`);
+  });
+
+  it.each(ERROR_CODES)('describes %s with its readable message', (code) => {
+    expect(describeError({ code, message: '' })).toBe(ERROR_MESSAGES[code]);
+  });
+
   it('describes anything else as INTERNAL', () => {
     expect(describeError(undefined)).toContain(ERROR_MESSAGES.INTERNAL);
   });
