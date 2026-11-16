@@ -7,7 +7,13 @@ import type {
 } from '@thicket/contract';
 import { isDeepStrictEqual } from 'node:util';
 
-import { BSON, MongoClient, type Document, type MongoClientOptions } from 'mongodb';
+import {
+  BSON,
+  MongoClient,
+  type Document,
+  type MongoClientOptions,
+  type RunCommandOptions,
+} from 'mongodb';
 
 import { RpcError } from '../server/rpc';
 import { redact, toConnectError } from './errors';
@@ -17,7 +23,7 @@ import { clientConfig, type ConnectSecrets } from './options';
 export interface ClientLike {
   connect(): Promise<unknown>;
   close(force?: boolean): Promise<void>;
-  db(name: string): { command(command: Document): Promise<Document> };
+  db(name: string): { command(command: Document, options?: RunCommandOptions): Promise<Document> };
 }
 
 export interface ConnectionManagerDeps {
@@ -331,7 +337,7 @@ function closedWhileConnecting(): RpcError {
 }
 
 /** Rejects with `CANCELLED` as soon as `signal` aborts (the operation itself runs on). */
-function abortable<T>(operation: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+export function abortable<T>(operation: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (!signal) return operation;
   if (signal.aborted) {
     operation.catch(() => undefined);

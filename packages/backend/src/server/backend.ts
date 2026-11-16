@@ -1,5 +1,6 @@
 import { methods, type Profile } from '@thicket/contract';
 
+import { browseHandlers } from '../browse';
 import { ConnectionManager, connHandlers } from '../connections';
 import { guardWrites } from '../guard';
 import { wiringHandlers, type PrivilegedLink } from './handlers';
@@ -49,6 +50,7 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
     {
       ...wiringHandlers({ pid: options.pid, privileged: () => privileged }),
       ...connHandlers(connections),
+      ...browseHandlers(connections),
     },
     loadProfile,
   );

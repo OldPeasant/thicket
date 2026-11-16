@@ -23,6 +23,12 @@ export interface FixtureSpec {
   replicaSet?: boolean;
   /** `requireTLS` with the test CA's server certificate; clients without a certificate are allowed. */
   tls?: boolean;
+  /**
+   * Access control on (`--auth`) with this root user, created by the image's entrypoint. Not used
+   * by the shared fixtures (they run without auth); tests that need permissions start their own.
+   * Generate the password at test time. Standalone only (a replica set would need a key file).
+   */
+  auth?: { username: string; password: string };
 }
 
 export const FIXTURE_SPECS: Record<FixtureName, FixtureSpec> = {
@@ -64,6 +70,16 @@ export async function startFixture(
     .withStartupTimeout(120_000);
 
   if (spec.replicaSet) command.push('--replSet', REPLICA_SET);
+  if (spec.auth) {
+    if (spec.replicaSet) throw new Error('auth fixtures are standalone only');
+    // The entrypoint starts mongod once without auth to create the root user, then for real.
+    container = container
+      .withEnvironment({
+        MONGO_INITDB_ROOT_USERNAME: spec.auth.username,
+        MONGO_INITDB_ROOT_PASSWORD: spec.auth.password,
+      })
+      .withWaitStrategy(Wait.forLogMessage(/Waiting for connections/, 2));
+  }
   if (spec.tls) {
     if (!certs) throw new Error('TLS fixture needs certificates');
     command.push(
