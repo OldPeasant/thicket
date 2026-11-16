@@ -307,9 +307,12 @@ Contract layout (`packages/contract/src/`):
 
 ## Main window layout (`packages/renderer/src/app/layout`)
 - Routes: `''` is `AppShell` (sidebar, splitter, tab strip, work area, status bar); its child routes
-  are the "start page" shown when no tab is active: `''` → `Welcome`, `NAV.newConnection`
-  (`/connections/new`) and `NAV.importCompass` (`/connections/import/compass`) → `PlannedPage`
-  placeholders that connection-ui and profiles-import-export replace. `dev/explorer` stays outside
+  are the "start page" shown when no tab is active: `''` → `Welcome`, `NAV.connections`
+  (`/connections`, manager), `NAV.newConnection` (`/connections/new`) and
+  `editConnectionUrl(id)` (`/connections/:id`) → the connection pages (lazy, see "Connection
+  editor"), `NAV.importCompass` (`/connections/import/compass`) → a `PlannedPage` placeholder
+  that profiles-import-export replaces. Routes bind parameters to inputs
+  (`withComponentInputBinding`). `dev/explorer` stays outside
   the shell. Any `NavigationEnd` shows the routed page (`WorkspaceService.showHome()`).
 - Tabs: `WorkspaceService` (`tabs`, `activeId`, `open/close/activate/cycle/move/showHome`); a tab is
   `{ id, kind: 'collection' | 'shell' | 'admin', title, detail?, production?, data? }`, opening a
@@ -324,6 +327,34 @@ Contract layout (`packages/contract/src/`):
   shell. The sidebar content is `SidebarTree` (below).
 - Status bar: `StatusService.setConnection({ name, state, production?, readonly? })` and
   `begin(label, progress?) → { update, done }` / `track(label, promise)` for running operations.
+
+## Connection editor (`packages/renderer/src/app/connections`)
+- `connection-form.model.ts` (pure): the editor's `EditorState` is core's `ConnectionUriModel`
+  (`@thicket/core/uri`, never the core root) plus name, color, folder, mechanism, the typed
+  password, `secretMode` and the flags. The form fields and the "Connection string" tab edit the
+  same model: `connectionStringText()` prints it (password as `MASK` `****`),
+  `applyConnectionString()` parses a typed URI (a password in it moves to the password field;
+  `****` keeps the typed one). `profileDraftFromState()` writes the whole URI without password
+  as `connectionString` and mirrors the form fields into the profile's own fields (`auth`, `tls`,
+  read preference, app name, timeouts), which the backend passes as driver options; fields the
+  form doesn't edit yet (SSH, `tls.keyFile`) are kept from the loaded profile. A user name
+  without `authMechanism` becomes SCRAM-SHA-256 (the contract has no "negotiate").
+- `ConnectionEditor` (`/connections/new`, `/connections/:id`): Save = `profiles.save`, then
+  `profiles.setSecret('password')` only for `secretMode: 'saved'` with a typed password (else a
+  saved password stays); new profiles take `defaultSecretMode` from `profiles.secretStorage`, a
+  `weak` store shows a warning, `unavailable` disables "save". Test connection sends
+  `{ profileId }` while the loaded profile is unchanged and no password was typed (so the stored
+  secrets are used), else the draft (+ the typed password, also in "ask" mode, never stored);
+  errors show the code, `ERROR_MESSAGES` and the backend's message. After Save it calls
+  `SidebarTreeService.reloadProfiles()`.
+- `ConnectionsPage` (`/connections`): profiles grouped by folder (`groupByFolder`), edit,
+  duplicate, delete (asked inline; closes the connection and its tabs). The sidebar links to it
+  (`sidebar-manage`) and has "Edit connection…" in a connection's context menu.
+- `mongodb-connection-string-url` loads `whatwg-url` → `webidl-conversions`, which needs
+  `SharedArrayBuffer` at load time; the renderer isn't cross-origin isolated, so `main.ts` first
+  imports `shared-array-buffer-stub.ts` (installs a throwing stand-in only when it is missing).
+  The connection routes are lazy, so `whatwg-url` stays out of the initial bundle.
+- e2e: `test/e2e/connections.e2e.ts` (mongo8 fixture + a user created by the test).
 
 ## Sidebar tree (`packages/renderer/src/app/sidebar`)
 - `SidebarTreeService` (root): profiles from `profiles.list` (registered in `ProfileSafetyService`;

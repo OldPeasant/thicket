@@ -39,8 +39,8 @@ test('welcome buttons navigate to the connection editor and the Compass import',
   await window.getByTestId('welcome-new').click();
   await expect(window).toHaveURL(/#\/connections\/new$/);
   await expect(window.getByTestId('page-heading')).toHaveText('New connection');
-  await window.getByTestId('tab-home').click();
-  await window.getByRole('link', { name: 'Back to start' }).click();
+  await expect(window.getByTestId('connection-editor')).toBeVisible();
+  await window.goBack();
   await expect(window).toHaveURL(/#\/$/);
   await window.getByTestId('welcome-import').click();
   await expect(window).toHaveURL(/#\/connections\/import\/compass$/);
