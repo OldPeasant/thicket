@@ -112,6 +112,15 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   serves `privilegedMethods` (contract `backend.ts`: `main.ping`, `secrets.get` — a stub until the
   secrets store exists) on it. These methods are not in `methods`, so `route()` and the backend's
   renderer-facing `serve()` refuse them (`UNKNOWN_METHOD`).
+- Settings (`src/settings/store.ts`, `SettingsStore`): `userData/settings.json` as
+  `{ "version": 1, "settings": {...} }`. Missing file → `DEFAULT_SETTINGS`; unknown keys are
+  dropped and invalid values fall back to their default per key; a file that is not JSON or not
+  in that layout is renamed to `settings.json.corrupt-<time>` and the defaults are used. Writes go
+  to `settings.json.tmp` (flushed) and are renamed over the file (a stale temp file is removed at
+  start); writes are serialized. Main serves `app.settings.get/set` and, after a set that changed
+  something, broadcasts `app.settings.changed` (payload `SettingsChanged`) to every window through
+  `Broadcaster` (`src/main/broadcast.ts`) on the window's main port. `THICKET_USER_DATA` overrides
+  Electron's `userData` folder (tests).
 - Wiring diagnostics in the contract: `app.ping` (main), `backend.ping` (backend; also checks the
   privileged port), `backend.sleep` (cancellable wait for tests).
 - Tests: unit specs next to the code; `npm run test:electron` (root: builds the renderer first)
