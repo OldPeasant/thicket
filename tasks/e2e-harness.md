@@ -1,11 +1,11 @@
 ---
 title: M0: Playwright end-to-end harness for the Electron app
-status: in_progress
+status: done
 owner: felix/agent-2
 deps: [electron-shell,int-harness]
 touches: [test/e2e/harness,playwright.config.ts,package.json]
 prio: 1
-lease_until: 2026-11-16T19:49:51Z
+lease_until: 
 ---
 ## Goal
 Playwright `_electron` launches the built app with an isolated userData dir; helpers to start a MongoDB fixture from int-harness when available; `npm run test:e2e`.
@@ -24,3 +24,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 20:20+0100 by felix/agent-2): 'No writes to the real userData' is enforced per test by snapshotting (paths, sizes, mtimes) Electron's default userData folder (appData + app name, cross-checked against the running app) before launch and comparing after close; Chromium caches outside userData are not tracked
 - ASSUMPTION (2026-11-16 20:20+0100 by felix/agent-2): The mongo e2e fixture reuses test/integration/fixtures startFixture (worker-scoped, default mongo8) and skips tests using it when no Docker/Podman answers ('when available')
 - ASSUMPTION (2026-11-16 20:32+0100 by felix/agent-2): Criterion 1 verified with the session's Wayland display instead of xvfb-run (not installed on this host, no sudo); playwright.config.ts and docs say to use 'xvfb-run -a npm run test:e2e' on display-less Linux, else the harness falls back to --ozone-platform=headless (only unit-tested here)
+- done by felix/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 31s on c12f913a2; criteria verified 3/3
