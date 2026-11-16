@@ -169,6 +169,54 @@ describe('docsQueryHandlers', () => {
     });
   });
 
+  it('docs.find ends CANCELLED when its connection was closed and reopened meanwhile', async () => {
+    let failFind: (error: Error) => void = () => undefined;
+    let findSent = false;
+    const clients: ClientLike[] = [];
+    const manager = new ConnectionManager({
+      loadProfile: () => Promise.resolve(profile),
+      loadSecrets: () => Promise.resolve(null),
+      createClient: () => {
+        const client: ClientLike = {
+          connect: () => Promise.resolve(),
+          close: () => Promise.resolve(),
+          db: () => ({
+            command: async (command: Document) =>
+              'find' in command
+                ? new Promise<Document>((_resolve, reject) => {
+                    failFind = reject;
+                    findSent = true;
+                  })
+                : defaultAnswer('admin', command),
+          }),
+        };
+        clients.push(client);
+        return client;
+      },
+    });
+    await manager.open('p1', undefined);
+    const producers: StreamProducer[] = [];
+    const handler = docsQueryHandlers(manager)['docs.find'] as Handler;
+    await handler({ ...base, filter: '{}' } as never, {
+      signal: new AbortController().signal,
+      requestId: 'r1',
+      openStream: (producer) => {
+        producers.push(producer);
+        return 'stream-1';
+      },
+    });
+    const running = producers[0]?.(sink());
+    await vi.waitFor(() => expect(findSent).toBe(true));
+    await manager.close('p1');
+    await manager.open('p1', undefined);
+    expect(clients).toHaveLength(2);
+    failFind(new Error('Topology is closed'));
+    await expect(running).rejects.toMatchObject({
+      code: 'CANCELLED',
+      message: 'The connection was closed',
+    });
+  });
+
   it('docs.find passes a failure on unchanged while its connection is open', async () => {
     const { call, producers } = await setup((db, command) => {
       if ('find' in command) throw new Error('boom');

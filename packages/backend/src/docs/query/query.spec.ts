@@ -669,6 +669,67 @@ describe('Operation cancel', () => {
     });
   });
 
+  it('probing stops once the interrupted command answers (never seen in currentOp); its cursor is killed', async () => {
+    vi.useFakeTimers();
+    const find = deferred<Document>();
+    const client = cancellable(find.promise, []);
+    const controller = new AbortController();
+    const running = streamFind(client, findParams(), () => undefined, controller.signal);
+    let outcome: string | undefined;
+    void running.then(
+      () => (outcome = 'resolved'),
+      (error: unknown) => (outcome = (error as RpcError).code),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(250);
+    const probesBefore = commandsOf(client).filter((c) => c === 'currentOp').length;
+    expect(probesBefore).toBeGreaterThanOrEqual(2);
+    find.resolve(cursorReply(BSON.Long.fromNumber(44), docs(1)));
+    await vi.advanceTimersByTimeAsync(0);
+    // Done long before CANCEL_SETTLE_MS, without further probes.
+    expect(outcome).toBe('CANCELLED');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(commandsOf(client).filter((c) => c === 'currentOp')).toHaveLength(probesBefore);
+    expect(client.sent.filter((s) => 'killCursors' in s.command).map((s) => s.command)).toEqual([
+      { killCursors: 'orders', cursors: [BSON.Long.fromNumber(44)] },
+    ]);
+    expect(commandsOf(client)).not.toContain('killOp');
+  });
+
+  it('a late reply whose cursor is already exhausted (id 0) needs no killCursors', async () => {
+    const find = deferred<Document>();
+    const client = cancellable(find.promise);
+    const controller = new AbortController();
+    const running = streamFind(client, findParams(), () => undefined, controller.signal);
+    await vi.waitFor(() => expect(commandsOf(client)).toEqual(['find']));
+    controller.abort();
+    await vi.waitFor(() => expect(commandsOf(client)).toContain('killOp'));
+    find.resolve(cursorReply(BSON.Long.fromNumber(0), docs(1)));
+    expect((await rejection(running)).code).toBe('CANCELLED');
+    expect(commandsOf(client)).toEqual(['find', 'currentOp', 'killOp']);
+  });
+
+  it('an abort during a count aggregation that is never in currentOp still ends when it fails', async () => {
+    vi.useFakeTimers();
+    const aggregate = deferred<Document>();
+    const client = cancellable(aggregate.promise, []);
+    const controller = new AbortController();
+    const counting = countDocuments(client, { ...target, filter: '{}' }, controller.signal);
+    let outcome: string | undefined;
+    void counting.then(
+      () => (outcome = 'resolved'),
+      (error: unknown) => (outcome = (error as RpcError).code),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(150);
+    aggregate.reject(new Error('connection reset'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(outcome).toBe('CANCELLED');
+    expect(commandsOf(client)).not.toContain('killCursors');
+  });
+
   it('falls back to $ownOps when currentOp is unauthorized', async () => {
     let calls = 0;
     const client = fakeClient((_db, command) => {

@@ -522,6 +522,73 @@ describe('serve: streams', () => {
     }
   });
 
+  it('a repeated cancel neither restarts the grace time nor sends CANCELLED twice', async () => {
+    vi.useFakeTimers();
+    try {
+      const s = streaming(() => deferred<number>().promise);
+      s.client.send({ id: 'f1', method: 'docs.find', params: FIND });
+      await vi.advanceTimersByTimeAsync(5);
+      const streamId = (s.received[0]?.result as { streamId: string }).streamId;
+      s.client.send({ cancel: streamId });
+      await vi.advanceTimersByTimeAsync(STREAM_CANCEL_GRACE_MS - 100);
+      s.client.send({ cancel: streamId });
+      await vi.advanceTimersByTimeAsync(110);
+      // Ends at the first cancel's grace time, not at the second one's.
+      expect(s.eventsOf(streamId)).toEqual([
+        {
+          stream: streamId,
+          kind: 'error',
+          payload: { code: 'CANCELLED', message: 'The operation was cancelled' },
+        },
+      ]);
+      await vi.advanceTimersByTimeAsync(STREAM_CANCEL_GRACE_MS);
+      expect(s.eventsOf(streamId)).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a cancelled producer that settles in time clears its grace timer', async () => {
+    vi.useFakeTimers();
+    try {
+      const finish = deferred<number>();
+      const s = streaming(() => finish.promise);
+      s.client.send({ id: 'f1', method: 'docs.find', params: FIND });
+      await vi.advanceTimersByTimeAsync(5);
+      const streamId = (s.received[0]?.result as { streamId: string }).streamId;
+      s.client.send({ cancel: streamId });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(vi.getTimerCount()).toBe(1);
+      finish.resolve(0);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(s.eventsOf(streamId).map((e) => e.kind)).toEqual(['error']);
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(STREAM_CANCEL_GRACE_MS + 10);
+      expect(s.eventsOf(streamId)).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stop() with several running streams drops all of them, cancelled or not', async () => {
+    const finishes = [deferred<number>(), deferred<number>()];
+    let n = 0;
+    const s = streaming(() => (finishes[n++] ?? deferred<number>()).promise);
+    const a = await s.openId('a');
+    await s.openId('b');
+    await vi.waitFor(() => expect(s.started).toHaveLength(2));
+    s.client.send({ cancel: a });
+    await vi.waitFor(() => expect(s.started[0]?.signal.aborted).toBe(true));
+    s.stop();
+    expect(s.started[1]?.signal.aborted).toBe(true);
+    finishes[0]?.resolve(0);
+    finishes[1]?.reject(new Error('client closed'));
+    await settleTicks();
+    expect(s.received.filter((m) => m.stream !== undefined)).toEqual([]);
+    expect(s.onError).not.toHaveBeenCalled();
+  });
+
   it('a stream is not started when its request fails after opening it', async () => {
     const producer = vi.fn(() => Promise.resolve(0));
     const thrown = streaming(producer, vi.fn(), (_p, ctx) => {
