@@ -20,3 +20,4 @@ Electron app that opens a sandboxed window with the renderer build, starts the b
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 19:20+0100 by dell26/agent-2): Wiring diagnostics live in the contract: app.ping (main), backend.ping (backend, also checks the privileged port) and backend.sleep (cancellable wait for the cancel test) instead of conn.ping, which would need a profile/connection
+- ASSUMPTION (2026-11-16 19:20+0100 by dell26/agent-2): thicket.request takes a full {id,method,params} Request and resolves with the Response (never rejects for contract errors); thicket.on accepts (stream, listener) or (listener) for all events, matching the interface wip/api-client already assumes
