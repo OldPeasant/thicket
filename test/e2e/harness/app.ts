@@ -4,12 +4,14 @@ import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { _electron, type ElectronApplication } from 'playwright-core';
+import { _electron, type ElectronApplication } from '@playwright/test';
 
 export const repoDir = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 /** The Electron app folder (`package.json` `main` → `dist/main.cjs`, built by `npm run test:e2e`). */
 export const appDir = join(repoDir, 'apps', 'desktop');
 
+// Electron binary lookup, headlessArgs() and the launch env duplicate
+// apps/desktop/test/helpers.ts: keep in sync with it.
 // The `electron` package's main export is the path of the Electron binary.
 const electronPath = createRequire(join(appDir, 'package.json'))('electron') as string;
 

@@ -1,8 +1,13 @@
-import { test as base, expect, type TestInfo } from '@playwright/test';
+import {
+  test as base,
+  expect,
+  type ElectronApplication,
+  type Page,
+  type TestInfo,
+} from '@playwright/test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ElectronApplication, Page } from 'playwright-core';
 
 import { launchApp, realUserDataDir, snapshotDir } from './app';
 import { containerRuntimeUnavailable, startMongo, type E2EMongo, type FixtureName } from './mongo';

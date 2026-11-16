@@ -15,6 +15,8 @@ export type TestWindow = typeof globalThis & { thicket: Thicket; restartEvents: 
 
 export const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const repoDir = resolve(appDir, '..', '..');
+// Electron binary lookup, headlessArgs() and the launch env are duplicated in
+// test/e2e/harness/app.ts: keep in sync with it.
 // The `electron` package's main export is the path of the Electron binary.
 const electronPath = createRequire(import.meta.url)('electron') as string;
 
