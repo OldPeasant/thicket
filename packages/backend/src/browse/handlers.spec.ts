@@ -189,6 +189,51 @@ describe('browseHandlers', () => {
     },
   );
 
+  it.each([
+    ['db.listDatabases', 'listDatabases', {}],
+    ['db.stats', 'dbStats', { db: 'shop' }],
+    ['coll.list', 'listCollections', { db: 'shop' }],
+    ['coll.stats', 'aggregate', { db: 'shop', coll: 'orders' }],
+  ])(
+    '%s (a read) answers CANCELLED at once while its server command is pending',
+    async (method, commandName, params) => {
+      let release!: () => void;
+      const { call } = await setup((db, command) =>
+        commandName in command
+          ? new Promise<Document>((resolve) => {
+              release = () => resolve(defaultAnswer(db, command) as Document);
+            })
+          : defaultAnswer(db, command),
+      );
+      const controller = new AbortController();
+      const pending = call(method, { profileId: 'p1', ...params }, controller.signal);
+      // Let the handler send its command before cancelling.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      controller.abort();
+      await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' });
+      release();
+    },
+  );
+
+  it.each([
+    ['db.create', 'create', { db: 'shop', firstCollection: 'orders' }],
+    ['db.drop', 'dropDatabase', { db: 'shop' }],
+    ['coll.create', 'create', { db: 'shop', coll: 'orders' }],
+    ['coll.drop', 'drop', { db: 'shop', coll: 'orders' }],
+    ['coll.rename', 'renameCollection', { db: 'shop', coll: 'orders', newName: 'orders2' }],
+  ])(
+    '%s with a signal already aborted still sends the write and answers its result',
+    async (method, commandName, params) => {
+      const { call, sent } = await setup();
+      const controller = new AbortController();
+      controller.abort();
+      await expect(
+        call(method, { profileId: 'p1', ...params }, controller.signal),
+      ).resolves.toEqual({});
+      expect(sent.map((s) => Object.keys(s.command)[0])).toEqual([commandName]);
+    },
+  );
+
   it('a cancelled write answers the server error when the write fails', async () => {
     const { call } = await setup((db, command) =>
       'drop' in command

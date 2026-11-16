@@ -240,6 +240,34 @@ describe('coll.* on the 8.x replica set', () => {
     expect(error.code).toBe('INVALID_PARAMS');
   });
 
+  it('coll.create refuses an EJSON value wrapper as options and creates nothing (TW-1)', async () => {
+    const error = await failure(
+      backend.call('coll.create', {
+        profileId: RW.id,
+        db: DB,
+        coll: 'dated',
+        options: '{"$date":{"$numberLong":"0"}}',
+      }),
+    );
+    expect(error.code).toBe('INVALID_PARAMS');
+    expect(await direct.db(DB).listCollections({ name: 'dated' }).toArray()).toEqual([]);
+  });
+
+  it('a server refusal whose message names "certificates" is SERVER_ERROR, not TLS_ERROR (CR-1)', async () => {
+    await direct.db(DB).createCollection('certificates');
+    const error = await failure(
+      backend.call('coll.create', {
+        profileId: RW.id,
+        db: DB,
+        coll: 'certificates',
+        options: JSON.stringify({ capped: true, size: { $numberInt: '4096' } }),
+      }),
+    );
+    expect(error.code).toBe('SERVER_ERROR');
+    expect(error.detail).toEqual({ serverCode: 48, codeName: 'NamespaceExists' });
+    expect(error.message).toMatch(/^The server refused the command: .*certificates/);
+  });
+
   it('coll.stats reports count, sizes and indexes', async () => {
     const coll = direct.db(DB).collection('counted');
     await coll.insertMany(Array.from({ length: 5 }, (_, i) => ({ i })));
@@ -280,6 +308,7 @@ describe('coll.* on the 8.x replica set', () => {
       backend.call('coll.rename', { profileId: RW.id, db: DB, coll: 'other', newName: 'after' }),
     );
     expect(exists.code).toBe('SERVER_ERROR');
+    expect(exists.detail).toEqual({ serverCode: 48, codeName: 'NamespaceExists' });
     await backend.call('coll.rename', {
       profileId: RW.id,
       db: DB,

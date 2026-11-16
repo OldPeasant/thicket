@@ -1,4 +1,13 @@
-import { BSON, MongoServerError, type Document, type RunCommandOptions } from 'mongodb';
+import { serverErrorDetail } from '@thicket/contract';
+import {
+  BSON,
+  MongoNetworkError,
+  MongoNetworkTimeoutError,
+  MongoServerError,
+  MongoWriteConcernError,
+  type Document,
+  type RunCommandOptions,
+} from 'mongodb';
 import { describe, expect, it } from 'vitest';
 
 import type { ClientLike } from '../connections/manager';
@@ -160,6 +169,101 @@ describe('toBrowseError', () => {
     expect(toBrowseError(network).code).toBe('NETWORK_ERROR');
     expect(toBrowseError(new Error('boom')).code).toBe('INTERNAL');
   });
+
+  // Round 2: edge cases of the server-error mapping introduced for CR-1/CR-2/CR-6.
+
+  it('a server error without a message answers the bare prefix and keeps its detail', () => {
+    for (const error of [
+      { name: 'MongoServerError', code: 11000, codeName: 'DuplicateKey', message: '' },
+      { code: 11000, codeName: 'DuplicateKey' },
+      { code: 11000, codeName: 'DuplicateKey', message: 42 },
+    ]) {
+      const mapped = toBrowseError(error);
+      expect(mapped.code).toBe('SERVER_ERROR');
+      expect(mapped.message).toBe('The server refused the command');
+      expect(mapped.detail).toEqual({ serverCode: 11000, codeName: 'DuplicateKey' });
+    }
+  });
+
+  it('an error with only an integer code (no name, no code name) counts as a server answer', () => {
+    const error = toBrowseError({ code: 11000, message: 'E11000 duplicate key error' });
+    expect(error.code).toBe('SERVER_ERROR');
+    expect(error.detail).toEqual({ serverCode: 11000 });
+  });
+
+  it('a MongoServerError without code or code name is SERVER_ERROR with a contract-valid detail', () => {
+    const error = toBrowseError(new MongoServerError({ ok: 0, errmsg: 'odd answer' }));
+    expect(error.code).toBe('SERVER_ERROR');
+    expect(error.message).toBe('The server refused the command: odd answer');
+    expect(serverErrorDetail.safeParse(error.detail).success).toBe(true);
+    expect(error.detail).not.toHaveProperty('serverCode');
+  });
+
+  it('a non-integer or non-numeric code alone does not make an error a server answer', () => {
+    expect(toBrowseError({ code: 1.5, message: 'boom' }).code).toBe('INTERNAL');
+    expect(toBrowseError({ code: '48', message: 'boom' }).code).toBe('INTERNAL');
+  });
+
+  it('every SERVER_ERROR detail validates against the contract ServerErrorDetail', () => {
+    for (const error of [
+      serverError(48, 'NamespaceExists', 'exists'),
+      { name: 'MongoServerError', code: new BSON.Int32(13), codeName: 'Unauthorized' },
+      { code: BSON.Long.fromNumber(8000), codeName: 'AtlasError' },
+      { codeName: 'SomethingNew' },
+    ]) {
+      const mapped = toBrowseError(error);
+      expect(mapped.code).toBe('SERVER_ERROR');
+      expect(serverErrorDetail.strict().safeParse(mapped.detail).success).toBe(true);
+    }
+  });
+
+  it('a write concern error is SERVER_ERROR even when its message says "timed out"', () => {
+    const error = toBrowseError(
+      new MongoWriteConcernError({
+        ok: 1,
+        writeConcernError: {
+          code: 64,
+          codeName: 'WriteConcernTimeout',
+          errmsg: 'waiting for replication timed out',
+        },
+      }),
+    );
+    expect(error.code).toBe('SERVER_ERROR');
+    expect(error.detail).toEqual({ serverCode: 64, codeName: 'WriteConcernTimeout' });
+    expect(error.message).toBe('The server refused the command: waiting for replication timed out');
+  });
+
+  it('a NamespaceNotFound whose message mentions TLS is still NOT_FOUND', () => {
+    expect(
+      toBrowseError(serverError(26, 'NamespaceNotFound', 'ns TLS.certificates not found')),
+    ).toMatchObject({ code: 'NOT_FOUND', message: 'ns TLS.certificates not found' });
+  });
+
+  it('driver network errors without a server answer stay NETWORK_ERROR / TIMEOUT', () => {
+    expect(
+      toBrowseError(new MongoNetworkError('connection 3 to db.example.test:27017 closed')).code,
+    ).toBe('NETWORK_ERROR');
+    expect(
+      toBrowseError(new MongoNetworkTimeoutError('connection 3 to db.example.test:27017 timed out'))
+        .code,
+    ).toBe('TIMEOUT');
+  });
+
+  it('masks connection strings in INTERNAL browse messages', () => {
+    const error = toBrowseError(new Error('bad state for mongodb://alice:s3cret@db.example.test'));
+    expect(error.code).toBe('INTERNAL');
+    expect(error.message).toMatch(/^Unexpected error while browsing: /);
+    expect(error.message).not.toContain('s3cret');
+  });
+
+  it('null and undefined are INTERNAL with the bare browse prefix', () => {
+    for (const value of [null, undefined]) {
+      expect(toBrowseError(value)).toMatchObject({
+        code: 'INTERNAL',
+        message: 'Unexpected error while browsing',
+      });
+    }
+  });
 });
 
 describe('toNumber', () => {
@@ -230,6 +334,35 @@ describe('parseCreateOptions', () => {
     expect(() => parseCreateOptions(text)).toThrow(
       expect.objectContaining({ code: 'INVALID_PARAMS' }),
     );
+  });
+});
+
+describe('parseCreateOptions: other EJSON value wrappers (TW-1 follow-up)', () => {
+  it.each([
+    '{"$numberLong":"5"}',
+    '{"$numberDouble":"1.5"}',
+    '{"$numberDecimal":"1.5"}',
+    '{"$regularExpression":{"pattern":"a","options":""}}',
+    '{"$binary":{"base64":"AA==","subType":"00"}}',
+    '{"$timestamp":{"t":1,"i":1}}',
+    '{"$minKey":1}',
+    '{"$maxKey":1}',
+  ])('refuses %s with INVALID_PARAMS', (text) => {
+    expect(() => parseCreateOptions(text)).toThrow(
+      expect.objectContaining({
+        code: 'INVALID_PARAMS',
+        message: 'options must be an EJSON document',
+      }),
+    );
+  });
+
+  it('accepts an empty document and documents with EJSON-typed fields', () => {
+    expect(parseCreateOptions('{}')).toEqual({});
+    const options = parseCreateOptions(
+      '{"validator":{"$jsonSchema":{"bsonType":"object"}},"expireAfterSeconds":{"$numberLong":"60"}}',
+    );
+    expect(options['validator']).toEqual({ $jsonSchema: { bsonType: 'object' } });
+    expect(options['expireAfterSeconds']).toBeInstanceOf(BSON.Long);
   });
 });
 
@@ -361,6 +494,51 @@ describe('listDatabases', () => {
       throw serverError(13, 'Unauthorized', 'no connectionStatus');
     });
     await expect(listDatabases(client, false)).resolves.toEqual({ databases: [{ name: 'shop' }] });
+  });
+
+  it('recognises Unauthorized given as an unpromoted Int32 code (CR-2)', async () => {
+    const client = fakeClient((_db, command) => {
+      if ('listDatabases' in command) {
+        throw Object.assign(new Error('not authorized on admin'), {
+          name: 'MongoServerError',
+          code: new BSON.Int32(13),
+        });
+      }
+      return {
+        authInfo: {
+          authenticatedUserPrivileges: [{ resource: { db: 'reports', collection: '' } }],
+        },
+        ok: 1,
+      };
+    });
+    await expect(listDatabases(client, false)).resolves.toEqual({
+      databases: [{ name: 'reports' }],
+    });
+  });
+
+  it('when listDatabases is Unauthorized and connectionStatus has a network error, the refusal is answered', async () => {
+    const client = fakeClient((_db, command) => {
+      if ('listDatabases' in command) throw serverError(13, 'Unauthorized', 'not authorized');
+      throw new MongoNetworkError('connection 4 to db.example.test:27017 closed');
+    });
+    const error = await rejection(listDatabases(client, false));
+    expect(error.code).toBe('SERVER_ERROR');
+    expect(error.detail).toEqual({ serverCode: 13, codeName: 'Unauthorized' });
+  });
+
+  it('a network error of listDatabases is answered as such, without asking connectionStatus', async () => {
+    const client = fakeClient(() => {
+      throw new MongoNetworkError('connection 4 to db.example.test:27017 closed');
+    });
+    expect((await rejection(listDatabases(client, false))).code).toBe('NETWORK_ERROR');
+    expect(client.sent).toHaveLength(1);
+  });
+
+  it('a listDatabases answer without a databases array is INTERNAL (browse prefix)', async () => {
+    const client = fakeClient(() => ({ ok: 1 }));
+    const error = await rejection(listDatabases(client, false));
+    expect(error.code).toBe('INTERNAL');
+    expect(error.message).toMatch(/^Unexpected error while browsing/);
   });
 
   it('connectionStatus without authInfo adds nothing', async () => {
@@ -627,6 +805,30 @@ describe('coll.create / coll.drop / coll.rename', () => {
     const client = fakeClient(() => ({ ok: 1 }));
     await expect(dropCollection(client, 'shop', 'orders')).resolves.toEqual({});
     expect(client.sent[0]).toMatchObject({ db: 'shop', command: { drop: 'orders' } });
+  });
+
+  it('createCollection of a name whose message mentions certificates is SERVER_ERROR, not TLS_ERROR (CR-1)', async () => {
+    const client = fakeClient(() => {
+      throw serverError(
+        48,
+        'NamespaceExists',
+        'Collection shop.certificates already exists with different options',
+      );
+    });
+    const error = await rejection(createCollection(client, 'shop', 'certificates', '{}'));
+    expect(error.code).toBe('SERVER_ERROR');
+    expect(error.detail).toEqual({ serverCode: 48, codeName: 'NamespaceExists' });
+  });
+
+  it('createCollection accepts a document whose fields are EJSON values (only the top level must be plain)', async () => {
+    const client = fakeClient(() => ({ ok: 1 }));
+    await createCollection(
+      client,
+      'shop',
+      'logs',
+      '{"expireAfterSeconds":{"$numberLong":"60"},"timeseries":{"timeField":"t"}}',
+    );
+    expect(client.sent[0]?.command['expireAfterSeconds']).toBeInstanceOf(BSON.Long);
   });
 
   it('dropCollection of a missing collection is NOT_FOUND', async () => {
