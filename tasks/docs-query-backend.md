@@ -1,11 +1,11 @@
 ---
 title: M1: Query documents with paging, counts, cancel and slices
-status: in_progress
+status: done
 owner: felix/agent-2
 deps: [conn-manager,paging-core]
 touches: [packages/backend/src/docs/query]
 prio: 1
-lease_until: 2026-11-16T22:06:11Z
+lease_until: 
 ---
 ## Goal
 docs.find (filter, projection, sort, collation, limit) streaming pages as EJSON, using paging-core; count/estimatedCount; cancel kills the cursor; docs.get and docs.getSlice (`$slice` projection for a path of a large document).
@@ -28,3 +28,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 22:42+0100 by felix/agent-2): docs.find refuses before/fromEnd without limit > 0 (INVALID_PARAMS): rows read backwards are buffered until the page is complete; a previous/last page without a page size has no meaning (review CR-5)
 - ASSUMPTION (2026-11-16 22:42+0100 by felix/agent-2): A docs.find stream whose connection conn.close closed ends CANCELLED (detected when the stream fails and the manager no longer holds that client), rather than registering streams with the ConnectionManager (review CR-3)
 - ASSUMPTION (2026-11-16 22:49+0100 by felix/agent-2): docs.getSlice refuses all-digit path components (INVALID_PARAMS) even after a document parent (e.g. byYear.2024); kept conservative, review round 2 CR-1 accepted
+- done by felix/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 55s on 7e0b3ebe4; criteria verified 3/3
