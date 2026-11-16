@@ -11,7 +11,8 @@ lease_until: 2026-11-16T20:40:22Z
 Adapt the explorer to the BSON model: type badges and colors per type, Date in local time with timezone and UTC toggle, Int64/Decimal128 exact display, Binary/UUID display, deprecated types read-only.
 
 ## Acceptance criteria
-- [ ] Component tests render the all-types fixture from bson-model with correct badge per value
+- [x] Component tests render the all-types fixture from bson-model with correct badge per value
+  - verified (2026-11-16 21:23+0100 by felix/agent-2): cd packages/renderer && npx ng test --include='src/app/explorer/bson-*.spec.ts' -> 58 passed; bson-display.spec.ts 'shows the correct badge for every value of the all-types fixture' renders @thicket/core/testing ALL_TYPES_EJSON (49 fields, all 21 types) in JsonExplorerComponent and asserts each field's badge (ObjectId, Double, Binary 0xNN, UUID, Int64, Decimal128, Code w/ scope, deprecated ...); plus tables layout and color-token tests
 - [ ] Numbers never lose precision on display (Int64 9007199254740993, Decimal128 with 34 digits) (test)
 - [ ] Search still works across BSON values (test)
 
