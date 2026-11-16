@@ -11,7 +11,8 @@ lease_until: 2026-11-16T19:02:04Z
 Map a profile (hosts, SRV, replica set, auth mechanism and source, TLS options, read preference, app name, timeouts, proxy, extra options) to a connection string and back, using `mongodb-connection-string-url`; password masking for display and logs.
 
 ## Acceptance criteria
-- [ ] Round-trip tests for 20+ URIs incl. SRV, IPv6 hosts, encoded credentials, authMechanismProperties
+- [x] Round-trip tests for 20+ URIs incl. SRV, IPv6 hosts, encoded credentials, authMechanismProperties
+  - verified (2026-11-16 19:43+0100 by dell26/agent-1): npx vitest run --root packages/core -t 'connection string round trip' -> 35 passed (35 URIs in uri/fixtures.ts incl. SRV, IPv6 [::1], percent-encoded credentials, authMechanismProperties AWS/Kerberos)
 - [ ] Unknown options are preserved in an `extra` map (test)
 - [ ] `mask()` never leaks the password in any of the test URIs (test)
 
