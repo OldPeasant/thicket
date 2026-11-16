@@ -4,74 +4,76 @@ Date: 2026-11-16
 
 Task: safety-ui (M1: Safety UI: production accent, read-only state, confirm dialog service)
 
-Scope: `2524a5ced5e53202286ca7221f0ad8d72d3c6132..adb7096a134954e92809fac066ff262a1e989a12` on `main`
-(task commits 28ef314 "WriteGuard, confirm dialog, read-only control, production accent" and adb7096
-"dev page, e2e screenshots in four themes, architecture notes"), plus the uncommitted test files listed
-below. Base and commit list supplied by the parent worker and matched against `git log 2524a5c..HEAD`.
+Scope: `95e744c3e2dacf3953e50db9852e363213a1ab56..24cd7c440cebf708e410319fdbb0d7be287b5520` on `main`
+(base = `git merge-base HEAD origin/main`, supplied by the parent worker). Task commits: ecfa408
+"WriteGuard, confirm dialog, read-only control, production accent", 971aea8 "dev page, e2e screenshots in
+four themes, architecture notes", 9f22957 "test-writer tests and report, code review", 24cd7c4 "fix review
+findings CR-1..CR-6". Task code = changes under `packages/`, `test/`, `docs/` in that range, plus the
+uncommitted test files listed below. This is the final-revision run after the CR-1..CR-6 fixes; it
+supersedes the earlier report (which measured the pre-fix revision).
 
 Requirements:
 - `tasks/safety-ui.md` acceptance criteria and recorded assumptions (type-to-confirm for
   `docs.deleteMany` > 1000 via `count`/`expectedCount`; `CANCELLED` / `READ_ONLY` rejections;
-  opt-in `typeToConfirm` for other destructive writes)
-- SPEC.md M1 "Safety" (as quoted in the production doc comments), docs/ARCHITECTURE.md "Coverage"
-- Parent instructions (confirm dialog, WriteGuard with FakeThicketBridge, read-only refusal,
-  WriteControl, describeWrite shell formatting, production accent classes)
+  opt-in `typeToConfirm` for other destructive writes; dev route `#/dev/safety` for screenshots)
+- `reviews/safety-ui/review.md` findings CR-1..CR-6 and the behavior `reviews/safety-ui/fixes.md` says was
+  implemented (modal dialog, signal withdrawal, agg options, WriteControl `title`)
+- SPEC.md M1 "Safety", docs/ARCHITECTURE.md "Coverage"
+- Parent instructions for this run
 
 ## Test files changed
 
-- `packages/renderer/src/app/safety/confirm.service.spec.ts` (new)
 - `packages/renderer/src/app/safety/confirm-dialog.spec.ts`
-- `packages/renderer/src/app/safety/write-guard.service.spec.ts`
+- `packages/renderer/src/app/safety/confirm.service.spec.ts`
 - `packages/renderer/src/app/safety/operation.spec.ts`
 - `packages/renderer/src/app/safety/write-control.directive.spec.ts`
 
-No existing test was changed, weakened or skipped; all additions are new `it` blocks (and one new file).
-No production code was modified.
+All changes are additions (new `it` blocks and one new `describe` block). No existing test was changed,
+weakened or skipped. No production code was modified.
 
 ## Tests added or updated
 
-Count: 40 (safety + layout selection: 177 -> 217 tests)
+Count: 14 (safety + layout selection: 223 -> 237 tests; renderer suite 817 -> 831)
 
-- ConfirmService (6): no request shown initially; `answer()` with nothing pending is a no-op; queue shows
-  one request at a time and answers each separately; `answer(true)` accepted only with the exact typed
-  text (case-sensitive); typed text does not carry over to the next queued request; cancel with the
-  name typed still resolves false.
-- ConfirmDialog (10): namespace without connection; no target/detail/name field when absent;
-  `destructive` class; production focuses Cancel; Escape in the name field aborts even when the name
-  matches; Enter outside the name field does not confirm; `aria-invalid` false while empty and when
-  matching; operation and type-to-confirm text rendered verbatim (no HTML interpretation); focus is not
-  returned to an element removed while the dialog was open; Tab between inner controls is not trapped.
-- WriteGuard with `FakeThicketBridge` (16): `count` 1 001 (boundary just above 1000) requires the name
-  and `count` wins over `expectedCount`, `answer(true)` without the name sends nothing; deleteMany with
-  no known count has no name field/detail; updateMany over 1000 has no name field and is not
-  destructive; cancelling a type-to-confirm delete on production sends nothing (dialog shows production
-  flag and "Affects 12 431 documents." with narrow no-break space); `coll.drop` opt-in `typeToConfirm`
-  sends `confirmed: true`; `db.drop` namespace is the database, `detail`/`destructive` overrides;
-  singular "Affects 1 document."; unknown profile is not production (sent without `confirmed`); bulk
-  write on unknown profile has no connection; read-only wins over `alwaysConfirm` and bulk writes
-  (`run` and `approve`); caller `confirmed: false` is stripped; pre-aborted signal opens no dialog and
-  sends nothing; two production writes queue and only the confirmed one is sent; backend error after
-  confirming reaches the caller (request carried `confirmed: true`); `needsConfirmation` matrix;
-  `admin.killOp` has no namespace.
-- describeWrite / shell (6): optional arguments only when present (createCollection options,
-  renameCollection without dropTarget, createIndex options, hideIndex, deleteMany collation,
-  updateMany without collation, insertMany ordered default, io.import without options); full collMod
-  command with a validator; deleteOne filter with expected values; db/collection names escaped as
-  string literals (quote, backslash, newline); ISODate printing; default indent and invalid EJSON passthrough.
-- WriteControl (2): re-enables and drops hint/`data-readonly` when read-only is cleared or the profile is
-  removed; production alone does not disable.
+Discrepancy found while checking the fixes: `fixes.md` (CR-1, CR-2) says the dialog tests "cover backdrop
+click plus Escape, backdrop refocus, Tab from outside, no handling with no request shown, and Ctrl+Tab not
+trapped" and that "a test checks that the described element's text is the operation", but commit 24cd7c4
+does not touch `confirm-dialog.spec.ts` and none of these tests existed at HEAD. Only the AppShell-level
+CR-1 test (inert background, shortcuts ignored) was present. The tests below close that gap; the
+production behavior they check was correct.
+
+- ConfirmDialog (9), CR-1/CR-2:
+  - `the accessible description is the operation text itself (no aria-label on it)` (CR-2)
+  - `a backdrop click keeps focus in the dialog, so Escape still cancels` (mousedown default prevented,
+    focus moves from `<body>` to the dialog)
+  - `a backdrop click leaves focus on the control inside the dialog`
+  - `Escape pressed with focus on <body> cancels`
+  - `Tab pressed with focus on <body> moves focus into the dialog`
+  - `other keys and Ctrl+Tab on <body> are left alone`
+  - `with no dialog shown, document keys are not handled`
+  - `Ctrl/Meta/Alt+Tab on the last control is not trapped`
+  - `Escape inside the dialog cancels only the shown request, not the next queued one` (regression guard:
+    the in-dialog and document Escape handlers must not both answer)
+- ConfirmService (3), CR-3: withdrawing the shown request clears the typed name (a following
+  type-to-confirm request with the same name is not auto-accepted); withdrawing a waiting request keeps
+  the name typed into the shown one; withdrawing the last request closes the dialog.
+- describeWrite (1), CR-4: `agg.run` prints given falsy options (`allowDiskUse: false`, `maxTimeMS: 0`)
+  and no options object when none are given; `agg.createView` without collation has three arguments.
+- WriteControl (1), CR-5: an empty bound `title` leaves no `title` attribute while writable; read-only
+  still shows the hint and disables.
 
 ## Requirement coverage
 
 | Requirement | Tests | Command | Result |
 |---|---|---|---|
-| AC1: confirm shows operation text | `ConfirmDialog` "shows the exact operation text, the title, connection and detail", "shows type-to-confirm text verbatim", "shows the namespace without a connection"; `describeWrite` suite; `WriteGuard` "production: nothing is sent before the dialog..." | `cd packages/renderer && npx ng test --include='src/app/safety/**/*.spec.ts' --include='src/app/layout/**/*.spec.ts'` | Pass |
-| AC1: cancel aborts | `ConfirmDialog` "cancel aborts", "Escape aborts", "Escape in the name field aborts even with the name typed"; `ConfirmService` "cancelling a type-to-confirm request resolves false"; `WriteGuard` "production: cancel sends nothing...", "cancelling a type-to-confirm delete sends nothing" | same | Pass |
-| AC1: type-to-confirm enforced above threshold | `ConfirmDialog` "enforces type-to-confirm", "Enter in the name field confirms only when it matches", "the service refuses answer(true) without the typed name"; `ConfirmService` type-to-confirm tests; `WriteGuard` "deleteMany over 1 000 ...", "exactly 1 000 ...", "1 001 documents (count option)...", "without a known count", "updateMany over 1 000 ..." | same | Pass |
-| AC2: `confirmed: true` only after the dialog (fake API) | `WriteGuard` "production: nothing is sent before the dialog", "a caller cannot pre-set confirmed: true", "a caller-supplied confirmed: false is not sent", "bulk writes ask on every profile", "an abort while the dialog is open", "an already aborted signal", "two production writes are confirmed one after the other", "a backend error after confirming", "other destructive writes can opt in" | same | Pass |
-| Read-only refusal / read-only signal | `WriteGuard` "read-only profiles are refused with READ_ONLY", "read-only wins over alwaysConfirm and bulk writes", "flag changes take effect"; `WriteControl` suite (4 tests) | same | Pass |
-| Production accent classes (shell, status bar, tabs) | `AppShell` "shows the production accent while the active view is production", "hosts the confirm dialog"; `StatusBar` "tints the bar for production and marks read-only connections"; existing tab-bar production test | same | Pass |
-| AC3: accent visible in all four theme combinations | `test/e2e/safety.e2e.ts` (4 tests: business/tron x light/dark); screenshots inspected (tron-dark: red sidebar edge, red tab top, red status bar band, production dialog) | `npm run test:e2e -- safety` (builds renderer + desktop, Playwright Electron) | Pass (4 passed). Screenshots went to git-ignored `test-results/screenshots`; the committed copies in `reviews/safety-ui/screenshots/` were not regenerated or modified by this run |
+| AC1: confirm shows operation text | `ConfirmDialog` "shows the exact operation text, the title, connection and detail", "shows type-to-confirm text verbatim", "the accessible description is the operation text itself"; `describeWrite` suite incl. "prints agg.run options and the agg.createView collation", "agg.run prints falsy options..."; `WriteGuard` "production: nothing is sent before the dialog..." | `cd packages/renderer && npx ng test --include='src/app/safety/**/*.spec.ts' --include='src/app/layout/**/*.spec.ts'` | Pass |
+| AC1: cancel aborts | `ConfirmDialog` "cancel aborts", "Escape aborts", "Escape in the name field aborts...", "Escape pressed with focus on <body> cancels", "a backdrop click keeps focus in the dialog, so Escape still cancels", "Escape inside the dialog cancels only the shown request"; `ConfirmService` cancel + withdrawal tests; `WriteGuard` "production: cancel sends nothing", "an abort while the dialog is open closes it and sends nothing" | same | Pass |
+| AC1: type-to-confirm enforced above threshold | `ConfirmDialog` "enforces type-to-confirm", "Enter in the name field confirms only when it matches", "the service refuses answer(true) without the typed name"; `ConfirmService` type-to-confirm tests incl. "withdrawing the shown request clears the typed name"; `WriteGuard` "deleteMany over 1 000", "exactly 1 000", "1 001 documents", "without a known count", "updateMany over 1 000" | same | Pass |
+| AC2: `confirmed: true` only after the dialog (fake API) | `WriteGuard` (with `FakeThicketBridge`) "production: nothing is sent before the dialog", "a caller cannot pre-set confirmed: true", "a caller-supplied confirmed: false is not sent", "bulk writes ask on every profile", "an abort while the dialog is open closes it and sends nothing", "an already aborted signal", "two production writes are confirmed one after the other", "a backend error after confirming", "other destructive writes can opt in" | same | Pass |
+| Dialog is modal (CR-1): background inert, tab shortcuts ignored, focus kept | `AppShell` "while the confirm dialog is open, the rest of the window is inert and shortcuts do nothing"; the 8 new `ConfirmDialog` "modal keyboard handling" tests | same | Pass |
+| Read-only signal / write controls (incl. CR-5 `title`) | `WriteGuard` read-only tests; `WriteControl` suite (7 tests incl. "keeps the control own title...", "an empty bound title leaves no title attribute...") | same | Pass |
+| Production accent classes (shell, status bar, tabs) | `AppShell` "shows the production accent while the active view is production"; `StatusBar` "tints the bar for production and marks read-only connections"; tab-bar production test | same | Pass |
+| AC3: accent visible in all four theme combinations | `test/e2e/safety.e2e.ts` (business/tron x light/dark) | `npm run test:e2e -- test/e2e/safety.e2e.ts` (builds renderer + desktop, Playwright Electron) | Pass (4 passed, 18.3 s). Screenshots written to git-ignored `test-results/`; the committed `reviews/safety-ui/screenshots/` were not modified by this run (git status clean for them) and were not compared pixel-by-pixel |
 
 ## Focused test execution
 
@@ -81,7 +83,7 @@ Command:
 
 Result:
 
-Pass: 12 files, 217 tests (before additions: 11 files, 177 tests, also passing).
+Pass: 12 files, 237 tests (223 at HEAD before the additions).
 
 ## Full test execution
 
@@ -91,19 +93,24 @@ Command:
 
 Result:
 
-Pass: root vitest 42 files / 2551 tests, renderer 44 files / 811 tests; lint, Prettier and type checks clean.
+Pass: root vitest 42 files / 2551 tests; renderer 44 files / 831 tests; lint, Prettier and type checks clean.
 
-Also: `npm run test:e2e -- safety` -> 4 passed (17.3 s).
+Also: `npm run test:e2e -- test/e2e/safety.e2e.ts` -> 4 passed.
 
 ## .taskcheck
 
 Result:
 
-Pass (`.taskcheck` runs `npm run check`, see above).
+Pass (`sh .taskcheck` -> `npm run check`, same counts as above).
 
 ## Bugs found
 
 None. No test exposed a production defect.
+
+Non-code finding for the parent worker: `reviews/safety-ui/fixes.md` claims dialog-level tests for CR-1 and
+CR-2 that were not in commit 24cd7c4 (see "Tests added or updated"). They are added now; the parent should
+note this when recording the fixer evidence. Separately, `reviews/safety-ui/review.md` shows as modified in
+the working tree during this run; this test-writer did not edit it.
 
 ## Coverage
 
@@ -115,84 +122,90 @@ no tooling was added).
 
 Evidence:
 - Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: `safety-ui`; base
-  `2524a5ced5e53202286ca7221f0ad8d72d3c6132`; HEAD `adb7096a134954e92809fac066ff262a1e989a12`; task
-  commits 28ef314, adb7096 (from parent, confirmed with `git log 2524a5c..HEAD` / `git diff --stat`).
-- Source/test snapshot identifier (including uncommitted inputs): HEAD adb7096 + uncommitted spec files;
-  `cat packages/renderer/src/app/safety/*.spec.ts | sha256sum` =
-  `f8f67c453d0220cb38109fe9d9ee19b4394f963db90d543b9de32e69fa3c4169` (same before the final coverage
-  run and before `npm run check`); `git diff HEAD -- packages | sha256sum` =
-  `445253c1e6d2fb5acdccaadd082ccfe740bb9569895f9b079ff8b5a251d177e5`. No production file differs from HEAD.
-- Exact included files: `src/app/safety/{confirm-dialog,confirm.service,operation,profile-safety.service,safety.types,write-control.directive,write-guard.service,index}.ts`,
+  `95e744c3e2dacf3953e50db9852e363213a1ab56` (`git merge-base HEAD origin/main`); HEAD
+  `24cd7c440cebf708e410319fdbb0d7be287b5520`; task commits ecfa408, 971aea8, 9f22957, 24cd7c4
+  (`git log 95e744c..HEAD`, `git diff --stat 95e744c HEAD`).
+- Source/test snapshot identifier (including uncommitted inputs): HEAD 24cd7c4 + four uncommitted spec
+  files, sha256: `confirm-dialog.spec.ts` b97e333a8dfc8ba3bd0bbffbdb820a5654b0d363f3f8df7a19ac221241a4bb15,
+  `confirm.service.spec.ts` 496d4b8a3da89c595f6a7a4473a2db7b789d853a49a50199a4905464eb4bfc7e,
+  `operation.spec.ts` 9aca1a34b4888f415820b0c6646860fc1509de6b44705169bcd8cd72caf17d9d,
+  `write-control.directive.spec.ts` f122ccbf5c8926a41ca103a3431d508ce6e67953d9ef19c5a441451eefbcf287
+  (identical before and after the coverage run and `npm run check`). `git diff --quiet HEAD` on the
+  changed production files: no difference.
+- Exact included files (relative to `packages/renderer`): `src/app/safety/{confirm-dialog,confirm.service,operation,profile-safety.service,safety.types,write-control.directive,write-guard.service,index}.ts`,
   `src/app/layout/app-shell.ts`, `src/app/layout/status-bar.ts`, `src/app/dev/safety-demo.ts`,
-  `src/app/app.routes.ts` (paths relative to `packages/renderer`). Excluded: `confirm-dialog.css`,
-  `app-shell.css` (styles, no executable code; verified through e2e screenshots),
-  `packages/core/package.json` (export map only; exercised by every test importing
-  `@thicket/core/shellsyntax`), `test/e2e/safety.e2e.ts` (test), `docs/ARCHITECTURE.md`, screenshots.
-  No renamed or deleted files.
-- Provider/version, command, working directory, and test selection: `@vitest/coverage-v8` 5.1.0 via
-  `@angular/build:unit-test` 22.2.7 (vitest 5.1.0); in `packages/renderer`:
+  `src/app/app.routes.ts`. Excluded: `confirm-dialog.css`, `app-shell.css` (styles, no executable code;
+  checked through the e2e screenshots), `packages/core/package.json` (export map only; exercised by every
+  test importing `@thicket/core/shellsyntax`), spec files, `test/e2e/safety.e2e.ts` (test),
+  `docs/ARCHITECTURE.md`, `reviews/`. No renamed or deleted files.
+- Provider/version, command, working directory, and test selection: `@vitest/coverage-v8` via
+  `@angular/build:unit-test` (vitest 5.1.0), in `packages/renderer`:
   `npx ng test --include='src/app/safety/**/*.spec.ts' --include='src/app/layout/**/*.spec.ts' --coverage --coverage-reporters=text --coverage-reporters=json-summary --coverage-reporters=json --coverage-include='src/app/safety/*.ts' --coverage-include='src/app/layout/app-shell.ts' --coverage-include='src/app/layout/status-bar.ts' --coverage-include='src/app/dev/safety-demo.ts' --coverage-include='src/app/app.routes.ts'`
-- Run start/completion time and exit status: started 2026-11-16 21:51:50 +0100, reports written
-  21:51:53 +0100; 12 files / 217 tests passed, no error.
+- Run start/completion time and exit status: started 2026-11-16 22:04:10 +0100, reports written
+  22:04:13 +0100; exit 0; 12 files / 237 tests passed.
 - Generated report paths and report hashes/run identifier: `packages/renderer/coverage/renderer/coverage-summary.json`
-  (sha256 `419524678dc50a9c3cb3a25dca575e413eb971b91577befdde66a20bdf12c013`),
+  (sha256 `2d83d664482934f4c47045d40ab16ac4f0ffc52448de31a3113adfa3ee78a950`),
   `packages/renderer/coverage/renderer/coverage-final.json`
-  (sha256 `51516540d1ae7ac2937d2c0ca4dcd9fe557d9be92ece7be0819d09c10b6802ad`); git-ignored.
-- Evidence outputs are fresh and inputs stayed unchanged: report mtimes are within the run; the provider
-  rewrote the directory (it only held the two files of this run's reporters); spec hash identical before
-  and after.
-- Final run after latest test additions and production fixes: yes for the test additions; no production
-  fixes were made. Any later production change makes these numbers stale.
+  (sha256 `63b6cc7089b61fc60a9511cab703ef4fe50badc4b513bafe004a3fc62d1502cf`); git-ignored.
+- Evidence outputs are fresh and inputs stayed unchanged: report mtimes (22:04:13) fall within this run;
+  the directory holds only this run's two JSON reports; spec hashes and production files unchanged.
+- Final run after latest test additions and production fixes: yes (after the CR-1..CR-6 fixes in 24cd7c4
+  and after all tests added in this run). Any later production change makes these numbers stale.
 
 Values below use covered/total (percentage); zero-denominator or unsupported metrics are N/A.
 
 | Changed file | Statements | Branches | Functions | Lines |
 |---|---:|---:|---:|---:|
-| `src/app/safety/confirm-dialog.ts` | 121/122 (99.2%) | 60/62 (96.8%) | 15/15 (100%) | 93/93 (100%) |
-| `src/app/safety/confirm.service.ts` | 21/21 (100%) | 14/14 (100%) | 4/4 (100%) | 16/16 (100%) |
-| `src/app/safety/operation.ts` | 56/57 (98.2%) | 49/51 (96.1%) | 8/8 (100%) | 48/49 (98.0%) |
+| `src/app/safety/confirm-dialog.ts` | 141/142 (99.3%) | 80/82 (97.6%) | 21/21 (100%) | 108/108 (100%) |
+| `src/app/safety/confirm.service.ts` | 36/37 (97.3%) | 21/22 (95.5%) | 7/7 (100%) | 29/29 (100%) |
+| `src/app/safety/operation.ts` | 73/74 (98.6%) | 63/65 (96.9%) | 8/8 (100%) | 60/61 (98.4%) |
 | `src/app/safety/profile-safety.service.ts` | 28/28 (100%) | 17/17 (100%) | 9/9 (100%) | 21/21 (100%) |
 | `src/app/safety/safety.types.ts` | 2/2 (100%) | N/A (0/0) | N/A (0/0) | 2/2 (100%) |
-| `src/app/safety/write-control.directive.ts` | 14/14 (100%) | 13/13 (100%) | 3/3 (100%) | 8/8 (100%) |
+| `src/app/safety/write-control.directive.ts` | 15/15 (100%) | 15/15 (100%) | 3/3 (100%) | 9/9 (100%) |
 | `src/app/safety/write-guard.service.ts` | 48/48 (100%) | 53/55 (96.4%) | 7/7 (100%) | 37/37 (100%) |
 | `src/app/safety/index.ts` | N/A (0/0, re-exports) | N/A | N/A | N/A |
-| `src/app/layout/app-shell.ts` (whole file, mostly pre-existing) | 115/116 (99.1%) | 68/68 (100%) | 23/24 (95.8%) | 84/84 (100%) |
-| `src/app/layout/status-bar.ts` (whole file, mostly pre-existing) | 52/52 (100%) | 23/24 (95.8%) | 4/4 (100%) | 31/31 (100%) |
+| `src/app/layout/app-shell.ts` (whole file, partly pre-existing) | 125/126 (99.2%) | 74/74 (100%) | 24/25 (96.0%) | 88/88 (100%) |
+| `src/app/layout/status-bar.ts` (whole file, partly pre-existing) | 52/52 (100%) | 23/24 (95.8%) | 4/4 (100%) | 31/31 (100%) |
 | `src/app/dev/safety-demo.ts` | 0/19 (0%) | 0/2 (0%) | 0/4 (0%) | 0/17 (0%) |
 | `src/app/app.routes.ts` (whole file) | 1/5 (20%) | N/A (0/0) | 0/4 (0%) | 1/3 (33.3%) |
-| **Aggregate (all 12 files above, summed counters)** | 458/484 (94.6%) | 297/306 (97.1%) | 73/82 (89.0%) | 341/361 (94.5%) |
-| Safety folder only (8 files) | 290/292 (99.3%) | 206/212 (97.2%) | 46/46 (100%) | 225/226 (99.6%) |
+| **Aggregate (all 12 files above, summed counters)** | 521/548 (95.1%) | 346/356 (97.2%) | 83/92 (90.2%) | 386/406 (95.1%) |
+| Safety folder only (8 files) | 343/346 (99.1%) | 249/256 (97.3%) | 55/55 (100%) | 266/267 (99.6%) |
 
-Baseline before the new tests (same command): aggregate 450/484 statements, 278/306 branches, 73/82
-functions, 339/361 lines; safety folder branches 187/212 -> now 206/212.
-No scoped file was missing from the report. Not in the aggregate: the CSS files and
-`packages/core/package.json` (excluded above).
+Before this run's additions the fix commit already had the covered logic exercised indirectly through
+AppShell; the new tests target the CR-1/CR-2 behavior directly. No scoped file was missing from the report.
+Not in the aggregate: the CSS files and `packages/core/package.json` (excluded above).
 
 | File and uncovered lines/branch locations | Required behavior or risk | Action/test added or reason left uncovered |
 |---|---|---|
-| `src/app/dev/safety-demo.ts:9-66` | Development page for the screenshots (`#/dev/safety`), not product behavior | Exercised by `test/e2e/safety.e2e.ts` (4 passed); unit test not added (dev-only code, e2e is the meaningful check) |
-| `src/app/app.routes.ts:17-28` (lazy `loadComponent` callbacks) | Route `dev/safety` loads the demo | Covered by the e2e run that navigates to `#/dev/safety`; the other callbacks are pre-existing routes |
-| `src/app/safety/operation.ts:134` (`default` case) | Fallback for a write method without a formatter | Unreachable for the typed `WriteMethodName` union (all methods have a case); justified gap |
-| `src/app/safety/operation.ts` 1 more branch (`docs[0] ?? '{}'`) | Defensive fallback when `docs` is empty in the single-insert path | Unreachable (`length === 1` guarantees `docs[0]`); justified gap |
-| `src/app/safety/confirm-dialog.ts:142` (`activeElement instanceof HTMLElement` false) | Focus restore when nothing focusable was active (e.g. SVG element) | Low risk; not added |
-| `src/app/safety/confirm-dialog.ts:192` (`!first \|\| !last` return in Tab trap) | Defensive: Cancel is always enabled, so the list is never empty | Unreachable in the current template; justified gap |
-| `src/app/safety/write-guard.service.ts:115` (`?? 'This connection'`) | READ_ONLY message for a read-only profile with no name | Unreachable: read-only is only true for a registered profile, which has a name |
-| `src/app/safety/write-guard.service.ts:147` (`TITLES[method] ?? method`) | Title fallback for a write method without a title | Every current write method has a title; justified gap |
-| `src/app/layout/app-shell.ts:114` (anonymous function, pre-existing) and `status-bar.ts:171` (`conn ? ... : ''`, pre-existing) | Pre-existing code outside this task's change | Not in the task's changed lines; left as is |
+| `src/app/dev/safety-demo.ts:9-66` | Dev page for the screenshots (`#/dev/safety`), not product behavior | Exercised by `test/e2e/safety.e2e.ts` (4 passed in this run); no unit test (dev-only code) |
+| `src/app/app.routes.ts:17-28` (lazy `loadComponent` callbacks) | Route `dev/safety` loads the demo | Covered by the e2e run that navigates to `#/dev/safety`; other callbacks are pre-existing routes |
+| `src/app/safety/confirm.service.ts:74` (`index < 0` return in `withdraw`) | Abort of a request that is no longer queued | Unreachable: `answer()` detaches the abort listener and the listener is `once`; the "abort after the answer changes nothing" test covers the observable behavior. Justified gap |
+| `src/app/safety/confirm-dialog.ts:150` (`activeElement instanceof HTMLElement` false) | Focus restore when the previously focused element is not an HTMLElement (e.g. SVG) | Low risk; not added |
+| `src/app/safety/confirm-dialog.ts:231` (`!first \|\| !last` return in Tab trap) | Defensive: Cancel is always enabled, so the list is never empty | Unreachable in the current template; justified gap |
+| `src/app/safety/operation.ts:49` switch `default` (line 150) | Fallback for a write method without a formatter | Unreachable for the typed `WriteMethodName` union; justified gap |
+| `src/app/safety/operation.ts:54` (`docs[0] ?? '{}'`) | Defensive fallback in the single-insert path | Unreachable (`length === 1` guarantees `docs[0]`); justified gap |
+| `src/app/safety/write-guard.service.ts:115` (`?? 'This connection'`) | READ_ONLY message for a nameless read-only profile | Unreachable: read-only is only true for a registered profile, which has a name |
+| `src/app/safety/write-guard.service.ts:147` (`TITLES[method] ?? method`) | Title fallback for a method without a title | Every current write method has a title; justified gap |
+| `src/app/layout/app-shell.ts:121` (`viewChild.required` internal function) and `status-bar.ts:171` (`conn ? ... : ''` false arm) | Pre-existing code outside this task's change | Left as is |
 
 ## Unable to test
 
-- Visual rendering of the accent with the Business/Tron tokens (no hard-coded colors) cannot be asserted
-  in jsdom-style component tests; it was checked through the e2e screenshots (run here, 4 passed, one
-  screenshot inspected). Comparing the committed `reviews/safety-ui/screenshots/` pixel-for-pixel was not
-  done (no snapshot assertions exist in the e2e spec). No follow-up needed for this task.
-- WriteGuard is not yet wired into real write UIs or `ProfileSafetyService.set()` into the connection UI
-  (connection-ui task, per the recorded assumption); end-to-end behavior with a real production profile is
-  therefore not testable in this task.
+- Visual rendering of the accent with the Business/Tron tokens (no hard-coded colors) cannot be asserted in
+  the jsdom component tests; it is covered by the e2e run (4 passed). The committed screenshots in
+  `reviews/safety-ui/screenshots/` were not compared pixel-by-pixel (the e2e spec has no snapshot
+  assertions). No follow-up needed for this task.
+- Real browser `inert` semantics (pointer and focus blocking) are only asserted as the attribute in the
+  AppShell unit test; jsdom does not implement `inert`. The e2e spec does not exercise keyboard use behind
+  the open dialog. Low risk; optional follow-up in a later e2e task.
+- WriteGuard is not yet wired into real write UIs, nor `ProfileSafetyService.set()` into the connection UI
+  (connection-ui task, per the recorded assumption), so end-to-end behavior with a real production profile
+  is not testable in this task.
 
 ## Summary
 
-Tests added and all validation passed. 40 new tests (no production defects found); focused safety/layout
-specs, `npm run check` (`.taskcheck`) and the safety e2e spec pass. Task-scoped coverage of the safety
-folder is 99.3% statements / 97.2% branches / 100% functions / 99.6% lines; remaining gaps are
-unreachable defensive branches or dev-only code exercised by e2e.
+Tests added and all validation passed. 14 new tests for the CR-1..CR-5 fixes (including the dialog-level
+CR-1/CR-2 tests that `fixes.md` described but that were missing from the fix commit); no production defects
+found. Focused safety/layout specs (237), `npm run check` / `.taskcheck` and the safety e2e spec (4) pass.
+Task-scoped coverage of the safety folder at 24cd7c4: 99.1% statements / 97.3% branches / 100% functions /
+99.6% lines; remaining gaps are unreachable defensive branches, pre-existing code, or dev-only code covered
+by e2e.

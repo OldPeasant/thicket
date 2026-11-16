@@ -276,6 +276,124 @@ describe('ConfirmDialog', () => {
     expect(typeField()?.getAttribute('aria-invalid')).toBe('false');
   });
 
+  it('the accessible description is the operation text itself (no aria-label on it)', async () => {
+    void service.confirm(request());
+    await render();
+    const describedBy = dialog()?.getAttribute('aria-describedby');
+    expect(describedBy).toBe('confirm-operation');
+    const described = el.querySelector(`#${describedBy ?? 'missing'}`);
+    expect(described?.textContent).toBe(OPERATION);
+    expect(described?.hasAttribute('aria-label')).toBe(false);
+    expect(described?.hasAttribute('aria-labelledby')).toBe(false);
+  });
+
+  describe('modal keyboard handling (focus outside the dialog)', () => {
+    const backdrop = () => el.querySelector<HTMLElement>('[data-testid="confirm-backdrop"]');
+    const onBody = (init: KeyboardEventInit) => {
+      const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+      document.body.dispatchEvent(event);
+      return event;
+    };
+    const blurAll = () => (document.activeElement as HTMLElement | null)?.blur();
+
+    it('a backdrop click keeps focus in the dialog, so Escape still cancels', async () => {
+      const answer = service.confirm(request());
+      await render();
+      blurAll();
+      expect(dialog()?.contains(document.activeElement)).toBe(false);
+      const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+      backdrop()?.dispatchEvent(down);
+      expect(down.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(dialog());
+      dialog()?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+      );
+      await expect(answer).resolves.toBe(false);
+    });
+
+    it('a backdrop click leaves focus on the control inside the dialog', async () => {
+      void service.confirm(request({ typeToConfirm: 'orders' }));
+      await render();
+      expect(document.activeElement).toBe(typeField());
+      backdrop()?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+      expect(document.activeElement).toBe(typeField());
+    });
+
+    it('Escape pressed with focus on <body> cancels', async () => {
+      const answer = service.confirm(request());
+      await render();
+      blurAll();
+      expect(onBody({ key: 'Escape' }).defaultPrevented).toBe(true);
+      await expect(answer).resolves.toBe(false);
+      await render();
+      expect(dialog()).toBeNull();
+    });
+
+    it('Tab pressed with focus on <body> moves focus into the dialog', async () => {
+      void service.confirm(request());
+      await render();
+      blurAll();
+      expect(onBody({ key: 'Tab' }).defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(el.querySelector('[data-testid="confirm-operation"]'));
+    });
+
+    it('other keys and Ctrl+Tab on <body> are left alone', async () => {
+      let settled = false;
+      void service.confirm(request()).then(() => (settled = true));
+      await render();
+      blurAll();
+      expect(onBody({ key: 'a' }).defaultPrevented).toBe(false);
+      expect(onBody({ key: 'Tab', ctrlKey: true }).defaultPrevented).toBe(false);
+      expect(onBody({ key: 'Enter' }).defaultPrevented).toBe(false);
+      await render();
+      expect(settled).toBe(false);
+      expect(dialog()).not.toBeNull();
+    });
+
+    it('with no dialog shown, document keys are not handled', async () => {
+      expect(onBody({ key: 'Escape' }).defaultPrevented).toBe(false);
+      expect(onBody({ key: 'Tab' }).defaultPrevented).toBe(false);
+      // A request made afterwards is still pending, i.e. the Escape above answered nothing.
+      let settled = false;
+      void service.confirm(request()).then(() => (settled = true));
+      await render();
+      expect(dialog()).not.toBeNull();
+      await Promise.resolve();
+      expect(settled).toBe(false);
+    });
+
+    it('Ctrl/Meta/Alt+Tab on the last control is not trapped', async () => {
+      void service.confirm(request());
+      await render();
+      ok()?.focus();
+      for (const mod of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }]) {
+        const tab = new KeyboardEvent('keydown', {
+          key: 'Tab',
+          bubbles: true,
+          cancelable: true,
+          ...mod,
+        });
+        ok()?.dispatchEvent(tab);
+        expect(tab.defaultPrevented).toBe(false);
+        expect(document.activeElement).toBe(ok());
+      }
+    });
+
+    it('Escape inside the dialog cancels only the shown request, not the next queued one', async () => {
+      const first = service.confirm(request({ title: 'First' }));
+      let secondSettled = false;
+      void service.confirm(request({ title: 'Second' })).then(() => (secondSettled = true));
+      await render();
+      cancel()?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+      );
+      await expect(first).resolves.toBe(false);
+      await render();
+      expect(el.querySelector('#confirm-title')?.textContent).toBe('Second');
+      expect(secondSettled).toBe(false);
+    });
+  });
+
   it('shows type-to-confirm text verbatim (no HTML interpretation)', async () => {
     void service.confirm(
       request({ typeToConfirm: '<b>x</b>', operation: 'db.getCollection("<img src=x>")' }),

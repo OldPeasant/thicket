@@ -4,31 +4,42 @@ Date: 2026-11-16
 
 Task: safety-ui - M1: Safety UI: production accent, read-only state, confirm dialog service
 
-Scope: `git diff 2524a5c b98c2fb -- packages test docs` (task code at reviewed revision b98c2fb; HEAD adb7096 has no differences in `packages`, `test` or `docs` against b98c2fb)
+Scope: `git diff 95e744c HEAD -- packages test docs` at reviewed revision 24cd7c440cebf708e410319fdbb0d7be287b5520 (final round, after the fixes for CR-1..CR-6 of the first round). The fix commit was also reviewed on its own (`git diff 9f22957 24cd7c4`). Committed changes only; one uncommitted working-tree change was found and is reported as CR-1.
 
 Requirements:
 - tasks/safety-ui.md (goal, three acceptance criteria, four recorded assumptions)
-- SPEC.md M1 "Safety" and section 4 (write requests carry `profileId` and `confirmed`)
-- docs/ARCHITECTURE.md "Write safety in the renderer" and the status bar notes
+- SPEC.md M1 "Safety" (confirm dialog showing the operation, `confirmed` flag, type-to-confirm over 1 000 documents, production accent, read-only)
+- docs/ARCHITECTURE.md "Write safety in the renderer"
 - docs/QUALITY.md (report contract)
-- packages/contract (write method params, `confirmed`, `WriteKind`)
-- AGENTS.md project notes (theme tokens, no hard-coded colors)
+- reviews/safety-ui/fixes.md (claimed fixes for the first round)
 
 Git range:
 - Branch: main
-- HEAD: adb7096a134954e92809fac066ff262a1e989a12 (reviewed revision b98c2fb, same code)
-- Base/start: 2524a5ced5e53202286ca7221f0ad8d72d3c6132
-- Commits reviewed: 2 (84ca9f2 WriteGuard, confirm dialog, read-only control, production accent; b98c2fb dev page, e2e screenshots, architecture notes)
+- HEAD: 24cd7c440cebf708e410319fdbb0d7be287b5520
+- Base/start: 95e744c3e2dacf3953e50db9852e363213a1ab56 (`git merge-base HEAD origin/main`)
+- Commits reviewed: 4 (ecfa408 WriteGuard, confirm dialog, read-only control, production accent; 971aea8 dev page, e2e screenshots, architecture notes; 9f22957 test-writer tests and first review; 24cd7c4 fixes for CR-1..CR-6)
 
-Summary: 0 P0, 0 P1, 1 P2, 5 P3
+Summary: 0 P0, 0 P1, 1 P2, 1 P3
 
-What was checked and holds:
-- `WriteGuard.approve` refuses read-only profiles with `READ_ONLY` before any request, strips a caller-supplied `confirmed`, adds `confirmed: true` only after `ConfirmService.confirm` resolves `true` and the signal is not aborted; non-confirming writes are sent without `confirmed`. Covered with the fake API in `write-guard.service.spec.ts` (production, bulk on non-production, pre-set `confirmed`, abort, read-only, `approve()`).
-- Type-to-confirm: `count > 1000` (strictly above, 1 000 itself excluded and tested) for `docs.deleteMany`, from `count` or `expectedCount`; enforced both in the dialog (button disabled, Enter guarded) and in `ConfirmService.answer`, so `answer(true)` cannot bypass it (tested).
-- `describeWrite` matches the contract params of all write methods that have required fields (checked against `packages/contract/src/*.ts`); EJSON goes through `printShellSyntax`.
-- Production accent uses only `--production*` tokens, defined in all four theme blocks of `theme/tokens.css`; the dialog CSS uses only tokens (`color-mix` with a token and `transparent`). The 12 committed screenshots in `reviews/safety-ui/screenshots/` show the accent on tab, sidebar edge and status bar in all four combinations; the e2e test also asserts the computed colors.
-- `@thicket/core/shellsyntax` export points at a module that imports only `bson` and `../bson/*`, the same dependency surface as the already-used `./bson` export.
-- Acceptance criteria evidence is not yet recorded (`python tasks.py verify safety-ui` shows all three unticked); that is the parent worker's next step, not a finding.
+## Earlier round (reviewed revision b98c2fb, same code as ecfa408 + 971aea8 after rebase)
+
+| Finding | Title | Status at 24cd7c4 |
+| --- | --- | --- |
+| CR-1 (P2) | Dialog not keyboard-modal | Fixed in code: `AppShell` sets `inert` on sidebar, splitter, `.work` and status bar while `ConfirmService.current()` is set and still consumes Ctrl/Cmd+W, Ctrl+Tab, Ctrl+PageUp/PageDown without touching tabs; the dialog has `tabindex="-1"`, the backdrop `mousedown` keeps or restores focus in it, a `document:keydown` fallback handles Escape/Tab from outside, and the Tab trap ignores Ctrl/Meta/Alt+Tab. AppShell regression test committed; the dialog-level regression tests are not committed (see new CR-1). |
+| CR-2 (P3) | `aria-label` replaced the description | Fixed (`aria-label` removed from `#confirm-operation`); its test is not committed (see new CR-1). |
+| CR-3 (P3) | Aborted write left dialog open | Fixed: `ConfirmService.confirm(request, signal?)` withdraws the entry on abort (shown or waiting), resolves `false`, resets the typed text, and detaches the listener on answer (`once: true` covers the abort path, so no listener leak). `WriteGuard.approve` passes its signal. Tests committed. |
+| CR-4 (P3) | `agg.run` / `agg.createView` options missing | Fixed with tests. |
+| CR-5 (P3) | `WriteControl` removed host `title` | Fixed via a `title` input; static and bound titles tested. |
+| CR-6 (P3) | Splitter comment misplaced | Fixed. |
+
+What was checked in this round and holds:
+- Shortcut handling while modal: Escape inside the dialog stops propagation, so neither `AppShell` nor the explorer's `document:keydown.escape` listener sees it; all other keys from inside the dialog are ignored by `onDocumentKeydown` (`dialog.contains(target)`); `AppShell` consumes the tab shortcuts but leaves tabs alone while `modal()` is true. No other global keydown listeners exist in the renderer besides the explorer column menu (inside the inert `.work`).
+- Focus return after close: the inert attributes are removed during change detection, before `afterRenderEffect` restores focus, so the return target is focusable again.
+- `ConfirmService` queue: withdrawing index 0 shows the next request and resets `typed`; withdrawing a waiting entry leaves the shown one untouched; an abort after an answer is a no-op; an already aborted signal never enqueues. `answer(true)` still cannot bypass type-to-confirm.
+- `WriteGuard`: read-only refusal before any request, caller `confirmed` stripped, `confirmed: true` only after confirmation and when not aborted; unchanged apart from passing the signal.
+- `describeWrite` option output matches the contract field names for `agg.run` / `agg.createView`.
+- Focused tests run by this reviewer: `cd packages/renderer && npx ng test --include='src/app/safety/**/*.spec.ts' --include='src/app/layout/**/*.spec.ts' --watch=false` -> 12 files, 232 tests passed (working tree, including the uncommitted spec change).
+- Acceptance-criterion evidence is not yet recorded (`python tasks.py verify safety-ui` shows #1-#3 unticked); that is the parent worker's next step, not a finding. The 12 screenshots in `reviews/safety-ui/screenshots/` predate the fix commit; the fix only adds `.dialog:focus { outline: none }` and does not affect the accent.
 
 ## P0 Critical
 
@@ -40,50 +51,22 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | Confirm dialog is not modal for the keyboard: app shortcuts act behind it and focus can leave it**
-    - File: `packages/renderer/src/app/safety/confirm-dialog.ts:37` (keydown only on the dialog element), `:170-201`; `packages/renderer/src/app/layout/app-shell.ts:51`, `:157-175`
-    - Category: Correctness
-    - Problem: Only Escape stops propagation. Ctrl/Cmd+W, Ctrl+Tab and Ctrl+PageUp/PageDown pressed inside the open dialog bubble to `AppShell`'s `(document:keydown)` handler, which closes or switches the tab behind the modal (Ctrl+Tab additionally runs `trapFocus`, since it only checks `key === 'Tab'`). Separately, the backdrop has no handler and the background is not `inert`: clicking the backdrop moves focus to `<body>`, after which the dialog's `(keydown)` listener no longer receives events, so Escape does nothing and Tab walks into the sidebar/tabs behind the dialog.
-    - Why it matters: The task asks for a confirm dialog with focus trap and Escape. A user can close the tab whose write is waiting for confirmation (the dialog then stays open for a write whose UI is gone, see CR-3) or interact with the app behind a production confirm. `aria-modal="true"` is announced, but the background stays operable.
-    - Suggested fix: Handle keydown at the document level while a request is shown (or stop propagation of all keydown events from the dialog) so `AppShell` shortcuts are ignored while the dialog is open; make the rest of the shell `inert` while `confirm.current()` is set (or return focus into the dialog on `focusin` outside / backdrop `mousedown`). Add component tests: Ctrl+W inside the dialog does not close a tab; Escape still cancels after a backdrop click.
+- [ ] **CR-1 | Dialog regression tests for the CR-1/CR-2 fixes are not in the reviewed revision**
+    - File: `packages/renderer/src/app/safety/confirm-dialog.spec.ts:279-395` (working tree only; `git status` shows the file modified, `git diff --stat` +118 lines against HEAD)
+    - Category: Tests
+    - Problem: `reviews/safety-ui/fixes.md` lists `confirm-dialog.spec.ts` as changed and describes tests for backdrop click plus Escape, backdrop refocus, Tab from `<body>`, no handling without a request, Ctrl+Tab not trapped and the accessible description, but commit 24cd7c4 does not contain any change to that file (`git diff 9f22957 24cd7c4 --stat` omits it). The tests exist only as an uncommitted working-tree change (they pass, see above). At the reviewed revision, the new `onDocumentKeydown`, `onBackdropMousedown`, the modifier check in the Tab trap and the removed `aria-label` have no committed test; only the AppShell-level inert/shortcut test is committed.
+    - Why it matters: The fix report and the quality evidence claim coverage the repository does not hold; a later change can regress the modal focus handling unnoticed, and `done` would ship the code without these tests.
+    - Suggested fix: Commit the `confirm-dialog.spec.ts` changes (after any in-progress test-writer run finishes) together with the review evidence. Test-only changes keep this review fresh under docs/QUALITY.md "Freshness".
 
 ## P3 Low
 
-- [ ] **CR-2 | `aria-label="Operation"` on the operation block replaces the alert dialog's description**
-    - File: `packages/renderer/src/app/safety/confirm-dialog.ts:33`, `:58-63`
+- [ ] **CR-2 | ARCHITECTURE.md still documents the old `ConfirmService.confirm` signature and omits the modal behavior**
+    - File: `docs/ARCHITECTURE.md:293-294` (section "Write safety in the renderer")
     - Category: Quality
-    - Problem: The `alertdialog` is described by `#confirm-operation` (`aria-describedby`), but that `<pre>` has `aria-label="Operation"`. In accessible-description computation the referenced element's `aria-label` takes precedence over its text content, so screen readers announce "Operation" instead of the shell operation.
-    - Why it matters: SPEC requires the dialog to show the operation; non-visual users get only the label when the dialog opens.
-    - Suggested fix: Drop the `aria-label` from the `<pre>` (or put a visible "Operation" label in a separate element and keep `aria-describedby` pointing at the text-only node).
-
-- [ ] **CR-3 | An aborted write leaves its confirm dialog open**
-    - File: `packages/renderer/src/app/safety/write-guard.service.ts:122-124`; `packages/renderer/src/app/safety/confirm.service.ts:41`
-    - Category: Correctness
-    - Problem: When the caller's `AbortSignal` fires while the dialog is open (tab closed, component destroyed, e.g. `SafetyDemo`'s `onDestroy`), the request stays queued in `ConfirmService`; the dialog remains visible and confirming it only produces a silent `CANCELLED`. `ConfirmService` has no way to withdraw a pending request.
-    - Why it matters: The user sees and may confirm a write that will not happen, and further queued confirmations wait behind it.
-    - Suggested fix: Pass the signal into `confirm()` (or return a withdraw handle) and remove the pending entry / resolve `false` on abort; add a test that aborting closes the dialog.
-
-- [ ] **CR-4 | `describeWrite` omits options for `agg.run` and `agg.createView`**
-    - File: `packages/renderer/src/app/safety/operation.ts:318-325`
-    - Category: Correctness
-    - Problem: `agg.run` prints only the pipeline, dropping `collation`, `hint`, `allowDiskUse`, `maxTimeMS` (and `batchSize`); `agg.createView` drops `collation`. Other cases (`updateMany`/`deleteMany` collation, `insertMany` ordered) do print their options.
-    - Why it matters: The dialog is meant to show the exact operation; a collation changes which documents a `$out`/`$merge` pipeline or view matches.
-    - Suggested fix: Append an options document (`{ collation: ..., hint: ..., allowDiskUse: true, maxTimeMS: ... }`) when present, as done for `updateMany`; add a test case.
-
-- [ ] **CR-5 | `WriteControl` removes a control's own `title` tooltip**
-    - File: `packages/renderer/src/app/safety/write-control.directive.ts:357`
-    - Category: Quality
-    - Problem: The host binding `'[attr.title]': 'readOnly() ? hint : null'` evaluates to `null` on writable profiles, and Angular removes an attribute bound to `null`, so a static `title` on the host (e.g. `title="Save (Ctrl+S)"`) is deleted.
-    - Why it matters: The directive is meant for every write control; tooltips on those controls would silently disappear once later tasks use it.
-    - Suggested fix: Add an optional `title` input that the binding falls back to (`readOnly() ? hint : title()`), or document that hosts must pass their tooltip through the directive.
-
-- [ ] **CR-6 | Splitter comment now sits above the production rule**
-    - File: `packages/renderer/src/app/layout/app-shell.css:46-52`
-    - Category: Quality
-    - Problem: The new `:host(.production) .sidebar` rule was inserted between the existing "The splitter is a 5px hit area..." comment and the `.splitter` rule, so that comment now describes the wrong block.
-    - Why it matters: Misleading comments in the layout stylesheet.
-    - Suggested fix: Move the production rule (with its comment) above the splitter comment.
+    - Problem: The section says `ConfirmService.confirm(request) → Promise<boolean>`; since 24cd7c4 it is `confirm(request, signal?)`, where aborting the signal withdraws the request and closes the dialog, and `AppShell` makes the rest of the window inert while a request is shown. Neither is mentioned.
+    - Why it matters: Later write UIs that call `ConfirmService` directly (not via `WriteGuard`) would not know to pass their abort signal, reintroducing the stale-dialog problem fixed by the earlier CR-3.
+    - Suggested fix: Update the line to `confirm(request, signal?)` with one sentence on withdrawal on abort and the inert background.
 
 ## Review conclusion
 
-Material issues found; fix before completing the task. No acceptance criterion is violated and the core safety guarantees (no `confirmed: true` without confirmation, read-only refusal, type-to-confirm above 1 000) hold and are tested; CR-1 (dialog not keyboard-modal) should be fixed, the P3 items may be fixed or accepted with a note.
+Material issues found; fix before completing the task. The code at 24cd7c4 correctly fixes all six earlier findings and introduces no new correctness, focus or listener-leak problems that could be verified; the core safety guarantees still hold and are tested. CR-1 (commit the dialog regression tests the fix report claims) should be resolved before `done`; CR-2 is a small documentation update.

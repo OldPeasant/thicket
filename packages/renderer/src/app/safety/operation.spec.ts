@@ -165,6 +165,24 @@ describe('describeWrite', () => {
     );
   });
 
+  it('agg.run prints falsy options that were given and omits the options object without any', () => {
+    expect(
+      describeWrite('agg.run', { ...t, pipeline: '[]', allowDiskUse: false, maxTimeMS: 0 }),
+    ).toBe(`${C}.aggregate([], { allowDiskUse: false, maxTimeMS: 0 })`);
+    expect(describeWrite('agg.run', { ...t, pipeline: '[{"$match":{"a":1}}]' })).toBe(
+      `${C}.aggregate([\n  {\n    $match: {\n      a: 1\n    }\n  }\n])`,
+    );
+    expect(
+      describeWrite('agg.createView', {
+        profileId: 'p',
+        db: 'shop',
+        view: 'v',
+        viewOn: 'orders',
+        pipeline: '[]',
+      }),
+    ).toBe('db.getSiblingDB("shop").createView("v", "orders", [])');
+  });
+
   it('prints the full collMod command with a validator', () => {
     expect(
       describeWrite('coll.validator.set', {

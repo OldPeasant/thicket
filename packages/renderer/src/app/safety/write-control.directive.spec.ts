@@ -28,6 +28,25 @@ class TitledHost {
 }
 
 describe('WriteControl', () => {
+  it('an empty bound title leaves no title attribute on a writable control', async () => {
+    const fixture = TestBed.createComponent(TitledHost);
+    const del = (fixture.nativeElement as HTMLElement).querySelectorAll('button')[1];
+    fixture.componentInstance.tip.set('');
+    await fixture.whenStable();
+    expect(del?.hasAttribute('title')).toBe(false);
+    expect(del?.hasAttribute('disabled')).toBe(false);
+
+    TestBed.inject(ProfileSafetyService).set({
+      id: 'a',
+      name: 'A',
+      readOnly: true,
+      production: false,
+    });
+    await fixture.whenStable();
+    expect(del?.title).toBe(READ_ONLY_HINT);
+    expect(del?.hasAttribute('disabled')).toBe(true);
+  });
+
   it('keeps the control own title on writable profiles and restores it after read-only', async () => {
     const fixture = TestBed.createComponent(TitledHost);
     const safety = TestBed.inject(ProfileSafetyService);

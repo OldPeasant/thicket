@@ -83,6 +83,42 @@ describe('ConfirmService', () => {
     await expect(next).resolves.toBe(false);
   });
 
+  it('withdrawing the shown request clears the typed name for the next one', async () => {
+    const controller = new AbortController();
+    const first = service.confirm(request('first', { typeToConfirm: 'orders' }), controller.signal);
+    const second = service.confirm(request('second', { typeToConfirm: 'orders' }));
+    service.setTyped('orders');
+    controller.abort();
+    await expect(first).resolves.toBe(false);
+    expect(service.current()?.title).toBe('second');
+    service.answer(true);
+    await expect(second).resolves.toBe(false);
+  });
+
+  it('withdrawing a waiting request keeps the name typed into the shown one', async () => {
+    const controller = new AbortController();
+    const first = service.confirm(request('first', { typeToConfirm: 'orders' }));
+    const second = service.confirm(request('second'), controller.signal);
+    service.setTyped('orders');
+    controller.abort();
+    await expect(second).resolves.toBe(false);
+    service.answer(true);
+    await expect(first).resolves.toBe(true);
+    expect(service.current()).toBeNull();
+  });
+
+  it('the last shown request withdrawn closes the dialog', async () => {
+    const controller = new AbortController();
+    const only = service.confirm(request('only'), controller.signal);
+    expect(service.current()?.title).toBe('only');
+    controller.abort();
+    await expect(only).resolves.toBe(false);
+    expect(service.current()).toBeNull();
+    // A later answer has nothing to answer.
+    service.answer(true);
+    expect(service.current()).toBeNull();
+  });
+
   it('type-to-confirm: answer(true) is accepted only with the exact text typed', async () => {
     const wrong = service.confirm(request('a', { typeToConfirm: 'orders' }));
     service.setTyped('ORDERS');
