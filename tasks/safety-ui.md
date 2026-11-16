@@ -1,11 +1,11 @@
 ---
 title: M1: Safety UI: production accent, read-only state, confirm dialog service
-status: in_progress
+status: done
 owner: felix/agent-1
 deps: [app-layout,api-client]
 touches: [packages/renderer/src/app/safety]
 prio: 1
-lease_until: 2026-11-16T21:31:17Z
+lease_until: 
 ---
 ## Goal
 A WriteGuard service and confirm dialog showing the exact operation (shell syntax) used by all write UIs; production connections get the red accent on tabs/sidebar/status bar; read-only exposes a signal that write controls bind to; typing the collection name for deletes over 1 000 documents. Use the frontend-design skill for the visual direction; respect the Business and Tron tokens (no hard-coded colors).
@@ -24,3 +24,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 21:48+0100 by felix/agent-1): WriteGuard rejects with ApiError CANCELLED when the dialog is cancelled and READ_ONLY (nothing sent) on read-only profiles; profile flags come from ProfileSafetyService, which connection-ui must fill with set() when it loads profiles.
 - ASSUMPTION (2026-11-16 21:48+0100 by felix/agent-1): Added a ./shellsyntax subpath export to @thicket/core: importing the core root in the renderer crashes it at startup (SharedArrayBuffer is not defined).
 - ASSUMPTION (2026-11-16 21:48+0100 by felix/agent-1): Screenshots come from a dev route #/dev/safety inside the shell, because no connection UI exists yet to open a real production connection.
+- done by felix/agent-1: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 44s on 66b53c114; criteria verified 3/3
