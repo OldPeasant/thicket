@@ -123,6 +123,9 @@ export class ConnectionEditor {
   private testAbort: AbortController | null = null;
 
   protected readonly isNew = computed(() => this.state().id === undefined);
+  protected readonly heading = computed(() =>
+    this.id() === undefined && this.isNew() ? 'New connection' : 'Edit connection',
+  );
   protected readonly uri = computed(() => connectionStringText(this.state()));
   protected readonly problems = computed(() => editorProblems(this.state()));
   protected readonly folders = computed(() => folderNames(this.tree.profileList()));
@@ -351,8 +354,12 @@ export class ConnectionEditor {
 
   protected setTlsFlag(flag: 'allowInvalidHostnames' | 'allowInvalidCertificates', on: boolean) {
     this.updateModel((m) => {
-      if (on) m.tls[flag] = true;
-      else delete m.tls[flag];
+      // Off removes the option (the driver default) rather than writing `=false`.
+      if (flag === 'allowInvalidHostnames') {
+        if (on) m.tls.allowInvalidHostnames = true;
+        else delete m.tls.allowInvalidHostnames;
+      } else if (on) m.tls.allowInvalidCertificates = true;
+      else delete m.tls.allowInvalidCertificates;
     });
   }
 
@@ -389,8 +396,11 @@ export class ConnectionEditor {
   protected setTimeout(key: 'connectTimeoutMS' | 'serverSelectionTimeoutMS', text: string): void {
     this.updateModel((m) => {
       const n = Number(text.trim());
-      if (text.trim() === '' || !Number.isInteger(n) || n <= 0) delete m.timeouts[key];
-      else m.timeouts[key] = n;
+      const valid = text.trim() !== '' && Number.isInteger(n) && n > 0;
+      const timeouts = new Map(Object.entries(m.timeouts));
+      if (valid) timeouts.set(key, n);
+      else timeouts.delete(key);
+      m.timeouts = Object.fromEntries(timeouts);
     });
   }
 

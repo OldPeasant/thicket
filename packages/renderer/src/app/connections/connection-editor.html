@@ -1,10 +1,14 @@
 @switch (load().status) {
   @case ('loading') {
-    <p class="loading" data-testid="editor-loading">Loading connection…</p>
+    <div class="loading">
+      <h1 class="state-heading" data-testid="page-heading">{{ heading() }}</h1>
+      <p data-testid="editor-loading">Loading connection…</p>
+    </div>
   }
   @case ('error') {
-    <div class="load-error" role="alert" data-testid="editor-load-error">
-      <p>The connection could not be loaded.</p>
+    <div class="load-error">
+      <h1 class="state-heading" data-testid="page-heading">{{ heading() }}</h1>
+      <p role="alert" data-testid="editor-load-error">The connection could not be loaded.</p>
       <p class="detail">{{ $any(load()).message }}</p>
       <a [routerLink]="nav.connections">Back to connections</a>
     </div>
@@ -34,7 +38,7 @@
             />
           </label>
           <p class="where">
-            {{ isNew() ? 'New connection' : 'Edit connection' }}
+            <span data-testid="page-heading">{{ heading() }}</span>
             @if (state().folder) {
               <span class="in-folder">in {{ state().folder }}</span>
             }

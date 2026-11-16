@@ -27,6 +27,15 @@
   color: var(--text-muted);
 }
 
+.state-heading {
+  margin: 0 0 0.5rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: var(--heading-tracking);
+  text-transform: var(--heading-transform);
+}
+
 .load-error .detail {
   white-space: pre-line;
   color: var(--danger-text);
