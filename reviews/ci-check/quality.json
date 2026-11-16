@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "task": "ci-check",
+  "reviewed_revision": "dc09cde1738dc084b6747e1966e788a602e7d052",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/ci-check/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/ci-check/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/ci-check/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "R1-CR-1",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "first review round (CR-1 in fixes.md): cancel-in-progress no longer applies to main"
+    },
+    {
+      "id": "R1-CR-2",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "first review round (CR-2 in fixes.md): actions/checkout and actions/setup-node moved to v5"
+    },
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "accepted",
+      "note": "final review: a queued (not running) main run can be superseded when 3+ pushes land during one run; the latest main commit is always checked, so no breakage goes unseen; not worth another fix/review round"
+    }
+  ],
+  "validation": [
+    { "command": "npx --yes @action-validator/cli .github/workflows/check.yml", "result": "pass" },
+    { "command": "npm run check", "result": "pass" }
+  ]
+}
