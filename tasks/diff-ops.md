@@ -1,11 +1,11 @@
 ---
 title: Core: edit diff → update operations and conflict filter
-status: in_progress
+status: done
 owner: felix/agent-2
 deps: [bson-model]
 touches: [packages/core/src/diff]
 prio: 1
-lease_until: 2026-11-16T19:34:44Z
+lease_until: 
 ---
 ## Goal
 From original and edited documents compute the minimal update (`$set`/`$unset`, `$push` for pure appends, whole-array replace otherwise) and the conflict filter (`_id` + original values of changed top-level fields).
@@ -25,3 +25,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 19:57+0100 by felix/agent-2): Conflict filter uses {field: {$eq: original}} per changed top-level field, {$exists: false} for fields absent in the original, and $expr/$getField for non-path keys. Known limit of $eq query semantics: a scalar/array original also matches a server array containing it, and numbers match across int/long/double.
 - ASSUMPTION (2026-11-16 19:57+0100 by felix/agent-2): diffDocuments throws BsonModelError when _id is missing or changed (MongoDB rejects _id changes); the editor must create a new document for that.
 - ASSUMPTION (2026-11-16 20:08+0100 by felix/agent-2): Null and BSON-undefined originals are checked with $type ($eq null would also match a field removed on the server). A replace whose edited document has a top-level $-prefixed key cannot be written (server rejects replaceOne), so diffDocuments throws BsonModelError for it.
+- done by felix/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 33s on 0739f0eba; criteria verified 3/3
