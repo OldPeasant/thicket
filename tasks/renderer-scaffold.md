@@ -5,7 +5,7 @@ owner: dell26/agent-1
 deps: [scaffold]
 touches: [packages/renderer]
 prio: 1
-lease_until: 2026-11-16T18:01:06Z
+lease_until: 2026-11-16T18:01:08Z
 ---
 ## Goal
 Angular 22 app in packages/renderer (standalone components, signals, zoneless if Canopy is), built into `packages/renderer/dist` for Electron to load from disk; Vitest unit tests as in JSON Canopy.
