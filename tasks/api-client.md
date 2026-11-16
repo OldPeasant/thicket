@@ -11,7 +11,8 @@ lease_until: 2026-11-16T18:44:05Z
 Typed Angular service wrapping `window.thicket`: `request<M>()` typed by the contract, streams as Observables with cancel on unsubscribe, error codes mapped to user-readable messages, a fake implementation for tests.
 
 ## Acceptance criteria
-- [ ] Unit tests with the fake: typed request/response, stream data/end/error, unsubscribe sends cancel
+- [x] Unit tests with the fake: typed request/response, stream data/end/error, unsubscribe sends cancel
+  - verified (2026-11-16 19:25+0100 by felix/agent-2): npm run test -w packages/renderer (ng test, Vitest+jsdom) -> 181 passed; api.service.spec.ts uses FakeThicketBridge: typed request/response (expectTypeOf ResultOf), stream data/end/error, unsubscribe sends cancel with request id (pending) or streamId (running)
 - [ ] Every contract error code has a message (test enumerates the codes)
 - [ ] Fake is exported for other renderer tests to use
 
