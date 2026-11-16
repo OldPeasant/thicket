@@ -376,6 +376,135 @@ describe('CollectionView', () => {
     expect(finds()).toHaveLength(2);
   });
 
+  it('shows a document that cannot be read in every view without dropping the others', async () => {
+    // Valid JSON, but not valid canonical EJSON (an Int32 wrapper holding no number).
+    const unreadable = '{"_id":{"$numberInt":"not a number"}}';
+    answer = () => [docs(1, 1)[0] ?? '', unreadable, docs(3, 1)[0] ?? ''];
+    type('query-filter', '{ a: 1 }');
+    click('query-run');
+    await settle();
+    expect(q('results-error')).toBeNull();
+    expect(q('pager-rows')?.textContent).toContain('1–3');
+
+    click('view-list');
+    await settle();
+    const items = el().querySelectorAll('[data-testid="result-doc"]');
+    expect(items).toHaveLength(3);
+    expect(items[1]?.textContent).toContain('could not be read');
+    expect(items[0]?.querySelector('app-json-form')).not.toBeNull();
+
+    click('view-raw');
+    await settle();
+    const raw = q('raw-text')?.textContent ?? '';
+    expect(raw).toContain('// unreadable document');
+    expect(raw).toContain('name: "doc 1"');
+    expect(raw).toContain('name: "doc 3"');
+    click('raw-ejson');
+    await settle();
+    // The EJSON view shows the text as received, the unreadable document included.
+    expect(q('raw-text')?.textContent?.split('\n')).toEqual([
+      docs(1, 1)[0],
+      unreadable,
+      docs(3, 1)[0],
+    ]);
+
+    click('view-table');
+    await settle();
+    expect(el().querySelector('app-json-explorer')).not.toBeNull();
+  });
+
+  it('closing the tab cancels a running page read and count', async () => {
+    let countId = '';
+    fake.handle('docs.count', (_p, request) => {
+      countId = request.id;
+      return new Promise(() => undefined);
+    });
+    answer = () => null;
+    click('pager-next');
+    click('pager-count');
+    await settle();
+    const streamId = `s${streams}`;
+    expect(fake.cancels).not.toContain(streamId);
+    fixture.destroy();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fake.cancels).toContain(streamId);
+    expect(fake.cancels).toContain(countId);
+  });
+
+  it('previous on a last page read straight from page 1 shows the page before the last', async () => {
+    type('query-filter', '{ a: 1 }');
+    click('query-run');
+    await settle();
+    answer = () => docs(9951, 50);
+    click('pager-last');
+    await settle();
+    expect(q('pager-rows')?.textContent).toContain('Last 50');
+    expect(q<HTMLButtonElement>('pager-prev')?.disabled).toBe(false);
+    answer = () => docs(9901, 50);
+    click('pager-prev');
+    await settle();
+    expect(lastFind()).toHaveProperty('before');
+    expect(q('pager-rows')?.textContent).toContain('50, 1 page before the last');
+  });
+
+  it('a page number beyond the limit is not read and the field shows the current page again', async () => {
+    type('query-filter', '{ a: 1 }');
+    type('query-limit', '120');
+    click('query-run');
+    await settle();
+    const page = get<HTMLInputElement>('pager-page');
+    page.value = '10';
+    page.dispatchEvent(new Event('change'));
+    await settle();
+    expect(finds()).toHaveLength(2); // opening + run, nothing for page 10
+    expect(q('pager-rows')?.textContent).toContain('1–50');
+    expect(get<HTMLInputElement>('pager-page').value).toBe('1');
+  });
+
+  it('a page number past the last page (exact count) shows the last page number', async () => {
+    click('pager-count'); // 9 990 documents: 200 pages
+    await settle();
+    answer = () => docs(9951, 40);
+    click('pager-last');
+    await settle();
+    expect(get<HTMLInputElement>('pager-page').value).toBe('200');
+    const page = get<HTMLInputElement>('pager-page');
+    page.value = '999';
+    page.dispatchEvent(new Event('change'));
+    await settle();
+    expect(q('pager-rows')?.textContent).toContain('9,951–9,990');
+    expect(get<HTMLInputElement>('pager-page').value).toBe('200');
+  });
+
+  it('an invalid page number is not read and the field shows the current page again', async () => {
+    const page = get<HTMLInputElement>('pager-page');
+    for (const bad of ['0', '-1', '2.5']) {
+      page.value = bad;
+      page.dispatchEvent(new Event('change'));
+      await settle();
+      expect(get<HTMLInputElement>('pager-page').value).toBe('1');
+    }
+    expect(finds()).toHaveLength(1);
+  });
+
+  it('names a page several pages before an unknown last page', async () => {
+    type('query-filter', '{ a: 1 }');
+    click('query-run');
+    await settle();
+    for (let i = 0; i < 3; i++) {
+      click('pager-next');
+      await settle();
+    }
+    click('pager-last');
+    await settle();
+    click('pager-prev');
+    await settle();
+    click('pager-prev');
+    await settle();
+    expect(q('pager-rows')?.textContent).toContain('50, 2 pages before the last');
+    expect(q<HTMLInputElement>('pager-page')?.value).toBe('');
+  });
+
   it('shows the explorer read-only', () => {
     const toggle = el().querySelector<HTMLButtonElement>('.mode-toggle');
     expect(toggle?.disabled).toBe(true);
