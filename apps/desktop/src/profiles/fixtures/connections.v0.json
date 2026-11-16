@@ -1,0 +1,21 @@
+[
+  {
+    "id": "legacy-1",
+    "name": "Local dev",
+    "uri": "mongodb://localhost:27017/?directConnection=true",
+    "color": "#3a7",
+    "group": "Dev/Local"
+  },
+  {
+    "id": "legacy-2",
+    "name": "Prod cluster",
+    "uri": "mongodb+srv://admin:s%40cret-pw@cluster0.example.net/?retryWrites=true",
+    "readonly": true,
+    "isProduction": true
+  },
+  {
+    "name": "Ask me",
+    "uri": "mongodb://alice:typed-each-time@db1:27017,db2:27017/?replicaSet=rs0",
+    "askPassword": true
+  }
+]

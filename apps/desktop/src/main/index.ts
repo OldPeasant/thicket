@@ -21,6 +21,7 @@ import {
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { ProfilesStore } from '../profiles';
 import { SecretsStore } from '../secrets';
 import { BackendHost } from './backend-host';
 import { mainHandlers, privilegedHandlers } from './handlers';
@@ -82,6 +83,18 @@ function secretsStore(): SecretsStore {
   return secrets;
 }
 
+/** `connections.json` in `userData` (profiles without secrets). */
+let profiles: ProfilesStore | undefined;
+
+function profilesStore(): ProfilesStore {
+  profiles ??= new ProfilesStore({
+    file: path.join(app.getPath('userData'), 'connections.json'),
+    secrets: secretsStore(),
+    log: (message) => log(`profiles: ${message}`),
+  });
+  return profiles;
+}
+
 const host = new BackendHost<MessagePortMain>({
   fork: () =>
     utilityProcess.fork(path.join(distDir, 'backend.cjs'), [], {
@@ -118,7 +131,11 @@ function createWindow(): void {
     preload: path.join(distDir, 'preload.cjs'),
     url: devServer ?? `${APP_ORIGIN}/index.html`,
     host,
-    mainHandlers: mainHandlers({ version: app.getVersion(), secrets: secretsStore() }),
+    mainHandlers: mainHandlers({
+      version: app.getVersion(),
+      secrets: secretsStore(),
+      profiles: profilesStore(),
+    }),
     log,
   });
 }
