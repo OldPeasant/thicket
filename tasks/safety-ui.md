@@ -17,3 +17,4 @@ A WriteGuard service and confirm dialog showing the exact operation (shell synta
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 21:48+0100 by felix/agent-1): Type-to-confirm applies to docs.deleteMany with more than 1000 documents (count option or expectedCount); other destructive writes (coll.drop, db.drop) can opt in via the typeToConfirm option. SPEC only names deletes over 1 000 documents.
