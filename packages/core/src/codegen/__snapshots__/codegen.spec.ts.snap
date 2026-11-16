@@ -55,7 +55,10 @@ public class Query {
                 .append("with space", "line\\nbreak\\ttab")
                 .append("__proto__", "x")
                 .append("ünï", "çödé ✓")
-                .append("$expr", new Document("$eq", Arrays.asList("$a", "$b"))))
+                .append(
+                    "$expr",
+                    new Document("$eq", Arrays.asList("$a", "$b"))
+                ))
                 .sort(new Document("a.b", 1))
                 .forEach(doc -> System.out.println(doc.toJson()));
         }

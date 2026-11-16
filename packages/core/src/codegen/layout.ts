@@ -51,6 +51,42 @@ export function flat(node: Node): string {
 }
 
 /**
+ * Length of the shortest first line `node` can print, and whether it can break at all: a
+ * non-empty list can break right after `open`, a chain right after its head.
+ */
+function firstLine(node: Node): { length: number; breaks: boolean } {
+  if (typeof node === 'string') return { length: node.length, breaks: false };
+  switch (node.kind) {
+    case 'concat':
+      return prefix(node.parts);
+    case 'list':
+      return node.items.length === 0
+        ? { length: flat(node).length, breaks: false }
+        : { length: node.open.length, breaks: true };
+    case 'chain': {
+      const head = firstLine(node.head);
+      return head.breaks ? head : { length: head.length, breaks: true };
+    }
+  }
+}
+
+function prefix(parts: readonly Node[]): { length: number; breaks: boolean } {
+  let length = 0;
+  for (const part of parts) {
+    const first = firstLine(part);
+    length += first.length;
+    if (first.breaks) return { length, breaks: true };
+  }
+  return { length, breaks: false };
+}
+
+/** What must still fit on the line after a concat part: the later parts up to their first break. */
+function restOfLine(later: readonly Node[], trailing: number): number {
+  const rest = prefix(later);
+  return rest.breaks ? rest.length : rest.length + trailing;
+}
+
+/**
  * Prints `node` starting at column `column` of a line whose indentation is `indent`; `step` is
  * one indentation level. `trailing` is the length of what follows on the same line (`,`, `)`).
  */
@@ -68,7 +104,7 @@ export function layout(
       let out = '';
       let col = column;
       node.parts.forEach((part, i) => {
-        const rest = i === node.parts.length - 1 ? trailing : 0;
+        const rest = restOfLine(node.parts.slice(i + 1), trailing);
         const text = layout(part, indent, step, col, rest);
         out += text;
         const nl = text.lastIndexOf('\n');

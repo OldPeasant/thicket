@@ -21,16 +21,8 @@ class PythonPrinter {
     return name;
   }
 
+  /** A dict keeps the last value of a repeated key (so would `SON`, a dict subclass). */
   doc(d: BsonDocument): Node {
-    const keys = new Set(d.fields.map((f) => f.key));
-    if (keys.size < d.fields.length) {
-      // A dict can't hold a key twice; SON is an ordered list of pairs.
-      return list(
-        `${this.use('SON')}([`,
-        d.fields.map((f) => list('(', [q(f.key), this.value(f.value)], ')')),
-        '])',
-      );
-    }
     return list(
       '{',
       d.fields.map((f) => concat(q(f.key), ': ', this.value(f.value))),

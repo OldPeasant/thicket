@@ -86,6 +86,18 @@ const QUERIES: readonly { name: string; query: CodegenQuery }[] = [
     },
   },
   {
+    // `[null]` is the case where Java's Arrays.asList(null) would throw (review CR-1).
+    name: 'find null or missing values with $in: [null]',
+    query: {
+      kind: 'find',
+      database: DB,
+      collection: COLL,
+      filter: d('{ ratio: { $in: [null] }, status: { $in: ["open", "closed"] } }'),
+      projection: d('{ name: 1 }'),
+      sort: d('{ _id: 1 }'),
+    },
+  },
+  {
     name: 'pipeline with $match, $group, $sort and typed literals',
     query: {
       kind: 'aggregate',
@@ -158,7 +170,7 @@ afterAll(async () => {
 });
 
 it('the samples find documents (the comparison is not vacuous)', () => {
-  expect(QUERIES.map((q) => expected.get(q.name)?.length)).toEqual([2, 1, 2]);
+  expect(QUERIES.map((q) => expected.get(q.name)?.length)).toEqual([2, 1, 2, 2]);
 });
 
 /** Runs a generated program and returns its stdout. */

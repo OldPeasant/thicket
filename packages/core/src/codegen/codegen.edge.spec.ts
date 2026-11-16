@@ -166,6 +166,25 @@ describe('layout', () => {
     expect(chain('head', [])).toBe('head');
   });
 
+  it('does not let text after a group push the line past WIDTH', () => {
+    const node = concat(list('(', ['a'.repeat(WIDTH - 2)], ')'), ';');
+    for (const line of layout(node, '', '  ').split('\n')) {
+      expect(line.length).toBeLessThanOrEqual(WIDTH);
+    }
+  });
+
+  it('counts later parts up to their first break, and the outer trailing text', () => {
+    const group = list('(', ['a'.repeat(WIDTH - 4)], ')');
+    // `group` + `.x(` (up to where the next list can break) is one column too wide.
+    expect(layout(concat(group, '.x', list('(', ['b'], ')')), '', '  ').split('\n')[0]).toBe('(');
+    // Only `.(` must fit when the next list breaks: the group stays on one line.
+    const fits = layout(concat(group, '.', list('(', ['b'.repeat(WIDTH)], ')')), '', '  ');
+    expect(fits.split('\n')[0]).toBe(`${flat(group)}.(`);
+    // With nothing breakable after the group, the outer trailing text counts too.
+    expect(layout(concat(group, '..'), '', '  ', 0, 1)).toContain('\n');
+    expect(layout(concat(group, '.'), '', '  ', 0, 1)).not.toContain('\n');
+  });
+
   it('continues a concat after a broken part at the column of its last line', () => {
     const node = concat(list('(', ['a'.repeat(WIDTH)], ')'), '.next()');
     expect(layout(node, '', '  ')).toBe(`(\n  ${'a'.repeat(WIDTH)}\n).next()`);
@@ -175,13 +194,15 @@ describe('layout', () => {
 describe('duplicate keys', () => {
   const dup = fields(['a', int(1)], ['a', int(2)]);
 
-  it('Python writes a document with a repeated key as SON pairs, nested too', () => {
+  it('Python writes a document with a repeated key as a dict literal, nested too', () => {
+    // A dict (and SON, a dict subclass) keeps one value per key, so there is no SON case.
     const top = generateCode(find(dup), 'python');
-    expect(top).toContain('cursor = coll.find(SON([("a", 1), ("a", 2)]))');
-    expect(top).toMatch(/^from bson import SON, json_util$/m);
+    expect(top).toContain('cursor = coll.find({"a": 1, "a": 2})');
+    expect(top).toMatch(/^from bson import json_util$/m);
+    expect(top).not.toContain('SON');
 
     const nested = generateCode(find(fields(['x', dup], ['y', int(3)])), 'python');
-    expect(nested).toContain('{"x": SON([("a", 1), ("a", 2)]), "y": 3}');
+    expect(nested).toContain('{"x": {"a": 1, "a": 2}, "y": 3}');
 
     const pipeline = generateCode(
       {
@@ -192,7 +213,7 @@ describe('duplicate keys', () => {
       },
       'python',
     );
-    expect(pipeline).toContain('[{"$match": SON([("a", 1), ("a", 2)])}]');
+    expect(pipeline).toContain('[{"$match": {"a": 1, "a": 2}}]');
   });
 
   it('Python uses a plain dict (and no SON import) when the keys are unique', () => {
@@ -315,6 +336,20 @@ describe('Java timestamps', () => {
   });
 });
 
+describe('Java arrays', () => {
+  it('casts a lone null so Arrays.asList gets a one-element list, not a null array', () => {
+    const code = generateCode(find(d('{ x: { $in: [null] } }')), 'java');
+    expect(code).toContain('new Document("$in", Arrays.asList((Object) null))');
+  });
+
+  it('leaves other nulls and single items as they are', () => {
+    const code = generateCode(find(d('{ a: [null, null], b: [1], c: [[null]] }')), 'java');
+    expect(code).toContain('Arrays.asList(null, null)');
+    expect(code).toContain('Arrays.asList(1)');
+    expect(code).toContain('Arrays.asList(Arrays.asList((Object) null))');
+  });
+});
+
 describe('Java collation', () => {
   it('maps every collation option to the Collation builder', () => {
     const code = generateCode(
@@ -419,7 +454,8 @@ describe('skip and limit', () => {
 
   it('writes positive values in every language', () => {
     const q = find(d('{}'), { skip: 3, limit: 2147483647 });
-    expect(generateCode(q, 'shell')).toContain('.find({}).skip(3).limit(2147483647);');
+    // The one-line statement would be 82 columns, so the find arguments break.
+    expect(generateCode(q, 'shell')).toContain('.find(\n  {}\n).skip(3).limit(2147483647);');
     expect(generateCode(q, 'node')).toContain('coll.find({}, { skip: 3, limit: 2147483647 });');
     expect(generateCode(q, 'python')).toContain('coll.find({}, skip=3, limit=2147483647)');
     expect(generateCode(q, 'java')).toContain('.skip(3)');

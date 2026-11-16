@@ -79,9 +79,12 @@ class JavaPrinter {
       case 'object':
         return this.doc(v);
       case 'array':
+        // A lone `null` argument would be passed as the varargs array itself (NPE).
         return list(
           `${this.use('Arrays')}.asList(`,
-          v.items.map((i) => this.value(i)),
+          v.items.length === 1 && v.items[0]?.type === 'null'
+            ? ['(Object) null']
+            : v.items.map((i) => this.value(i)),
           ')',
         );
       case 'string':
