@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "task": "scaffold",
+  "reviewed_revision": "88cd75d64d0e1cccdb2815dee042d2d38c3e5013",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/scaffold/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/scaffold/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/scaffold/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "CR-1 (round 1)",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "vitest test.projects glob replaced by the explicit list of the 5 workspace configs (fixes.md round 1)"
+    },
+    {
+      "id": "CR-2 (round 1)",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "Node globals only for desktop/backend/config files, browser globals for renderer, Node types for desktop/backend, bare builtins banned in core (fixes.md round 1)"
+    },
+    {
+      "id": "CR-1 (round 2)",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "builtins in gitignore-style patterns flagged local ./util imports; moved to exact-match paths (fixes.md round 2)"
+    },
+    {
+      "id": "TW-1",
+      "source": "test-writer",
+      "severity": "Medium",
+      "disposition": "fixed",
+      "note": "same defect as CR-1 (round 2), fixed in the same commit and confirmed by the final test-writer probes"
+    },
+    {
+      "id": "CR-1 (final)",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "accepted",
+      "note": "the 'electron' pattern would also flag a local ./electron module in packages/core; core has no reason to contain such a module, so the cost of another review round is not justified"
+    }
+  ],
+  "validation": [
+    { "command": "npm ci && npm run check (fresh clone, Node 24.21.0)", "result": "pass" },
+    { "command": "npm run coverage", "result": "pass" },
+    {
+      "command": "npm --prefix packages/core run coverage -- --coverage.include=src/index.ts",
+      "result": "pass"
+    },
+    { "command": "sh .taskcheck", "result": "pass" }
+  ]
+}
