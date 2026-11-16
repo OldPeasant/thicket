@@ -105,15 +105,29 @@ export class EditableValueComponent {
   // can't be converted to (bson-model's table) disabled with the reason. With
   // a schema, only the types it allows, plus the current one so the dropdown
   // can always show what is there now. With a single option there is
-  // nothing to choose, so the dropdown is hidden.
+  // nothing to choose, so the dropdown is hidden. Computed once per value
+  // (and schema type list), not on every change detection.
   get typeOptions(): TypeOption[] {
-    const options = typeOptions(this.value);
     const allowed = this.schema.typesFor(this.uid) as readonly string[] | undefined;
-    if (!allowed) return options;
-    return options.filter(
-      (o) => o.target === this.current || jsonTypesOf(o.target).some((t) => allowed.includes(t)),
-    );
+    const memo = this.optionsMemo;
+    if (memo && Object.is(memo.value, this.value) && memo.allowed === allowed) return memo.options;
+    const current = this.current;
+    const all = typeOptions(this.value);
+    const options = allowed
+      ? all.filter(
+          (o) => o.target === current || jsonTypesOf(o.target).some((t) => allowed.includes(t)),
+        )
+      : all;
+    this.optionsMemo = { value: this.value, allowed, options };
+    return options;
   }
+
+  private optionsMemo?: {
+    value: unknown;
+    allowed: readonly string[] | undefined;
+    options: TypeOption[];
+  };
+
   onChoice(event: Event): void {
     const select = event.target as HTMLSelectElement;
     const index = Number(select.value);

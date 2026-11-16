@@ -21,6 +21,7 @@ import {
   formatDate,
   fromExplorerValue,
   isBsonLeaf,
+  isContainer,
   systemTimeZone,
   toExplorerValue,
   zoneOffsetMs,
@@ -136,19 +137,38 @@ export function parseTimestamp(
 }
 
 const WALL_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/;
+/** An offset with seconds (local mean time, as `formatDate` writes it), e.g. `+00:34:08`. */
+const SECONDS_OFFSET = /^(.+T.+)([+-])(\d{2}):(\d{2}):(\d{2})$/;
 
 /**
- * A date from ISO text: with `Z` or an offset as is, a trailing zone name (as
- * the explorer shows it) ignored; a date-time without offset is wall time in
- * the zone dates are shown in (UTC or local); a date alone is UTC midnight.
+ * A date from ISO text: with `Z` or an offset (`±HH:MM`, or `±HH:MM:SS` as
+ * shown for local mean time) as is, a trailing zone name (as the explorer
+ * shows it) ignored; a date-time without offset is wall time in the zone dates
+ * are shown in (UTC or local); a date alone is UTC midnight. A bare integer is
+ * milliseconds since 1970 (how dates outside the JS date range are shown).
  */
 export function parseDate(text: string, dates: DateDisplay): Parsed<{ type: 'date'; ms: bigint }> {
   const t = text.trim().replace(/\s+[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+)*$/, '');
+  if (INT_TEXT.test(t)) {
+    const ms = BigInt(t);
+    if (ms < INT64_MIN || ms > INT64_MAX) return err(`${t} ms overflows a Date (Int64)`);
+    return ok({ type: 'date', ms });
+  }
   if (WALL_TIME.test(t)) {
     const ms = wallTimeToMs(t, dates);
     return ms === null ? err(`"${text}" is not a valid date`) : ok({ type: 'date', ms });
   }
   try {
+    const lmt = SECONDS_OFFSET.exec(t);
+    if (lmt) {
+      const [, base = '', sign, h, m, s] = lmt;
+      if (Number(h) >= 24 || Number(m) >= 60 || Number(s) >= 60) throw new Error('offset');
+      const offsetMs = (Number(h) * 3600 + Number(m) * 60 + Number(s)) * 1000;
+      return ok({
+        type: 'date',
+        ms: parseIsoDate(`${base}Z`) - BigInt(sign === '-' ? -offsetMs : offsetMs),
+      });
+    }
     return ok({ type: 'date', ms: parseIsoDate(t) });
   } catch {
     return err(`"${text}" is not an ISO-8601 date`);
@@ -319,11 +339,21 @@ export function convertValue(value: unknown, target: CreatableTarget): unknown {
 /** Every creatable type, enabled when `value` can become it. */
 export function typeOptions(value: unknown): TypeOption[] {
   const current = currentTarget(value);
+  // Whether a document or array converts depends on its type alone
+  // (bson-model's table never looks inside): try an empty one instead of
+  // copying the whole subtree for every target.
+  const shell: BsonValue | undefined =
+    isContainer(value) && !isEmptyValue(value)
+      ? Array.isArray(value)
+        ? { type: 'array', items: [] }
+        : { type: 'object', fields: [] }
+      : undefined;
   return CREATABLE_TARGETS.map((target) => {
     const label = TARGET_LABELS[target];
     if (target === current) return { target, label, enabled: true };
     try {
-      convertValue(value, target);
+      if (shell) convert(shell, target);
+      else convertValue(value, target);
       return { target, label, enabled: true };
     } catch (e) {
       if (!(e instanceof ConversionError)) throw e;
@@ -396,22 +426,5 @@ export function blankBson(value: BsonLeafValue): BsonLeafValue {
 
 // --- new numbers ---
 
-/** Type of new integer values that fit 32 bits (`defaultIntegerType` setting). */
-export type IntegerDefault = 'int32' | 'int64' | 'double';
-
-/**
- * A new number typed where no type was chosen: integers that fit 32 bits get
- * the configured type; other integers Int64 when that is configured and they
- * are exact, else Double; fractions are Double.
- */
-export function newNumber(n: number, integers: IntegerDefault = 'int32'): BsonLeafValue {
-  if (Number.isInteger(n) && !Object.is(n, -0)) {
-    if (n >= INT32_MIN && n <= INT32_MAX) {
-      if (integers === 'int32') return { type: 'int', value: n };
-      if (integers === 'int64') return { type: 'long', value: BigInt(n) };
-    } else if (integers === 'int64' && Number.isSafeInteger(n)) {
-      return { type: 'long', value: BigInt(n) };
-    }
-  }
-  return { type: 'double', value: n };
-}
+// `newNumber` lives with `fromExplorerValue`, which applies it to plain numbers.
+export { type IntegerDefault, newNumber } from './bson-value.util';

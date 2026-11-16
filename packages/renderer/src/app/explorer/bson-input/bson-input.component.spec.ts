@@ -99,6 +99,28 @@ describe('BsonInputComponent', () => {
     expect(box?.value).toBe('7');
   });
 
+  // CR-4: a value set from outside (type dropdown, undo) replaces stale text and error.
+  it('a new value from outside clears the error and shows the new value', async () => {
+    await render({ type: 'long', value: 7n });
+    await blur(inputs()[0], 'abc');
+    expect(errorText()).toContain('not an integer');
+    fixture.componentRef.setInput('value', { type: 'int', value: 7 });
+    await fixture.whenStable();
+    expect(errorText()).toBe('');
+    expect(inputs()[0]?.value).toBe('7');
+    expect(inputs()[0]?.classList.contains('invalid')).toBe(false);
+    expect(emitted).toEqual([]);
+  });
+
+  it('the shown text typed back after an error clears it without emitting', async () => {
+    await render({ type: 'int', value: 7 });
+    await blur(inputs()[0], 'x');
+    expect(errorText()).not.toBe('');
+    await blur(inputs()[0], '7');
+    expect(errorText()).toBe('');
+    expect(emitted).toEqual([]);
+  });
+
   it('-0 and 0 are different Doubles', async () => {
     await render({ type: 'double', value: 0 });
     await blur(inputs()[0], '-0');

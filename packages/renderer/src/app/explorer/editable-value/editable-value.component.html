@@ -15,7 +15,8 @@
         }
       </select>
     } @else {
-      @if (typeOptions.length > 1) {
+      @let types = typeOptions;
+      @if (types.length > 1) {
         <select
           class="type-select"
           aria-label="Type"
@@ -24,7 +25,7 @@
           (change)="onTypeChange($event)"
           (click)="$event.stopPropagation()"
         >
-          @for (o of typeOptions; track o.target) {
+          @for (o of types; track o.target) {
             <option
               [value]="o.target"
               [selected]="o.target === current"

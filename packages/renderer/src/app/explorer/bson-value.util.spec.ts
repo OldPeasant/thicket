@@ -95,6 +95,24 @@ describe('toExplorerValue / fromExplorerValue', () => {
     expect(fromExplorerValue(Number.NaN).type).toBe('double');
   });
 
+  // CR-3: plain numbers (unedited schema seeds) follow the defaultIntegerType setting.
+  it('maps plain JS numbers by the integer default it is given, also when nested', () => {
+    expect(fromExplorerValue(5, 'int32')).toEqual({ type: 'int', value: 5 });
+    expect(fromExplorerValue(5, 'int64')).toEqual({ type: 'long', value: 5n });
+    expect(fromExplorerValue(5, 'double')).toEqual({ type: 'double', value: 5 });
+    expect(fromExplorerValue(2 ** 40, 'int64')).toEqual({ type: 'long', value: 2n ** 40n });
+    expect(fromExplorerValue(1.5, 'int64')).toEqual({ type: 'double', value: 1.5 });
+    expect(fromExplorerValue({ a: [7] }, 'double')).toEqual({
+      type: 'object',
+      fields: [{ key: 'a', value: { type: 'array', items: [{ type: 'double', value: 7 }] } }],
+    });
+    const kept = new BsonLeaf({ type: 'int', value: 3 });
+    expect(fromExplorerValue([kept], 'double')).toEqual({
+      type: 'array',
+      items: [{ type: 'int', value: 3 }],
+    });
+  });
+
   it('maps undefined to null and rejects values that are not explorer values', () => {
     expect(fromExplorerValue(undefined)).toEqual({ type: 'null' });
     expect(() => fromExplorerValue(() => 1)).toThrow(TypeError);

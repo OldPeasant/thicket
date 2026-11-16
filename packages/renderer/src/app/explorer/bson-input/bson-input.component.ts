@@ -1,4 +1,12 @@
-import { Component, EventEmitter, Input, Output, inject } from '@angular/core';
+import {
+  Component,
+  EventEmitter,
+  Input,
+  type OnChanges,
+  Output,
+  type SimpleChanges,
+  inject,
+} from '@angular/core';
 import { BINARY_SUBTYPE_UUID, uuidOf } from '@thicket/core/bson';
 
 import { BsonLeaf, type BsonLeafValue, badgeColorVar, badgeOf } from '../bson-value.util';
@@ -38,7 +46,7 @@ export type Part = 'text' | 'subtype' | 'pattern' | 'options' | 't' | 'i';
   templateUrl: './bson-input.component.html',
   styleUrl: './bson-input.component.css',
 })
-export class BsonInputComponent {
+export class BsonInputComponent implements OnChanges {
   @Input({ required: true }) value!: BsonLeafValue;
   @Output() valueChange = new EventEmitter<BsonLeafValue>();
 
@@ -46,6 +54,8 @@ export class BsonInputComponent {
 
   /** The last input's problem, shown until the next valid change or Escape. */
   error = '';
+  /** The input holding the text `error` is about. */
+  private invalid?: { input: HTMLInputElement; part: Part };
 
   readonly regexOptions = REGEX_OPTIONS;
 
@@ -161,21 +171,47 @@ export class BsonInputComponent {
    * written differently ("007" for 7) shows the canonical text again.
    */
   commit(part: Part, input: HTMLInputElement): void {
+    // The text shown for the current value (an input tabbed through) is no
+    // edit: never parsed, so it can't fail where the shown form doesn't parse.
+    if (input.value === this.partText(part)) {
+      if (this.invalid?.input === input) this.clearError();
+      return;
+    }
     const parsed = this.parse(part, input.value);
     if (!parsed.ok) {
       this.error = parsed.error;
+      this.invalid = { input, part };
       return;
     }
-    this.error = '';
+    this.clearError();
     if (!sameValue(parsed.value, this.value)) this.valueChange.emit(parsed.value);
     else input.value = this.partText(part);
   }
 
   /** Escape: back to the current value. */
   revert(input: HTMLInputElement, part: Part): void {
-    this.error = '';
+    this.clearError();
     input.value = this.partText(part);
     input.blur();
+  }
+
+  /**
+   * A new value from outside (type change, undo, reload): the old error is
+   * about text that no longer applies, so it goes, and the input holding that
+   * text shows the new value (its binding alone won't rewrite it when the
+   * shown text is the same as before).
+   */
+  ngOnChanges(changes: SimpleChanges): void {
+    const change = changes['value'];
+    if (!change || change.firstChange) return;
+    const stale = this.invalid;
+    this.clearError();
+    if (stale?.input.isConnected) stale.input.value = this.partText(stale.part);
+  }
+
+  private clearError(): void {
+    this.error = '';
+    this.invalid = undefined;
   }
 
   /** The date-time picker's value is wall time in the zone dates are shown in. */

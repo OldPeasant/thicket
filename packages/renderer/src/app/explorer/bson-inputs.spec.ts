@@ -8,6 +8,7 @@ import { JsonExplorerComponent } from './json-explorer.component';
 import { BsonDisplayService } from './services/bson-display.service';
 import { EditModeService } from './services/edit-mode.service';
 import { NumberDefaultService } from './services/number-default.service';
+import { SchemaService } from './services/schema.service';
 
 // The explorer in edit mode over a BSON document, its owner applying every
 // change (as the app does): typed inputs, the type dropdown, new numbers and
@@ -394,6 +395,18 @@ describe('Explorer edits BSON values without changing their types', () => {
       await move('2', 'up');
       expect(keys()).toEqual(['b', '10', '2', 'a']);
       expect(shown()).toEqual(['b', '10', '2', 'a']);
+    });
+
+    // CR-5: with a schema declaring the keys, the form shows schema order,
+    // which moving the data would not change: no move buttons there.
+    it('offers no moves where a schema declares the keys (schema order is shown)', async () => {
+      expect(
+        TestBed.inject(SchemaService).load('{"properties":{"b":{},"a":{}}}', 'order.schema.json'),
+      ).toBe(true);
+      await renderEJson('{"a":1,"b":2}');
+      expect(shown()).toEqual(['b', 'a']);
+      expect(el().querySelector('button[data-move]')).toBeNull();
+      expect(field('a')?.querySelector('.del-btn')).not.toBeNull();
     });
   });
 });

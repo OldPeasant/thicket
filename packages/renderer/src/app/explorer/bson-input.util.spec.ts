@@ -317,9 +317,30 @@ describe('parseDate', () => {
   });
 
   it('rejects text that is not ISO-8601', () => {
-    for (const text of ['', 'yesterday', '14.11.2023', '2023-11-14 23:13', '1700000000000']) {
+    for (const text of ['', 'yesterday', '14.11.2023', '2023-11-14 23:13', '1.5', '1e3']) {
       expect(error(parseDate(text, ZURICH))).toContain('not');
     }
+  });
+
+  // CR-1 / TW-2: dates outside the JS date range are shown as their bare
+  // millisecond count, so that text must be editable too.
+  it('reads a bare signed integer as milliseconds since 1970, within Int64', () => {
+    expect(value(parseDate('1700000000000', ZURICH)).ms).toBe(1700000000000n);
+    expect(value(parseDate(' -100000000000000000 ', UTC)).ms).toBe(-(10n ** 17n));
+    expect(value(parseDate('+9223372036854775807', UTC)).ms).toBe(2n ** 63n - 1n);
+    expect(error(parseDate('9223372036854775808', UTC))).toContain('overflows');
+  });
+
+  // CR-1 / TW-1: local mean time offsets have seconds.
+  it('reads an offset with seconds', () => {
+    expect(iso(value(parseDate('1850-01-01T00:34:08.000+00:34:08', UTC)).ms)).toBe(
+      '1850-01-01T00:00:00.000Z',
+    );
+    expect(iso(value(parseDate('1850-01-01T00:00:00-00:00:30 Some/Zone', UTC)).ms)).toBe(
+      '1850-01-01T00:00:30.000Z',
+    );
+    expect(error(parseDate('1850-01-01T00:00:00+00:60:00', UTC))).toContain('not');
+    expect(error(parseDate('1850-02-30T00:00:00+00:34:08', UTC))).toContain('not');
   });
 });
 
@@ -651,6 +672,32 @@ describe('typeOptions and convertValue', () => {
       'it already is one; edit its subtype instead',
     );
     expect(convertValue(UUID_LEAF, 'string')).toBe('00112233-4455-6677-8899-aabbccddeeff');
+  });
+
+  // CR-2: a filled document or array is decided by its type alone (no deep
+  // conversion), with the same result as converting it.
+  it('enables for a filled document or array exactly what converting it allows', () => {
+    const doc = { a: [1, { b: leaf({ type: 'long', value: 1n }) }], c: 'x' };
+    const arr = [{ a: 1 }, 'x', leaf({ type: 'date', ms: 0n })];
+    for (const v of [doc, arr]) {
+      for (const o of typeOptions(v)) {
+        let converts = o.target === currentTarget(v);
+        try {
+          convertValue(v, o.target);
+          converts = true;
+        } catch (e) {
+          expect(e).toBeInstanceOf(ConversionError);
+          expect(o.reason).toBe((e as Error).message);
+        }
+        expect(o.enabled, `${JSON.stringify(v)} -> ${o.target}`).toBe(converts);
+      }
+    }
+    const enabled = (v: unknown) =>
+      typeOptions(v)
+        .filter((o) => o.enabled)
+        .map((o) => o.target);
+    expect(enabled(doc)).toEqual(['object', 'array', 'null', 'minKey', 'maxKey']);
+    expect(enabled(arr)).toEqual(['object', 'array', 'null', 'minKey', 'maxKey']);
   });
 
   it('a 16-byte binary can become a UUID, a shorter one cannot', () => {

@@ -111,6 +111,22 @@ describe('EditableValueComponent type dropdown with a schema', () => {
     expect(options.find((o) => o.value === 'int')?.title).toContain('not an integer');
   });
 
+  // CR-2: the options are computed once per value and schema type list.
+  it('reuses the options while the value and the schema types stay the same', async () => {
+    const fixture = await create(int(1));
+    const ev = fixture.componentInstance;
+    const first = ev.typeOptions;
+    expect(ev.typeOptions).toBe(first);
+    allowed = ['integer'];
+    const filtered = ev.typeOptions;
+    expect(filtered.map((o) => o.target)).toEqual(['int', 'long']);
+    expect(ev.typeOptions).toBe(filtered);
+    fixture.componentRef.setInput('value', new BsonLeaf({ type: 'long', value: 1n }));
+    await fixture.whenStable();
+    expect(ev.typeOptions).not.toBe(filtered);
+    expect(ev.typeOptions.map((o) => o.target)).toEqual(['int', 'long']);
+  });
+
   it('a plain number typed becomes the configured BSON number', async () => {
     TestBed.inject(NumberDefaultService).integers.set('int64');
     const fixture = await create(1);

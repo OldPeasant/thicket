@@ -71,24 +71,48 @@ export function toExplorerValue(value: BsonValue): unknown {
 }
 
 /**
- * The BSON value of an explorer tree. Plain JS numbers (typed in the explorer)
- * become Int32 when they are integers that fit, Double otherwise.
+ * The BSON value of an explorer tree. Plain JS numbers (schema seeds and
+ * defaults not edited yet) become what `newNumber` makes of them with the
+ * `integers` setting (`defaultIntegerType`; Int32 when omitted).
  */
-export function fromExplorerValue(value: unknown): BsonValue {
+export function fromExplorerValue(value: unknown, integers: IntegerDefault = 'int32'): BsonValue {
   if (isBsonLeaf(value)) return value.bson;
   if (value === null || value === undefined) return { type: 'null' };
   if (typeof value === 'string') return { type: 'string', value };
   if (typeof value === 'boolean') return { type: 'bool', value };
-  if (typeof value === 'number')
-    return isInt32(value) ? { type: 'int', value } : { type: 'double', value };
-  if (Array.isArray(value)) return { type: 'array', items: value.map(fromExplorerValue) };
+  if (typeof value === 'number') return newNumber(value, integers);
+  if (Array.isArray(value))
+    return { type: 'array', items: value.map((v) => fromExplorerValue(v, integers)) };
   if (typeof value === 'object') {
     return {
       type: 'object',
-      fields: orderedEntries(value).map(([key, v]) => ({ key, value: fromExplorerValue(v) })),
+      fields: orderedEntries(value).map(([key, v]) => ({
+        key,
+        value: fromExplorerValue(v, integers),
+      })),
     };
   }
   throw new TypeError(`Not an explorer value: ${typeof value}`);
+}
+
+/** Type of new integer values that fit 32 bits (`defaultIntegerType` setting). */
+export type IntegerDefault = 'int32' | 'int64' | 'double';
+
+/**
+ * A new number typed where no type was chosen: integers that fit 32 bits get
+ * the configured type; other integers Int64 when that is configured and they
+ * are exact, else Double; fractions are Double.
+ */
+export function newNumber(n: number, integers: IntegerDefault = 'int32'): BsonLeafValue {
+  if (Number.isInteger(n) && !Object.is(n, -0)) {
+    if (n >= INT32_MIN && n <= INT32_MAX) {
+      if (integers === 'int32') return { type: 'int', value: n };
+      if (integers === 'int64') return { type: 'long', value: BigInt(n) };
+    } else if (integers === 'int64' && Number.isSafeInteger(n)) {
+      return { type: 'long', value: BigInt(n) };
+    }
+  }
+  return { type: 'double', value: n };
 }
 
 function isInt32(n: number): boolean {

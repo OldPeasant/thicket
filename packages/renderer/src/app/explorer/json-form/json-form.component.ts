@@ -25,6 +25,19 @@ type Kind = 'object' | 'array' | 'scalar';
 
 const NO_GHOSTS: readonly GhostKey[] = [];
 
+// What the form shows for one object value, kept while the value and the
+// schema's answers about it stay the same.
+interface FieldMemo {
+  value: unknown;
+  ghosts: readonly GhostKey[];
+  declared: readonly string[];
+  required: ReadonlySet<string>;
+  fields: FormField[];
+  avgBytes: number;
+  /** Each own key's place in document order (what the move buttons change). */
+  keyIndex: ReadonlyMap<string, number>;
+}
+
 // The form rendering of a document: an object is a list of labelled fields
 // in schema order, a nested object is a collapsible group, and an array
 // hands over to the table (a list of records is best read as a table, even
@@ -69,14 +82,7 @@ export class JsonFormComponent {
   // A variant switch that would lose data, waiting for the user to confirm.
   protected pending?: { label: string; to: unknown; sw: VariantSwitch };
 
-  private fieldMemo?: {
-    value: unknown;
-    ghosts: readonly GhostKey[];
-    declared: readonly string[];
-    required: ReadonlySet<string>;
-    fields: FormField[];
-    avgBytes: number;
-  };
+  private fieldMemo?: FieldMemo;
 
   get type(): JsonType {
     return typeOf(this.value);
@@ -103,6 +109,10 @@ export class JsonFormComponent {
   }
 
   get fields(): FormField[] {
+    return this.memo.fields;
+  }
+
+  private get memo(): FieldMemo {
     const value = this.value as Record<string, unknown>;
     const ghosts = this.schema.ghostsFor(this.uid);
     const declared = this.schema.declaredKeys(this.uid);
@@ -115,7 +125,7 @@ export class JsonFormComponent {
       memo.declared === declared &&
       memo.required === required
     )
-      return memo.fields;
+      return memo;
     const fields = formFields(value, declared, ghosts.length ? ghosts : NO_GHOSTS, required);
     this.fieldMemo = {
       value,
@@ -124,8 +134,9 @@ export class JsonFormComponent {
       required,
       fields,
       avgBytes: estimateAvgItemBytes(value, Object.values(value)),
+      keyIndex: new Map(orderedKeys(value).map((k, i) => [k, i])),
     };
-    return fields;
+    return this.fieldMemo;
   }
 
   // Expanding a group by hand shows everything below it, whatever the search
@@ -319,13 +330,19 @@ export class JsonFormComponent {
   }
 
   // --- field order ---
+  // Fields move only without a schema declaring this object's keys: the form
+  // then shows schema order, which moving the data would not change.
+  get canMove(): boolean {
+    return this.schema.declaredKeys(this.uid).length === 0;
+  }
+
   // Where a field stands among the object's own keys (document order).
   fieldIndex(key: string): number {
-    return orderedKeys(this.value as object).indexOf(key);
+    return this.memo.keyIndex.get(key) ?? -1;
   }
 
   get fieldCount(): number {
-    return Object.keys(this.value as object).length;
+    return this.memo.keyIndex.size;
   }
 
   // Moves a field one place up (-1) or down (+1) in the document.
