@@ -84,13 +84,34 @@ describe('handleEditKeys', () => {
     expect(s.edits.redo).not.toHaveBeenCalled();
   });
 
-  it('saves with Ctrl+S, also from a text field', () => {
+  it('saves with Ctrl+S', () => {
     const s = setup();
-    expect(s.press({ key: 's', ctrlKey: true }, document.createElement('input'))).toEqual({
-      handled: true,
-      prevented: true,
-    });
+    expect(s.press({ key: 's', ctrlKey: true })).toEqual({ handled: true, prevented: true });
     expect(s.actions.saveAll).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies the value typed into a text field before saving with Ctrl+S', async () => {
+    // Nothing is modified until the field applies its value, on blur.
+    const state = { modified: false };
+    const s = setup(state);
+    const field = document.createElement('input');
+    document.body.append(field);
+    field.focus();
+    field.addEventListener('blur', () => (state.modified = true));
+    try {
+      expect(s.press({ key: 's', ctrlKey: true }, field)).toEqual({
+        handled: true,
+        prevented: true,
+      });
+      expect(document.activeElement).not.toBe(field);
+      expect(state.modified).toBe(true);
+      // The save runs once the applied edit has been recorded.
+      expect(s.actions.saveAll).not.toHaveBeenCalled();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(s.actions.saveAll).toHaveBeenCalledTimes(1);
+    } finally {
+      field.remove();
+    }
   });
 
   it('swallows Ctrl+S without saving when read-only, unmodified or busy', () => {

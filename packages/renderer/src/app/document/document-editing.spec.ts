@@ -243,6 +243,18 @@ describe('Editing documents in a collection tab', () => {
     expect(button('edit-undo').disabled).toBe(true);
   });
 
+  it('saves the value still being typed in a field with Ctrl+S', async () => {
+    const field = input(0, 'total');
+    field.focus();
+    field.value = '15';
+    field.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }),
+    );
+    await settle();
+    expect(updates().map((u) => u['update'])).toEqual(['{"$set":{"total":{"$numberInt":"15"}}}']);
+    expect(q('edit-count')).toBeNull();
+  });
+
   it('asks first on a production profile, showing the $set operation', async () => {
     TestBed.inject(ProfileSafetyService).set({
       id: 'p1',
@@ -365,7 +377,9 @@ describe('Editing documents in a collection tab', () => {
       expect(button(id, docItem(0)).disabled, id).toBe(true);
     }
     // The explorer leaves edit mode and shows no inputs; its own toggle says read-only.
-    expect(TestBed.inject(EditModeService).enabled()).toBe(false);
+    const viewEditMode = fixture.debugElement.injector.get(EditModeService);
+    expect(viewEditMode).not.toBe(TestBed.inject(EditModeService));
+    expect(viewEditMode.enabled()).toBe(false);
     expect(docItem(0).querySelector('app-bson-input input')).toBeNull();
     await click('view-table');
     const toggle = el().querySelector<HTMLButtonElement>('.mode-toggle');

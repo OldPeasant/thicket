@@ -157,7 +157,8 @@ export class EditBar {
 
 /**
  * Undo / redo / save keys of a collection tab: Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z or Ctrl+Y, Ctrl/Cmd+S.
- * Text fields keep their own undo, so keys typed into them are left alone. Returns true when the
+ * Text fields keep their own undo, so keys typed into them are left alone; Ctrl/Cmd+S in a text
+ * field first applies its value (by leaving the field), then saves. Returns true when the
  * key was handled (and its default prevented).
  */
 export function handleEditKeys(
@@ -171,7 +172,17 @@ export function handleEditKeys(
   const key = event.key.toLowerCase();
   if (key === 's') {
     event.preventDefault();
-    if (canWrite && edits.modified() && !actions.busy()) void actions.saveAll();
+    if (!canWrite) return true;
+    const save = () => {
+      if (edits.modified() && !actions.busy()) void actions.saveAll();
+    };
+    if (target !== null && isTextField(target)) {
+      // Fields apply what was typed when they lose focus: apply it first, then save it too.
+      target.blur();
+      setTimeout(save);
+    } else {
+      save();
+    }
     return true;
   }
   if (target !== null && isTextField(target)) return false;

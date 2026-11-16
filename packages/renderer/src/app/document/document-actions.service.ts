@@ -8,6 +8,7 @@ import {
   parseEJsonDocument,
   stringifyEJson,
 } from '@thicket/core/bson';
+import type { DocumentDiff } from '@thicket/core/diff';
 import { printShellSyntax } from '@thicket/core/shellsyntax';
 
 import { ApiError, ApiService, describeError } from '../api';
@@ -112,7 +113,12 @@ export class DocumentActions {
       id: stringifyEJson(id),
     };
     const diff = pending.diff;
-    return this.write(key, async () => {
+    if (host.projection() !== undefined && overwritesHiddenData(diff, entry.original)) {
+      this.messageState.set({ kind: 'error', text: PROJECTION_REFUSED });
+      return false;
+    }
+    const sent = entry.current;
+    return this.write('Not saved', key, async () => {
       if (diff.kind === 'update') {
         await this.guard.run('docs.update', {
           ...base,
@@ -126,10 +132,11 @@ export class DocumentActions {
           expected: stringifyEJson(diff.expected),
         });
       }
-      this.edits.discard(key);
       this.dropConflict(key);
       this.messageState.set({ kind: 'info', text: `Saved ${label(id)}.` });
-      await this.readBack(key, base.id, entry.current);
+      await this.readBack(key, base.id, sent);
+      // What was sent is the new baseline; edits made since then stay unsaved.
+      this.edits.rebase(key, sent);
     });
   }
 
@@ -164,7 +171,7 @@ export class DocumentActions {
     const id = idOf(doc);
     if (key === null || id === null || this.isBusy(key)) return false;
     const params = { profileId: host.profileId, db: host.db, coll: host.coll, id: key };
-    return this.write(key, async () => {
+    return this.write('Not deleted', key, async () => {
       const { deleted } = await this.guard.run('docs.delete', params, {
         alwaysConfirm: true,
         confirmLabel: 'Delete',
@@ -208,7 +215,7 @@ export class DocumentActions {
     if (draft === undefined) return false;
     const busyKey = `draft:${id}`;
     if (this.isBusy(busyKey)) return false;
-    return this.write(busyKey, async () => {
+    return this.write('Not inserted', busyKey, async () => {
       const { insertedIds } = await this.guard.run('docs.insert', {
         profileId: host.profileId,
         db: host.db,
@@ -224,14 +231,17 @@ export class DocumentActions {
     });
   }
 
-  /** Runs a write for `key`; failures become the message (a cancelled dialog says nothing). */
-  private async write(key: string, body: () => Promise<void>): Promise<boolean> {
+  /**
+   * Runs a write for `key`; failures become the message, starting with `failure` ("Not saved"), and
+   * a cancelled dialog says nothing.
+   */
+  private async write(failure: string, key: string, body: () => Promise<void>): Promise<boolean> {
     this.busyKeys.update((set) => new Set(set).add(key));
     try {
       await body();
       return true;
     } catch (error) {
-      this.failed(key, error);
+      this.failed(failure, key, error);
       return false;
     } finally {
       this.busyKeys.update((set) => {
@@ -242,7 +252,7 @@ export class DocumentActions {
     }
   }
 
-  private failed(key: string, error: unknown): void {
+  private failed(failure: string, key: string, error: unknown): void {
     const apiError = ApiError.from(error);
     if (apiError.code === 'CANCELLED') {
       this.messageState.set(null);
@@ -262,7 +272,7 @@ export class DocumentActions {
       });
       return;
     }
-    this.messageState.set({ kind: 'error', text: `Not saved: ${describeError(apiError)}` });
+    this.messageState.set({ kind: 'error', text: `${failure}: ${describeError(apiError)}` });
   }
 
   /**
@@ -307,6 +317,39 @@ export class DocumentActions {
     if (this.host === null) throw new Error('DocumentActions: setHost() was not called');
     return this.host;
   }
+}
+
+const PROJECTION_REFUSED =
+  'Not saved: with a projection active, this edit would replace data the projection hides. ' +
+  'Clear the projection and edit again.';
+
+/**
+ * With a query projection the loaded document may be partial, so a save must not replace what
+ * the projection hides: a whole-document replace, or a `$set` of a document or array at a path
+ * the loaded document has (its loaded value may be partial). Scalar `$set`, `$unset`, `$push`
+ * and new documents or arrays at new paths only touch what the user saw.
+ */
+function overwritesHiddenData(diff: DocumentDiff, original: BsonDocument): boolean {
+  if (diff.kind === 'none') return false;
+  if (diff.kind === 'replace') return true;
+  return diff.ops.some(
+    (op) =>
+      op.op === 'set' &&
+      (op.value.type === 'object' || op.value.type === 'array') &&
+      hasPath(original, op.path),
+  );
+}
+
+/** Whether the dotted `path` (document keys only, as the diff builds them) exists in `doc`. */
+function hasPath(doc: BsonDocument, path: string): boolean {
+  let value: BsonValue = doc;
+  for (const key of path.split('.')) {
+    if (value.type !== 'object') return false;
+    const field: BsonField | undefined = value.fields.find((f) => f.key === key);
+    if (field === undefined) return false;
+    value = field.value;
+  }
+  return true;
 }
 
 function newIdField(): BsonField {

@@ -142,6 +142,19 @@ export class DocumentEdits {
     this.redoStack.update((s) => s.filter((step) => step.key !== key));
   }
 
+  /**
+   * One document was saved as `saved`: that becomes its baseline. Edits made after the save was
+   * sent stay unsaved (on top of `saved`); without such edits the document is no longer modified.
+   * Its steps leave the undo and redo history, as after a discard.
+   */
+  rebase(key: string, saved: BsonDocument): void {
+    const entry = this.entries().get(key);
+    if (entry === undefined) return;
+    this.apply(key, saved, entry.current);
+    this.undoStack.update((s) => s.filter((step) => step.key !== key));
+    this.redoStack.update((s) => s.filter((step) => step.key !== key));
+  }
+
   /** Discards every unsaved edit (Revert all). */
   discardAll(): void {
     this.entries.set(new Map());

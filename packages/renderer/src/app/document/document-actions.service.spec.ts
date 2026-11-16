@@ -208,6 +208,82 @@ describe('DocumentActions', () => {
       // Only total was saved; the qty edit was never sent and must not be lost.
       expect(params('docs.update')[0]?.['update']).toBe('{"$set":{"total":{"$numberInt":"15"}}}');
       expect(edits.isModified(keyOf(1))).toBe(true);
+      // The saved state is the new baseline: only the qty edit is left to save.
+      expect(stringifyEJson(edits.get(keyOf(1))?.original as BsonDocument)).toBe(orderText(1, 15));
+      expect(stringifyEJson(edits.get(keyOf(1))?.current as BsonDocument)).toBe(
+        orderText(1, 15, 4),
+      );
+      expect(edits.canUndo()).toBe(false);
+      await actions.save(keyOf(1));
+      expect(params('docs.update')[1]).toMatchObject({
+        update: '{"$set":{"qty":{"$numberInt":"4"}}}',
+        expected: '{"qty":{"$eq":{"$numberInt":"1"}}}',
+      });
+      expect(edits.modified()).toBe(false);
+    });
+
+    it('keeps showing the saved version, not the loaded one, while it is read back', async () => {
+      const readBack = deferred<{ doc: string; sliced: never[] }>();
+      fake.handle('docs.get', () => readBack.promise);
+      edits.edit(order(1), order(1, 15));
+      const saving = actions.save(keyOf(1));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(params('docs.get')).toHaveLength(1);
+      expect(stringifyEJson(edits.current(order(1)))).toBe(orderText(1, 15));
+      readBack.resolve({ doc: orderText(1, 15), sliced: [] });
+      expect(await saving).toBe(true);
+      expect(edits.modified()).toBe(false);
+    });
+  });
+
+  describe('save with a projection active', () => {
+    const PROJECTION_REFUSED =
+      'Not saved: with a projection active, this edit would replace data the projection hides. ' +
+      'Clear the projection and edit again.';
+    const loaded = parseEJsonDocument(
+      '{"_id":{"$numberInt":"1"},"a":"x","b":"y","addr":{"city":"Bonn"},"tags":["p"]}',
+    );
+    const withFields = (fields: string) =>
+      parseEJsonDocument(`{"_id":{"$numberInt":"1"},${fields}}`);
+
+    beforeEach(() => {
+      projection = '{"a":{"$numberInt":"1"},"b":{"$numberInt":"1"},"addr.city":{"$numberInt":"1"}}';
+    });
+
+    it('refuses a whole-document replace, sends nothing and keeps the edits', async () => {
+      edits.edit(loaded, withFields('"b":"y","a":"x","addr":{"city":"Bonn"},"tags":["p"]'));
+      expect(await actions.save(keyOf(1))).toBe(false);
+      expect(fake.requests).toHaveLength(0);
+      expect(actions.message()).toEqual({ kind: 'error', text: PROJECTION_REFUSED });
+      expect(edits.isModified(keyOf(1))).toBe(true);
+    });
+
+    it('refuses to $set a document or array the loaded document has', async () => {
+      edits.edit(loaded, withFields('"a":"x","b":"y","addr":["Bonn"],"tags":["p"]'));
+      expect(await actions.save(keyOf(1))).toBe(false);
+      edits.discardAll();
+      edits.edit(loaded, withFields('"a":"x","b":"y","addr":{"city":"Bonn"},"tags":["q"]'));
+      expect(await actions.save(keyOf(1))).toBe(false);
+      expect(fake.requests).toHaveLength(0);
+      expect(actions.message()?.text).toBe(PROJECTION_REFUSED);
+    });
+
+    it('sends scalar $set, $unset, $push and new documents at new paths', async () => {
+      edits.edit(
+        loaded,
+        withFields('"a":"z","addr":{"city":"Köln"},"tags":["p","q"],"extra":{"n":"1"}'),
+      );
+      expect(await actions.save(keyOf(1))).toBe(true);
+      expect(params('docs.update')[0]?.['update']).toBe(
+        '{"$set":{"a":"z","addr.city":"Köln","extra":{"n":"1"}},"$unset":{"b":""},"$push":{"tags":{"$each":["q"]}}}',
+      );
+    });
+
+    it('still sends docs.replace without a projection', async () => {
+      projection = undefined;
+      edits.edit(loaded, withFields('"b":"y","a":"x","addr":{"city":"Bonn"},"tags":["p"]'));
+      expect(await actions.save(keyOf(1))).toBe(true);
+      expect(params('docs.replace')).toHaveLength(1);
     });
   });
 
@@ -334,6 +410,12 @@ describe('DocumentActions', () => {
       expect(changed).toEqual([]);
     });
 
+    it('says "Not deleted" when the delete fails', async () => {
+      fake.fail('docs.delete', { code: 'SERVER_ERROR', message: 'not authorized' });
+      expect(await actions.delete(order(1))).toBe(false);
+      expect(actions.message()?.text).toMatch(/^Not deleted: [\s\S]*not authorized/);
+    });
+
     it('cannot delete a document without an _id', async () => {
       expect(await actions.delete(parseEJsonDocument('{"name":"no id"}'))).toBe(false);
       expect(confirms).toHaveLength(0);
@@ -411,7 +493,7 @@ describe('DocumentActions', () => {
       const draft = actions.newDocument();
       expect(await actions.insertDraft(draft.id)).toBe(false);
       expect(actions.drafts()).toHaveLength(1);
-      expect(actions.message()?.text).toContain('E11000 duplicate key error');
+      expect(actions.message()?.text).toMatch(/^Not inserted: [\s\S]*E11000 duplicate key error/);
     });
 
     it('does nothing for an unknown draft', async () => {
