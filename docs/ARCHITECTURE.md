@@ -88,6 +88,22 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
 See SPEC.md section 4. `packages/contract` is the single source of truth; renderer and backend both
 import it. Every new method gets: types, zod schema, a backend handler, a contract test.
 
+Contract layout (`packages/contract/src/`):
+- `envelope.ts` (Request/Response/Event/Cancel, broadcast stream names), `errors.ts` (stable
+  `ERROR_CODES`), `common.ts` (shared fields, `ejsonDocument`/`ejsonArray`/`ejsonValue` for every
+  document, query part, pipeline or BSON value — always canonical EJSON text, never objects).
+- One file per method group (`profiles.ts`, `conn.ts`, `db.ts`, `coll.ts`, `docs.ts`, `agg.ts`,
+  `idx.ts`, `schema.ts`, `io.ts`, `shell.ts`, `admin.ts`, `app.ts`), each exporting
+  `<group>Methods = defineMethods({...})`: per method `route` (`main`|`backend`), strict `params`
+  schema, `result` schema, `write` (`always`|`conditional`) and, for streaming methods, the `stream`
+  data payload schema. `index.ts` merges them into `methods`.
+- Helpers: `route(method)`, `parseParams`/`parseResult` (readable `INVALID_PARAMS` errors),
+  `WRITE_METHODS`, types `ParamsOf<M>`, `ResultOf<M>`, `StreamDataOf<M>`.
+- Writes carry `profileId` and optional `confirmed`; the backend refuses them on read-only
+  profiles and requires `confirmed: true` on production profiles.
+- Adding a method: add it to its group file, add a valid/invalid sample to `SAMPLES` in
+  `index.spec.ts` (the test fails otherwise), and to `EXPECTED_WRITES` if it writes.
+
 ## Install (development)
 All OSes: Node 24 LTS, 24.15.0 or newer (Angular 22 and jsdom require it), with npm, git, Python 3
 (for TFP and native module builds). Then `npm ci` in the repo root.

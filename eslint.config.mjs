@@ -46,6 +46,14 @@ export default tseslint.config(
     },
   },
   {
+    // The contract types both sides of every call: `any` would silently switch that off.
+    // (Already an error in tseslint `strict`; pinned here so a preset change can't drop it.)
+    files: ['packages/contract/**/*.ts', 'packages/core/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'error',
+    },
+  },
+  {
     // packages/core runs in the renderer too: no Node or Electron APIs.
     files: ['packages/core/src/**/*.ts'],
     rules: {
