@@ -1,5 +1,5 @@
 /** A path into a JSON document: object keys and array indices. */
-export type Path = ReadonlyArray<string | number>;
+export type Path = readonly (string | number)[];
 
 /** A JSON value that is not an object or array. */
 export type Primitive = string | number | boolean | null;
@@ -97,7 +97,7 @@ export interface NodeMeta {
 /** The variants of a oneOf/anyOf that a discriminator property tells apart. */
 export interface VariantInfo {
   property: string;
-  variants: Array<{ label: string; values: unknown[] }>;
+  variants: { label: string; values: unknown[] }[];
 }
 
 /** What choosing another variant does to an object. */

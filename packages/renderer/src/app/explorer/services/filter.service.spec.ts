@@ -2,10 +2,12 @@ import '@angular/compiler';
 import { Injector } from '@angular/core';
 import { describe, expect, it } from 'vitest';
 import { CollapseService } from './collapse.service';
-import { FilterMode, FilterService } from './filter.service';
+import { type FilterMode, FilterService } from './filter.service';
 
 function search(term: string, mode: FilterMode): FilterService {
-  const filter = Injector.create({ providers: [FilterService, CollapseService] }).get(FilterService);
+  const filter = Injector.create({ providers: [FilterService, CollapseService] }).get(
+    FilterService,
+  );
   filter.setMode(mode);
   filter.set(term);
   return filter;
@@ -24,7 +26,12 @@ describe('FilterService, strict mode', () => {
 
   it('never widens to siblings and dims the path', () => {
     const filter = search('zurich', 'strict');
-    expect(filter.widens([['city', 'Zurich'], ['staff', []]])).toBe(false);
+    expect(
+      filter.widens([
+        ['city', 'Zurich'],
+        ['staff', []],
+      ]),
+    ).toBe(false);
     expect(filter.groupMatch([['city', 'Zurich']])).toBe(false);
     expect(filter.keyDim('offices', [{ city: 'Zurich' }])).toBe(true);
   });
@@ -53,7 +60,17 @@ describe('FilterService, context mode', () => {
   it('shows a match in full, with all its siblings, array items included', () => {
     const filter = search('a', 'context');
     expect(filter.forces('tags', ['a', 'b'])).toBe(true);
-    expect(filter.groupMatch([[null, 'a'], [null, 'b']])).toBe(true);
-    expect(search('zz', 'context').groupMatch([[null, 'a'], [null, 'b']])).toBe(false);
+    expect(
+      filter.groupMatch([
+        [null, 'a'],
+        [null, 'b'],
+      ]),
+    ).toBe(true);
+    expect(
+      search('zz', 'context').groupMatch([
+        [null, 'a'],
+        [null, 'b'],
+      ]),
+    ).toBe(false);
   });
 });

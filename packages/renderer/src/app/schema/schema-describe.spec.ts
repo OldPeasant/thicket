@@ -17,10 +17,21 @@ describe('describeConstraints', () => {
 
   it('describes numbers, strings, arrays and objects', () => {
     expect(describeConstraints({ minimum: 1, maximum: 65535 })).toEqual(['≥ 1', '≤ 65535']);
-    expect(describeConstraints({ exclusiveMinimum: 0, exclusiveMaximum: 10, multipleOf: 5 })).toEqual(['> 0', '< 10', 'multiple of 5']);
-    expect(describeConstraints({ minLength: 1, maxLength: 200, format: 'email', pattern: '^a' })).toEqual(['length ≥ 1', 'length ≤ 200', 'format: email', 'pattern: ^a']);
-    expect(describeConstraints({ minItems: 1, maxItems: 3, uniqueItems: true })).toEqual(['items ≥ 1', 'items ≤ 3', 'unique items']);
-    expect(describeConstraints({ required: ['id', 'name'], additionalProperties: false })).toEqual(['required: id, name', 'no other keys']);
+    expect(
+      describeConstraints({ exclusiveMinimum: 0, exclusiveMaximum: 10, multipleOf: 5 }),
+    ).toEqual(['> 0', '< 10', 'multiple of 5']);
+    expect(
+      describeConstraints({ minLength: 1, maxLength: 200, format: 'email', pattern: '^a' }),
+    ).toEqual(['length ≥ 1', 'length ≤ 200', 'format: email', 'pattern: ^a']);
+    expect(describeConstraints({ minItems: 1, maxItems: 3, uniqueItems: true })).toEqual([
+      'items ≥ 1',
+      'items ≤ 3',
+      'unique items',
+    ]);
+    expect(describeConstraints({ required: ['id', 'name'], additionalProperties: false })).toEqual([
+      'required: id, name',
+      'no other keys',
+    ]);
     expect(describeConstraints({ unevaluatedProperties: false })).toEqual(['no other keys']);
   });
 
@@ -37,7 +48,9 @@ describe('typeLabel', () => {
 
   it('collects the types of alternatives without repeats', () => {
     expect(typeLabel({ oneOf: [{ type: 'null' }, { type: 'object' }] })).toBe('null | object');
-    expect(typeLabel({ oneOf: [{ type: 'string' }, { type: 'string' }, { type: 'boolean' }] })).toBe('string | boolean');
+    expect(
+      typeLabel({ oneOf: [{ type: 'string' }, { type: 'string' }, { type: 'boolean' }] }),
+    ).toBe('string | boolean');
   });
 
   it('is empty when the schema does not say', () => {

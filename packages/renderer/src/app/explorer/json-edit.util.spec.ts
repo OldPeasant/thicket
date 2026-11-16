@@ -11,7 +11,11 @@ describe('blankItemLike', () => {
   });
 
   it('keeps the keys in the order the table shows them as columns', () => {
-    expect(Object.keys(blankItemLike([{ b: 1 }, { a: 1, b: 2, c: 3 }]) as object)).toEqual(['b', 'a', 'c']);
+    expect(Object.keys(blankItemLike([{ b: 1 }, { a: 1, b: 2, c: 3 }]) as object)).toEqual([
+      'b',
+      'a',
+      'c',
+    ]);
   });
 
   it('blanks a key like the first record that has it', () => {

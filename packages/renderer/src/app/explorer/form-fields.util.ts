@@ -27,7 +27,8 @@ export function formFields(
     if (Object.prototype.hasOwnProperty.call(value, key)) {
       fields.push({ key, required: required.has(key) });
     } else if (ghostByKey.has(key)) {
-      fields.push({ key, required: ghostByKey.get(key)!.required, ghost: ghostByKey.get(key) });
+      const ghost = ghostByKey.get(key);
+      fields.push({ key, required: ghost?.required ?? false, ghost });
     } else {
       continue;
     }

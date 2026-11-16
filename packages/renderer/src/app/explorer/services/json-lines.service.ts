@@ -1,5 +1,11 @@
 import { Injectable, computed, signal } from '@angular/core';
-import { lineValues, serializeJsonLines, shownLineIndices, withLineValue, type JsonLinesDoc } from '../json-lines.util';
+import {
+  lineValues,
+  serializeJsonLines,
+  shownLineIndices,
+  withLineValue,
+  type JsonLinesDoc,
+} from '../json-lines.util';
 
 // The key RevealService pages the list of lines by, and how many it shows first.
 export const LINES_REVEAL_KEY = '~lines';
@@ -27,7 +33,7 @@ export class JsonLinesService {
 
   // The first line that is JSON: what stands for the whole file where one
   // value is needed (its `$schema`, the default layout).
-  readonly first = computed(() => this.values()?.find(v => v !== undefined));
+  readonly first = computed(() => this.values()?.find((v) => v !== undefined));
 
   set(doc: JsonLinesDoc | undefined): void {
     this._doc.set(doc);

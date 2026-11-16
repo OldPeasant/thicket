@@ -7,7 +7,10 @@ import type { Path, Problem } from './schema.types';
  * one key and `parsePathKey` gets it back.
  */
 export function appendKey(parent: string, segment: string | number): string {
-  return parent + (typeof segment === 'number' ? `[${segment}]` : `.${segment.replace(/[\\.[]/g, '\\$&')}`);
+  return (
+    parent +
+    (typeof segment === 'number' ? `[${segment}]` : `.${segment.replace(/[\\.[]/g, '\\$&')}`)
+  );
 }
 
 export function pathKey(path: Path): string {
@@ -17,7 +20,7 @@ export function pathKey(path: Path): string {
 }
 
 export function parsePathKey(key: string): Path {
-  const path: Array<string | number> = [];
+  const path: (string | number)[] = [];
   let i = 0;
   while (i < key.length) {
     if (key[i] === '[') {
@@ -42,7 +45,10 @@ export function parsePathKey(key: string): Path {
 /** A path as a person would write it: `members[0].contact.email`; the document itself is `(document)`. */
 export function formatPath(path: Path): string {
   if (!path.length) return '(document)';
-  return path.map((seg) => (typeof seg === 'number' ? `[${seg}]` : `.${seg}`)).join('').replace(/^\./, '');
+  return path
+    .map((seg) => (typeof seg === 'number' ? `[${seg}]` : `.${seg}`))
+    .join('')
+    .replace(/^\./, '');
 }
 
 /**
@@ -55,7 +61,10 @@ export class ProblemIndex {
   private readonly direct = new Map<string, Problem[]>();
   private readonly below = new Map<string, number>();
 
-  constructor(problems: readonly Problem[], private readonly data: unknown) {
+  constructor(
+    problems: readonly Problem[],
+    private readonly data: unknown,
+  ) {
     for (const problem of problems) {
       const anchor = deepestExisting(problem.path, data);
       const key = pathKey(anchor);
@@ -91,10 +100,12 @@ function deepestExisting(path: Path, data: unknown): Path {
   let value = data;
   for (let i = 0; i < path.length; i++) {
     const seg = path[i];
-    const has =
-      Array.isArray(value)
-        ? typeof seg === 'number' && seg >= 0 && seg < value.length
-        : typeof value === 'object' && value !== null && Object.prototype.hasOwnProperty.call(value, seg);
+    if (seg === undefined) return path.slice(0, i);
+    const has = Array.isArray(value)
+      ? typeof seg === 'number' && seg >= 0 && seg < value.length
+      : typeof value === 'object' &&
+        value !== null &&
+        Object.prototype.hasOwnProperty.call(value, seg);
     if (!has) return path.slice(0, i);
     value = (value as Record<string | number, unknown>)[seg];
   }

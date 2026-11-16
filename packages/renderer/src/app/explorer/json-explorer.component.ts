@@ -5,7 +5,7 @@ import { JsonLinesComponent } from './json-lines/json-lines.component';
 import { OutlineComponent } from './outline/outline.component';
 import { JsonTableComponent } from './json-table/json-table.component';
 import type { Layout } from './layout.util';
-import { FilterMode, FilterService } from './services/filter.service';
+import { type FilterMode, FilterService } from './services/filter.service';
 import { EditModeService } from './services/edit-mode.service';
 import { ColumnSyncService } from './services/column-sync.service';
 import { JsonLinesService } from './services/json-lines.service';
@@ -15,7 +15,13 @@ import { SchemaService } from './services/schema.service';
 @Component({
   selector: 'app-json-explorer',
   standalone: true,
-  imports: [JsonTableComponent, JsonFormComponent, JsonLinesComponent, DocsPanelComponent, OutlineComponent],
+  imports: [
+    JsonTableComponent,
+    JsonFormComponent,
+    JsonLinesComponent,
+    DocsPanelComponent,
+    OutlineComponent,
+  ],
   templateUrl: './json-explorer.component.html',
   styleUrl: './json-explorer.component.css',
 })
@@ -47,12 +53,20 @@ export class JsonExplorerComponent {
 
   // Shown as buttons next to the search box, in this order.
   protected readonly filterModes: { value: FilterMode; label: string; hint: string }[] = [
-    { value: 'strict', label: 'Strict', hint: 'Only what matched, under its dimmed parents. A matching name shows its value; a nested one collapsed.' },
-    { value: 'context', label: 'Context', hint: 'Matches in full, with all their siblings; the siblings of every parent show collapsed. Click to expand, Shift+click to expand all alike.' },
+    {
+      value: 'strict',
+      label: 'Strict',
+      hint: 'Only what matched, under its dimmed parents. A matching name shows its value; a nested one collapsed.',
+    },
+    {
+      value: 'context',
+      label: 'Context',
+      hint: 'Matches in full, with all their siblings; the siblings of every parent show collapsed. Click to expand, Shift+click to expand all alike.',
+    },
   ];
 
   protected get modeHint(): string {
-    return this.filterModes.find(m => m.value === this.filter.mode())!.hint;
+    return this.filterModes.find((m) => m.value === this.filter.mode())?.hint ?? '';
   }
 
   onFilterInput(event: Event): void {

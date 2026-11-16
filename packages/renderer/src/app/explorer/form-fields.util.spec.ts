@@ -1,15 +1,17 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { SchemaModel } from '../schema';
 import { formFields } from './form-fields.util';
 
-const load = (file: string) => JSON.parse(readFileSync(new URL(`../../../samples/${file}`, import.meta.url), 'utf8'));
 const ghost = (key: string, required = false) => ({ key, schema: {}, required, hasDefault: false });
 
 describe('formFields', () => {
   it('follows the schema order and puts absent keys in their place as ghosts', () => {
     const fields = formFields({ b: 1, a: 2 }, ['a', 'x', 'b'], [ghost('x')], new Set());
-    expect(fields.map((f) => [f.key, !!f.ghost])).toEqual([['a', false], ['x', true], ['b', false]]);
+    expect(fields.map((f) => [f.key, !!f.ghost])).toEqual([
+      ['a', false],
+      ['x', true],
+      ['b', false],
+    ]);
   });
 
   it('appends keys only the data has, in data order', () => {
@@ -23,7 +25,10 @@ describe('formFields', () => {
 
   it('marks required keys, present or absent', () => {
     const fields = formFields({ a: 1 }, ['a', 'b'], [ghost('b', true)], new Set(['a']));
-    expect(fields.map((f) => [f.key, f.required])).toEqual([['a', true], ['b', true]]);
+    expect(fields.map((f) => [f.key, f.required])).toEqual([
+      ['a', true],
+      ['b', true],
+    ]);
   });
 
   it('leaves out declared keys that are absent and not offered', () => {
@@ -34,11 +39,40 @@ describe('formFields', () => {
     expect(formFields({ old: 1 }, ['old'], [], new Set()).map((f) => f.key)).toEqual(['old']);
   });
 
-  it('lays out the config sample the way the schema orders it', () => {
-    const model = new SchemaModel(load('schemas/app-config.schema.json'));
-    const data = load('config/app-config.json');
-    const fields = formFields(data, model.declaredKeysAt([]), model.ghostKeysAt([], data), model.requiredAt([], data));
-    expect(fields.map((f) => f.key)).toEqual(['$schema', 'name', 'environment', 'server', 'database', 'logging', 'features', 'cache']);
+  it('lays out a config document the way the schema orders it', () => {
+    // A stand-in for JSON Canopy's app-config sample, which was not copied.
+    const model = new SchemaModel({
+      type: 'object',
+      required: ['server', 'database'],
+      properties: {
+        $schema: { type: 'string' },
+        name: { type: 'string' },
+        environment: { enum: ['dev', 'prod'] },
+        server: { type: 'object' },
+        database: { type: 'object' },
+        logging: { type: 'object' },
+        features: { type: 'object' },
+        cache: { type: 'object' },
+        cacheTtl: { type: 'integer', deprecated: true },
+      },
+    });
+    const data = { logging: {}, server: {}, $schema: 'x.json', database: {}, name: 'billing-api' };
+    const fields = formFields(
+      data,
+      model.declaredKeysAt([]),
+      model.ghostKeysAt([], data),
+      model.requiredAt([], data),
+    );
+    expect(fields.map((f) => f.key)).toEqual([
+      '$schema',
+      'name',
+      'environment',
+      'server',
+      'database',
+      'logging',
+      'features',
+      'cache',
+    ]);
     expect(fields.filter((f) => f.required).map((f) => f.key)).toEqual(['server', 'database']);
   });
 });

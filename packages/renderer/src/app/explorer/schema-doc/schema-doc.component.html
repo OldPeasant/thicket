@@ -31,7 +31,9 @@
   </span>
 }
 @if (meta.hasDefault) {
-  <span class="line">default <code>{{ json(meta.default) }}</code></span>
+  <span class="line"
+    >default <code>{{ json(meta.default) }}</code></span
+  >
 }
 @if (meta.examples?.length) {
   <span class="line">

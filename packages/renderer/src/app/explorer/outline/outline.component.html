@@ -3,7 +3,13 @@
   @if (r.kind === 'more') {
     <span class="more" [style.padding-left.rem]="r.depth * 0.9 + 0.4">{{ r.label }}</span>
   } @else {
-    <button type="button" class="row" [class.is-current]="isCurrent(r)" [style.padding-left.rem]="r.depth * 0.9 + 0.4" (click)="go(r)">
+    <button
+      type="button"
+      class="row"
+      [class.is-current]="isCurrent(r)"
+      [style.padding-left.rem]="r.depth * 0.9 + 0.4"
+      (click)="go(r)"
+    >
       <span class="label">{{ r.label }}</span>
       @if (r.kind === 'object') {
         <span class="size">{{ '{' + r.size + '}' }}</span>

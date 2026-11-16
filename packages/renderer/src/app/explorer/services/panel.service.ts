@@ -6,6 +6,10 @@ export class PanelService {
   readonly docsOpen = signal(true);
   readonly outlineOpen = signal(false);
 
-  toggleDocs(): void { this.docsOpen.update(v => !v); }
-  toggleOutline(): void { this.outlineOpen.update(v => !v); }
+  toggleDocs(): void {
+    this.docsOpen.update((v) => !v);
+  }
+  toggleOutline(): void {
+    this.outlineOpen.update((v) => !v);
+  }
 }

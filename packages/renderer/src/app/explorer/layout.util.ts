@@ -17,6 +17,8 @@ export function defaultLayout(data: unknown, hasSchema: boolean): Layout {
   if (!hasSchema) return 'tables';
   if (Array.isArray(data)) return 'tables';
   if (!isObject(data)) return 'tables';
-  const listsRecords = Object.values(data).some((v) => Array.isArray(v) && v.filter(isObject).length >= 2);
+  const listsRecords = Object.values(data).some(
+    (v) => Array.isArray(v) && v.filter(isObject).length >= 2,
+  );
   return listsRecords ? 'tables' : 'form';
 }

@@ -35,12 +35,23 @@ export class SchemaInfoComponent {
 
   // The bare type is not worth an icon on every key; anything else is.
   private worthShowing(m: NodeMeta): boolean {
-    return !!(m.title || m.description || m.examples?.length || m.hasDefault || m.constraints.length || m.deprecated || m.readOnly);
+    return !!(
+      m.title ||
+      m.description ||
+      m.examples?.length ||
+      m.hasDefault ||
+      m.constraints.length ||
+      m.deprecated ||
+      m.readOnly
+    );
   }
 
   show(event: Event): void {
     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    this.x = Math.max(8, Math.min(rect.left, window.innerWidth - SchemaInfoComponent.PANEL_WIDTH - 8));
+    this.x = Math.max(
+      8,
+      Math.min(rect.left, window.innerWidth - SchemaInfoComponent.PANEL_WIDTH - 8),
+    );
     this.y = rect.bottom + 4;
     this.open = true;
   }

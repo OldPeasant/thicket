@@ -10,12 +10,19 @@ import {
   shownLineIndices,
   similarity,
   withLineValue,
+  type JsonLinesDoc,
 } from './json-lines.util';
+
+function mustParse(text: string, force?: boolean): JsonLinesDoc {
+  const doc = parseJsonLines(text, force);
+  if (!doc) throw new Error(`not JSON Lines: ${JSON.stringify(text)}`);
+  return doc;
+}
 
 describe('parseJsonLines', () => {
   it('reads one document per line, keeping blank lines and text lines', () => {
-    const doc = parseJsonLines('{"a":1}\n\nnot json\n[1,2]\n')!;
-    expect(doc.lines.map(l => l.kind)).toEqual(['json', 'blank', 'text', 'json']);
+    const doc = mustParse('{"a":1}\n\nnot json\n[1,2]\n');
+    expect(doc.lines.map((l) => l.kind)).toEqual(['json', 'blank', 'text', 'json']);
     expect(lineValues(doc)).toEqual([{ a: 1 }, undefined, undefined, [1, 2]]);
     expect(shownLineIndices(doc)).toEqual([0, 2, 3]);
   });
@@ -27,25 +34,27 @@ describe('parseJsonLines', () => {
   });
 
   it('takes any text when forced, as for a .jsonl file', () => {
-    expect(parseJsonLines('nothing\nhere', true)!.lines.map(l => l.kind)).toEqual(['text', 'text']);
-    expect(parseJsonLines('', true)!.lines.map(l => l.kind)).toEqual(['blank']);
+    expect(mustParse('nothing\nhere', true).lines.map((l) => l.kind)).toEqual(['text', 'text']);
+    expect(mustParse('', true).lines.map((l) => l.kind)).toEqual(['blank']);
   });
 });
 
 describe('serializeJsonLines', () => {
   it('gives back the text unchanged when nothing was edited', () => {
     for (const text of ['{"a": 1}\n\n  {"a":2}\nbad\n', '{"a":1}\r\n{"a":2}', '{"a":1}', '']) {
-      expect(serializeJsonLines(parseJsonLines(text, true)!)).toBe(text);
+      expect(serializeJsonLines(mustParse(text, true))).toBe(text);
     }
   });
 
   it('rewrites only the edited line, compactly', () => {
-    const doc = parseJsonLines('{"a": 1}\r\n{"a": 2}\r\n')!;
-    expect(serializeJsonLines(withLineValue(doc, 1, { a: 3, b: [true] }))).toBe('{"a": 1}\r\n{"a":3,"b":[true]}\r\n');
+    const doc = mustParse('{"a": 1}\r\n{"a": 2}\r\n');
+    expect(serializeJsonLines(withLineValue(doc, 1, { a: 3, b: [true] }))).toBe(
+      '{"a": 1}\r\n{"a":3,"b":[true]}\r\n',
+    );
   });
 
   it('keeps an edited line in its group', () => {
-    const doc = parseJsonLines('{"a":1}\n[1]\n')!;
+    const doc = mustParse('{"a":1}\n[1]\n');
     const edited = withLineValue(doc, 0, [1]);
     expect(edited.lines[0]).toMatchObject({ kind: 'json', group: 0 });
   });
@@ -74,7 +83,10 @@ describe('grouping by shape', () => {
   });
 
   it('does not tell lines apart by what an empty array would hold', () => {
-    const full = { request: { path: '/a', headers: [{ name: 'x', value: 'y' }] }, response: { status: 200, ms: 1 } };
+    const full = {
+      request: { path: '/a', headers: [{ name: 'x', value: 'y' }] },
+      response: { status: 200, ms: 1 },
+    };
     const empty = { request: { path: '/b', headers: [] }, response: { status: 404, ms: 2 } };
     expect(similarity(shapeOf(full), shapeOf(empty))).toBe(1);
     expect(groupByShape([full, empty]).of).toEqual([0, 0]);

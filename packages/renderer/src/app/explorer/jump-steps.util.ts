@@ -32,12 +32,16 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
  * structural path of the document root: both '' for a whole document, other
  * for a line of a JSON Lines file.
  */
-export function revealSteps(data: unknown, path: Path, root: { uid: string; path: string } = { uid: '', path: '' }): RevealStep[] {
+export function revealSteps(
+  data: unknown,
+  path: Path,
+  root: { uid: string; path: string } = { uid: '', path: '' },
+): RevealStep[] {
   const steps: RevealStep[] = [];
   let value = data;
   let uid = root.uid;
   let sp = root.path;
-  for (let i = 0; i < path.length; ) {
+  for (let i = 0; i < path.length;) {
     const seg = path[i];
     if (Array.isArray(value)) {
       const index = Number(seg);
@@ -48,7 +52,14 @@ export function revealSteps(data: unknown, path: Path, root: { uid: string; path
       if (records && isObject(item) && typeof key === 'string') {
         // A cell of a table of records: the row itself is not a node, so
         // row and column are one step.
-        steps.push({ uid, path: sp, kind, container: value, colKey: `${sp}:${key}`, position: index });
+        steps.push({
+          uid,
+          path: sp,
+          kind,
+          container: value,
+          colKey: `${sp}:${key}`,
+          position: index,
+        });
         uid = appendKey(appendKey(uid, index), key);
         sp = sp ? `${sp}.*.${key}` : `*.${key}`;
         value = item[key];
@@ -66,7 +77,15 @@ export function revealSteps(data: unknown, path: Path, root: { uid: string; path
       }
     } else if (isObject(value)) {
       const key = String(seg);
-      steps.push({ uid, path: sp, kind: 'object', container: value, colKey: `${sp}:${key}`, position: Object.keys(value).indexOf(key), key });
+      steps.push({
+        uid,
+        path: sp,
+        kind: 'object',
+        container: value,
+        colKey: `${sp}:${key}`,
+        position: Object.keys(value).indexOf(key),
+        key,
+      });
       uid = appendKey(uid, key);
       sp = sp ? `${sp}.${key}` : key;
       value = value[key];

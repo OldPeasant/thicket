@@ -21,7 +21,9 @@ export class DocsPanelComponent {
   private schema = inject(SchemaService);
   private lines = inject(JsonLinesService);
 
-  get key(): string | undefined { return this.focus.key(); }
+  get key(): string | undefined {
+    return this.focus.key();
+  }
 
   get path(): string {
     if (this.key === undefined) return '';
@@ -38,7 +40,9 @@ export class DocsPanelComponent {
     if (this.key === undefined) return false;
     const path = parsePathKey(this.key);
     const last = path[path.length - 1];
-    return typeof last === 'string' && this.schema.requiredFor(pathKey(path.slice(0, -1))).has(last);
+    return (
+      typeof last === 'string' && this.schema.requiredFor(pathKey(path.slice(0, -1))).has(last)
+    );
   }
 
   get problems(): readonly Problem[] {

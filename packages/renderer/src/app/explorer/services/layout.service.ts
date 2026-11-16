@@ -1,6 +1,6 @@
 import { Injectable, signal } from '@angular/core';
 import { LayoutMemory } from '../layout-memory';
-import { Layout, defaultLayout } from '../layout.util';
+import { type Layout, defaultLayout } from '../layout.util';
 
 // Which of the two renderings of the same document is showing. The user's
 // own choice always wins; until they make one, the layout is what they last
@@ -10,7 +10,9 @@ export class LayoutService {
   private readonly _mode = signal<Layout>('tables');
   private chosen = false;
   private schemaKey?: string;
-  private memory = new LayoutMemory(() => (typeof localStorage === 'undefined' ? undefined : localStorage));
+  private memory = new LayoutMemory(() =>
+    typeof localStorage === 'undefined' ? undefined : localStorage,
+  );
 
   readonly mode = this._mode.asReadonly();
 

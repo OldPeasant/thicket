@@ -1,4 +1,4 @@
-import { Injectable, signal, WritableSignal } from '@angular/core';
+import { Injectable, signal, type WritableSignal } from '@angular/core';
 import { REVEAL_BATCHES } from '../reveal.util';
 
 // How many items of a large array/object (keyed by structural path, same
@@ -34,7 +34,7 @@ export class RevealService {
   }
 
   revealMore(path: string, by: number): void {
-    this.extra(path).update(n => n + by);
+    this.extra(path).update((n) => n + by);
   }
 
   // Makes sure the child at `position` is among the revealed ones, growing

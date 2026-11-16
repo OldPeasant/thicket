@@ -1,4 +1,4 @@
-import { Injectable, signal, WritableSignal } from '@angular/core';
+import { Injectable, signal, type WritableSignal } from '@angular/core';
 
 @Injectable({ providedIn: 'root' })
 export class TableOrientationService {
@@ -20,7 +20,7 @@ export class TableOrientationService {
   }
 
   toggle(path: string): void {
-    this.getOrCreate(path).update(v => (v === 'h' ? 'v' : 'h'));
+    this.getOrCreate(path).update((v) => (v === 'h' ? 'v' : 'h'));
   }
 
   clear(): void {

@@ -71,9 +71,7 @@ export function withEntry(
 }
 
 export function withoutEntry(obj: Record<string, unknown>, key: string): Record<string, unknown> {
-  const rest = { ...obj };
-  delete rest[key];
-  return rest;
+  return Object.fromEntries(Object.entries(obj).filter(([k]) => k !== key));
 }
 
 export function withItem(arr: unknown[], index: number, value: unknown): unknown[] {

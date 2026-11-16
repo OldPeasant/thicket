@@ -1,24 +1,34 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { defaultLayout } from './layout.util';
 
-const load = (file: string) => JSON.parse(readFileSync(new URL(`../../../samples/${file}`, import.meta.url), 'utf8'));
+// JSON Canopy read these from its samples/ folder, which was not copied; these are small stand-ins
+// of the same shape (a configuration file, a list of records).
+const config = {
+  name: 'billing-api',
+  server: { port: 8080, tls: { certFile: 'a.pem', keyFile: 'a.key' } },
+  logging: { level: 'info', loggers: { 'http.client': 'warn' } },
+  features: { darkMode: true },
+};
+const team = {
+  project: 'Nightwatch',
+  members: [
+    { id: 1, name: 'Ada', role: 'engineer' },
+    { id: 2, name: 'Grace', role: 'engineer' },
+  ],
+};
 
 describe('defaultLayout', () => {
   it('stays with tables when there is no schema', () => {
-    expect(defaultLayout(load('config/app-config.json'), false)).toBe('tables');
+    expect(defaultLayout(config, false)).toBe('tables');
   });
 
   it('picks tables for documents that are lists of records', () => {
-    expect(defaultLayout(load('team.json'), true)).toBe('tables');
-    expect(defaultLayout(load('plugin-demo/filters-demo.json'), true)).toBe('tables');
-    expect(defaultLayout(load('search-demo.json'), true)).toBe('tables');
+    expect(defaultLayout(team, true)).toBe('tables');
     expect(defaultLayout([{ a: 1 }], true)).toBe('tables');
   });
 
   it('picks the form for configuration', () => {
-    expect(defaultLayout(load('config/app-config.json'), true)).toBe('form');
-    expect(defaultLayout(load('config/pipeline.json'), true)).toBe('form');
+    expect(defaultLayout(config, true)).toBe('form');
   });
 
   it('needs at least two records to call something a list', () => {

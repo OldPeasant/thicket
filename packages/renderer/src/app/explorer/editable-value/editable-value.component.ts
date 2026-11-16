@@ -1,5 +1,5 @@
 import { Component, EventEmitter, Input, Output, inject } from '@angular/core';
-import { JsonType, defaultForType, typeOf } from '../json-edit.util';
+import { type JsonType, defaultForType, typeOf } from '../json-edit.util';
 import { HighlightComponent } from '../highlight/highlight.component';
 import { EditModeService } from '../services/edit-mode.service';
 import { SchemaService } from '../services/schema.service';
@@ -14,7 +14,7 @@ import { SchemaService } from '../services/schema.service';
 export class EditableValueComponent {
   @Input({ required: true }) value: unknown;
   // Instance key of the node this value belongs to; how the schema is asked about it.
-  @Input() uid: string = '';
+  @Input() uid = '';
   @Output() valueChange = new EventEmitter<unknown>();
 
   protected editMode = inject(EditModeService);
@@ -40,7 +40,7 @@ export class EditableValueComponent {
   // Index of the current value among the choices, or -1 if it isn't one.
   get choiceIndex(): number {
     const now = JSON.stringify(this.value);
-    return this.choices?.findIndex(c => JSON.stringify(c) === now) ?? -1;
+    return this.choices?.findIndex((c) => JSON.stringify(c) === now) ?? -1;
   }
 
   choiceLabel(value: unknown): string {
@@ -52,7 +52,7 @@ export class EditableValueComponent {
   // a single option there is nothing to choose, so the dropdown is hidden.
   get typeOptions(): JsonType[] {
     const allowed = this.schema.typesFor(this.uid);
-    return allowed ? this.types.filter(t => allowed.includes(t) || t === this.type) : this.types;
+    return allowed ? this.types.filter((t) => allowed.includes(t) || t === this.type) : this.types;
   }
 
   onChoice(event: Event): void {

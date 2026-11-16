@@ -31,7 +31,14 @@ export function outlineRows(data: unknown, index: ProblemIndex): OutlineRow[] {
   return rows;
 }
 
-function walk(obj: Record<string, unknown>, path: Path, uid: string, depth: number, index: ProblemIndex, rows: OutlineRow[]): void {
+function walk(
+  obj: Record<string, unknown>,
+  path: Path,
+  uid: string,
+  depth: number,
+  index: ProblemIndex,
+  rows: OutlineRow[],
+): void {
   let shown = 0;
   let left = 0;
   for (const [name, child] of Object.entries(obj)) {
@@ -56,5 +63,14 @@ function walk(obj: Record<string, unknown>, path: Path, uid: string, depth: numb
     });
     if (isObject(child) && depth < MAX_DEPTH) walk(child, childPath, key, depth + 1, index, rows);
   }
-  if (left) rows.push({ key: `${uid}\u0000more`, path, label: `… ${left} more`, depth, kind: 'more', size: left, problems: 0 });
+  if (left)
+    rows.push({
+      key: `${uid}\u0000more`,
+      path,
+      label: `… ${left} more`,
+      depth,
+      kind: 'more',
+      size: left,
+      problems: 0,
+    });
 }

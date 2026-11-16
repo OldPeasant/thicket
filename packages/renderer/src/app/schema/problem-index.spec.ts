@@ -2,10 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { ProblemIndex, appendKey, formatPath, parsePathKey, pathKey } from './problem-index';
 import type { Path, Problem } from './schema.types';
 
-const problem = (path: Path, message = 'bad'): Problem => ({ path, keyword: 'x', message, schemaPath: '#' });
+const problem = (path: Path, message = 'bad'): Problem => ({
+  path,
+  keyword: 'x',
+  message,
+  schemaPath: '#',
+});
 
 describe('pathKey', () => {
-  it('matches the table components\' uid format', () => {
+  it("matches the table components' uid format", () => {
     expect(pathKey([])).toBe('');
     expect(pathKey(['members', 1, 'contact'])).toBe('.members[1].contact');
     expect(pathKey([0])).toBe('[0]');
@@ -81,7 +86,10 @@ describe('ProblemIndex', () => {
   });
 
   it('counts problems below every ancestor, root included', () => {
-    const idx = new ProblemIndex([problem(['members', 0, 'id']), problem(['members', 1, 'id']), problem(['team'])], data);
+    const idx = new ProblemIndex(
+      [problem(['members', 0, 'id']), problem(['members', 1, 'id']), problem(['team'])],
+      data,
+    );
     expect(idx.countBelow('')).toBe(3);
     expect(idx.countBelow('.members')).toBe(2);
     expect(idx.countBelow('.members[0]')).toBe(1);

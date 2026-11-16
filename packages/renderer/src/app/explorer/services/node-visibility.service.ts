@@ -9,7 +9,7 @@ export class NodeVisibilityService {
   }
 
   toggle(colKey: string): void {
-    this.hiddenKeys.update(prev => {
+    this.hiddenKeys.update((prev) => {
       const next = new Set(prev);
       if (next.has(colKey)) {
         next.delete(colKey);

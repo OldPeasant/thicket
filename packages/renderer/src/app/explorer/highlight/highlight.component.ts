@@ -5,10 +5,18 @@ import { FilterService } from '../services/filter.service';
 @Component({
   selector: 'app-hl',
   standalone: true,
-  template: `@for (p of parts; track $index) {@if (p.hit) {<mark>{{ p.t }}</mark>} @else {<span>{{ p.t }}</span>}}`,
+  template: `@for (p of parts; track $index) {
+    @if (p.hit) {
+      <mark>{{ p.t }}</mark>
+    } @else {
+      <span>{{ p.t }}</span>
+    }
+  }`,
   styles: [
     `
-      :host { display: contents; }
+      :host {
+        display: contents;
+      }
       mark {
         background: var(--accent-soft);
         color: inherit;
@@ -23,7 +31,7 @@ export class HighlightComponent {
 
   private filter = inject(FilterService);
 
-  get parts(): Array<{ t: string; hit: boolean }> {
+  get parts(): { t: string; hit: boolean }[] {
     // Reads the signal so the view refreshes when the search changes.
     this.filter.text();
     return this.filter.highlight(this.text);

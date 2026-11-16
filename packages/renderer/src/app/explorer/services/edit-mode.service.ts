@@ -16,7 +16,7 @@ export class EditModeService {
 
   toggle(): void {
     if (this._readOnly()) return;
-    this._enabled.update(v => !v);
+    this._enabled.update((v) => !v);
   }
 
   // Called whenever a new document is loaded, so switching to edit mode for

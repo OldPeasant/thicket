@@ -1,9 +1,15 @@
 import { Component, EventEmitter, Input, Output, inject } from '@angular/core';
-import { appendKey, type GhostKey, type Problem, type VariantInfo, type VariantSwitch } from '../../schema';
+import {
+  appendKey,
+  type GhostKey,
+  type Problem,
+  type VariantInfo,
+  type VariantSwitch,
+} from '../../schema';
 import { EditableValueComponent } from '../editable-value/editable-value.component';
-import { FormField, formFields } from '../form-fields.util';
+import { type FormField, formFields } from '../form-fields.util';
 import { estimateAvgItemBytes, formRevealKey, initialFormRevealCount } from '../reveal.util';
-import { JsonType, typeOf, withEntry, withoutEntry } from '../json-edit.util';
+import { type JsonType, typeOf, withEntry, withoutEntry } from '../json-edit.util';
 import { HighlightComponent } from '../highlight/highlight.component';
 import { JsonTableComponent } from '../json-table/json-table.component';
 import { SchemaInfoComponent } from '../schema-info/schema-info.component';
@@ -26,22 +32,28 @@ const NO_GHOSTS: readonly GhostKey[] = [];
 @Component({
   selector: 'app-json-form',
   standalone: true,
-  imports: [JsonFormComponent, JsonTableComponent, EditableValueComponent, SchemaInfoComponent, HighlightComponent],
+  imports: [
+    JsonFormComponent,
+    JsonTableComponent,
+    EditableValueComponent,
+    SchemaInfoComponent,
+    HighlightComponent,
+  ],
   templateUrl: './json-form.component.html',
   styleUrl: './json-form.component.css',
 })
 export class JsonFormComponent {
   @Input({ required: true }) value!: unknown;
-  @Input() path: string = '';
-  @Input() uid: string = '';
+  @Input() path = '';
+  @Input() uid = '';
   // How many groups deep this object sits. The label column shrinks by the
   // indentation each level adds, so the value column stays where it is.
-  @Input() depth: number = 0;
+  @Input() depth = 0;
   // Set by a parent whose own key directly matched the search (or was itself
   // forced): everything below stays visible, whatever it contains.
-  @Input() forceVisible: boolean = false;
+  @Input() forceVisible = false;
   // The search's default for this group: its name shown, its content behind a click.
-  @Input() filterCollapsed: boolean = false;
+  @Input() filterCollapsed = false;
 
   // The new value for THIS node, rebuilt one level at a time like the table's.
   @Output() valueChange = new EventEmitter<unknown>();
@@ -56,9 +68,18 @@ export class JsonFormComponent {
   // A variant switch that would lose data, waiting for the user to confirm.
   protected pending?: { label: string; to: unknown; sw: VariantSwitch };
 
-  private fieldMemo?: { value: unknown; ghosts: readonly GhostKey[]; declared: readonly string[]; required: ReadonlySet<string>; fields: FormField[]; avgBytes: number };
+  private fieldMemo?: {
+    value: unknown;
+    ghosts: readonly GhostKey[];
+    declared: readonly string[];
+    required: ReadonlySet<string>;
+    fields: FormField[];
+    avgBytes: number;
+  };
 
-  get type(): JsonType { return typeOf(this.value); }
+  get type(): JsonType {
+    return typeOf(this.value);
+  }
 
   // Edit controls at this object: on in edit mode, unless the schema makes it read-only.
   get canEdit(): boolean {
@@ -86,9 +107,23 @@ export class JsonFormComponent {
     const declared = this.schema.declaredKeys(this.uid);
     const required = this.schema.requiredFor(this.uid);
     const memo = this.fieldMemo;
-    if (memo && memo.value === value && memo.ghosts === ghosts && memo.declared === declared && memo.required === required) return memo.fields;
+    if (
+      memo &&
+      memo.value === value &&
+      memo.ghosts === ghosts &&
+      memo.declared === declared &&
+      memo.required === required
+    )
+      return memo.fields;
     const fields = formFields(value, declared, ghosts.length ? ghosts : NO_GHOSTS, required);
-    this.fieldMemo = { value, ghosts, declared, required, fields, avgBytes: estimateAvgItemBytes(value, Object.values(value)) };
+    this.fieldMemo = {
+      value,
+      ghosts,
+      declared,
+      required,
+      fields,
+      avgBytes: estimateAvgItemBytes(value, Object.values(value)),
+    };
     return fields;
   }
 
@@ -98,7 +133,7 @@ export class JsonFormComponent {
     return this.forceVisible || this.collapse.get(this.uid, this.path) === false;
   }
 
-  private get entries(): Array<[string, unknown]> {
+  private get entries(): [string, unknown][] {
     return Object.entries(this.value as Record<string, unknown>);
   }
 
@@ -111,29 +146,45 @@ export class JsonFormComponent {
     if (!this.filter.active) return fields;
     const value = this.value as Record<string, unknown>;
     const widened = this.filter.widens(this.entries);
-    return fields.filter(f => f.ghost
-      ? this.filter.keyMatch(f.key)
-      : this.effectiveForce || widened || this.filter.treeMatch(f.key, value[f.key]));
+    return fields.filter((f) =>
+      f.ghost
+        ? this.filter.keyMatch(f.key)
+        : this.effectiveForce || widened || this.filter.treeMatch(f.key, value[f.key]),
+    );
   }
 
   // --- pagination: a very large object shows a first page, like a table ---
   get revealedCount(): number {
     const length = this.visibleFields.length;
-    return this.reveal.count(formRevealKey(this.path), length, initialFormRevealCount(length, this.fieldMemo?.avgBytes ?? 0));
+    return this.reveal.count(
+      formRevealKey(this.path),
+      length,
+      initialFormRevealCount(length, this.fieldMemo?.avgBytes ?? 0),
+    );
   }
 
   get pagedFields(): FormField[] {
     return this.visibleFields.slice(0, this.revealedCount);
   }
 
-  get hasMore(): boolean { return this.revealedCount < this.visibleFields.length; }
+  get hasMore(): boolean {
+    return this.revealedCount < this.visibleFields.length;
+  }
 
-  revealMore(by: number): void { this.reveal.revealMore(formRevealKey(this.path), by); }
+  revealMore(by: number): void {
+    this.reveal.revealMore(formRevealKey(this.path), by);
+  }
 
-  revealAll(): void { this.reveal.revealAll(formRevealKey(this.path)); }
+  revealAll(): void {
+    this.reveal.revealAll(formRevealKey(this.path));
+  }
 
   childForce(key: string): boolean {
-    return this.effectiveForce || this.filter.forces(key, this.childOf(key)) || this.filter.groupMatch(this.entries);
+    return (
+      this.effectiveForce ||
+      this.filter.forces(key, this.childOf(key)) ||
+      this.filter.groupMatch(this.entries)
+    );
   }
 
   childFilterCollapsed(key: string): boolean {
@@ -144,22 +195,36 @@ export class JsonFormComponent {
     return this.filter.keyDim(key, this.childOf(key));
   }
 
-  childOf(key: string): unknown { return (this.value as Record<string, unknown>)[key]; }
+  childOf(key: string): unknown {
+    return (this.value as Record<string, unknown>)[key];
+  }
 
   kindOf(value: unknown): Kind {
     const type = typeOf(value);
     return type === 'object' ? 'object' : type === 'array' ? 'array' : 'scalar';
   }
 
-  objectSize(value: unknown): number { return Object.keys(value as object).length; }
+  objectSize(value: unknown): number {
+    return Object.keys(value as object).length;
+  }
 
-  childUid(key: string): string { return appendKey(this.uid, key); }
-  childPath(key: string): string { return this.path ? `${this.path}.${key}` : key; }
+  childUid(key: string): string {
+    return appendKey(this.uid, key);
+  }
+  childPath(key: string): string {
+    return this.path ? `${this.path}.${key}` : key;
+  }
 
   // --- what the schema and validation say about a field ---
-  problemsAt(key: string): readonly Problem[] { return this.schema.index().at(this.childUid(key)); }
+  problemsAt(key: string): readonly Problem[] {
+    return this.schema.index().at(this.childUid(key));
+  }
 
-  problemTitle(key: string): string { return this.problemsAt(key).map(p => p.message).join('\n'); }
+  problemTitle(key: string): string {
+    return this.problemsAt(key)
+      .map((p) => p.message)
+      .join('\n');
+  }
 
   // Everything wrong at or below a field — what a collapsed group is hiding.
   problemCount(key: string): number {
@@ -168,14 +233,19 @@ export class JsonFormComponent {
     return index.at(uid).length + index.countBelow(uid);
   }
 
-  isDeprecated(key: string): boolean { return this.schema.metaFor(this.childUid(key))?.deprecated === true; }
+  isDeprecated(key: string): boolean {
+    return this.schema.metaFor(this.childUid(key))?.deprecated === true;
+  }
 
   ghostHint(g: GhostKey): string {
     return g.hasDefault ? `default ${JSON.stringify(g.default)}` : 'not set';
   }
 
   ghostTitle(g: GhostKey): string {
-    return g.schema.description ?? (g.required ? 'Required by the schema' : 'Optional key from the schema');
+    return (
+      g.schema.description ??
+      (g.required ? 'Required by the schema' : 'Optional key from the schema')
+    );
   }
 
   // A field is in focus when it gains focus or is clicked. Events bubble
@@ -189,18 +259,28 @@ export class JsonFormComponent {
 
   // --- groups ---
   isCollapsed(key: string): boolean {
-    return this.collapse.get(this.childUid(key), this.childPath(key)) ?? this.childFilterCollapsed(key);
+    return (
+      this.collapse.get(this.childUid(key), this.childPath(key)) ?? this.childFilterCollapsed(key)
+    );
   }
 
   // Shift-click applies to every related node (same structural path).
   toggle(key: string, event: MouseEvent): void {
-    this.collapse.set(this.childUid(key), this.childPath(key), !this.isCollapsed(key), event.shiftKey);
+    this.collapse.set(
+      this.childUid(key),
+      this.childPath(key),
+      !this.isCollapsed(key),
+      event.shiftKey,
+    );
   }
 
   // --- edits ---
   onFieldChange(key: string, newValue: unknown): void {
     // Changing the discriminator is choosing a variant, whichever control did it.
-    if (this.variants?.property === key && JSON.stringify(newValue) !== JSON.stringify(this.childOf(key))) {
+    if (
+      this.variants?.property === key &&
+      JSON.stringify(newValue) !== JSON.stringify(this.childOf(key))
+    ) {
       this.requestSwitch(newValue);
       return;
     }
@@ -218,7 +298,10 @@ export class JsonFormComponent {
       this.valueChange.emit(sw.value);
       return;
     }
-    const label = this.variants?.variants.find(v => v.values.some(x => JSON.stringify(x) === JSON.stringify(to)))?.label ?? String(to);
+    const label =
+      this.variants?.variants.find((v) =>
+        v.values.some((x) => JSON.stringify(x) === JSON.stringify(to)),
+      )?.label ?? String(to);
     this.pending = { label, to, sw };
   }
 

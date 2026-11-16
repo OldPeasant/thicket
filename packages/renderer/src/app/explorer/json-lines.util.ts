@@ -56,15 +56,19 @@ export function parseJsonLines(text: string, force = false): JsonLinesDoc | unde
     }
   });
   if (!force && (json === 0 || json < other)) return undefined;
-  const groups = groupByShape(parsed.filter(l => l.kind === 'json').map(l => (l as { value: unknown }).value));
+  const groups = groupByShape(
+    parsed.filter((l) => l.kind === 'json').map((l) => (l as { value: unknown }).value),
+  );
   let next = 0;
-  const lines = parsed.map((l): JsonLine => (l.kind === 'json' ? { ...l, group: groups.of[next++] } : l));
+  const lines = parsed.map((l): JsonLine =>
+    l.kind === 'json' ? { ...l, group: groups.of[next++] ?? 0 } : l,
+  );
   return { lines, eol, finalEol, groupCount: groups.count };
 }
 
 /** The text of the file: one line per line, line breaks as they were. */
 export function serializeJsonLines(doc: JsonLinesDoc): string {
-  return doc.lines.map(l => l.text).join(doc.eol) + (doc.finalEol ? doc.eol : '');
+  return doc.lines.map((l) => l.text).join(doc.eol) + (doc.finalEol ? doc.eol : '');
 }
 
 /**
@@ -81,7 +85,7 @@ export function withLineValue(doc: JsonLinesDoc, index: number, value: unknown):
 
 /** What a line contributes to the data the schema sees: its value, or undefined when it is not JSON. */
 export function lineValues(doc: JsonLinesDoc): unknown[] {
-  return doc.lines.map(l => (l.kind === 'json' ? l.value : undefined));
+  return doc.lines.map((l) => (l.kind === 'json' ? l.value : undefined));
 }
 
 /** Indices of the lines that are shown: every line that is not blank. */
@@ -198,7 +202,7 @@ function openIn(shape: ReadonlySet<string>, path: string): boolean {
  */
 export function groupByShape(values: readonly unknown[]): { of: number[]; count: number } {
   const firsts: Set<string>[] = [];
-  const of = values.map(value => {
+  const of = values.map((value) => {
     const shape = shapeOf(value);
     let best = -1;
     let bestScore = SIMILARITY_THRESHOLD;

@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, OnInit, Output, inject } from '@angular/core';
+import { Component, EventEmitter, Input, type OnInit, Output, inject } from '@angular/core';
 import { TableOrientationService } from '../services/table-orientation.service';
 import { ColumnSyncService } from '../services/column-sync.service';
 import { FilterService } from '../services/filter.service';
@@ -14,7 +14,7 @@ import { SchemaService } from '../services/schema.service';
 import { appendKey, type GhostKey, type Problem } from '../../schema';
 import { estimateAvgItemBytes, initialRevealCount } from '../reveal.util';
 import {
-  JsonType,
+  type JsonType,
   blankItemLike,
   blankLike,
   typeOf,
@@ -30,22 +30,28 @@ const NO_KEYS: readonly string[] = [];
 @Component({
   selector: 'app-json-table',
   standalone: true,
-  imports: [JsonTableComponent, ColumnMenuComponent, EditableValueComponent, HighlightComponent, SchemaInfoComponent],
+  imports: [
+    JsonTableComponent,
+    ColumnMenuComponent,
+    EditableValueComponent,
+    HighlightComponent,
+    SchemaInfoComponent,
+  ],
   templateUrl: './json-table.component.html',
   styleUrl: './json-table.component.css',
 })
 export class JsonTableComponent implements OnInit {
   @Input({ required: true }) value!: unknown;
-  @Input() path: string = '';
+  @Input() path = '';
   // Set by a parent whose own key/value directly matched the filter (or was
   // itself forced) — every node below such a match stays visible, no matter
   // what it contains.
-  @Input() forceVisible: boolean = false;
+  @Input() forceVisible = false;
   // Instance id (unlike `path`, unique per array row) for collapse state.
-  @Input() uid: string = '';
+  @Input() uid = '';
   // The filter's default for this node: show its key but keep the value
   // collapsed behind a click.
-  @Input() filterCollapsed: boolean = false;
+  @Input() filterCollapsed = false;
 
   // Emits the new value for THIS node — either a direct edit at this node
   // (leaf value or type switch, handled by onSelfChange) or a rebuilt
@@ -81,7 +87,9 @@ export class JsonTableComponent implements OnInit {
     return this.schema.metaFor(childKey, narrow)?.deprecated === true;
   }
 
-  columnUid(key: string): string { return appendKey(this.itemUid(0), key); }
+  columnUid(key: string): string {
+    return appendKey(this.itemUid(0), key);
+  }
 
   // Edit controls at this node: on in edit mode, unless the schema makes the
   // node (or something above it) read-only.
@@ -91,15 +99,23 @@ export class JsonTableComponent implements OnInit {
 
   // Schema problems about this very node — or, for something the data lacks
   // (a missing required key), about the nearest node that exists.
-  get problems(): readonly Problem[] { return this.schema.index().at(this.uid); }
+  get problems(): readonly Problem[] {
+    return this.schema.index().at(this.uid);
+  }
 
-  get problemTitle(): string { return this.problems.map(p => p.message).join('\n'); }
+  get problemTitle(): string {
+    return this.problems.map((p) => p.message).join('\n');
+  }
 
   // In a table of records a row is not a node of its own — only its cells
   // are — so problems about the row itself (a missing required key) are
   // shown in the row's first cell (horizontal) or its #n header (vertical).
   rowProblemTitle(index: number): string {
-    return this.schema.index().at(this.itemUid(index)).map(p => p.message).join('\n');
+    return this.schema
+      .index()
+      .at(this.itemUid(index))
+      .map((p) => p.message)
+      .join('\n');
   }
 
   // Everything wrong at or below this node — what a collapsed chip is hiding.
@@ -115,7 +131,10 @@ export class JsonTableComponent implements OnInit {
   }
 
   ghostTitle(g: GhostKey): string {
-    const parts = [g.schema.description ?? (g.required ? 'Required by the schema' : 'Optional key from the schema')];
+    const parts = [
+      g.schema.description ??
+        (g.required ? 'Required by the schema' : 'Optional key from the schema'),
+    ];
     if (g.hasDefault) parts.push(`Default: ${JSON.stringify(g.default)}`);
     if (g.schema.readOnly) parts.push('Read-only');
     return parts.join('\n');
@@ -128,7 +147,9 @@ export class JsonTableComponent implements OnInit {
     this.reveal.revealMore(this.path, 1);
   }
 
-  get isContainer(): boolean { return this.type === 'object' || this.type === 'array'; }
+  get isContainer(): boolean {
+    return this.type === 'object' || this.type === 'array';
+  }
 
   private get hasContent(): boolean {
     if (this.type === 'object') return this.objEntries.length > 0;
@@ -137,7 +158,9 @@ export class JsonTableComponent implements OnInit {
   }
 
   // A collapsed node renders a clickable chip in place of its content.
-  get showChip(): boolean { return this.collapsed && this.hasContent; }
+  get showChip(): boolean {
+    return this.collapsed && this.hasContent;
+  }
 
   get chipLabel(): string {
     if (this.type === 'object') return `{ ${this.objEntries.length} }`;
@@ -152,9 +175,13 @@ export class JsonTableComponent implements OnInit {
     this.colSync.scheduleSync();
   }
 
-  get orientation(): 'h' | 'v' { return this.orientations.read(this.path); }
+  get orientation(): 'h' | 'v' {
+    return this.orientations.read(this.path);
+  }
 
-  get type(): JsonType { return typeOf(this.value); }
+  get type(): JsonType {
+    return typeOf(this.value);
+  }
 
   // --- object helpers ---
   get objEntries(): [string, unknown][] {
@@ -184,7 +211,9 @@ export class JsonTableComponent implements OnInit {
   }
 
   // --- array helpers ---
-  get arr(): unknown[] { return this.value as unknown[]; }
+  get arr(): unknown[] {
+    return this.value as unknown[];
+  }
 
   isObjectItem(item: unknown): boolean {
     return typeOf(item) === 'object' && item !== null;
@@ -197,14 +226,19 @@ export class JsonTableComponent implements OnInit {
   // the whole array back to the plain, unkeyed item list.
   get isArrayOfObjects(): boolean {
     const a = this.arr;
-    return a.length > 0 && a.some(item => this.isObjectItem(item));
+    return a.length > 0 && a.some((item) => this.isObjectItem(item));
   }
 
   // Shared column set: every key any row has, then — in edit mode, with a
   // schema — the keys the schema declares that no row has yet ("ghost"
   // columns, whose empty cells offer a + to add the key to that row).
   // Memoised on the array itself, which edits replace rather than mutate.
-  private get keyInfo(): { arr: unknown[]; declared: readonly string[]; all: string[]; ghosts: Set<string> } {
+  private get keyInfo(): {
+    arr: unknown[];
+    declared: readonly string[];
+    all: string[];
+    ghosts: Set<string>;
+  } {
     const arr = this.arr;
     const declared = this.canEdit ? this.schema.declaredItemKeys(this.uid) : NO_KEYS;
     const memo = this.keyMemo;
@@ -214,18 +248,30 @@ export class JsonTableComponent implements OnInit {
     for (const item of arr) {
       if (!this.isObjectItem(item)) continue;
       for (const k of Object.keys(item as Record<string, unknown>)) {
-        if (!seen.has(k)) { seen.add(k); all.push(k); }
+        if (!seen.has(k)) {
+          seen.add(k);
+          all.push(k);
+        }
       }
     }
-    const ghosts = new Set(declared.filter(k => !seen.has(k)));
+    const ghosts = new Set(declared.filter((k) => !seen.has(k)));
     all.push(...ghosts);
     return (this.keyMemo = { arr, declared, all, ghosts });
   }
-  private keyMemo?: { arr: unknown[]; declared: readonly string[]; all: string[]; ghosts: Set<string> };
+  private keyMemo?: {
+    arr: unknown[];
+    declared: readonly string[];
+    all: string[];
+    ghosts: Set<string>;
+  };
 
-  get arrayKeys(): string[] { return this.keyInfo.all; }
+  get arrayKeys(): string[] {
+    return this.keyInfo.all;
+  }
 
-  isGhostColumn(key: string): boolean { return this.keyInfo.ghosts.has(key); }
+  isGhostColumn(key: string): boolean {
+    return this.keyInfo.ghosts.has(key);
+  }
 
   // Whether a row may get this key at all: a closed object, or a variant that
   // doesn't declare it, must not be offered a + for it.
@@ -237,7 +283,7 @@ export class JsonTableComponent implements OnInit {
   // at least one item isn't a plain object and therefore has no keys of its
   // own to line up with the shared column set.
   get hasNonObjectItems(): boolean {
-    return this.arr.some(item => !this.isObjectItem(item));
+    return this.arr.some((item) => !this.isObjectItem(item));
   }
 
   // Whether the row at this item shows all its cells in 'context' mode: it
@@ -253,8 +299,9 @@ export class JsonTableComponent implements OnInit {
     if (this.effectiveForce) return true;
     const key = { arr: this.arr, text: this.filter.text(), mode: this.filter.mode() };
     const memo = this.arrForceMemo;
-    if (memo && memo.arr === key.arr && memo.text === key.text && memo.mode === key.mode) return memo.force;
-    const force = this.filter.groupMatch(this.arr.map(item => [null, item]));
+    if (memo && memo.arr === key.arr && memo.text === key.text && memo.mode === key.mode)
+      return memo.force;
+    const force = this.filter.groupMatch(this.arr.map((item) => [null, item]));
     this.arrForceMemo = { ...key, force };
     return force;
   }
@@ -269,10 +316,10 @@ export class JsonTableComponent implements OnInit {
   // matching (or match-containing) value in that column, or the row is
   // itself a widened group that needs every cell shown.
   get visibleArrayKeys(): string[] {
-    return this.arrayKeys.filter(k => {
+    return this.arrayKeys.filter((k) => {
       if (this.visibility.isHidden(this.colKey(k))) return false;
       if (this.arrForce || this.filter.directMatch(k, undefined)) return true;
-      return this.arr.some(item => {
+      return this.arr.some((item) => {
         if (!this.hasCell(item, k)) return false;
         return this.filter.treeMatch(k, this.cell(item, k)) || this.rowWidened(item);
       });
@@ -286,11 +333,13 @@ export class JsonTableComponent implements OnInit {
     const keys = this.visibleArrayKeys;
     return this.arr
       .map((_, i) => i)
-      .filter(i => {
+      .filter((i) => {
         if (this.arrForce) return true;
         const item = this.arr[i];
         if (!this.isObjectItem(item)) return this.filter.treeMatch(null, item);
-        return keys.some(k => this.hasCell(item, k) && this.filter.treeMatch(k, this.cell(item, k)));
+        return keys.some(
+          (k) => this.hasCell(item, k) && this.filter.treeMatch(k, this.cell(item, k)),
+        );
       });
   }
 
@@ -304,7 +353,7 @@ export class JsonTableComponent implements OnInit {
   // `arr`, independent of which items the filter currently hides.
   get filteredArrItemIndices(): number[] {
     if (this.arrForce) return this.arr.map((_, i) => i);
-    return this.arr.map((_, i) => i).filter(i => this.filter.treeMatch(null, this.arr[i]));
+    return this.arr.map((_, i) => i).filter((i) => this.filter.treeMatch(null, this.arr[i]));
   }
 
   get visibleArrItemIndices(): number[] {
@@ -324,7 +373,10 @@ export class JsonTableComponent implements OnInit {
 
   private get currentAvgItemBytes(): number {
     if (this.type === 'object') {
-      return estimateAvgItemBytes(this.value as object, this.objEntries.map(([, v]) => v));
+      return estimateAvgItemBytes(
+        this.value as object,
+        this.objEntries.map(([, v]) => v),
+      );
     }
     return estimateAvgItemBytes(this.arr, this.arr);
   }
@@ -360,9 +412,11 @@ export class JsonTableComponent implements OnInit {
   // group, so an ancestor that merely contains a match never forces the
   // whole document.
   cellForceVisible(item: unknown, key: string): boolean {
-    return this.arrForce
-      || this.filter.forces(key, this.cell(item, key))
-      || this.filter.groupMatch(this.objEntriesOf(item));
+    return (
+      this.arrForce ||
+      this.filter.forces(key, this.cell(item, key)) ||
+      this.filter.groupMatch(this.objEntriesOf(item))
+    );
   }
 
   // An object entry is shown if it isn't manually hidden via the column menu
@@ -375,9 +429,11 @@ export class JsonTableComponent implements OnInit {
   }
 
   entryForceVisible(key: string, value: unknown): boolean {
-    return this.effectiveForce
-      || this.filter.forces(key, value)
-      || this.filter.groupMatch(this.objEntries);
+    return (
+      this.effectiveForce ||
+      this.filter.forces(key, value) ||
+      this.filter.groupMatch(this.objEntries)
+    );
   }
 
   entryCollapsed(key: string, value: unknown): boolean {
@@ -396,9 +452,12 @@ export class JsonTableComponent implements OnInit {
   columnDim(key: string): boolean {
     if (!this.filter.active) return false;
     switch (this.filter.mode()) {
-      case 'strict': return !this.filter.keyMatch(key);
+      case 'strict':
+        return !this.filter.keyMatch(key);
       case 'context':
-        return !this.arr.some(item => this.hasCell(item, key) && this.filter.treeMatch(key, this.cell(item, key)));
+        return !this.arr.some(
+          (item) => this.hasCell(item, key) && this.filter.treeMatch(key, this.cell(item, key)),
+        );
     }
   }
 
@@ -419,9 +478,15 @@ export class JsonTableComponent implements OnInit {
     return this.path ? `${this.path}.*.${key}` : `*.${key}`;
   }
 
-  objChildUid(key: string): string { return appendKey(this.uid, key); }
-  cellUid(index: number, key: string): string { return appendKey(this.itemUid(index), key); }
-  itemUid(index: number): string { return appendKey(this.uid, index); }
+  objChildUid(key: string): string {
+    return appendKey(this.uid, key);
+  }
+  cellUid(index: number, key: string): string {
+    return appendKey(this.itemUid(index), key);
+  }
+  itemUid(index: number): string {
+    return appendKey(this.uid, index);
+  }
 
   arrItemPath(): string {
     return this.path ? `${this.path}.*` : '*';
@@ -451,8 +516,14 @@ export class JsonTableComponent implements OnInit {
 
   // --- object mutation ---
   onEntryChange(key: string, newValue: unknown): void {
-    this.valueChange.emit(this.switchedByDiscriminator(this.uid, this.value as Record<string, unknown>, key, newValue)
-      ?? withEntry(this.value as Record<string, unknown>, key, newValue));
+    this.valueChange.emit(
+      this.switchedByDiscriminator(
+        this.uid,
+        this.value as Record<string, unknown>,
+        key,
+        newValue,
+      ) ?? withEntry(this.value as Record<string, unknown>, key, newValue),
+    );
   }
 
   // Changing the key that tells a schema's variants apart means choosing
@@ -460,8 +531,17 @@ export class JsonTableComponent implements OnInit {
   // table never removes anything by itself (it has nowhere to ask first):
   // what the new variant does not allow stays, and the schema bar flags it.
   // The form asks before it drops anything.
-  private switchedByDiscriminator(uid: string, object: Record<string, unknown>, key: string, newValue: unknown): Record<string, unknown> | undefined {
-    if (this.schema.variantsFor(uid)?.property !== key || JSON.stringify(object[key]) === JSON.stringify(newValue)) return undefined;
+  private switchedByDiscriminator(
+    uid: string,
+    object: Record<string, unknown>,
+    key: string,
+    newValue: unknown,
+  ): Record<string, unknown> | undefined {
+    if (
+      this.schema.variantsFor(uid)?.property !== key ||
+      JSON.stringify(object[key]) === JSON.stringify(newValue)
+    )
+      return undefined;
     return this.schema.switchVariantFor(uid, newValue, false)?.value;
   }
 
@@ -513,7 +593,11 @@ export class JsonTableComponent implements OnInit {
   // row's object, leaving every other row untouched ---
   onCellChange(index: number, key: string, newValue: unknown): void {
     const item = this.arr[index] as Record<string, unknown>;
-    this.onItemChange(index, this.switchedByDiscriminator(this.itemUid(index), item, key, newValue) ?? withEntry(item, key, newValue));
+    this.onItemChange(
+      index,
+      this.switchedByDiscriminator(this.itemUid(index), item, key, newValue) ??
+        withEntry(item, key, newValue),
+    );
   }
 
   onCellDelete(index: number, key: string): void {
@@ -530,7 +614,7 @@ export class JsonTableComponent implements OnInit {
   addCellLike(index: number, key: string): void {
     const seeded = this.schema.seedFor(this.itemUid(index), key);
     if (seeded !== undefined) return this.onCellChange(index, key, seeded);
-    const source = this.arr.find(item => this.hasCell(item, key));
+    const source = this.arr.find((item) => this.hasCell(item, key));
     const template = source === undefined ? '' : blankLike(this.cell(source, key));
     this.onCellChange(index, key, template);
   }

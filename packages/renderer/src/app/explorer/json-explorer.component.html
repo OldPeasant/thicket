@@ -8,7 +8,9 @@
         (input)="onFilterInput($event)"
       />
       @if (filter.text()) {
-        <button type="button" class="clear-filter" (click)="filter.clear()" title="Clear filter">×</button>
+        <button type="button" class="clear-filter" (click)="filter.clear()" title="Clear filter">
+          ×
+        </button>
       }
     </div>
     <div class="filter-modes" role="group" aria-label="Filter mode">
@@ -25,10 +27,26 @@
       }
     </div>
     @if (layout === 'form' && !lines.active()) {
-      <button type="button" class="panel-toggle" [class.is-active]="panels.outlineOpen()" (click)="panels.toggleOutline()" title="Navigate the document by its structure">Outline</button>
+      <button
+        type="button"
+        class="panel-toggle"
+        [class.is-active]="panels.outlineOpen()"
+        (click)="panels.toggleOutline()"
+        title="Navigate the document by its structure"
+      >
+        Outline
+      </button>
     }
     @if (layout === 'form' && schema.model()) {
-      <button type="button" class="panel-toggle" [class.is-active]="panels.docsOpen()" (click)="panels.toggleDocs()" title="Show what the schema says about the field in focus">Docs</button>
+      <button
+        type="button"
+        class="panel-toggle"
+        [class.is-active]="panels.docsOpen()"
+        (click)="panels.toggleDocs()"
+        title="Show what the schema says about the field in focus"
+      >
+        Docs
+      </button>
     }
     <button
       type="button"
@@ -38,11 +56,19 @@
       [title]="editMode.readOnly() ? 'This file is read-only' : ''"
       (click)="toggleEditMode()"
     >
-      {{ editMode.readOnly() ? 'Read-only' : (editMode.enabled() ? 'Go to view mode' : 'Go to edit mode') }}
+      {{
+        editMode.readOnly()
+          ? 'Read-only'
+          : editMode.enabled()
+            ? 'Go to view mode'
+            : 'Go to edit mode'
+      }}
     </button>
   </div>
   @if (filter.text()) {
-    <div class="filter-hint"><strong>{{ filter.mode() }}:</strong> {{ modeHint }}</div>
+    <div class="filter-hint">
+      <strong>{{ filter.mode() }}:</strong> {{ modeHint }}
+    </div>
   }
   <div class="workspace">
     @if (layout === 'form' && panels.outlineOpen() && !lines.active()) {

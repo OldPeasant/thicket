@@ -76,7 +76,7 @@ export class FilterService {
 
   descendantMatch(value: unknown): boolean {
     if (value === null || typeof value !== 'object') return false;
-    if (Array.isArray(value)) return value.some(item => this.treeMatch(null, item));
+    if (Array.isArray(value)) return value.some((item) => this.treeMatch(null, item));
     return Object.entries(value as Record<string, unknown>).some(([k, v]) => this.treeMatch(k, v));
   }
 
@@ -89,7 +89,7 @@ export class FilterService {
   // 'context' mode: one entry of this sibling group (an object's attributes,
   // or an array's items) matched directly, so every sibling is shown in
   // full, subtree included.
-  groupMatch(entries: Array<[string | null, unknown]>): boolean {
+  groupMatch(entries: [string | null, unknown][]): boolean {
     if (!this.active || this.mode() !== 'context') return false;
     return entries.some(([k, v]) => this.directMatch(k, v));
   }
@@ -98,7 +98,7 @@ export class FilterService {
   // attributes are shown — the ones not leading to a match collapsed (see
   // collapsedByFilter). Arrays don't widen this way: sibling items of an
   // ancestor stay hidden.
-  widens(entries: Array<[string, unknown]>): boolean {
+  widens(entries: [string, unknown][]): boolean {
     if (!this.active || this.mode() !== 'context') return false;
     return entries.some(([k, v]) => this.treeMatch(k, v));
   }
@@ -120,11 +120,11 @@ export class FilterService {
   }
 
   // Splits text around case-insensitive occurrences of the search term.
-  highlight(text: string): Array<{ t: string; hit: boolean }> {
+  highlight(text: string): { t: string; hit: boolean }[] {
     const term = this.term();
     if (!term) return [{ t: text, hit: false }];
     const lower = text.toLowerCase();
-    const parts: Array<{ t: string; hit: boolean }> = [];
+    const parts: { t: string; hit: boolean }[] = [];
     let from = 0;
     for (let i = lower.indexOf(term); i !== -1; i = lower.indexOf(term, from)) {
       if (i > from) parts.push({ t: text.slice(from, i), hit: false });

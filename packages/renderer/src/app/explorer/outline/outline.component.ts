@@ -2,7 +2,7 @@ import { Component, Input, inject } from '@angular/core';
 import { FocusService } from '../services/focus.service';
 import { JumpService } from '../services/jump.service';
 import { SchemaService } from '../services/schema.service';
-import { OutlineRow, outlineRows } from './outline.util';
+import { type OutlineRow, outlineRows } from './outline.util';
 
 // The document's structure as a list to navigate by: click a group and the
 // form scrolls to it, opening whatever hides it. Problems are counted on the

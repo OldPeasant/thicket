@@ -18,7 +18,11 @@ describe('loadSchema', () => {
   });
 
   it('rejects a schema Ajv cannot compile', () => {
-    expect(loadSchema('{"type":"nonsense"}')).toMatchObject({ error: expect.stringContaining('Unusable schema') });
-    expect(loadSchema('{"$ref":"#/$defs/missing"}')).toMatchObject({ error: expect.stringContaining('Unusable schema') });
+    expect(loadSchema('{"type":"nonsense"}')).toMatchObject({
+      error: expect.stringContaining('Unusable schema'),
+    });
+    expect(loadSchema('{"$ref":"#/$defs/missing"}')).toMatchObject({
+      error: expect.stringContaining('Unusable schema'),
+    });
   });
 });

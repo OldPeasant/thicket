@@ -33,6 +33,7 @@ export function createValidator(schema: JsonSchema): Validator {
       let fn = subs.get(sub);
       if (fn === undefined) {
         try {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars -- picked out to leave `rest`
           const { $id, $schema, ...rest } = sub;
           fn = ajv.compile({ ...rest, $defs: schema.$defs, definitions: schema['definitions'] });
         } catch {
@@ -50,7 +51,11 @@ function toProblem(e: ErrorObject, data: unknown): Problem {
   const path = pointerToPath(e.instancePath, data);
   const params = e.params as Record<string, unknown>;
   // Keywords that complain about a key report the object; point at the key.
-  const key = params['missingProperty'] ?? params['additionalProperty'] ?? params['unevaluatedProperty'] ?? params['propertyName'];
+  const key =
+    params['missingProperty'] ??
+    params['additionalProperty'] ??
+    params['unevaluatedProperty'] ??
+    params['propertyName'];
   return {
     path: typeof key === 'string' ? [...path, key] : path,
     keyword: e.keyword,
@@ -61,12 +66,15 @@ function toProblem(e: ErrorObject, data: unknown): Problem {
 
 /** `/members/0/role` → `['members', 0, 'role']`; segments under an array become numbers. */
 function pointerToPath(pointer: string, data: unknown): Path {
-  const path: Array<string | number> = [];
+  const path: (string | number)[] = [];
   let value = data;
   for (const raw of pointer.split('/').slice(1)) {
     const seg = raw.replace(/~1/g, '/').replace(/~0/g, '~');
     path.push(Array.isArray(value) ? Number(seg) : seg);
-    value = typeof value === 'object' && value !== null ? (value as Record<string, unknown>)[seg] : undefined;
+    value =
+      typeof value === 'object' && value !== null
+        ? (value as Record<string, unknown>)[seg]
+        : undefined;
   }
   return path;
 }

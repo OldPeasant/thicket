@@ -1,7 +1,12 @@
 @if (editMode.enabled() && !locked) {
   <span class="ev">
     @if (choices; as options) {
-      <select class="type-select choice-select" [class.not-allowed]="choiceIndex < 0" (change)="onChoice($event)" (click)="$event.stopPropagation()">
+      <select
+        class="type-select choice-select"
+        [class.not-allowed]="choiceIndex < 0"
+        (change)="onChoice($event)"
+        (click)="$event.stopPropagation()"
+      >
         @if (choiceIndex < 0) {
           <option value="-1" selected>{{ choiceLabel(value) }} (not allowed)</option>
         }
@@ -10,45 +15,49 @@
         }
       </select>
     } @else {
-    @if (typeOptions.length > 1) {
-      <select class="type-select" (change)="onTypeChange($event)" (click)="$event.stopPropagation()">
-        @for (t of typeOptions; track t) {
-          <option [value]="t" [selected]="t === type">{{ t }}</option>
-        }
-      </select>
-    }
+      @if (typeOptions.length > 1) {
+        <select
+          class="type-select"
+          (change)="onTypeChange($event)"
+          (click)="$event.stopPropagation()"
+        >
+          @for (t of typeOptions; track t) {
+            <option [value]="t" [selected]="t === type">{{ t }}</option>
+          }
+        </select>
+      }
 
-    @if (type === 'string') {
-      <input
-        #input
-        class="val-input str"
-        type="text"
-        [value]="value"
-        (click)="$event.stopPropagation()"
-        (blur)="commitString(input.value)"
-        (keydown.enter)="input.blur()"
-      />
-    } @else if (type === 'number') {
-      <input
-        #input
-        class="val-input num"
-        type="number"
-        [value]="value"
-        (click)="$event.stopPropagation()"
-        (blur)="commitNumber(input.value)"
-        (keydown.enter)="input.blur()"
-      />
-    } @else if (type === 'boolean') {
-      <input
-        type="checkbox"
-        class="val-input bool"
-        [checked]="value"
-        (click)="$event.stopPropagation()"
-        (change)="commitBoolean($any($event.target).checked)"
-      />
-    } @else if (type === 'null') {
-      <span class="val null">null</span>
-    }
+      @if (type === 'string') {
+        <input
+          #input
+          class="val-input str"
+          type="text"
+          [value]="value"
+          (click)="$event.stopPropagation()"
+          (blur)="commitString(input.value)"
+          (keydown.enter)="input.blur()"
+        />
+      } @else if (type === 'number') {
+        <input
+          #input
+          class="val-input num"
+          type="number"
+          [value]="value"
+          (click)="$event.stopPropagation()"
+          (blur)="commitNumber(input.value)"
+          (keydown.enter)="input.blur()"
+        />
+      } @else if (type === 'boolean') {
+        <input
+          type="checkbox"
+          class="val-input bool"
+          [checked]="value"
+          (click)="$event.stopPropagation()"
+          (change)="commitBoolean($any($event.target).checked)"
+        />
+      } @else if (type === 'null') {
+        <span class="val null">null</span>
+      }
     }
   </span>
 } @else {

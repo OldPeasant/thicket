@@ -9,7 +9,7 @@ import { NodeVisibilityService } from '../services/node-visibility.service';
 })
 export class ColumnMenuComponent {
   @Input({ required: true }) keys: string[] = [];
-  @Input({ required: true }) path: string = '';
+  @Input({ required: true }) path = '';
 
   private visibility = inject(NodeVisibilityService);
   private host = inject<ElementRef<HTMLElement>>(ElementRef);
@@ -25,7 +25,7 @@ export class ColumnMenuComponent {
   }
 
   get hiddenCount(): number {
-    return this.keys.filter(k => this.isHidden(k)).length;
+    return this.keys.filter((k) => this.isHidden(k)).length;
   }
 
   // Esc, or a press anywhere outside this menu (including on another
@@ -44,7 +44,7 @@ export class ColumnMenuComponent {
 
   toggleOpen(event: Event): void {
     event.stopPropagation();
-    this.open.update(v => !v);
+    this.open.update((v) => !v);
   }
 
   toggleKey(event: Event, key: string): void {

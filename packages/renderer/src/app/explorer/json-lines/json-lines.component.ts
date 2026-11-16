@@ -2,10 +2,14 @@ import { Component, EventEmitter, Input, Output, inject } from '@angular/core';
 import { HighlightComponent } from '../highlight/highlight.component';
 import { JsonFormComponent } from '../json-form/json-form.component';
 import { JsonTableComponent } from '../json-table/json-table.component';
-import { groupRootPath, lineUid, type JsonLine } from '../json-lines.util';
+import { groupRootPath, lineUid, type JsonLine, type JsonLinesDoc } from '../json-lines.util';
 import type { Layout } from '../layout.util';
 import { FilterService } from '../services/filter.service';
-import { JsonLinesService, LINES_INITIAL_COUNT, LINES_REVEAL_KEY } from '../services/json-lines.service';
+import {
+  JsonLinesService,
+  LINES_INITIAL_COUNT,
+  LINES_REVEAL_KEY,
+} from '../services/json-lines.service';
 import { RevealService } from '../services/reveal.service';
 import { SchemaService } from '../services/schema.service';
 
@@ -34,18 +38,26 @@ export class JsonLinesComponent {
   protected readonly groupRootPath = groupRootPath;
   protected readonly lineUid = lineUid;
 
-  get doc() { return this.lines.doc()!; }
+  // Only rendered while JsonLinesService has a document (see JsonExplorerComponent).
+  get doc(): JsonLinesDoc {
+    return this.lines.doc() ?? EMPTY_DOC;
+  }
 
   // Shown lines the search leaves: those with a match somewhere in them.
   get matching(): number[] {
     const shown = this.lines.shown();
     if (!this.filter.active) return shown;
     const lines = this.doc.lines;
-    return shown.filter(i => this.matches(lines[i]));
+    return shown.filter((i) => {
+      const line = lines[i];
+      return line !== undefined && this.matches(line);
+    });
   }
 
   private matches(line: JsonLine): boolean {
-    return line.kind === 'json' ? this.filter.treeMatch(null, line.value) : this.filter.valueMatch(line.text);
+    return line.kind === 'json'
+      ? this.filter.treeMatch(null, line.value)
+      : this.filter.valueMatch(line.text);
   }
 
   get revealedCount(): number {
@@ -57,11 +69,17 @@ export class JsonLinesComponent {
     return this.matching.slice(0, this.revealedCount);
   }
 
-  get hasMore(): boolean { return this.revealedCount < this.matching.length; }
+  get hasMore(): boolean {
+    return this.revealedCount < this.matching.length;
+  }
 
-  revealMore(by: number): void { this.reveal.revealMore(LINES_REVEAL_KEY, by); }
+  revealMore(by: number): void {
+    this.reveal.revealMore(LINES_REVEAL_KEY, by);
+  }
 
-  revealAll(): void { this.reveal.revealAll(LINES_REVEAL_KEY); }
+  revealAll(): void {
+    this.reveal.revealAll(LINES_REVEAL_KEY);
+  }
 
   // A letter per group of alike lines, shown only when there is more than one.
   groupLabel(line: JsonLine): string | undefined {
@@ -77,9 +95,12 @@ export class JsonLinesComponent {
   }
 }
 
+const EMPTY_DOC: JsonLinesDoc = { lines: [], eol: '\n', finalEol: true, groupCount: 0 };
+
 // A, B, ... Z, AA, AB, ...
 function groupName(group: number): string {
   let name = '';
-  for (let n = group + 1; n > 0; n = Math.floor((n - 1) / 26)) name = String.fromCharCode(65 + ((n - 1) % 26)) + name;
+  for (let n = group + 1; n > 0; n = Math.floor((n - 1) / 26))
+    name = String.fromCharCode(65 + ((n - 1) % 26)) + name;
   return name;
 }

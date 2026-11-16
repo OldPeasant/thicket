@@ -23,12 +23,12 @@ export class CollapseService {
 
   set(id: string, path: string, collapsed: boolean, related: boolean): void {
     if (!related) {
-      this.byNode.update(prev => new Map(prev).set(id, { collapsed, path }));
+      this.byNode.update((prev) => new Map(prev).set(id, { collapsed, path }));
       return;
     }
-    this.byPath.update(prev => new Map(prev).set(path, collapsed));
+    this.byPath.update((prev) => new Map(prev).set(path, collapsed));
     // Drop single-node choices the path-wide one now supersedes.
-    this.byNode.update(prev => new Map([...prev].filter(([, c]) => c.path !== path)));
+    this.byNode.update((prev) => new Map([...prev].filter(([, c]) => c.path !== path)));
   }
 
   clear(): void {

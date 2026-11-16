@@ -1,24 +1,45 @@
 @if (type === 'object') {
   @if (rootProblems.length) {
-    <span class="problem-badge" [attr.data-problem-key]="uid" [title]="rootProblems[0].message">⚠ {{ rootProblems[0].message }}</span>
+    <span
+      class="problem-badge"
+      [attr.data-problem-key]="uid"
+      [title]="rootProblems[0]?.message ?? ''"
+      >⚠ {{ rootProblems[0]?.message }}</span
+    >
   }
   @if (variants; as info) {
     <div class="variants" role="group" aria-label="Variant">
       @for (v of info.variants; track $index) {
-        <button type="button" class="variant" [class.is-active]="activeVariant === $index" [disabled]="!canEdit" (click)="requestSwitch(v.values[0])">{{ v.label }}</button>
+        <button
+          type="button"
+          class="variant"
+          [class.is-active]="activeVariant === $index"
+          [disabled]="!canEdit"
+          (click)="requestSwitch(v.values[0])"
+        >
+          {{ v.label }}
+        </button>
       }
     </div>
     @if (pending; as p) {
       <div class="variant-confirm" role="alert">
-        <span>Switch to <b>{{ p.label }}</b>?</span>
+        <span
+          >Switch to <b>{{ p.label }}</b>?</span
+        >
         @if (p.sw.dropped.length) {
-          <span>Removes <code>{{ p.sw.dropped.join(', ') }}</code>.</span>
+          <span
+            >Removes <code>{{ p.sw.dropped.join(', ') }}</code>.</span
+          >
         }
         @if (p.sw.reset.length) {
-          <span>Resets <code>{{ p.sw.reset.join(', ') }}</code>.</span>
+          <span
+            >Resets <code>{{ p.sw.reset.join(', ') }}</code>.</span
+          >
         }
         @if (p.sw.added.length) {
-          <span>Adds <code>{{ p.sw.added.join(', ') }}</code>.</span>
+          <span
+            >Adds <code>{{ p.sw.added.join(', ') }}</code>.</span
+          >
         }
         <button type="button" class="confirm-btn" (click)="confirmSwitch()">Switch</button>
         <button type="button" class="confirm-btn" (click)="cancelSwitch()">Cancel</button>
@@ -29,43 +50,104 @@
     @for (f of pagedFields; track f.key) {
       @let child = childOf(f.key);
       @let kind = kindOf(child);
-      <div class="field" [attr.data-node]="childUid(f.key)" (focusin)="onFocus(f.key, $event)" (click)="onFocus(f.key, $event)" [class.ghost]="f.ghost" [class.block]="!f.ghost && kind !== 'scalar'" [class.deprecated]="isDeprecated(f.key)">
+      <div
+        class="field"
+        [attr.data-node]="childUid(f.key)"
+        (focusin)="onFocus(f.key, $event)"
+        (click)="onFocus(f.key, $event)"
+        [class.ghost]="f.ghost"
+        [class.block]="!f.ghost && kind !== 'scalar'"
+        [class.deprecated]="isDeprecated(f.key)"
+      >
         <div class="label">
           @if (kind === 'object' && !f.ghost) {
-            <button type="button" class="fold" (click)="toggle(f.key, $event)" [title]="(isCollapsed(f.key) ? 'Click to expand' : 'Click to collapse') + '. Shift+click: all related nodes too'">{{ isCollapsed(f.key) ? '▸' : '▾' }}</button>
+            <button
+              type="button"
+              class="fold"
+              (click)="toggle(f.key, $event)"
+              [title]="
+                (isCollapsed(f.key) ? 'Click to expand' : 'Click to collapse') +
+                '. Shift+click: all related nodes too'
+              "
+            >
+              {{ isCollapsed(f.key) ? '▸' : '▾' }}
+            </button>
           }
-          <span class="name" [class.dim]="keyDim(f.key)"><app-hl [text]="f.key" /></span>@if (f.required) {<b class="req" title="Required">*</b>}
+          <span class="name" [class.dim]="keyDim(f.key)"><app-hl [text]="f.key" /></span>
+          @if (f.required) {
+            <b class="req" title="Required">*</b>
+          }
           <app-schema-info [nodeKey]="childUid(f.key)" />
           @if (!f.ghost && kind !== 'array' && problemsAt(f.key).length) {
-            <span class="problem-badge" [attr.data-problem-key]="childUid(f.key)" [title]="problemTitle(f.key)">⚠</span>
+            <span
+              class="problem-badge"
+              [attr.data-problem-key]="childUid(f.key)"
+              [title]="problemTitle(f.key)"
+              >⚠</span
+            >
           }
           @if (kind === 'object' && !f.ghost && canEdit) {
-            <app-editable-value [value]="child" [uid]="childUid(f.key)" (valueChange)="onFieldChange(f.key, $event)" />
+            <app-editable-value
+              [value]="child"
+              [uid]="childUid(f.key)"
+              (valueChange)="onFieldChange(f.key, $event)"
+            />
           }
           @if (canEdit && !f.ghost) {
-            <button type="button" class="del-btn" (click)="onFieldDelete(f.key)" title="Delete key">&times;</button>
+            <button type="button" class="del-btn" (click)="onFieldDelete(f.key)" title="Delete key">
+              &times;
+            </button>
           }
         </div>
         <div class="control">
           @if (f.ghost; as g) {
             <span class="ghost-hint">{{ ghostHint(g) }}</span>
             @if (canEdit) {
-              <button type="button" class="ghost-add" (click)="addGhost(g)" [title]="ghostTitle(g)">⊕ add</button>
+              <button type="button" class="ghost-add" (click)="addGhost(g)" [title]="ghostTitle(g)">
+                ⊕ add
+              </button>
             }
           } @else if (kind === 'object') {
             @if (isCollapsed(f.key)) {
-              <button type="button" class="collapsed-chip" [class.has-problems]="problemCount(f.key) > 0" (click)="toggle(f.key, $event)" title="Click to expand. Shift+click: expand all related nodes too">
-                ▸ &#123; {{ objectSize(child) }} &#125;@if (problemCount(f.key)) { ⚠ {{ problemCount(f.key) }}}
+              <button
+                type="button"
+                class="collapsed-chip"
+                [class.has-problems]="problemCount(f.key) > 0"
+                (click)="toggle(f.key, $event)"
+                title="Click to expand. Shift+click: expand all related nodes too"
+              >
+                ▸ &#123; {{ objectSize(child) }} &#125;
+                @if (problemCount(f.key)) {
+                  ⚠ {{ problemCount(f.key) }}
+                }
               </button>
             } @else {
               <div class="group">
-                <app-json-form [value]="child" [path]="childPath(f.key)" [uid]="childUid(f.key)" [depth]="depth + 1" [forceVisible]="childForce(f.key)" (valueChange)="onFieldChange(f.key, $event)" />
+                <app-json-form
+                  [value]="child"
+                  [path]="childPath(f.key)"
+                  [uid]="childUid(f.key)"
+                  [depth]="depth + 1"
+                  [forceVisible]="childForce(f.key)"
+                  (valueChange)="onFieldChange(f.key, $event)"
+                />
               </div>
             }
           } @else if (kind === 'array') {
-            <app-json-table [value]="child" [path]="childPath(f.key)" [uid]="childUid(f.key)" [forceVisible]="childForce(f.key)" [filterCollapsed]="childFilterCollapsed(f.key)" (valueChange)="onFieldChange(f.key, $event)" />
+            <app-json-table
+              [value]="child"
+              [path]="childPath(f.key)"
+              [uid]="childUid(f.key)"
+              [forceVisible]="childForce(f.key)"
+              [filterCollapsed]="childFilterCollapsed(f.key)"
+              (valueChange)="onFieldChange(f.key, $event)"
+            />
           } @else {
-            <app-editable-value [value]="child" [uid]="childUid(f.key)" (valueChange)="onFieldChange(f.key, $event)" />
+            <app-editable-value
+              [value]="child"
+              [uid]="childUid(f.key)"
+              (valueChange)="onFieldChange(f.key, $event)"
+            />
           }
         </div>
       </div>
@@ -80,17 +162,36 @@
       @for (batch of reveal.batches; track batch) {
         <button type="button" class="reveal-btn" (click)="revealMore(batch)">+{{ batch }}</button>
       }
-      <button type="button" class="reveal-btn" (click)="revealAll()">Show all {{ visibleFields.length }}</button>
+      <button type="button" class="reveal-btn" (click)="revealAll()">
+        Show all {{ visibleFields.length }}
+      </button>
     </div>
   }
   @if (canEdit) {
     <span class="add-row">
-      <input #newKey class="add-input" placeholder="key…" (keydown.enter)="addEntry(newKey.value); newKey.value = ''" />
-      <button type="button" class="add-btn" (click)="addEntry(newKey.value); newKey.value = ''" title="Add key">+</button>
+      <input
+        #newKey
+        class="add-input"
+        placeholder="key…"
+        (keydown.enter)="addEntry(newKey.value); newKey.value = ''"
+      />
+      <button
+        type="button"
+        class="add-btn"
+        (click)="addEntry(newKey.value); newKey.value = ''"
+        title="Add key"
+      >
+        +
+      </button>
     </span>
   }
 } @else if (type === 'array') {
-  <app-json-table [value]="value" [path]="path" [uid]="uid" (valueChange)="valueChange.emit($event)" />
+  <app-json-table
+    [value]="value"
+    [path]="path"
+    [uid]="uid"
+    (valueChange)="valueChange.emit($event)"
+  />
 } @else {
   <app-editable-value [value]="value" [uid]="uid" (valueChange)="valueChange.emit($event)" />
 }

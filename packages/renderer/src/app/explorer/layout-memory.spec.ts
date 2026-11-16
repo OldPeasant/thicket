@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { KeyValueStore, LayoutMemory } from './layout-memory';
+import { type KeyValueStore, LayoutMemory } from './layout-memory';
 
 const mapStore = (): KeyValueStore & { map: Map<string, string> } => {
   const map = new Map<string, string>();
@@ -32,7 +32,12 @@ describe('LayoutMemory', () => {
     });
     expect(() => blocked.set('x', 'form')).not.toThrow();
     expect(blocked.get('x')).toBeUndefined();
-    const full: KeyValueStore = { getItem: () => null, setItem: () => { throw new Error('QuotaExceeded'); } };
+    const full: KeyValueStore = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('QuotaExceeded');
+      },
+    };
     expect(() => new LayoutMemory(() => full).set('x', 'form')).not.toThrow();
   });
 });

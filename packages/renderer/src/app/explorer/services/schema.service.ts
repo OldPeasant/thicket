@@ -1,8 +1,30 @@
 import { Injectable, computed, signal } from '@angular/core';
-import { ProblemIndex, SchemaModel, loadSchema, parsePathKey, type GhostKey, type Path, type Problem, type JsonSchema, type JsonType, type NodeMeta, type Primitive, type VariantInfo, type VariantSwitch } from '../../schema';
+import {
+  ProblemIndex,
+  SchemaModel,
+  loadSchema,
+  parsePathKey,
+  type GhostKey,
+  type Path,
+  type Problem,
+  type JsonSchema,
+  type JsonType,
+  type NodeMeta,
+  type Primitive,
+  type VariantInfo,
+  type VariantSwitch,
+} from '../../schema';
 
 const NONE: readonly never[] = [];
 const NO_SET: ReadonlySet<string> = new Set();
+
+/** The cached value for `key`, computed and stored on the first ask. */
+function memo<V>(cache: Map<string, V>, key: string, compute: () => V): V {
+  if (cache.has(key)) return cache.get(key) as V;
+  const value = compute();
+  cache.set(key, value);
+  return value;
+}
 
 // The schema the current document is checked against, and the problems that
 // result. Purely advisory: nothing here blocks or rewrites an edit — the
@@ -43,7 +65,7 @@ export class SchemaService {
     if (!model || data === undefined) return [];
     if (!this.perLine()) return model.validate(data);
     return (data as unknown[]).flatMap((line, i) =>
-      line === undefined ? [] : model.validate(line).map(p => ({ ...p, path: [i, ...p.path] })),
+      line === undefined ? [] : model.validate(line).map((p) => ({ ...p, path: [i, ...p.path] })),
     );
   });
 
@@ -78,7 +100,11 @@ export class SchemaService {
   choicesFor(key: string): readonly Primitive[] | undefined {
     const { model, data, byKey } = this.choiceCache();
     if (!model || data === undefined) return undefined;
-    if (!byKey.has(key)) byKey.set(key, this.at(key, data, (path, doc) => model.choicesAt(path, doc)));
+    if (!byKey.has(key))
+      byKey.set(
+        key,
+        this.at(key, data, (path, doc) => model.choicesAt(path, doc)),
+      );
     return byKey.get(key);
   }
 
@@ -91,7 +117,11 @@ export class SchemaService {
     const { model, data, meta } = this.choiceCache();
     if (!model || data === undefined) return undefined;
     const id = `${narrow ? 'n' : 'w'}:${key}`;
-    if (!meta.has(id)) meta.set(id, this.at(key, data, (path, doc) => model.metaAt(path, narrow ? doc : undefined)));
+    if (!meta.has(id))
+      meta.set(
+        id,
+        this.at(key, data, (path, doc) => model.metaAt(path, narrow ? doc : undefined)),
+      );
     return meta.get(id);
   }
 
@@ -99,16 +129,22 @@ export class SchemaService {
   readOnlyFor(key: string): boolean {
     const { model, data, readOnly } = this.choiceCache();
     if (!model || data === undefined) return false;
-    if (!readOnly.has(key)) readOnly.set(key, this.at(key, data, (path, doc) => model.readOnlyAt(path, doc)) ?? false);
-    return readOnly.get(key)!;
+    return memo(
+      readOnly,
+      key,
+      () => this.at(key, data, (path, doc) => model.readOnlyAt(path, doc)) ?? false,
+    );
   }
 
   /** Declared keys the object at this node does not have yet. */
   ghostsFor(key: string): readonly GhostKey[] {
     const { model, data, ghosts } = this.choiceCache();
     if (!model || data === undefined) return NONE;
-    if (!ghosts.has(key)) ghosts.set(key, this.at(key, data, (path, doc) => model.ghostKeysAt(path, doc)) ?? NONE);
-    return ghosts.get(key)!;
+    return memo(
+      ghosts,
+      key,
+      () => this.at(key, data, (path, doc) => model.ghostKeysAt(path, doc)) ?? NONE,
+    );
   }
 
   /** Whether `key` may be added to the object at `parentKey`; true when there is no schema to object. */
@@ -116,16 +152,22 @@ export class SchemaService {
     const { model, data, permits } = this.choiceCache();
     if (!model || data === undefined) return true;
     const id = `${parentKey}\u0000${key}`;
-    if (!permits.has(id)) permits.set(id, this.at(parentKey, data, (path, doc) => model.permitsKey(path, doc, key)) ?? true);
-    return permits.get(id)!;
+    return memo(
+      permits,
+      id,
+      () => this.at(parentKey, data, (path, doc) => model.permitsKey(path, doc, key)) ?? true,
+    );
   }
 
   /** The keys the schema requires of the object at `key`, for the variant the data selects. */
   requiredFor(key: string): ReadonlySet<string> {
     const { model, data, required } = this.choiceCache();
     if (!model || data === undefined) return NO_SET;
-    if (!required.has(key)) required.set(key, this.at(key, data, (path, doc) => model.requiredAt(path, doc)) ?? NO_SET);
-    return required.get(key)!;
+    return memo(
+      required,
+      key,
+      () => this.at(key, data, (path, doc) => model.requiredAt(path, doc)) ?? NO_SET,
+    );
   }
 
   /** The variants the object at `key` can be, when a discriminator tells them apart. */
@@ -140,7 +182,11 @@ export class SchemaService {
   variantIndexFor(key: string): number | undefined {
     const { model, data, variantIndex } = this.choiceCache();
     if (!model || data === undefined) return undefined;
-    if (!variantIndex.has(key)) variantIndex.set(key, this.at(key, data, (path, doc) => model.variantIndexAt(path, doc)));
+    if (!variantIndex.has(key))
+      variantIndex.set(
+        key,
+        this.at(key, data, (path, doc) => model.variantIndexAt(path, doc)),
+      );
     return variantIndex.get(key);
   }
 
@@ -148,23 +194,23 @@ export class SchemaService {
   switchVariantFor(key: string, to: unknown, drop = true): VariantSwitch | undefined {
     const model = this._model();
     const data = this.data();
-    return model && data !== undefined ? this.at(key, data, (path, doc) => model.switchVariant(path, doc, to, drop)) : undefined;
+    return model && data !== undefined
+      ? this.at(key, data, (path, doc) => model.switchVariant(path, doc, to, drop))
+      : undefined;
   }
 
   /** Every non-deprecated key the schema declares for the object at `key`, in schema order. */
   declaredKeys(key: string): readonly string[] {
     const { model, objectKeys } = this.typeCache();
     if (!model) return NONE;
-    if (!objectKeys.has(key)) objectKeys.set(key, model.declaredKeysAt(this.schemaPath(key)));
-    return objectKeys.get(key)!;
+    return memo(objectKeys, key, () => model.declaredKeysAt(this.schemaPath(key)));
   }
 
   /** Every key the item schema of the array at `arrayKey` declares. Empty when the schema says nothing. */
   declaredItemKeys(arrayKey: string): readonly string[] {
     const { model, declared } = this.typeCache();
     if (!model) return NONE;
-    if (!declared.has(arrayKey)) declared.set(arrayKey, model.declaredKeysAt([...this.schemaPath(arrayKey), 0]));
-    return declared.get(arrayKey)!;
+    return memo(declared, arrayKey, () => model.declaredKeysAt([...this.schemaPath(arrayKey), 0]));
   }
 
   /** A schema-shaped starting value for `schema`. */
@@ -191,7 +237,9 @@ export class SchemaService {
   seedItemFor(arrayKey: string): unknown {
     const model = this._model();
     const data = this.data();
-    return model && data !== undefined ? this.at(arrayKey, data, (path, doc) => model.seedItem(path, doc)) : undefined;
+    return model && data !== undefined
+      ? this.at(arrayKey, data, (path, doc) => model.seedItem(path, doc))
+      : undefined;
   }
 
   /** The JSON types the schema allows at this node, or undefined when it says nothing. */
