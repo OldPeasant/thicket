@@ -11,7 +11,8 @@ lease_until: 2026-11-16T19:03:12Z
 Typed, order-preserving value tree for all BSON types (SPEC M1 'Documents and BSON'), parsed from and serialized to canonical EJSON v2 with the `bson` package; explicit conversions between types with validation; no Node APIs (runs in the renderer).
 
 ## Acceptance criteria
-- [ ] Round trip test: a fixture document with every BSON type (incl. deprecated ones, Binary subtypes, UUID, negative zero, NaN/Infinity doubles, Int64 beyond 2^53) → model → EJSON is byte-identical
+- [x] Round trip test: a fixture document with every BSON type (incl. deprecated ones, Binary subtypes, UUID, negative zero, NaN/Infinity doubles, Int64 beyond 2^53) → model → EJSON is byte-identical
+  - verified (2026-11-16 19:46+0100 by dell26/agent-3): cd packages/core && npx vitest run src/bson/ejson.spec.ts -> 'EJSON round trip > is byte-identical for a document with every BSON type' passes: 49-field canonical fixture (all 21 types incl. Undefined/Symbol/DBPointer/CodeWithScope, Binary subtypes 00-09 and 80, UUID, -0.0, NaN and Infinity doubles, Int64 9007199254740993, dates beyond JS range) parse then stringify equals input; each leaf also equals bson EJSON.stringify canonical output
 - [ ] Field order preserved, including duplicate-looking keys like `$`-prefixed names (test)
 - [ ] Conversion table tested: String→ObjectId (valid/invalid), Int32→Int64, Int64→Int32 overflow error, Double→Decimal128, String↔Date ISO, Binary(4)↔UUID
 - [ ] Path API (get/set/insert/remove/move field) with tests; 100% branch coverage on conversions
