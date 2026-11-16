@@ -1,10 +1,10 @@
-import { privilegedMethods, type Response } from '@thicket/contract';
+import { privilegedMethods, type Profile, type Response } from '@thicket/contract';
 import { describe, expect, it, vi } from 'vitest';
 
 import { startBackend, type ParentPortLike } from './backend';
 import { sleep } from './handlers';
 import type { MainPortLike } from './ports';
-import { serve, type Port } from './rpc';
+import { RpcError, serve, type Port } from './rpc';
 import { portPair } from './testing';
 
 /** A `MainPortLike` over one end of an in-memory pair. */
@@ -185,6 +185,133 @@ describe('startBackend: privileged port isolation', () => {
     b.send({ type: 'renderer', window: '1' }, [mainPort(portPair()[0])]);
     b.send(null, [mainPort(portPair()[0])]);
     expect(b.log).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('startBackend: connections', () => {
+  const FICTITIOUS_PASSWORD = 'fictitious-wiring-Pw';
+  const profiles: Record<string, Profile> = {
+    p1: {
+      id: 'p1',
+      name: 'Needs password',
+      connectionString: 'mongodb://alice@db.example.test:27017',
+      auth: { mechanism: 'SCRAM-SHA-256', username: 'alice', secretMode: 'saved' },
+      readOnly: false,
+      production: false,
+    },
+    ssh: {
+      id: 'ssh',
+      name: 'Tunnel',
+      connectionString: 'mongodb://db.example.test:27017',
+      ssh: { host: 'bastion.example.test', port: 22, username: 'ops', method: 'agent' },
+      readOnly: true,
+      production: true,
+    },
+  };
+
+  /** A backend whose privileged port reaches a fake main serving profiles.forConnect/secrets.get. */
+  function withMain(secrets: Record<string, string> | null = null) {
+    const b = backend();
+    const [mainEnd, backendEnd] = portPair();
+    const forConnect = vi.fn((params: { profileId: string }) => {
+      const profile = profiles[params.profileId];
+      if (!profile) throw new RpcError('NOT_FOUND', `No profile ${params.profileId}`);
+      return { profile };
+    });
+    const secretsGet = vi.fn(() => ({ secrets }));
+    serve(mainEnd, {
+      table: privilegedMethods,
+      route: 'main',
+      handlers: { 'profiles.forConnect': forConnect, 'secrets.get': secretsGet },
+    });
+    b.send({ type: 'privileged' }, [mainPort(backendEnd)]);
+    return { ...b, forConnect, secretsGet, ...rendererPort(b) };
+  }
+
+  it('serves conn.* handlers next to the wiring diagnostics', () => {
+    const parentPort: ParentPortLike = { on: () => undefined };
+    const handlers = startBackend({ parentPort, pid: 1 });
+    expect(Object.keys(handlers)).toEqual(
+      expect.arrayContaining([
+        'backend.ping',
+        'backend.sleep',
+        'conn.test',
+        'conn.open',
+        'conn.close',
+        'conn.status',
+        'conn.serverInfo',
+      ]),
+    );
+  });
+
+  it('conn.open loads the profile and secrets from main (no password → AUTH_FAILED)', async () => {
+    const m = withMain(null);
+    m.renderer.send({ id: 'o', method: 'conn.open', params: { profileId: 'p1' } });
+    expect(await m.answer('o')).toMatchObject({
+      ok: false,
+      error: { code: 'AUTH_FAILED', message: expect.stringMatching(/^No password for user alice/) },
+    });
+    expect(m.forConnect).toHaveBeenCalledWith({ profileId: 'p1' }, expect.anything());
+    expect(m.secretsGet).toHaveBeenCalledWith({ profileId: 'p1' }, expect.anything());
+
+    m.renderer.send({ id: 's', method: 'conn.status', params: {} });
+    expect(await m.answer('s')).toMatchObject({
+      ok: true,
+      result: {
+        connections: [{ profileId: 'p1', state: 'error', error: { code: 'AUTH_FAILED' } }],
+      },
+    });
+    m.renderer.send({ id: 'c', method: 'conn.close', params: { profileId: 'p1' } });
+    expect(await m.answer('c')).toMatchObject({ ok: true, result: {} });
+    m.renderer.send({ id: 's2', method: 'conn.status', params: { profileId: 'p1' } });
+    expect(await m.answer('s2')).toMatchObject({
+      ok: true,
+      result: { connections: [{ profileId: 'p1', state: 'disconnected' }] },
+    });
+  });
+
+  it('conn.open answers NOT_FOUND from main and UNSUPPORTED for SSH profiles', async () => {
+    const m = withMain();
+    m.renderer.send({ id: 'nf', method: 'conn.open', params: { profileId: 'missing' } });
+    m.renderer.send({ id: 'ssh', method: 'conn.open', params: { profileId: 'ssh' } });
+    expect(await m.answer('nf')).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } });
+    expect(await m.answer('ssh')).toMatchObject({ ok: false, error: { code: 'UNSUPPORTED' } });
+  });
+
+  it('conn.serverInfo of a profile that is not open answers NOT_CONNECTED', async () => {
+    const m = withMain();
+    m.renderer.send({ id: 'i', method: 'conn.serverInfo', params: { profileId: 'p1' } });
+    expect(await m.answer('i')).toMatchObject({ ok: false, error: { code: 'NOT_CONNECTED' } });
+  });
+
+  it('conn.open before main sent the privileged port answers INTERNAL', async () => {
+    const b = backend();
+    const { renderer, answer } = rendererPort(b);
+    renderer.send({ id: 'o', method: 'conn.open', params: { profileId: 'p1' } });
+    expect(await answer('o')).toMatchObject({
+      ok: false,
+      error: { code: 'INTERNAL', message: expect.stringMatching(/no link to main/) },
+    });
+  });
+
+  it('logs connection events with a prefix and without the password', async () => {
+    const m = withMain(null);
+    m.renderer.send({
+      id: 't',
+      method: 'conn.test',
+      params: {
+        profile: { ...profiles['ssh'], id: undefined },
+        password: FICTITIOUS_PASSWORD,
+      },
+    });
+    m.renderer.send({ id: 'o', method: 'conn.open', params: { profileId: 'p1' } });
+    expect(await m.answer('t')).toMatchObject({ ok: false, error: { code: 'UNSUPPORTED' } });
+    expect(await m.answer('o')).toMatchObject({ ok: false, error: { code: 'AUTH_FAILED' } });
+    const lines = m.log.mock.calls.map(([line]) => String(line));
+    expect(lines).toContain(
+      'connections: open p1: AUTH_FAILED No password for user alice: enter it or save it in the profile',
+    );
+    expect(lines.join('\n')).not.toContain(FICTITIOUS_PASSWORD);
   });
 });
 
