@@ -17,7 +17,8 @@ Implement SPEC.md section 4 in packages/contract: envelope types, stable error c
   - verified (2026-11-16 19:07+0100 by dell26/agent-2): cd packages/contract && npx vitest run --reporter=verbose -> 66/66 '<method> has no object or free-form document fields' pass (schema walker over params/result/stream rejects z.object/unknown/record for document fields; walker self-test catches a plain object doc field)
 - [x] Writes (`docs.insert/update/replace/delete/updateMany/deleteMany`, `idx.create/drop`, `db/coll.drop` …) carry `profileId` and optional `confirmed: boolean`; a test lists all write methods and checks this
   - verified (2026-11-16 19:07+0100 by dell26/agent-2): cd packages/contract && npx vitest run --reporter=verbose -> 'the write list matches the contract' (19 methods in EXPECTED_WRITES incl. docs.insert/update/replace/delete/updateMany/deleteMany, idx.create/drop/hide, db.drop, coll.drop) and 19/19 '<method> requires profileId and takes an optional boolean confirmed' pass
-- [ ] `npm run check` passes; no `any` in the package (lint rule on)
+- [x] `npm run check` passes; no `any` in the package (lint rule on)
+  - verified (2026-11-16 19:07+0100 by dell26/agent-2): npm run check (after npm ci) -> lint+prettier+typecheck pass, 599 vitest + 46 renderer tests pass; npx eslint packages/contract --max-warnings 0 -> clean, --print-config shows @typescript-eslint/no-explicit-any = 2 (error, pinned for contract/core in eslint.config.mjs)
 
 ## Notes
 Exact method signatures are decided here; record notable choices with `assume`.
