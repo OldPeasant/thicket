@@ -149,6 +149,89 @@ describe('SettingsStore corrupt file', () => {
     expect(await fs.readFile(file, 'utf8')).toBe('garbage');
   });
 
+  /** Real fs; while `failMoveAside` is set, renaming settings.json to a corrupt backup fails. */
+  function stuckCorruptFs(): SettingsFs & { failMoveAside: boolean } {
+    const wrapper = {
+      failMoveAside: true,
+      readFile: (p: string, e: 'utf8') => fs.readFile(p, e),
+      writeFile: (p: string, d: string, o: { flush: boolean }) => fs.writeFile(p, d, o),
+      unlink: (p: string) => fs.unlink(p),
+      rename: (from: string, to: string) =>
+        wrapper.failMoveAside && to.includes('.corrupt-')
+          ? Promise.reject(Object.assign(new Error('EBUSY: locked'), { code: 'EBUSY' }))
+          : fs.rename(from, to),
+    };
+    return wrapper;
+  }
+
+  it('a corrupt file that could not be moved aside at start is backed up before the first set', async () => {
+    await fs.writeFile(file, 'garbage');
+    const log = vi.fn();
+    const stuck = stuckCorruptFs();
+    const store = await SettingsStore.open(file, { fs: stuck, log, now });
+    expect(await fs.readFile(file, 'utf8')).toBe('garbage');
+
+    stuck.failMoveAside = false;
+    await store.set({ mode: 'dark' });
+    expect(await fs.readFile(backup(), 'utf8')).toBe('garbage');
+    expect(await readJson(file)).toEqual({
+      version: SETTINGS_VERSION,
+      settings: { ...DEFAULT_SETTINGS, mode: 'dark' },
+    });
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('before writing'));
+
+    // Only the first write moves the file aside.
+    await store.set({ mode: 'light' });
+    const backups = (await fs.readdir(dir)).filter((n) => n.includes('.corrupt-'));
+    expect(backups).toHaveLength(1);
+    expect(await fs.readFile(backup(), 'utf8')).toBe('garbage');
+  });
+
+  it('if the corrupt file still cannot be moved aside, set rejects and nothing changes; a later set retries', async () => {
+    await fs.writeFile(file, 'garbage');
+    const log = vi.fn();
+    const stuck = stuckCorruptFs();
+    const store = await SettingsStore.open(file, { fs: stuck, log, now });
+    const listener = vi.fn();
+    store.onChange(listener);
+
+    await expect(store.set({ mode: 'dark' })).rejects.toThrow('EBUSY');
+    expect(await fs.readFile(file, 'utf8')).toBe('garbage');
+    await expect(fs.access(`${file}.tmp`)).rejects.toThrow();
+    await expect(fs.access(backup())).rejects.toThrow();
+    expect(store.get()).toEqual(DEFAULT_SETTINGS);
+    expect(listener).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('not writing'));
+
+    stuck.failMoveAside = false;
+    await expect(store.set({ mode: 'dark' })).resolves.toMatchObject({ mode: 'dark' });
+    expect(await fs.readFile(backup(), 'utf8')).toBe('garbage');
+    expect(await readJson(file)).toMatchObject({ settings: { mode: 'dark' } });
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('a corrupt file that disappeared before it could be moved aside (ENOENT) is not retried', async () => {
+    await fs.writeFile(file, 'garbage');
+    const renames: string[] = [];
+    const vanishing: SettingsFs = {
+      readFile: (p, e) => fs.readFile(p, e),
+      writeFile: (p, d, o) => fs.writeFile(p, d, o),
+      unlink: (p) => fs.unlink(p),
+      rename: async (from, to) => {
+        renames.push(to);
+        if (to.includes('.corrupt-')) {
+          await fs.unlink(from);
+          throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+        }
+        await fs.rename(from, to);
+      },
+    };
+    const store = await SettingsStore.open(file, { fs: vanishing, now });
+    await store.set({ mode: 'dark' });
+    expect(renames.filter((to) => to.includes('.corrupt-'))).toHaveLength(1);
+    expect(await readJson(file)).toMatchObject({ settings: { mode: 'dark' } });
+  });
+
   it('without an injected clock the backup is named after the current time', async () => {
     await fs.writeFile(file, 'garbage');
     const before = Date.now();

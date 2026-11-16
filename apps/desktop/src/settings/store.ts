@@ -34,6 +34,9 @@ export interface SettingsStoreOptions {
 
 export type SettingsListener = (settings: Settings) => void;
 
+/** Suffix of the backup name of a file that is moved aside. */
+type BackupKind = 'corrupt' | 'unreadable';
+
 const KEYS = Object.keys(settingsSchema.shape) as (keyof Settings)[];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -79,7 +82,8 @@ function sameSettings(a: Settings, b: Settings): boolean {
  * `settings.json` in the user-data folder: `{ "version": 1, "settings": { ... } }`.
  *
  * - A missing file gives the defaults. A file that is not JSON or not in that layout is renamed to
- *   `settings.json.corrupt-<time>` (kept for the user) and the defaults are used.
+ *   `settings.json.corrupt-<time>` (kept for the user) and the defaults are used. If that rename
+ *   fails (other than ENOENT), the move is tried again before the first write, as below.
  * - A file that exists but cannot be read (EACCES, a lock, ...) also gives the defaults. Before the
  *   first write it is moved to `settings.json.unreadable-<time>` so the write does not destroy it;
  *   if that move fails (other than ENOENT) the set fails and the next set tries again.
@@ -96,8 +100,11 @@ export class SettingsStore {
   private current: Settings = { ...DEFAULT_SETTINGS };
   private readonly listeners = new Set<SettingsListener>();
   private queue: Promise<unknown> = Promise.resolve();
-  /** The file could not be read at start; it must be moved aside before the first write. */
-  private unreadable = false;
+  /**
+   * The file could not be read (or was corrupt and could not be moved aside) at start; it must be
+   * moved to `settings.json.<kind>-<time>` before the first write.
+   */
+  private pendingBackup: BackupKind | undefined;
 
   private constructor(file: string, options: SettingsStoreOptions) {
     this.file = file;
@@ -160,7 +167,7 @@ export class SettingsStore {
   }
 
   private async write(value: Settings): Promise<void> {
-    if (this.unreadable) await this.backUpUnreadable();
+    if (this.pendingBackup) await this.moveAsideBeforeWrite(this.pendingBackup);
     const text = `${JSON.stringify({ version: SETTINGS_VERSION, settings: value }, null, 2)}\n`;
     await this.fs.writeFile(this.tempFile, text, { flush: true });
     await this.fs.rename(this.tempFile, this.file);
@@ -173,7 +180,7 @@ export class SettingsStore {
       text = await this.fs.readFile(this.file, 'utf8');
     } catch (error) {
       if (errorCode(error) !== 'ENOENT') {
-        this.unreadable = true;
+        this.pendingBackup = 'unreadable';
         this.log(`could not read ${this.file}, using the defaults: ${String(error)}`);
       }
       return;
@@ -199,24 +206,24 @@ export class SettingsStore {
     this.current = sanitize(raw);
   }
 
-  private backupName(kind: 'corrupt' | 'unreadable'): string {
+  private backupName(kind: BackupKind): string {
     const stamp = this.now().toISOString().replace(/[:.]/g, '-');
     return `${this.file}.${kind}-${stamp}`;
   }
 
-  /** Moves the file that could not be read at start aside; throws (no write) if that fails. */
-  private async backUpUnreadable(): Promise<void> {
-    const backup = this.backupName('unreadable');
+  /** Moves the file kept from the start aside; throws (no write) if that fails. */
+  private async moveAsideBeforeWrite(kind: BackupKind): Promise<void> {
+    const backup = this.backupName(kind);
     try {
       await this.fs.rename(this.file, backup);
-      this.log(`moved the unreadable ${this.file} to ${backup} before writing`);
+      this.log(`moved the ${kind} ${this.file} to ${backup} before writing`);
     } catch (error) {
       if (errorCode(error) !== 'ENOENT') {
-        this.log(`could not move the unreadable ${this.file} aside, not writing: ${String(error)}`);
+        this.log(`could not move the ${kind} ${this.file} aside, not writing: ${String(error)}`);
         throw error;
       }
     }
-    this.unreadable = false;
+    this.pendingBackup = undefined;
   }
 
   private async backUpCorrupt(): Promise<void> {
@@ -226,6 +233,8 @@ export class SettingsStore {
       this.log(`${this.file} is not valid; moved it to ${backup} and using the defaults`);
     } catch (error) {
       this.log(`${this.file} is not valid and could not be moved aside: ${String(error)}`);
+      // Gone already (ENOENT): nothing to keep. Otherwise retry before the first write.
+      if (errorCode(error) !== 'ENOENT') this.pendingBackup = 'corrupt';
     }
   }
 
