@@ -4,7 +4,7 @@ The source brief for `SPEC.md`, collected in the planning conversation of 2026-1
 
 ## Idea
 A desktop client for MongoDB built around the table view and editor of JSON Canopy
-(`../json-master-plugin`): documents show as nested, filterable tables (or forms) and every value
+(copied into `packages/renderer/src/app/explorer`): documents show as nested, filterable tables (or forms) and every value
 can be edited in place. On top of that the client connects to MongoDB servers, stores connections
 and credentials, and covers what a full MongoDB GUI needs.
 

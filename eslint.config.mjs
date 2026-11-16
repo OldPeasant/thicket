@@ -44,6 +44,10 @@ export default tseslint.config(
     languageOptions: {
       globals: { ...globals.browser },
     },
+    rules: {
+      // Angular components, directives and services may be empty classes: the decorator is the content.
+      '@typescript-eslint/no-extraneous-class': ['error', { allowWithDecorator: true }],
+    },
   },
   {
     // The contract types both sides of every call: `any` would silently switch that off.
