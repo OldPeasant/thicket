@@ -10,11 +10,11 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import type { CollectionInfo, Profile } from '@thicket/contract';
 
 import { ApiError, describeError } from '../api/api-error';
-import { NAV } from '../layout/navigation';
+import { NAV, editConnectionUrl } from '../layout/navigation';
 import { ProfileSafetyService } from '../safety/profile-safety.service';
 import { WriteControl } from '../safety/write-control.directive';
 import { formatBytes, formatDocs } from './sidebar-format';
@@ -121,6 +121,7 @@ export class SidebarTree {
   protected readonly tree = inject(SidebarTreeService);
   private readonly safety = inject(ProfileSafetyService);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly router = inject(Router);
   protected readonly nav = NAV;
   protected readonly stateLabel = STATE_LABEL;
   protected readonly typeLabel = TYPE_LABEL;
@@ -414,6 +415,11 @@ export class SidebarTree {
           write: true,
           disabled: !connected,
           run: () => this.promptCreateDatabase(row.profile),
+        },
+        {
+          id: 'edit-conn',
+          label: 'Edit connection…',
+          run: () => void this.router.navigateByUrl(editConnectionUrl(id)),
         },
       ];
     }

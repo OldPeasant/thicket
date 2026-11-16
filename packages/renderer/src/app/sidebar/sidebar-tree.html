@@ -14,6 +14,15 @@
   </button>
   <a
     class="icon-btn"
+    data-testid="sidebar-manage"
+    title="Manage connections"
+    aria-label="Manage connections"
+    [routerLink]="nav.connections"
+  >
+    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4h10M3 8h10M3 12h10" /></svg>
+  </a>
+  <a
+    class="icon-btn"
     data-testid="sidebar-add"
     title="New connection"
     aria-label="New connection"

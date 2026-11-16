@@ -1,0 +1,559 @@
+/*
+ * Connection editor. Colors only from the theme tokens (app/theme/tokens.css); the one exception
+ * is the profile's own color (user data, `--profile-color`), which runs down the editor's left
+ * edge like the guide line of the connection in the sidebar.
+ */
+:host {
+  display: block;
+  height: 100%;
+  overflow: auto;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  color: var(--text);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.loading,
+.load-error {
+  padding: 2rem 2.5rem;
+  color: var(--text-muted);
+}
+
+.load-error .detail {
+  white-space: pre-line;
+  color: var(--danger-text);
+}
+
+.editor {
+  --spine: var(--border-strong);
+  max-width: 54rem;
+  min-height: 100%;
+  box-sizing: border-box;
+  padding: 1.25rem 2rem 3rem 1.75rem;
+  border-left: 4px solid var(--spine);
+}
+
+.editor.has-color {
+  --spine: var(--profile-color);
+}
+
+/* ---- header: the name is the page title ---- */
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem 1.5rem;
+}
+
+.identity {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+
+.name-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.125rem 0.25rem;
+  margin-left: -0.25rem;
+  font: inherit;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: var(--heading-tracking);
+  color: var(--text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+}
+
+.name-input::placeholder {
+  color: var(--text-faint);
+}
+
+.name-input:hover {
+  border-color: var(--border);
+}
+
+.name-input:focus-visible {
+  outline: none;
+  border-color: var(--focus);
+  box-shadow: var(--focus-ring);
+}
+
+.name-input[aria-invalid='true'] {
+  border-color: var(--danger-border);
+}
+
+.where {
+  margin: 0.125rem 0 0;
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+
+.head-actions {
+  display: flex;
+  gap: 0.5rem;
+  padding-top: 0.25rem;
+}
+
+/* ---- buttons ---- */
+
+.btn {
+  padding: 0.35rem 0.85rem;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn:hover:not([disabled]) {
+  background: var(--bg-hover);
+}
+
+.btn.primary {
+  color: var(--accent-contrast);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.btn.primary:hover:not([disabled]) {
+  background: var(--accent-2);
+}
+
+.btn.quiet {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.btn[disabled] {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.link {
+  justify-self: start;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  align-self: end;
+  margin-bottom: 0.15rem;
+  padding: 0;
+  color: var(--text-muted);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.icon-btn svg {
+  width: 0.9rem;
+  height: 0.9rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.btn:focus-visible,
+.link:focus-visible,
+.icon-btn:focus-visible,
+.tab:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* ---- test / save outcome ---- */
+
+.outcome {
+  display: grid;
+  gap: 0.375rem;
+  margin: 0.75rem 0 0;
+}
+
+.outcome:empty {
+  display: none;
+}
+
+.result {
+  margin: 0;
+  padding: 0.45rem 0.75rem;
+  border-left: 3px solid var(--border-strong);
+  background: var(--bg-panel);
+  border-radius: 0 4px 4px 0;
+}
+
+.result.running {
+  color: var(--text-muted);
+}
+
+.result.ok {
+  border-left-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.result.error {
+  color: var(--danger-text);
+  border-left-color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.result p {
+  margin: 0;
+}
+
+.error-head {
+  font-weight: 600;
+}
+
+.code {
+  margin-right: 0.4em;
+  padding: 0 0.35em;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  font-weight: 400;
+  border: 1px solid var(--danger-border);
+  border-radius: 3px;
+}
+
+.error-detail {
+  margin-top: 0.25rem !important;
+  white-space: pre-line;
+  word-break: break-word;
+}
+
+.problems {
+  padding-left: 1.75rem;
+}
+
+/* ---- tabs ---- */
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin: 1.25rem 0 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  margin-bottom: -1px;
+  padding: 0.4rem 0.85rem;
+  font: inherit;
+  color: var(--text-muted);
+  background: none;
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tab[aria-selected='true'] {
+  color: var(--text);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
+.panel {
+  padding-top: 0.75rem;
+}
+
+/* The live connection string above the form: what the form fields add up to. */
+.uri-strip {
+  margin: 0 0 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--text-muted);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.uri-strip.invalid {
+  font-family: var(--font-ui);
+  color: var(--danger-text);
+  user-select: auto;
+}
+
+/* ---- groups: a heading column and the fields ---- */
+
+.group {
+  display: grid;
+  grid-template-columns: 10rem minmax(0, 1fr);
+  gap: 0.75rem 1.5rem;
+  padding: 1rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.panel > .group:first-of-type {
+  border-top: none;
+}
+
+.organize {
+  margin-top: 0.5rem;
+  border-top: 1px solid var(--border-strong);
+}
+
+.group-title {
+  margin: 0.25rem 0 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: var(--heading-tracking);
+  text-transform: var(--heading-transform);
+  color: var(--text);
+}
+
+.fields {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.row,
+.host-row,
+.password-row,
+.file-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.5rem 0.75rem;
+}
+
+.hosts {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.field {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 10rem;
+}
+
+.field.grow {
+  flex: 1 1 14rem;
+}
+
+.field.port {
+  min-width: 0;
+  width: 6.5rem;
+}
+
+.label,
+legend {
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+
+input:not([type='checkbox'], [type='radio']),
+select,
+textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-faint);
+}
+
+input:not([type='checkbox'], [type='radio']):focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: var(--focus);
+  box-shadow: var(--focus-ring);
+}
+
+[aria-invalid='true'] {
+  border-color: var(--danger-border) !important;
+}
+
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+input[type='checkbox']:focus-visible,
+input[type='radio']:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.uri-input {
+  font-family: var(--font-mono) !important;
+  font-size: 0.9em !important;
+  resize: vertical;
+  word-break: break-all;
+}
+
+.choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.25rem;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.choice legend {
+  width: 100%;
+  margin-bottom: 0.3rem;
+  padding: 0;
+}
+
+.choice.stacked {
+  flex-direction: column;
+}
+
+.choice label,
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+}
+
+.check.flag {
+  align-items: flex-start;
+}
+
+.check.flag input {
+  margin-top: 0.2rem;
+}
+
+.flag-text {
+  display: block;
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+
+.check.flag.production strong {
+  color: var(--production-text);
+}
+
+.hint {
+  margin: 0;
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+
+.field-problem {
+  margin: 0.35rem 0 0;
+  font-size: 0.9em;
+  color: var(--danger-text);
+}
+
+.warning {
+  margin: 0;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.9em;
+  color: var(--readonly-text);
+  background: var(--readonly-bg);
+  border-left: 3px solid var(--readonly);
+  border-radius: 0 4px 4px 0;
+}
+
+/* ---- color swatches ---- */
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.swatches legend {
+  width: 100%;
+  margin-bottom: 0.3rem;
+  padding: 0;
+}
+
+.swatch {
+  position: relative;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: var(--swatch);
+  border: 2px solid var(--bg-page);
+  box-shadow: 0 0 0 1px var(--border-strong);
+  cursor: pointer;
+}
+
+.swatch.none {
+  background: linear-gradient(
+    135deg,
+    transparent calc(50% - 1px),
+    var(--text-faint) calc(50% - 1px),
+    var(--text-faint) calc(50% + 1px),
+    transparent calc(50% + 1px)
+  );
+}
+
+.swatch input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.swatch:has(input:checked) {
+  box-shadow: 0 0 0 2px var(--text);
+}
+
+.swatch:has(input:focus-visible) {
+  box-shadow: var(--focus-ring);
+}
+
+@media (max-width: 40rem) {
+  .editor {
+    padding: 1rem 1rem 2rem;
+  }
+
+  .group {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+}

@@ -1,0 +1,171 @@
+/* Connection manager. Colors from the theme tokens; the profile's own color marks its row edge. */
+:host {
+  display: block;
+  height: 100%;
+  overflow: auto;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  color: var(--text);
+}
+
+.page {
+  max-width: 54rem;
+  padding: 1.25rem 2rem 3rem;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: var(--heading-tracking);
+  text-transform: var(--heading-transform);
+}
+
+.folder {
+  margin-top: 1.25rem;
+}
+
+.folder-name {
+  margin: 0 0 0.4rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+
+.item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.4rem 0.5rem 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  border-left: 4px solid var(--border-strong);
+}
+
+.item.has-color {
+  border-left-color: var(--profile-color);
+}
+
+.item:hover {
+  background: var(--bg-hover);
+}
+
+.main {
+  display: grid;
+  flex: 1 1 14rem;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.name {
+  font-weight: 600;
+}
+
+.where {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+
+.badges,
+.actions,
+.confirm {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.badge {
+  padding: 0 0.4em;
+  font-size: 0.8em;
+  color: var(--text-muted);
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+}
+
+.badge.readonly {
+  color: var(--readonly-text);
+  background: var(--readonly-bg);
+  border-color: var(--readonly);
+}
+
+.badge.production {
+  color: var(--production-text);
+  background: var(--production-bg);
+  border-color: var(--production);
+}
+
+.btn {
+  padding: 0.25rem 0.7rem;
+  font: inherit;
+  color: var(--text);
+  text-decoration: none;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.btn:hover:not([disabled]) {
+  background: var(--bg-hover);
+}
+
+.btn.primary {
+  color: var(--accent-contrast);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.btn.danger {
+  color: var(--danger-text);
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+}
+
+.btn[disabled] {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn:focus-visible,
+.main:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.empty {
+  color: var(--text-muted);
+}
+
+.error {
+  padding: 0.45rem 0.75rem;
+  white-space: pre-line;
+  color: var(--danger-text);
+  background: var(--danger-bg);
+  border-left: 3px solid var(--danger);
+}

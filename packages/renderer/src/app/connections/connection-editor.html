@@ -1,0 +1,594 @@
+@switch (load().status) {
+  @case ('loading') {
+    <p class="loading" data-testid="editor-loading">Loading connection…</p>
+  }
+  @case ('error') {
+    <div class="load-error" role="alert" data-testid="editor-load-error">
+      <p>The connection could not be loaded.</p>
+      <p class="detail">{{ $any(load()).message }}</p>
+      <a [routerLink]="nav.connections">Back to connections</a>
+    </div>
+  }
+  @default {
+    <form
+      class="editor"
+      novalidate
+      data-testid="connection-editor"
+      [class.has-color]="!!state().color"
+      [style.--profile-color]="state().color ?? null"
+      (submit)="save($event)"
+    >
+      <header class="head">
+        <div class="identity">
+          <label class="name-field">
+            <span class="sr-only">Connection name</span>
+            <input
+              class="name-input"
+              data-testid="field-name"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Name this connection"
+              [value]="state().name"
+              [attr.aria-invalid]="attempted() && state().name.trim() === ''"
+              (input)="setName(value($event))"
+            />
+          </label>
+          <p class="where">
+            {{ isNew() ? 'New connection' : 'Edit connection' }}
+            @if (state().folder) {
+              <span class="in-folder">in {{ state().folder }}</span>
+            }
+          </p>
+        </div>
+        <div class="head-actions">
+          @if (test().status === 'running') {
+            <button type="button" class="btn" data-testid="test-cancel" (click)="cancelTest()">
+              Cancel test
+            </button>
+          } @else {
+            <button
+              type="button"
+              class="btn"
+              data-testid="test-connection"
+              (click)="testConnection()"
+            >
+              Test connection
+            </button>
+          }
+          <button type="submit" class="btn primary" data-testid="save" [disabled]="saving()">
+            {{ saving() ? 'Saving…' : 'Save' }}
+          </button>
+        </div>
+      </header>
+
+      <div class="outcome" aria-live="polite">
+        @switch (test().status) {
+          @case ('running') {
+            <p class="result running" data-testid="test-running">Connecting…</p>
+          }
+          @case ('ok') {
+            @if (test(); as t) {
+              @if (t.status === 'ok') {
+                <p class="result ok" data-testid="test-ok">
+                  Connected in {{ t.result.latencyMS }} ms to MongoDB
+                  {{ t.result.server.version }} ({{ t.result.server.topology }}).
+                </p>
+              }
+            }
+          }
+          @case ('error') {
+            @if (test(); as t) {
+              @if (t.status === 'error') {
+                <div class="result error" role="alert" data-testid="test-error">
+                  <p class="error-head">
+                    <span class="code" data-testid="test-error-code">{{ t.code }}</span>
+                    {{ t.explanation }}
+                  </p>
+                  @if (t.message) {
+                    <p class="error-detail" data-testid="test-error-message">{{ t.message }}</p>
+                  }
+                </div>
+              }
+            }
+          }
+        }
+        @if (savedNotice()) {
+          <p class="result ok" data-testid="saved-notice">Saved.</p>
+        }
+        @if (saveError(); as error) {
+          <p class="result error" role="alert" data-testid="save-error">{{ error }}</p>
+        }
+        @if (attempted() && problems().length > 0) {
+          <ul class="result error problems" role="alert" data-testid="problems">
+            @for (problem of problems(); track problem) {
+              <li>{{ problem }}</li>
+            }
+          </ul>
+        }
+      </div>
+
+      <div class="tabs" role="tablist" aria-label="Edit as">
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          data-tab="form"
+          data-testid="tab-form"
+          id="conn-tab-form"
+          aria-controls="conn-panel-form"
+          [attr.aria-selected]="tab() === 'form'"
+          [attr.tabindex]="tab() === 'form' ? 0 : -1"
+          (click)="selectTab('form')"
+          (keydown)="onTabKeydown($event)"
+        >
+          Form
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          data-tab="uri"
+          data-testid="tab-uri"
+          id="conn-tab-uri"
+          aria-controls="conn-panel-uri"
+          [attr.aria-selected]="tab() === 'uri'"
+          [attr.tabindex]="tab() === 'uri' ? 0 : -1"
+          (click)="selectTab('uri')"
+          (keydown)="onTabKeydown($event)"
+        >
+          Connection string
+        </button>
+      </div>
+
+      @if (tab() === 'form') {
+        <div class="panel" role="tabpanel" id="conn-panel-form" aria-labelledby="conn-tab-form">
+          <p
+            class="uri-strip"
+            data-testid="uri-preview"
+            [class.invalid]="uri().error !== undefined"
+          >
+            {{ uri().error ?? uri().text }}
+          </p>
+
+          <section class="group" aria-labelledby="g-server">
+            <h2 id="g-server" class="group-title">Server</h2>
+            <div class="fields">
+              <fieldset class="choice">
+                <legend>Address type</legend>
+                <label>
+                  <input
+                    type="radio"
+                    name="scheme"
+                    data-testid="field-scheme-standard"
+                    [checked]="state().model.scheme === 'mongodb'"
+                    (change)="setScheme(false)"
+                  />
+                  Host list
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="scheme"
+                    data-testid="field-scheme-srv"
+                    [checked]="state().model.scheme === 'mongodb+srv'"
+                    (change)="setScheme(true)"
+                  />
+                  DNS seed list (SRV)
+                </label>
+              </fieldset>
+
+              <div class="hosts">
+                @for (h of state().model.hosts; track $index; let i = $index) {
+                  <div class="host-row">
+                    <label class="field grow">
+                      <span class="label">{{
+                        state().model.scheme === 'mongodb+srv' ? 'SRV host name' : hostLabel(i)
+                      }}</span>
+                      <input
+                        data-testid="field-host"
+                        autocomplete="off"
+                        spellcheck="false"
+                        [value]="h.host"
+                        (change)="setHost(i, value($event))"
+                      />
+                    </label>
+                    @if (state().model.scheme === 'mongodb') {
+                      <label class="field port">
+                        <span class="label">Port</span>
+                        <input
+                          data-testid="field-port"
+                          inputmode="numeric"
+                          autocomplete="off"
+                          [value]="portText(h.port)"
+                          (change)="setPort(i, value($event))"
+                        />
+                      </label>
+                      @if (state().model.hosts.length > 1) {
+                        <button
+                          type="button"
+                          class="icon-btn"
+                          data-testid="remove-host"
+                          [attr.aria-label]="'Remove ' + hostLabel(i).toLowerCase()"
+                          (click)="removeHost(i)"
+                        >
+                          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 8h8" /></svg>
+                        </button>
+                      }
+                    }
+                  </div>
+                }
+                @if (state().model.scheme === 'mongodb') {
+                  <button type="button" class="link" data-testid="add-host" (click)="addHost()">
+                    Add host
+                  </button>
+                }
+              </div>
+
+              <div class="row">
+                <label class="field">
+                  <span class="label">Replica set</span>
+                  <input
+                    data-testid="field-replica-set"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="none"
+                    [value]="state().model.replicaSet ?? ''"
+                    (change)="setReplicaSet(value($event))"
+                  />
+                </label>
+                @if (state().model.scheme === 'mongodb') {
+                  <label class="check">
+                    <input
+                      type="checkbox"
+                      data-testid="field-direct"
+                      [checked]="state().model.directConnection === true"
+                      (change)="setDirect(checked($event))"
+                    />
+                    Direct connection (only this host, no replica set discovery)
+                  </label>
+                }
+              </div>
+            </div>
+          </section>
+
+          <section class="group" aria-labelledby="g-auth">
+            <h2 id="g-auth" class="group-title">Authentication</h2>
+            <div class="fields">
+              <label class="field">
+                <span class="label">Method</span>
+                <select data-testid="field-mechanism" (change)="setMechanism($any(value($event)))">
+                  @for (m of mechanisms(); track m) {
+                    <option [value]="m" [selected]="m === state().mechanism">
+                      {{ mechanismLabels[m] }}
+                    </option>
+                  }
+                </select>
+              </label>
+              @if (state().mechanism !== 'NONE') {
+                <div class="row">
+                  <label class="field grow">
+                    <span class="label">User name</span>
+                    <input
+                      data-testid="field-username"
+                      autocomplete="off"
+                      spellcheck="false"
+                      [value]="state().model.username ?? ''"
+                      [attr.aria-invalid]="
+                        attempted() && needsPassword() && !state().model.username
+                      "
+                      (input)="setUsername(value($event))"
+                    />
+                  </label>
+                  <label class="field">
+                    <span class="label">Authentication database</span>
+                    <input
+                      data-testid="field-auth-source"
+                      autocomplete="off"
+                      spellcheck="false"
+                      placeholder="admin"
+                      [value]="state().model.auth.source ?? ''"
+                      (change)="setAuthSource(value($event))"
+                    />
+                  </label>
+                </div>
+              }
+              @if (needsPassword()) {
+                <div class="password-row">
+                  <label class="field grow">
+                    <span class="label">Password</span>
+                    <input
+                      data-testid="field-password"
+                      autocomplete="new-password"
+                      spellcheck="false"
+                      [type]="showPassword() ? 'text' : 'password'"
+                      [placeholder]="passwordSaved() ? 'Saved; type to replace it' : ''"
+                      [value]="state().password"
+                      (input)="setPassword(value($event))"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    class="btn quiet"
+                    data-testid="toggle-password"
+                    [attr.aria-pressed]="showPassword()"
+                    (click)="showPassword.set(!showPassword())"
+                  >
+                    {{ showPassword() ? 'Hide' : 'Show' }}
+                  </button>
+                </div>
+
+                <fieldset class="choice stacked">
+                  <legend>Password storage</legend>
+                  <label>
+                    <input
+                      type="radio"
+                      name="secretMode"
+                      data-testid="secret-saved"
+                      [disabled]="!canSave()"
+                      [checked]="state().secretMode === 'saved'"
+                      (change)="setSecretMode('saved')"
+                    />
+                    Save it in the system keychain
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="secretMode"
+                      data-testid="secret-ask"
+                      [checked]="state().secretMode === 'ask'"
+                      (change)="setSecretMode('ask')"
+                    />
+                    Ask for it each time I connect
+                  </label>
+                </fieldset>
+                @if (state().secretMode === 'ask') {
+                  <p class="hint" data-testid="ask-hint">
+                    The password above is used for Test connection only and is not stored.
+                  </p>
+                }
+                @switch (storage()?.level) {
+                  @case ('weak') {
+                    <p class="warning" role="note" data-testid="weak-keychain">
+                      No system keychain was found ({{ storage()?.backend }}). A saved password is
+                      only obfuscated on disk, so anyone who can read your files can read it. Asking
+                      each time is safer.
+                    </p>
+                  }
+                  @case ('unavailable') {
+                    <p class="warning" role="note" data-testid="no-keychain">
+                      Passwords can't be saved on this system: no encryption is available. Thicket
+                      asks for the password when you connect.
+                    </p>
+                  }
+                }
+              }
+            </div>
+          </section>
+
+          <section class="group" aria-labelledby="g-tls">
+            <h2 id="g-tls" class="group-title">TLS</h2>
+            <div class="fields">
+              <label class="check">
+                <input
+                  type="checkbox"
+                  data-testid="field-tls"
+                  [checked]="tlsOn()"
+                  (change)="setTls(checked($event))"
+                />
+                Encrypt the connection with TLS
+              </label>
+              @if (tlsOn()) {
+                <div class="file-row">
+                  <label class="field grow">
+                    <span class="label">Certificate authority (CA) file</span>
+                    <input
+                      data-testid="field-ca-file"
+                      autocomplete="off"
+                      spellcheck="false"
+                      placeholder="system certificates"
+                      [value]="state().model.tls.caFile ?? ''"
+                      (change)="setCaFile(value($event))"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    class="btn"
+                    data-testid="choose-ca"
+                    (click)="chooseCaFile()"
+                  >
+                    Choose…
+                  </button>
+                </div>
+                <label class="check">
+                  <input
+                    type="checkbox"
+                    data-testid="field-allow-invalid-hostnames"
+                    [checked]="state().model.tls.allowInvalidHostnames === true"
+                    (change)="setTlsFlag('allowInvalidHostnames', checked($event))"
+                  />
+                  Allow a certificate for another host name
+                </label>
+                <label class="check">
+                  <input
+                    type="checkbox"
+                    data-testid="field-allow-invalid-certificates"
+                    [checked]="state().model.tls.allowInvalidCertificates === true"
+                    (change)="setTlsFlag('allowInvalidCertificates', checked($event))"
+                  />
+                  Allow invalid certificates
+                </label>
+                @if (
+                  state().model.tls.allowInvalidHostnames ||
+                  state().model.tls.allowInvalidCertificates
+                ) {
+                  <p class="warning" role="note" data-testid="tls-insecure">
+                    The server's identity is not fully checked. Someone on the network could pose as
+                    the server and read your data and password. Use this only for testing.
+                  </p>
+                }
+              }
+            </div>
+          </section>
+
+          <section class="group" aria-labelledby="g-options">
+            <h2 id="g-options" class="group-title">Options</h2>
+            <div class="fields">
+              <div class="row">
+                <label class="field">
+                  <span class="label">Read preference</span>
+                  <select
+                    data-testid="field-read-preference"
+                    (change)="setReadPreference(value($event))"
+                  >
+                    <option value="" [selected]="!state().model.readPreference.mode">
+                      Default (primary)
+                    </option>
+                    @for (mode of readPreferences; track mode) {
+                      <option
+                        [value]="mode"
+                        [selected]="state().model.readPreference.mode === mode"
+                      >
+                        {{ readPreferenceLabels[mode] }}
+                      </option>
+                    }
+                  </select>
+                </label>
+                <label class="field grow">
+                  <span class="label">App name</span>
+                  <input
+                    data-testid="field-app-name"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="Thicket"
+                    [value]="state().model.appName ?? ''"
+                    (change)="setAppName(value($event))"
+                  />
+                </label>
+              </div>
+              <div class="row">
+                <label class="field">
+                  <span class="label">Connect timeout (ms)</span>
+                  <input
+                    data-testid="field-connect-timeout"
+                    inputmode="numeric"
+                    autocomplete="off"
+                    placeholder="30000"
+                    [value]="state().model.timeouts.connectTimeoutMS ?? ''"
+                    (change)="setTimeout('connectTimeoutMS', value($event))"
+                  />
+                </label>
+                <label class="field">
+                  <span class="label">Server selection timeout (ms)</span>
+                  <input
+                    data-testid="field-selection-timeout"
+                    inputmode="numeric"
+                    autocomplete="off"
+                    placeholder="30000"
+                    [value]="state().model.timeouts.serverSelectionTimeoutMS ?? ''"
+                    (change)="setTimeout('serverSelectionTimeoutMS', value($event))"
+                  />
+                </label>
+              </div>
+            </div>
+          </section>
+        </div>
+      } @else {
+        <div class="panel" role="tabpanel" id="conn-panel-uri" aria-labelledby="conn-tab-uri">
+          <label class="field">
+            <span class="label">Connection string</span>
+            <textarea
+              class="uri-input"
+              rows="4"
+              data-testid="field-uri"
+              spellcheck="false"
+              autocomplete="off"
+              aria-describedby="uri-help"
+              [attr.aria-invalid]="uriError() !== null"
+              [value]="uriInput()"
+              (input)="onUriInput(value($event))"
+            ></textarea>
+          </label>
+          @if (uriError(); as error) {
+            <p class="field-problem" role="alert" data-testid="uri-error">{{ error }}</p>
+          }
+          <p id="uri-help" class="hint">
+            Paste or edit a mongodb:// or mongodb+srv:// string; the form follows it. A password you
+            paste moves to the password field and shows here as ****.
+          </p>
+        </div>
+      }
+
+      <section class="group organize" aria-labelledby="g-organize">
+        <h2 id="g-organize" class="group-title">Organize and protect</h2>
+        <div class="fields">
+          <fieldset class="swatches">
+            <legend>Color</legend>
+            <label class="swatch none" title="No color">
+              <input
+                type="radio"
+                name="color"
+                data-testid="color-none"
+                [checked]="!state().color"
+                (change)="setColor(undefined)"
+              />
+              <span class="sr-only">No color</span>
+            </label>
+            @for (c of colors; track c.value) {
+              <label class="swatch" [title]="c.name" [style.--swatch]="c.value">
+                <input
+                  type="radio"
+                  name="color"
+                  [attr.data-testid]="'color-' + c.name.toLowerCase()"
+                  [checked]="state().color === c.value"
+                  (change)="setColor(c.value)"
+                />
+                <span class="sr-only">{{ c.name }}</span>
+              </label>
+            }
+          </fieldset>
+          <label class="field">
+            <span class="label">Folder</span>
+            <input
+              data-testid="field-folder"
+              list="conn-folders"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="e.g. Customers/Staging"
+              [value]="state().folder ?? ''"
+              (input)="setFolder(value($event))"
+            />
+            <datalist id="conn-folders">
+              @for (f of folders(); track f) {
+                <option [value]="f"></option>
+              }
+            </datalist>
+          </label>
+          <label class="check flag">
+            <input
+              type="checkbox"
+              data-testid="field-read-only"
+              [checked]="state().readOnly"
+              (change)="setFlag('readOnly', checked($event))"
+            />
+            <span>
+              <strong>Read-only</strong>
+              <span class="flag-text">Disable every change; Thicket refuses writes.</span>
+            </span>
+          </label>
+          <label class="check flag production">
+            <input
+              type="checkbox"
+              data-testid="field-production"
+              [checked]="state().production"
+              (change)="setFlag('production', checked($event))"
+            />
+            <span>
+              <strong>Production</strong>
+              <span class="flag-text">Mark in red and confirm every change before it is sent.</span>
+            </span>
+          </label>
+        </div>
+      </section>
+    </form>
+  }
+}

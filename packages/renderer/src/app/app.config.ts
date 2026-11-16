@@ -3,7 +3,7 @@ import {
   provideBrowserGlobalErrorListeners,
   provideZonelessChangeDetection,
 } from '@angular/core';
-import { provideRouter, withHashLocation } from '@angular/router';
+import { provideRouter, withComponentInputBinding, withHashLocation } from '@angular/router';
 
 import { routes } from './app.routes';
 import { CollectionView } from './collection';
@@ -15,7 +15,7 @@ export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
     provideZonelessChangeDetection(),
-    provideRouter(routes, withHashLocation()),
+    provideRouter(routes, withHashLocation(), withComponentInputBinding()),
     provideTheme(),
     provideTabView('collection', CollectionView),
   ],

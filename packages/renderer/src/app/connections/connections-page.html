@@ -1,0 +1,107 @@
+<section class="page" aria-labelledby="connections-title">
+  <header class="head">
+    <h1 id="connections-title">Connections</h1>
+    <a class="btn primary" data-testid="manager-new" [routerLink]="nav.newConnection"
+      >New connection</a
+    >
+  </header>
+
+  @if (error(); as message) {
+    <p class="error" role="alert" data-testid="manager-error">{{ message }}</p>
+  }
+
+  @switch (tree.profiles().status) {
+    @case ('loading') {
+      <p class="empty">Loading connections…</p>
+    }
+    @case ('error') {
+      <p class="error" role="alert">Connections could not be loaded.</p>
+    }
+    @default {
+      @if (groups().length === 0) {
+        <div class="empty" data-testid="manager-empty">
+          <p>No connections yet. Create one to start browsing a server.</p>
+        </div>
+      }
+      @for (group of groups(); track group.folder) {
+        <section
+          class="folder"
+          data-testid="manager-folder"
+          [attr.data-folder]="group.folder"
+          [attr.aria-label]="group.folder || 'Without folder'"
+        >
+          @if (group.folder) {
+            <h2 class="folder-name">{{ group.folder }}</h2>
+          }
+          <ul class="list">
+            @for (p of group.profiles; track p.id) {
+              <li
+                class="item"
+                data-testid="manager-profile"
+                [attr.data-name]="p.name"
+                [class.has-color]="!!p.color"
+                [style.--profile-color]="p.color ?? null"
+              >
+                <button type="button" class="main" (click)="edit(p)">
+                  <span class="name">{{ p.name }}</span>
+                  <span class="where">{{ summary(p) }}</span>
+                </button>
+                <span class="badges">
+                  @if (p.readOnly) {
+                    <span class="badge readonly">read-only</span>
+                  }
+                  @if (p.production) {
+                    <span class="badge production">production</span>
+                  }
+                  @if (p.auth?.secretMode === 'ask') {
+                    <span class="badge">asks password</span>
+                  }
+                </span>
+                @if (confirmDelete() === p.id) {
+                  <span class="confirm" role="group" [attr.aria-label]="'Delete ' + p.name">
+                    <span>Delete with its saved password?</span>
+                    <button
+                      type="button"
+                      class="btn danger"
+                      data-testid="manager-delete-confirm"
+                      [disabled]="busy()"
+                      (click)="remove(p)"
+                    >
+                      Delete
+                    </button>
+                    <button type="button" class="btn" (click)="confirmDelete.set(null)">
+                      Keep
+                    </button>
+                  </span>
+                } @else {
+                  <span class="actions">
+                    <button type="button" class="btn" data-testid="manager-edit" (click)="edit(p)">
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      class="btn"
+                      data-testid="manager-duplicate"
+                      [disabled]="busy()"
+                      (click)="duplicate(p)"
+                    >
+                      Duplicate
+                    </button>
+                    <button
+                      type="button"
+                      class="btn"
+                      data-testid="manager-delete"
+                      (click)="confirmDelete.set(p.id)"
+                    >
+                      Delete
+                    </button>
+                  </span>
+                }
+              </li>
+            }
+          </ul>
+        </section>
+      }
+    }
+  }
+</section>

@@ -1,5 +1,7 @@
 import type { Routes } from '@angular/router';
 
+import { ConnectionEditor } from './connections/connection-editor';
+import { ConnectionsPage } from './connections/connections-page';
 import { AppShell } from './layout/app-shell';
 import { PlannedPage } from './layout/planned-page';
 import { Welcome } from './layout/welcome';
@@ -27,19 +29,17 @@ export const routes: Routes = [
         title: 'Safety demo · Thicket',
         loadComponent: () => import('./dev/safety-demo').then((m) => m.SafetyDemo),
       },
-      // Placeholders until connection-ui and profiles-import-export build these pages.
-      {
-        path: 'connections/new',
-        component: PlannedPage,
-        title: 'New connection · Thicket',
-        data: { heading: 'New connection' },
-      },
+      { path: 'connections', component: ConnectionsPage, title: 'Connections · Thicket' },
+      { path: 'connections/new', component: ConnectionEditor, title: 'New connection · Thicket' },
+      // Placeholder until profiles-import-export builds this page.
       {
         path: 'connections/import/compass',
         component: PlannedPage,
         title: 'Import from Compass · Thicket',
         data: { heading: 'Import from Compass' },
       },
+      // Route parameter `id` → the editor's `id` input (`withComponentInputBinding`).
+      { path: 'connections/:id', component: ConnectionEditor, title: 'Connection · Thicket' },
     ],
   },
   { path: '**', redirectTo: '' },

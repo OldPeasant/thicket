@@ -1,9 +1,15 @@
 /**
- * Router URLs of the pages the layout links to. The connection editor (connection-ui) and the
- * Compass import (profiles-import-export) replace the placeholder pages behind them.
+ * Router URLs of the pages the layout links to. The Compass import (profiles-import-export)
+ * replaces the placeholder page behind `importCompass`.
  */
 export const NAV = {
   home: '/',
+  connections: '/connections',
   newConnection: '/connections/new',
   importCompass: '/connections/import/compass',
 } as const;
+
+/** URL of the connection editor for a saved profile. */
+export function editConnectionUrl(profileId: string): string {
+  return `/connections/${encodeURIComponent(profileId)}`;
+}

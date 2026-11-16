@@ -11,6 +11,7 @@
     "./diff": "./src/diff/index.ts",
     "./paging": "./src/paging/index.ts",
     "./shellsyntax": "./src/shellsyntax/index.ts",
+    "./uri": "./src/uri/index.ts",
     "./testing": "./src/bson/fixtures.ts"
   },
   "scripts": {
