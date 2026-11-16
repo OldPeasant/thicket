@@ -13,6 +13,9 @@ export function clampSidebarWidth(width: number): number {
  * The sidebar width, persisted in the app settings (`sidebarWidth`). `preview()` changes it while
  * dragging without saving; `commit()` saves the current width. Stored values from main
  * (`app.settings.get`, the `app.settings.changed` broadcast) are taken unless a drag is running.
+ * While saves of this window are in flight, those values are ignored: they may be older than the
+ * width just requested (main broadcasts after each save). The answer of the last own save to
+ * settle is shown instead.
  */
 @Injectable({ providedIn: 'root' })
 export class SidebarWidthService {
@@ -22,6 +25,8 @@ export class SidebarWidthService {
   private readonly widthState = signal<number>(SIDEBAR_WIDTH.default);
   private started = false;
   private dragging = false;
+  /** Saves of this window not answered yet. */
+  private saving = 0;
   /** Last width known to be stored in main (no save needed when it is unchanged). */
   private stored: number = SIDEBAR_WIDTH.default;
 
@@ -54,20 +59,30 @@ export class SidebarWidthService {
     this.dragging = false;
     const value = clampSidebarWidth(width);
     this.widthState.set(value);
-    if (value === this.stored) return;
+    // With a save in flight, `stored` may change once it lands, so an equal value is still sent.
+    if (value === this.stored && this.saving === 0) return;
+    this.saving++;
     try {
       const { settings } = await this.api.request('app.settings.set', {
         settings: { sidebarWidth: value },
       });
-      this.stored = settings.sidebarWidth;
+      this.saving--;
+      if (typeof settings.sidebarWidth === 'number') {
+        this.stored = clampSidebarWidth(settings.sidebarWidth);
+      }
+      if (this.saving === 0 && !this.dragging) this.widthState.set(this.stored);
     } catch (error) {
-      if (this.widthState() === value) this.widthState.set(this.stored);
+      this.saving--;
+      if (this.saving === 0 && !this.dragging && this.widthState() === value) {
+        this.widthState.set(this.stored);
+      }
       throw error;
     }
   }
 
   private take(width: number | undefined): void {
-    if (typeof width !== 'number') return;
+    // Values arriving while own saves are in flight may predate them (see the class comment).
+    if (typeof width !== 'number' || this.saving > 0) return;
     this.stored = clampSidebarWidth(width);
     if (!this.dragging) this.widthState.set(this.stored);
   }

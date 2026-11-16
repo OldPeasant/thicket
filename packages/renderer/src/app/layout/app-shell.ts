@@ -1,13 +1,20 @@
 import { NgComponentOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, DestroyRef, inject, type Type } from '@angular/core';
-import { NavigationEnd, Router, RouterLink, RouterOutlet } from '@angular/router';
+import {
+  NavigationEnd,
+  NavigationSkipped,
+  NavigationSkippedCode,
+  Router,
+  RouterLink,
+  RouterOutlet,
+} from '@angular/router';
 import { SIDEBAR_WIDTH } from '@thicket/contract';
 import { filter } from 'rxjs';
 
 import { NAV } from './navigation';
 import { SidebarWidthService } from './sidebar-width.service';
 import { StatusBar } from './status-bar';
-import { TabBar } from './tab-bar';
+import { START_PANEL_DOM_ID, START_TAB_DOM_ID, TabBar, tabDomId, tabPanelDomId } from './tab-bar';
 import { TAB_VIEWS } from './tab-views';
 import { TabPlaceholder } from './tab-placeholder';
 import { WorkspaceService, type TabKind } from './workspace.service';
@@ -57,7 +64,13 @@ export const SIDEBAR_KEY_STEP = 16;
     <div class="work">
       <app-tab-bar />
       <main class="content" data-testid="workspace">
-        <div class="pane" [hidden]="workspace.activeId() !== null">
+        <div
+          class="pane"
+          role="tabpanel"
+          [id]="startPanelId"
+          [attr.aria-labelledby]="startTabId"
+          [hidden]="workspace.activeId() !== null"
+        >
           <router-outlet />
         </div>
         @for (tab of workspace.tabs(); track tab.id) {
@@ -65,8 +78,9 @@ export const SIDEBAR_KEY_STEP = 16;
             class="pane"
             role="tabpanel"
             data-testid="tab-panel"
+            [id]="panelId(tab.id)"
+            [attr.aria-labelledby]="tabId(tab.id)"
             [attr.data-tab-id]="tab.id"
-            [attr.aria-label]="tab.title"
             [hidden]="tab.id !== workspace.activeId()"
           >
             <ng-container *ngComponentOutlet="viewFor(tab.kind); inputs: { tab }" />
@@ -86,14 +100,26 @@ export class AppShell {
   protected readonly min = SIDEBAR_WIDTH.min;
   protected readonly max = SIDEBAR_WIDTH.max;
   protected readonly defaultWidth = SIDEBAR_WIDTH.default;
+  protected readonly startTabId = START_TAB_DOM_ID;
+  protected readonly startPanelId = START_PANEL_DOM_ID;
+  protected readonly tabId = tabDomId;
+  protected readonly panelId = tabPanelDomId;
 
   private drag: { pointerId: number; startX: number; startWidth: number } | null = null;
 
   constructor() {
     void this.sidebar.init();
-    // Following a link (welcome screen, sidebar) shows the routed page instead of a tab.
+    // Following a link (welcome screen, sidebar) shows the routed page instead of a tab, also
+    // when it leads to the current URL (the router skips that navigation).
     const sub = inject(Router)
-      .events.pipe(filter((event) => event instanceof NavigationEnd))
+      .events.pipe(
+        filter(
+          (event) =>
+            event instanceof NavigationEnd ||
+            (event instanceof NavigationSkipped &&
+              event.code === NavigationSkippedCode.IgnoredSameUrlNavigation),
+        ),
+      )
       .subscribe(() => this.workspace.showHome());
     inject(DestroyRef).onDestroy(() => sub.unsubscribe());
   }
@@ -106,7 +132,10 @@ export class AppShell {
     const mod = event.ctrlKey || event.metaKey;
     if (!mod || event.altKey) return;
     const key = event.key;
-    if ((key === 'w' || key === 'W') && !event.shiftKey) {
+    // The physical W key also counts on non-Latin layouts (e.g. key 'ц'), where the menu
+    // accelerator could close the window; a Latin letter on that key (AZERTY 'z') is left alone.
+    const isW = key === 'w' || key === 'W' || (event.code === 'KeyW' && !/^[a-z]$/i.test(key));
+    if (isW && !event.shiftKey) {
       // Always consumed, so the shortcut never closes the window instead of a tab.
       event.preventDefault();
       this.workspace.close();

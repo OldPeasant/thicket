@@ -241,6 +241,27 @@ describe('AppShell', () => {
       expect(tabIds()).toEqual(['a']);
     });
 
+    it('Ctrl+W on the physical W key of a non-Latin layout closes the tab too', async () => {
+      await start();
+      ['a', 'b'].forEach((id) => ws.open(tab(id)));
+      await settle();
+      expect(key({ key: 'ц', code: 'KeyW', ctrlKey: true }).defaultPrevented).toBe(true);
+      await settle();
+      expect(tabIds()).toEqual(['a']);
+      expect(key({ key: 'ς', code: 'KeyW', metaKey: true }).defaultPrevented).toBe(true);
+      await settle();
+      expect(tabIds()).toEqual([]);
+    });
+
+    it('a Latin letter on the W key (AZERTY Ctrl+Z) is not taken for Ctrl+W', async () => {
+      await start();
+      ws.open(tab('a'));
+      await settle();
+      expect(key({ key: 'z', code: 'KeyW', ctrlKey: true }).defaultPrevented).toBe(false);
+      await settle();
+      expect(tabIds()).toEqual(['a']);
+    });
+
     it('Ctrl+Tab cycles forward, Ctrl+Shift+Tab backward, with wrap-around', async () => {
       await start();
       ['a', 'b', 'c'].forEach((id) => ws.open(tab(id)));
@@ -358,6 +379,50 @@ describe('AppShell', () => {
       await settle();
       expect(stored.sidebarWidth).toBe(260);
       expect(width()).toBe('260px');
+    });
+
+    it('quick arrow presses with saves in flight all count, despite earlier broadcasts', async () => {
+      stored = { ...stored, sidebarWidth: 260 };
+      // Main answers each save later and then broadcasts the saved settings.
+      const answers: (() => void)[] = [];
+      fake.handle(
+        'app.settings.set',
+        (params) =>
+          new Promise<{ settings: Settings }>((resolve) =>
+            answers.push(() => {
+              stored = { ...stored, ...params.settings };
+              resolve({ settings: { ...stored } });
+              fake.emit({
+                stream: BROADCAST_STREAMS.settingsChanged,
+                kind: 'data',
+                payload: { settings: { ...stored } },
+              });
+            }),
+          ),
+      );
+      await start();
+      await settle();
+      expect(width()).toBe('260px');
+      const arrowRight = () =>
+        splitter().dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }),
+        );
+      arrowRight();
+      arrowRight();
+      await vi.waitFor(() => expect(answers).toHaveLength(2));
+      answers[0]?.();
+      await settle();
+      expect(width()).toBe('292px');
+      arrowRight();
+      await vi.waitFor(() => expect(answers).toHaveLength(3));
+      answers[1]?.();
+      await settle();
+      expect(width()).toBe('308px');
+      answers[2]?.();
+      await settle();
+      expect(width()).toBe('308px');
+      expect(splitter().getAttribute('aria-valuenow')).toBe('308');
+      expect(stored.sidebarWidth).toBe(308);
     });
 
     it('persists across a new window: a fresh shell reads the saved width', async () => {
@@ -557,10 +622,26 @@ describe('AppShell', () => {
       await settle();
       const panel = el.querySelector('[data-testid="tab-panel"][data-tab-id="s"]');
       expect(panel?.getAttribute('role')).toBe('tabpanel');
-      expect(panel?.getAttribute('aria-label')).toBe('Current operations');
+      // The panel is named by its tab, which controls it.
+      const labelledBy = must(panel?.getAttribute('aria-labelledby'));
+      const owner = must(el.ownerDocument.getElementById(labelledBy));
+      expect(owner.getAttribute('role')).toBe('tab');
+      expect(owner.textContent).toContain('Current operations');
+      expect(owner.getAttribute('aria-controls')).toBe(panel?.id);
       expect(panel?.querySelector('app-tab-placeholder .detail')?.textContent).toBe(
         'local / admin',
       );
+    });
+
+    it('the routed start page is the tab panel of the Start tab', async () => {
+      await start();
+      ws.open(tab('a'));
+      await settle();
+      const home = must(el.querySelector<HTMLElement>('[data-testid="tab-home"]'));
+      const pane = must(el.querySelector('app-welcome')?.closest<HTMLElement>('.pane'));
+      expect(pane.getAttribute('role')).toBe('tabpanel');
+      expect(home.getAttribute('aria-controls')).toBe(pane.id);
+      expect(pane.getAttribute('aria-labelledby')).toBe(home.id);
     });
 
     it('keeps the views of background tabs alive while switching', async () => {
@@ -582,6 +663,21 @@ describe('AppShell', () => {
       expect(TestBed.inject(Router).url).toBe(NAV.newConnection);
       expect(ws.activeId()).toBeNull();
       expect(el.querySelector('[data-testid="page-heading"]')?.textContent).toBe('New connection');
+    });
+
+    it('the sidebar link shows its page again when its URL is already the current one', async () => {
+      await start(NAV.newConnection);
+      ws.open(tab('a'));
+      await settle();
+      expect(ws.activeId()).toBe('a');
+      el.querySelector<HTMLElement>('[data-testid="sidebar-new"]')?.click();
+      await settle();
+      expect(TestBed.inject(Router).url).toBe(NAV.newConnection);
+      expect(ws.activeId()).toBeNull();
+      const heading = must(el.querySelector<HTMLElement>('[data-testid="page-heading"]'));
+      expect(heading.textContent).toBe('New connection');
+      expect(heading.closest<HTMLElement>('.pane')?.hidden).toBe(false);
+      expect(tabIds()).toEqual(['a']);
     });
   });
 

@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { BROADCAST_STREAMS, SIDEBAR_WIDTH, type Settings } from '@thicket/contract';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
 import { SidebarWidthService, clampSidebarWidth } from './sidebar-width.service';
@@ -236,6 +236,85 @@ describe('SidebarWidthService', () => {
       pending.reject(new Error('write failed'));
       await expect(first).rejects.toThrow('write failed');
       expect(service.width()).toBe(420);
+    });
+
+    it('overlapping saves: answers and broadcasts of earlier saves do not undo newer widths', async () => {
+      stored = { ...stored, sidebarWidth: 260 };
+      await service.init();
+      // Main answers each save later and then broadcasts the saved settings, like the real one.
+      const answers: (() => void)[] = [];
+      fake.handle(
+        'app.settings.set',
+        (params) =>
+          new Promise<{ settings: Settings }>((resolve) =>
+            answers.push(() => {
+              stored = { ...stored, ...params.settings };
+              resolve({ settings: { ...stored } });
+              broadcast({});
+            }),
+          ),
+      );
+      const answer = async (count: number) => {
+        await vi.waitFor(() => expect(answers.length).toBeGreaterThanOrEqual(count));
+        answers[count - 1]?.();
+        await Promise.resolve();
+      };
+      // Three quick presses of ArrowRight on the splitter (step 16).
+      const press = () => service.commit(service.width() + 16);
+      const first = press();
+      const second = press();
+      await answer(1);
+      await first;
+      expect(service.width()).toBe(292);
+      const third = press();
+      expect(service.width()).toBe(308);
+      await answer(2);
+      await second;
+      expect(service.width()).toBe(308);
+      await answer(3);
+      await third;
+      expect(service.width()).toBe(308);
+      expect(stored.sidebarWidth).toBe(308);
+      expect(saves()).toEqual([
+        { settings: { sidebarWidth: 276 } },
+        { settings: { sidebarWidth: 292 } },
+        { settings: { sidebarWidth: 308 } },
+      ]);
+      // With no save in flight, broadcasts from other windows are followed again.
+      broadcast({ sidebarWidth: 400 });
+      expect(service.width()).toBe(400);
+    });
+
+    it('a save back to the stored width while another save is in flight is still sent', async () => {
+      await service.init();
+      const pending = deferred<{ settings: Settings }>();
+      fake.handle('app.settings.set', () => pending.promise);
+      const first = service.commit(400);
+      const back = service.commit(300);
+      expect(service.width()).toBe(300);
+      await vi.waitFor(() => expect(saves()).toHaveLength(2));
+      pending.resolve({ settings: { ...stored, sidebarWidth: 300 } });
+      await Promise.all([first, back]);
+      expect(saves()).toEqual([
+        { settings: { sidebarWidth: 400 } },
+        { settings: { sidebarWidth: 300 } },
+      ]);
+      expect(service.width()).toBe(300);
+    });
+
+    it('a late answer to the initial load does not undo a width saved meanwhile', async () => {
+      const load = deferred<{ settings: Settings }>();
+      fake.handle('app.settings.get', () => load.promise);
+      const saved = deferred<{ settings: Settings }>();
+      fake.handle('app.settings.set', () => saved.promise);
+      const init = service.init();
+      const commit = service.commit(350);
+      load.resolve({ settings: { ...stored } });
+      await init;
+      expect(service.width()).toBe(350);
+      saved.resolve({ settings: { ...stored, sidebarWidth: 350 } });
+      await commit;
+      expect(service.width()).toBe(350);
     });
 
     it('a failed save after a successful one reverts to the last saved width', async () => {
