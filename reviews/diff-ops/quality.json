@@ -39,9 +39,9 @@
     }
   ],
   "validation": [
-    { "command": "npx vitest run --root packages/core src/diff", "result": "pass (112 tests)" },
-    { "command": "npm run test:int -- diff-ops (Podman, mongo 8.2 + 7.0)", "result": "pass (308 tests)" },
-    { "command": "task-scoped coverage src/diff/diff.ts, src/diff/equals.ts", "result": "100% statements/branches/functions/lines" },
+    { "command": "npx vitest run --root packages/core src/diff (112 tests)", "result": "pass" },
+    { "command": "npm run test:int -- diff-ops (Podman, mongo 8.2 + 7.0, 308 tests)", "result": "pass" },
+    { "command": "task-scoped coverage src/diff/diff.ts, src/diff/equals.ts (100% statements/branches/functions/lines)", "result": "pass" },
     { "command": "sh .taskcheck (npm run check)", "result": "pass" }
   ]
 }
