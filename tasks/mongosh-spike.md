@@ -1,12 +1,13 @@
 ---
 title: M4: Spike: embedding mongosh in the backend process
-status: todo
-owner:
+status: in_progress
+owner: felix/agent-1
 deps: [electron-shell]
 touches: [docs/mongosh.md,spikes/mongosh]
 quality: exempt
 quality_reason: research spike: produces a decision document and throwaway prototype, no product code
 prio: 2
+lease_until: 2026-11-16T19:27:48Z
 ---
 ## Goal
 Find out how to host the real mongosh runtime in the utilityProcess (packages, versions, eval API, autocompletion, output types, interrupt), with a throwaway prototype in spikes/mongosh.
