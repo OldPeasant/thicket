@@ -17,3 +17,4 @@ Persist app settings (style, mode, page size, number default, update check on/of
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 19:48+0100 by dell26/agent-1): Defaults: style business, mode system (follow OS), pageSize 50, nestedPageSize 100, defaultIntegerType int32, dateDisplay local, checkForUpdates true, schemaSampleSize 1000. SPEC fixes only business/100/int32; the rest are my picks.
