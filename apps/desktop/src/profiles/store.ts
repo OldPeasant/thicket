@@ -123,7 +123,8 @@ function migrateV0(entries: unknown[], newId: () => string): Migrated {
         ? /^mongodb(?:\+srv)?:\/\/([^@/?#]*)@/.exec(split.uri)?.[1]
         : undefined;
     const ask = old.askPassword === true;
-    if (split.password !== undefined && !ask)
+    // A password without a username can't be used for auth: it is dropped, not moved.
+    if (split.password !== undefined && username && !ask)
       secrets.push({ profileId: id, kind: 'password', value: split.password });
     const migrated: Record<string, unknown> = {
       id,
