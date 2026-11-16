@@ -4,6 +4,7 @@ import {
   parseResult,
   parseResultIn,
   privilegedMethods,
+  route,
   BROADCAST_STREAMS,
   settingsChanged,
   type Event,
@@ -166,6 +167,51 @@ describe('app.settings handlers', () => {
   it('are only served when a settings store is given', () => {
     expect(mainHandlers(deps('1'))['app.settings.get']).toBeUndefined();
     expect(mainHandlers({ ...deps('1'), settings: fakeStore() })['app.settings.get']).toBeDefined();
+  });
+
+  it('coexist with the secrets handlers: every name is a distinct main-routed renderer method', () => {
+    const without = Object.keys(mainHandlers(deps('1')));
+    const withSettings = Object.keys(mainHandlers({ ...deps('1'), settings: fakeStore() }));
+    // Adding the settings store only adds the two settings methods; nothing is replaced or lost.
+    expect(withSettings.sort()).toEqual(
+      [...without, 'app.settings.get', 'app.settings.set'].sort(),
+    );
+    expect(without).toEqual(
+      expect.arrayContaining([
+        'profiles.secretStorage',
+        'profiles.setSecret',
+        'profiles.clearSecret',
+      ]),
+    );
+    for (const name of withSettings) {
+      expect(Object.hasOwn(methods, name)).toBe(true);
+      expect(route(name)).toBe('main');
+    }
+  });
+
+  it('settings and secrets methods are both answered on one window port', async () => {
+    const store = fakeStore();
+    const port = fakePort();
+    serve(port, {
+      table: methods,
+      route: 'main',
+      handlers: mainHandlers({ ...deps('1'), settings: store }),
+    });
+    port.push({ id: 'st', method: 'profiles.secretStorage', params: {} });
+    port.push({ id: 'g', method: 'app.settings.get', params: {} });
+    port.push({ id: 's', method: 'app.settings.set', params: { settings: { pageSize: 100 } } });
+    await vi.waitFor(() => expect(port.sent).toHaveLength(3));
+    const byId = new Map(port.sent.map((r) => [r.id, r]));
+    expect(byId.get('st')).toMatchObject({ ok: true });
+    expect(
+      parseResult('profiles.secretStorage', (byId.get('st') as { result: unknown }).result).ok,
+    ).toBe(true);
+    expect(byId.get('g')).toEqual({ id: 'g', ok: true, result: { settings: SETTINGS } });
+    expect(byId.get('s')).toEqual({
+      id: 's',
+      ok: true,
+      result: { settings: { ...SETTINGS, pageSize: 100 } },
+    });
   });
 
   it('get and set go to the store over the renderer contract; invalid values are refused', async () => {
