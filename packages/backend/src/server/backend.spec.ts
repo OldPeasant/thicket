@@ -379,6 +379,57 @@ describe('startBackend: connections', () => {
     },
   );
 
+  const docsWrites: [string, Record<string, unknown>][] = [
+    ['docs.insert', { db: 'shop', coll: 'orders', docs: ['{"a":1}'] }],
+    [
+      'docs.update',
+      { db: 'shop', coll: 'orders', id: '1', update: '{"$set":{"a":1}}', expected: '{}' },
+    ],
+    ['docs.replace', { db: 'shop', coll: 'orders', id: '1', doc: '{"a":1}' }],
+    ['docs.delete', { db: 'shop', coll: 'orders', id: '1' }],
+    ['docs.updateMany', { db: 'shop', coll: 'orders', filter: '{}', update: '{"$set":{"a":1}}' }],
+    ['docs.deleteMany', { db: 'shop', coll: 'orders', filter: '{}' }],
+  ];
+
+  it.each(docsWrites)(
+    '%s is served and guarded: READ_ONLY on a read-only profile, CONFIRMATION_REQUIRED on production',
+    async (method, params) => {
+      const parentPort: ParentPortLike = { on: () => undefined };
+      expect(Object.keys(startBackend({ parentPort, pid: 1 }))).toContain(method);
+      const m = withMain();
+      m.renderer.send({
+        id: 'ro',
+        method,
+        params: { profileId: 'ssh', confirmed: true, ...params },
+      });
+      m.renderer.send({ id: 'prod', method, params: { profileId: 'prod', ...params } });
+      // Allowed by the guard: reaches the handler, which finds no open connection.
+      m.renderer.send({
+        id: 'ok',
+        method,
+        params: { profileId: 'prod', confirmed: true, ...params },
+      });
+      expect(await m.answer('ro')).toMatchObject({ ok: false, error: { code: 'READ_ONLY' } });
+      expect(await m.answer('prod')).toMatchObject({
+        ok: false,
+        error: { code: 'CONFIRMATION_REQUIRED' },
+      });
+      expect(await m.answer('ok')).toMatchObject({ ok: false, error: { code: 'NOT_CONNECTED' } });
+    },
+  );
+
+  it('docs.previewMany is served and not guarded on a read-only profile (a read)', async () => {
+    const parentPort: ParentPortLike = { on: () => undefined };
+    expect(Object.keys(startBackend({ parentPort, pid: 1 }))).toContain('docs.previewMany');
+    const m = withMain();
+    m.renderer.send({
+      id: 'p',
+      method: 'docs.previewMany',
+      params: { profileId: 'ssh', db: 'shop', coll: 'orders', filter: '{}' },
+    });
+    expect(await m.answer('p')).toMatchObject({ ok: false, error: { code: 'NOT_CONNECTED' } });
+  });
+
   it('browse reads are not guarded on a read-only profile (NOT_CONNECTED, not READ_ONLY)', async () => {
     const m = withMain();
     m.renderer.send({ id: 'l', method: 'db.listDatabases', params: { profileId: 'ssh' } });
