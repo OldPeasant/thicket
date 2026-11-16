@@ -17,3 +17,4 @@ profiles.* in main: list/get/save/delete/duplicate, folders, color, read-only an
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 20:05+0100 by dell26/agent-2): No v0 format existed; defined v0 as a bare JSON array of {id?,name,uri,color?,group?,readonly?,isProduction?,askPassword?}. Migration strips the URI password into secrets.bin (or switches to secretMode ask if secrets.bin can't take it), username in URI -> SCRAM-SHA-256 auth.
