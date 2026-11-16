@@ -11,7 +11,8 @@ lease_until: 2026-11-16T20:02:53Z
 Token sets for Business (default) and Tron, each light and dark, selected by `data-style` and `data-theme` on the root; mode follows the OS when set to system; persisted via app settings. Use the frontend-design skill for the visual direction; respect the Business and Tron tokens (no hard-coded colors).
 
 ## Acceptance criteria
-- [ ] Four combinations render the explorer demo; Playwright screenshots of each attached in reviews/
+- [x] Four combinations render the explorer demo; Playwright screenshots of each attached in reviews/
+  - verified (2026-11-16 20:47+0100 by dell26/agent-1): npm run test:electron -w apps/desktop -- test/theme.electron.spec.ts at d370b59 -> 4 passed; 'renders the explorer demo in all four combinations, switched without reload' wrote 4 screenshots, byte-identical (sha1) to reviews/themes/screenshots/explorer-{business,tron}-{light,dark}.png, viewed in review rounds
 - [ ] Business light and dark pass WCAG AA contrast for text/background token pairs (unit test computing ratios)
 - [ ] Tron keeps Canopy's look (fonts bundled locally, glow/scanlines only in Tron)
 - [ ] Switching style/mode applies without reload; `system` follows `prefers-color-scheme` changes (test)
