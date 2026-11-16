@@ -1,10 +1,11 @@
 ---
 title: M1: Edit session and explicit save
-status: todo
-owner:
+status: in_progress
+owner: felix/agent-1
 deps: [collection-view,docs-write-backend,bson-inputs,safety-ui]
 touches: [packages/renderer/src/app/document]
 prio: 1
+lease_until: 2026-11-16T23:23:08Z
 ---
 ## Goal
 Edit session per document: modified marker and change count, undo/redo within unsaved edits, Revert, Save via diff-ops + docs.update through WriteGuard; insert (empty/copy), clone and delete.
