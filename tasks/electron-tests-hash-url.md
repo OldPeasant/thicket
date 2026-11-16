@@ -1,10 +1,11 @@
 ---
 title: Fix npm run test:electron: 5 specs expect the URL without the router's #/ (pre-existing on main)
-status: todo
-owner:
+status: in_progress
+owner: felix/agent-2
 deps: []
 touches: [apps/desktop/test]
 prio: 2
+lease_until: 2026-11-16T20:08:21Z
 ---
 ## Goal
 `npm run test:electron` passes again. Since the renderer's hash router redirects to `#/`, the specs
