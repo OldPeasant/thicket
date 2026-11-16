@@ -15,7 +15,8 @@ Typed, order-preserving value tree for all BSON types (SPEC M1 'Documents and BS
   - verified (2026-11-16 19:46+0100 by dell26/agent-3): cd packages/core && npx vitest run src/bson/ejson.spec.ts -> 'EJSON round trip > is byte-identical for a document with every BSON type' passes: 49-field canonical fixture (all 21 types incl. Undefined/Symbol/DBPointer/CodeWithScope, Binary subtypes 00-09 and 80, UUID, -0.0, NaN and Infinity doubles, Int64 9007199254740993, dates beyond JS range) parse then stringify equals input; each leaf also equals bson EJSON.stringify canonical output
 - [x] Field order preserved, including duplicate-looking keys like `$`-prefixed names (test)
   - verified (2026-11-16 19:46+0100 by dell26/agent-3): cd packages/core && npx vitest run src/bson/ejson.spec.ts (field order suite) -> pass: integer-like keys ('10','2'), dollar-prefixed keys (set/id/ref/foo), __proto__ and repeated 'a' keys keep order and re-serialize byte-identically; wrapper-lookalike docs stay documents
-- [ ] Conversion table tested: String→ObjectId (valid/invalid), Int32→Int64, Int64→Int32 overflow error, Double→Decimal128, String↔Date ISO, Binary(4)↔UUID
+- [x] Conversion table tested: String→ObjectId (valid/invalid), Int32→Int64, Int64→Int32 overflow error, Double→Decimal128, String↔Date ISO, Binary(4)↔UUID
+  - verified (2026-11-16 19:46+0100 by dell26/agent-3): cd packages/core && npx vitest run src/bson/convert.spec.ts -> 39 tests pass: String to ObjectId valid/invalid, Int32 to Int64, Int64 to Int32 overflow error, Double to Decimal128, String to/from Date ISO, Binary(4) to/from UUID, plus every other target
 - [ ] Path API (get/set/insert/remove/move field) with tests; 100% branch coverage on conversions
 
 ## Notes
