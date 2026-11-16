@@ -17,3 +17,4 @@ Adapt the explorer to the BSON model: type badges and colors per type, Date in l
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 21:09+0100 by felix/agent-2): Explorer keeps walking plain JS trees: toExplorerValue() maps documents/arrays to plain objects/arrays, String/Boolean/Null to JS values and every other BSON value to a frozen BsonLeaf (typeOf 'bson'). Consequence: JS objects list integer-like keys first and keep the last of repeated keys; an order-preserving container is left to bson-inputs/doc views.
