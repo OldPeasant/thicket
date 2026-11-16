@@ -307,7 +307,9 @@ Contract layout (`packages/contract/src/`):
   states (`conn.open/close/status`, the `conn.status` broadcast; `backend.restarted` clears
   everything), and `Load<T>` (`loading` / `loaded` / `error`) per database list, collection list,
   `db.stats` and `coll.stats`, loaded on demand. A slower older answer never overwrites a newer
-  one. A list answering `NOT_CONNECTED` marks the connection disconnected.
+  one, and answers still running when a connection is forgotten (disconnect, error, backend
+  restart) are dropped. A current list answering `NOT_CONNECTED` marks the connection
+  disconnected. Forgotten connections collapse their databases in the tree.
 - Writes go through `WriteGuard`: `db.create` (with the first collection), `coll.create`,
   `coll.rename`, and `db.drop` / `coll.drop` always with the confirm dialog and the name typed
   (`alwaysConfirm` + `typeToConfirm`). Drop and rename close the affected collection tabs.
@@ -316,6 +318,9 @@ Contract layout (`packages/contract/src/`):
   the context menu. Write items use `[appWriteControl]` (disabled with the read-only hint). Names
   are typed into the sidebar's own prompt (client-side name checks: `dbNameProblem`,
   `collNameProblem`); profiles with `secretMode: 'ask'` get a password prompt before `conn.open`.
+  The prompt is modal: `SidebarTreeService.promptOpen()` makes `AppShell` ignore the tab
+  shortcuts and set everything but the sidebar `inert`. Status lines (loading, error, empty) are
+  non-focusable `treeitem`s that the arrow keys skip.
 - Collection tabs: id `collectionTabId(profileId, db, coll)`, kind `collection`, `data` is
   `CollectionTabData` (`profileId`, `db`, `coll`, `type`).
 - The profile's `color` draws the connection's dot and the guide line down its subtree (user data,

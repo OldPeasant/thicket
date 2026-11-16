@@ -166,10 +166,13 @@
               </li>
             }
             @case ('status') {
+              <!-- A status line is a treeitem (a tree owns only treeitems and groups) that the
+                   arrow keys skip; its Retry/Connect button stays reachable with Tab. -->
               <li
                 class="status"
-                role="none"
+                role="treeitem"
                 data-testid="tree-status"
+                [attr.aria-level]="row.level"
                 [attr.data-tone]="row.tone"
                 [style.--level]="row.level"
               >

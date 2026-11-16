@@ -315,6 +315,37 @@ describe('SidebarTreeService', () => {
       });
     });
 
+    it('ignores an older NOT_CONNECTED database list failure after a newer success', async () => {
+      await tree.connect('p1');
+      const first = deferred<{ error: { code: string; message: string } }>();
+      let call = 0;
+      fake.handle('db.listDatabases', () =>
+        ++call === 1 ? (first.promise as never) : { databases: [{ name: 'fresh' }] },
+      );
+      const a = tree.loadDatabases('p1');
+      await tree.loadDatabases('p1');
+      first.resolve({ error: { code: 'NOT_CONNECTED', message: 'old connection gone' } });
+      await a;
+      expect(tree.databases('p1')).toEqual({ status: 'loaded', value: [{ name: 'fresh' }] });
+      expect(tree.conn('p1').state).toBe('connected');
+    });
+
+    it('ignores an older collection list that answers after a newer one', async () => {
+      const first = deferred<ResultOf<'coll.list'>>();
+      const second = deferred<ResultOf<'coll.list'>>();
+      fake.handle('coll.list', inOrder(first, second));
+      const a = tree.loadCollections('p1', 'shop');
+      const b = tree.loadCollections('p1', 'shop');
+      second.resolve({ collections: [coll('newer')] });
+      await b;
+      first.resolve({ collections: [coll('older')] });
+      await a;
+      expect(tree.collections('p1', 'shop')).toMatchObject({
+        status: 'loaded',
+        value: [{ name: 'newer' }],
+      });
+    });
+
     it('lists of different databases do not share a generation', async () => {
       const slow = deferred<ResultOf<'coll.list'>>();
       fake.handle('coll.list', ({ db }) =>
@@ -439,6 +470,85 @@ describe('SidebarTreeService', () => {
   describe('connections', () => {
     beforeEach(async () => {
       await tree.reloadProfiles();
+    });
+
+    it('drops lists still loading when the connection is closed', async () => {
+      await tree.connect('p1');
+      const dbs = deferred<ResultOf<'db.listDatabases'>>();
+      const colls = deferred<ResultOf<'coll.list'>>();
+      fake.handle('db.listDatabases', () => dbs.promise);
+      fake.handle('coll.list', () => colls.promise);
+      const a = tree.loadDatabases('p1');
+      const b = tree.loadCollections('p1', 'shop');
+      await tree.disconnect('p1');
+      dbs.resolve({ databases: [{ name: 'late' }] });
+      colls.resolve({ collections: [coll('late')] });
+      await Promise.all([a, b]);
+      expect(tree.databases('p1')).toBeUndefined();
+      expect(tree.collections('p1', 'shop')).toBeUndefined();
+    });
+
+    it('a late NOT_CONNECTED of the old connection does not mark a reopened one disconnected', async () => {
+      await tree.connect('p1');
+      const stale = deferred<{ error: { code: string; message: string } }>();
+      fake.handle('coll.list', () => stale.promise as never);
+      const late = tree.loadCollections('p1', 'shop');
+      fake.emit({
+        stream: 'conn.status',
+        kind: 'data',
+        payload: { profileId: 'p1', state: 'disconnected' },
+      });
+      await flush();
+      await tree.connect('p1');
+      stale.resolve({ error: { code: 'NOT_CONNECTED', message: 'old connection gone' } });
+      await late;
+      expect(tree.conn('p1').state).toBe('connected');
+      expect(tree.databases('p1')).toMatchObject({ status: 'loaded' });
+      expect(tree.collections('p1', 'shop')).toBeUndefined();
+    });
+
+    it('closing one connection keeps the requests of another one current', async () => {
+      await tree.connect('p1');
+      await tree.connect('p2');
+      const slow = deferred<ResultOf<'coll.list'>>();
+      fake.handle('coll.list', () => slow.promise);
+      const p2 = tree.loadCollections('p2', 'shop');
+      await tree.disconnect('p1');
+      slow.resolve({ collections: [coll('kept')] });
+      await p2;
+      expect(tree.collections('p2', 'shop')).toMatchObject({ value: [{ name: 'kept' }] });
+    });
+
+    it('drops answers still running when the backend restarts', async () => {
+      await tree.connect('p1');
+      const slow = deferred<ResultOf<'db.stats'>>();
+      fake.handle('db.stats', () => slow.promise);
+      const stats = tree.loadDbStats('p1', 'shop');
+      fake.emit({
+        stream: 'backend.restarted',
+        kind: 'data',
+        payload: { restarts: 1, reason: 'exit code 1' },
+      });
+      await flush();
+      slow.resolve({
+        collections: 1,
+        views: 0,
+        objects: 1,
+        dataSize: 1,
+        storageSize: 1,
+        indexSize: 1,
+        raw: '{}',
+      });
+      await stats;
+      expect(tree.dbStats('p1', 'shop')).toBeUndefined();
+    });
+
+    it('promptOpen follows setPromptOpen', () => {
+      expect(tree.promptOpen()).toBe(false);
+      tree.setPromptOpen(true);
+      expect(tree.promptOpen()).toBe(true);
+      tree.setPromptOpen(false);
+      expect(tree.promptOpen()).toBe(false);
     });
 
     it('connect loads the databases and resolves with the connected state', async () => {

@@ -105,6 +105,13 @@ export class SidebarTreeService {
     return load.status === 'loaded' ? load.value : [];
   });
 
+  private readonly promptOpenState = signal(false);
+  /**
+   * The sidebar's name/password prompt is open. It is modal: the shell ignores its tab shortcuts
+   * and makes the work area inert meanwhile.
+   */
+  readonly promptOpen = this.promptOpenState.asReadonly();
+
   /** Requests of the latest load per list, so a slow older answer never overwrites a newer one. */
   private readonly generation = new Map<string, number>();
   private started = false;
@@ -115,7 +122,8 @@ export class SidebarTreeService {
         this.applyStatus(status);
       }),
       this.api.events(BROADCAST_STREAMS.backendRestarted).subscribe(() => {
-        // The new backend has no open connections.
+        // The new backend has no open connections; answers of the old one are dropped.
+        this.invalidate((key) => key !== 'profiles');
         this.connState.set(new Map());
         this.dbState.set(new Map());
         this.collState.set(new Map());
@@ -158,6 +166,11 @@ export class SidebarTreeService {
     } catch {
       // States stay as they are; opening a connection reports its own errors.
     }
+  }
+
+  /** Called by the sidebar when its prompt opens or closes. */
+  setPromptOpen(open: boolean): void {
+    this.promptOpenState.set(open);
   }
 
   profile(id: string): Profile | undefined {
@@ -236,7 +249,7 @@ export class SidebarTreeService {
       next = { status: 'loaded', value: [...databases].sort((a, b) => byName(a.name, b.name)) };
     } catch (error) {
       next = { status: 'error', message: describeError(error) };
-      this.noteDisconnect(profileId, error);
+      if (this.current(key, gen)) this.noteDisconnect(profileId, error);
     }
     if (this.current(key, gen)) this.dbState.update((m) => new Map(m).set(profileId, next));
   }
@@ -254,7 +267,7 @@ export class SidebarTreeService {
       next = { status: 'loaded', value: [...collections].sort((a, b) => byName(a.name, b.name)) };
     } catch (error) {
       next = { status: 'error', message: describeError(error) };
-      this.noteDisconnect(profileId, error);
+      if (this.current(`coll:${k}`, gen)) this.noteDisconnect(profileId, error);
     }
     if (this.current(`coll:${k}`, gen)) this.collState.update((m) => new Map(m).set(k, next));
   }
@@ -403,6 +416,12 @@ export class SidebarTreeService {
 
   private forgetProfile(profileId: string): void {
     const prefix = `${profileId}\u0000`;
+    // Requests still running for the old connection must not write their answers back.
+    this.invalidate((key) => {
+      const sep = key.indexOf(':');
+      const rest = key.slice(sep + 1);
+      return sep > 0 && (rest === profileId || rest.startsWith(prefix));
+    });
     const drop = <T>(m: ReadonlyMap<string, T>): ReadonlyMap<string, T> => {
       if (![...m.keys()].some((k) => k === profileId || k.startsWith(prefix))) return m;
       return new Map([...m].filter(([k]) => k !== profileId && !k.startsWith(prefix)));
@@ -436,6 +455,13 @@ export class SidebarTreeService {
 
   private current(key: string, gen: number): boolean {
     return this.generation.get(key) === gen;
+  }
+
+  /** Makes the running requests of the matching lists stale, so their answers are dropped. */
+  private invalidate(matches: (key: string) => boolean): void {
+    for (const [key, gen] of this.generation) {
+      if (matches(key)) this.generation.set(key, gen + 1);
+    }
   }
 }
 

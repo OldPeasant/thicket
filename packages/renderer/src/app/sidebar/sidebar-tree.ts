@@ -1,11 +1,14 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   ElementRef,
   afterRenderEffect,
   computed,
+  effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import type { CollectionInfo, Profile } from '@thicket/contract';
@@ -57,6 +60,13 @@ interface MenuItem {
   danger?: boolean;
 }
 
+interface OpenMenu {
+  x: number;
+  y: number;
+  row: NodeRow;
+  items: MenuItem[];
+}
+
 interface PromptField {
   key: string;
   label: string;
@@ -87,6 +97,9 @@ const TYPE_LABEL: Record<CollectionInfo['type'], string> = {
   timeseries: 'Time series',
 };
 
+/** Distance the context menu keeps from the window edges. */
+const MENU_MARGIN = 4;
+
 /**
  * The sidebar: connections → databases → collections, views and time series, loaded when a node
  * is expanded. Counts and sizes are loaded on demand (context menu). The context menu (right
@@ -115,12 +128,7 @@ export class SidebarTree {
   private readonly expanded = signal<ReadonlySet<string>>(new Set());
   /** Key of the focused (selected) node. */
   protected readonly focusKey = signal<string | null>(null);
-  protected readonly menu = signal<{
-    x: number;
-    y: number;
-    row: NodeRow;
-    items: MenuItem[];
-  } | null>(null);
+  protected readonly menu = signal<OpenMenu | null>(null);
   protected readonly prompt = signal<Prompt | null>(null);
   protected readonly promptValues = signal<Record<string, string>>({});
   protected readonly promptError = signal<string | null>(null);
@@ -234,6 +242,24 @@ export class SidebarTree {
 
   constructor() {
     this.tree.start();
+    // When a connection's lists are forgotten (disconnect, connection error, backend restart),
+    // its databases collapse, so after reconnecting they load their collections again when
+    // expanded instead of waiting for a list nobody requests.
+    effect(() => {
+      const expanded = this.expanded();
+      const forgotten = this.tree
+        .profileList()
+        .filter((p) => this.tree.databases(p.id) === undefined)
+        .map((p) => dbNodeKey(p.id, ''));
+      const stale = [...expanded].filter((k) => forgotten.some((prefix) => k.startsWith(prefix)));
+      if (stale.length === 0) return;
+      untracked(() => {
+        for (const key of stale) this.setExpanded(key, false);
+      });
+    });
+    inject(DestroyRef).onDestroy(() => {
+      if (this.prompt()) this.tree.setPromptOpen(false);
+    });
     afterRenderEffect(() => {
       this.rows();
       this.focusRequest();
@@ -244,6 +270,8 @@ export class SidebarTree {
         this.promptFocusPending = false;
         root.querySelector<HTMLElement>('.prompt input')?.focus();
       }
+      const menu = this.menu();
+      if (menu) this.keepMenuInView(menu);
       if (this.menuFocusPending && this.menu()) {
         this.menuFocusPending = false;
         root.querySelector<HTMLElement>('.menu button:not([disabled])')?.focus();
@@ -520,8 +548,25 @@ export class SidebarTree {
   protected chooseItem(item: MenuItem, row: NodeRow): void {
     if (item.disabled || (item.write && this.readOnly(profileIdOf(row)))) return;
     this.menu.set(null);
-    this.refocus();
     item.run();
+    // An item that opened the prompt leaves the focus to it; closing the prompt returns it here.
+    if (!this.prompt()) this.refocus();
+  }
+
+  /** Moves the open menu inside the window (above the pointer when there is no room below). */
+  private keepMenuInView(menu: OpenMenu): void {
+    const el = this.host.nativeElement.querySelector<HTMLElement>('.menu');
+    const view = this.host.nativeElement.ownerDocument.defaultView;
+    if (!el || !view) return;
+    const { width, height } = el.getBoundingClientRect();
+    let { x, y } = menu;
+    if (x + width + MENU_MARGIN > view.innerWidth) {
+      x = Math.max(MENU_MARGIN, view.innerWidth - width - MENU_MARGIN);
+    }
+    if (y + height + MENU_MARGIN > view.innerHeight) {
+      y = Math.max(MENU_MARGIN, y - height);
+    }
+    if (x !== menu.x || y !== menu.y) this.menu.set({ ...menu, x, y });
   }
 
   protected onMenuKeydown(event: KeyboardEvent): void {
@@ -560,6 +605,7 @@ export class SidebarTree {
     this.promptFocusPending = true;
     this.returnFocus ??= this.focusKey();
     this.prompt.set(prompt);
+    this.tree.setPromptOpen(true);
   }
 
   protected fieldProblem(field: PromptField): string | null {
@@ -596,6 +642,7 @@ export class SidebarTree {
   protected closePrompt(): void {
     this.prompt.set(null);
     this.promptValues.set({});
+    this.tree.setPromptOpen(false);
     this.refocus();
   }
 

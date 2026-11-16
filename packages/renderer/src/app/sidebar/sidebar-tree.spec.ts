@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import type { CollectionInfo, Profile } from '@thicket/contract';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
 import { WorkspaceService } from '../layout/workspace.service';
@@ -213,6 +213,69 @@ describe('SidebarTree', () => {
       expect(node('conn', 'Profile p1').dataset['state']).toBe('disconnected');
       expect(nodes('db')).toEqual([]);
       expect(byTestId('tree-status')?.textContent).toContain('Not connected');
+    });
+
+    it('reloads the collections of a database expanded before a disconnect broadcast', async () => {
+      await start();
+      await openShop();
+      expect(nodes('coll')).toHaveLength(3);
+      fake.emit({
+        stream: 'conn.status',
+        kind: 'data',
+        payload: { profileId: 'p1', state: 'disconnected' },
+      });
+      await settle();
+      await click(must('tree-retry'));
+      expect(node('conn', 'Profile p1').dataset['state']).toBe('connected');
+      // The database collapsed with the forgotten lists instead of waiting for its collections.
+      expect(node('db', 'shop').getAttribute('aria-expanded')).toBe('false');
+      expect(el.textContent).not.toContain('Loading collections');
+      await click(node('db', 'shop'));
+      expect(fake.requestsFor('coll.list')).toHaveLength(2);
+      expect(nodes('coll')).toEqual(['big_orders', 'orders', 'ticks']);
+    });
+
+    it('reloads the collections of an expanded database after Disconnect and Connect', async () => {
+      await start();
+      await openShop();
+      await menu(node('conn', 'Profile p1'));
+      await click(must('menu-disconnect'));
+      await menu(node('conn', 'Profile p1'));
+      await click(must('menu-connect'));
+      expect(nodes('db')).toEqual(['admin', 'shop']);
+      expect(el.textContent).not.toContain('Loading collections');
+      await click(node('db', 'shop'));
+      expect(nodes('coll')).toEqual(['big_orders', 'orders', 'ticks']);
+    });
+
+    it('reloads the collections of an expanded database after a backend restart', async () => {
+      await start();
+      await openShop();
+      fake.emit({
+        stream: 'backend.restarted',
+        kind: 'data',
+        payload: { restarts: 1, reason: 'exit code 1' },
+      });
+      await settle();
+      await click(must('tree-retry'));
+      expect(nodes('db')).toEqual(['admin', 'shop']);
+      expect(el.textContent).not.toContain('Loading collections');
+      await click(node('db', 'shop'));
+      expect(nodes('coll')).toEqual(['big_orders', 'orders', 'ticks']);
+    });
+
+    it('status lines are non-focusable treeitems with their level', async () => {
+      fake.fail('coll.list', { code: 'SERVER_ERROR', message: 'not authorized on shop' });
+      await start();
+      await openShop();
+      const tree = must('sidebar-tree');
+      for (const child of Array.from(tree.children)) {
+        expect(child.getAttribute('role')).toBe('treeitem');
+      }
+      const line = must('tree-status');
+      expect(line.getAttribute('aria-level')).toBe('3');
+      expect(line.hasAttribute('tabindex')).toBe(false);
+      expect(must('tree-retry').closest('[role="treeitem"]')).toBe(line);
     });
   });
 
@@ -494,14 +557,12 @@ describe('SidebarTree', () => {
       await click(createDb);
       expect(byTestId('tree-prompt')).toBeNull();
 
-      await click(document.body);
       await menu(node('db', 'shop'));
       expect((must('menu-create-coll') as HTMLButtonElement).disabled).toBe(true);
       expect((must('menu-drop-db') as HTMLButtonElement).disabled).toBe(true);
       expect((must('menu-refresh') as HTMLButtonElement).disabled).toBe(false);
       expect((must('menu-stats') as HTMLButtonElement).disabled).toBe(false);
 
-      await click(document.body);
       await click(node('db', 'shop'));
       await menu(node('coll', 'orders'));
       expect((must('menu-rename') as HTMLButtonElement).disabled).toBe(true);
@@ -580,6 +641,46 @@ describe('SidebarTree', () => {
       document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
       await settle();
       expect(byTestId('tree-menu')).toBeNull();
+    });
+
+    it('keeps the menu inside the window near the bottom right corner', async () => {
+      const real = HTMLElement.prototype.getBoundingClientRect;
+      const spy = vi
+        .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+        .mockImplementation(function (this: HTMLElement) {
+          return this.classList.contains('menu')
+            ? DOMRect.fromRect({ x: 0, y: 0, width: 200, height: 120 })
+            : real.call(this);
+        });
+      try {
+        await start();
+        node('conn', 'Profile p1').dispatchEvent(
+          new MouseEvent('contextmenu', {
+            bubbles: true,
+            cancelable: true,
+            clientX: window.innerWidth - 10,
+            clientY: window.innerHeight - 10,
+          }),
+        );
+        await settle();
+        const m = must('tree-menu');
+        const left = parseFloat(m.style.left);
+        const top = parseFloat(m.style.top);
+        expect(left + 200).toBeLessThanOrEqual(window.innerWidth);
+        expect(left).toBeGreaterThanOrEqual(0);
+        // No room below the pointer: the menu opens above it.
+        expect(top).toBe(window.innerHeight - 10 - 120);
+        expect(document.activeElement).toBe(must('menu-connect'));
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('leaves a menu that fits at the pointer', async () => {
+      await start();
+      await menu(node('conn', 'Profile p1'));
+      expect(must('tree-menu').style.left).toBe('20px');
+      expect(must('tree-menu').style.top).toBe('30px');
     });
 
     it('opens with the ContextMenu key', async () => {

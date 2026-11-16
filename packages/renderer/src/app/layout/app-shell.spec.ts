@@ -270,6 +270,58 @@ describe('AppShell', () => {
       expect(tabIds()).toEqual(['a', 'b']);
     });
 
+    it('while the sidebar prompt is open, the work area is inert and shortcuts do nothing', async () => {
+      fake.handle('profiles.list', () => ({
+        profiles: [
+          {
+            id: 'p1',
+            name: 'Asks',
+            connectionString: 'mongodb://localhost:27017',
+            readOnly: false,
+            production: false,
+            auth: { mechanism: 'SCRAM-SHA-256', username: 'u', secretMode: 'ask' },
+          },
+        ],
+      }));
+      fake.respond('conn.status', { connections: [] });
+      await start();
+      ['a', 'b', 'c'].forEach((id) => ws.open(tab(id)));
+      await settle();
+      const behind = () =>
+        ['[data-testid="sidebar"]', '[data-testid="splitter"]', '.work', 'app-status-bar'].map(
+          (selector) => must(el.querySelector(selector)).hasAttribute('inert'),
+        );
+
+      // Expanding the ask-each-time connection opens the sidebar's password prompt.
+      must(el.querySelector<HTMLElement>('[data-testid="tree-conn"]')).click();
+      await settle();
+      const prompt = must(el.querySelector<HTMLElement>('[data-testid="tree-prompt"]'));
+      // The sidebar (holding the prompt) stays usable; everything else is inert.
+      expect(behind()).toEqual([false, true, true, true]);
+
+      const password = must(prompt.querySelector<HTMLElement>('[data-testid="prompt-password"]'));
+      const inPrompt = (init: KeyboardEventInit) => {
+        const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+        password.dispatchEvent(event);
+        return event;
+      };
+      expect(inPrompt({ key: 'w', ctrlKey: true }).defaultPrevented).toBe(true);
+      expect(inPrompt({ key: 'Tab', ctrlKey: true }).defaultPrevented).toBe(true);
+      inPrompt({ key: 'PageUp', ctrlKey: true });
+      inPrompt({ key: 'PageUp', ctrlKey: true, shiftKey: true });
+      await settle();
+      expect(tabIds()).toEqual(['a', 'b', 'c']);
+      expect(activeTab()).toBe('c');
+
+      must(prompt.querySelector<HTMLElement>('[data-testid="prompt-cancel"]')).click();
+      await settle();
+      expect(el.querySelector('[data-testid="tree-prompt"]')).toBeNull();
+      expect(behind()).toEqual([false, false, false, false]);
+      key({ key: 'w', ctrlKey: true });
+      await settle();
+      expect(tabIds()).toEqual(['a', 'b']);
+    });
+
     it('following a link shows the routed page instead of the active tab', async () => {
       await start();
       ws.open(tab('a'));

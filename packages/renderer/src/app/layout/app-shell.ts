@@ -20,6 +20,7 @@ import { filter } from 'rxjs';
 
 import { ConfirmDialog } from '../safety/confirm-dialog';
 import { SidebarTree } from '../sidebar/sidebar-tree';
+import { SidebarTreeService } from '../sidebar/sidebar-tree.service';
 import { ConfirmService } from '../safety/confirm.service';
 import { SidebarWidthService } from './sidebar-width.service';
 import { StatusBar } from './status-bar';
@@ -38,7 +39,9 @@ export const SIDEBAR_KEY_STEP = 16;
  * Ctrl+Tab / Ctrl+Shift+Tab (and Ctrl+PageDown / Ctrl+PageUp) cycle through the tabs,
  * Ctrl+Shift+PageDown / Ctrl+Shift+PageUp move the active tab. Hosts the write confirm dialog
  * (`ConfirmDialog`): while it is open the rest of the window is `inert` and the tab shortcuts do
- * nothing. Shows the production accent while the active view is on a production connection.
+ * nothing. The sidebar's name/password prompt is modal too: while it is open everything but the
+ * sidebar is `inert` and the shortcuts do nothing. Shows the production accent while the active
+ * view is on a production connection.
  */
 @Component({
   selector: 'app-shell',
@@ -55,7 +58,7 @@ export const SIDEBAR_KEY_STEP = 16;
       class="sidebar"
       data-testid="sidebar"
       aria-label="Connections"
-      [attr.inert]="modal() ? '' : null"
+      [attr.inert]="confirmOpen() ? '' : null"
     >
       <app-sidebar-tree />
     </aside>
@@ -124,8 +127,14 @@ export class AppShell {
 
   private readonly status = inject(StatusService);
   private readonly confirm = inject(ConfirmService);
-  /** The write confirm dialog is open: everything else is inert and the shortcuts are ignored. */
-  protected readonly modal = computed(() => this.confirm.current() !== null);
+  private readonly sidebarTree = inject(SidebarTreeService);
+  /** The write confirm dialog is open: everything else is inert. */
+  protected readonly confirmOpen = computed(() => this.confirm.current() !== null);
+  /**
+   * A modal dialog is open (the confirm dialog or the sidebar's prompt): the shortcuts are
+   * ignored and the work area, splitter and status bar are inert.
+   */
+  protected readonly modal = computed(() => this.confirmOpen() || this.sidebarTree.promptOpen());
   /**
    * The active view belongs to a production connection: the active tab's flag, or (on the start
    * page) the status bar's connection. Draws the red accent along the sidebar and status bar.
@@ -165,7 +174,7 @@ export class AppShell {
     // The physical W key also counts on non-Latin layouts (e.g. key 'ц'), where the menu
     // accelerator could close the window; a Latin letter on that key (AZERTY 'z') is left alone.
     const isW = key === 'w' || key === 'W' || (event.code === 'KeyW' && !/^[a-z]$/i.test(key));
-    // While the confirm dialog is open the shortcuts are still consumed (so Ctrl+W never closes
+    // While a modal dialog is open the shortcuts are still consumed (so Ctrl+W never closes
     // the window) but do not touch the tabs behind it.
     const modal = this.modal();
     if (isW && !event.shiftKey) {
