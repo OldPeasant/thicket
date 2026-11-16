@@ -159,6 +159,63 @@ Lint/type-check/build:
 Remaining unresolved findings:
 0
 
+## Round 3
+
+Date: 2026-11-16
+
+Scope: findings TW-5, TW-6 (`reviews/uri-model/tests.md`) and CR-7 (`reviews/uri-model/review.md`, same issue as TW-6) on revision `3e06e96`; only the `maskText()` scanner in `packages/core/src/uri/mask.ts`. No test changed.
+
+### Fixed findings
+
+#### TW-6 / CR-7 — `maskText()` leaks the tail of a secret option value containing a raw space or tab
+
+Files changed:
+- `packages/core/src/uri/mask.ts`
+
+Problem:
+The driver accepts a raw space in an option value, but `uriEnd` ended the connection string at the first whitespace, so `log: mongodb://h/?proxyHost=p&proxyPassword=my spaceOptSecret failed` became `...proxyPassword=**** spaceOptSecret failed`; likewise for `tlsCertificateKeyFilePassword` and `AWS_SESSION_TOKEN` in `authMechanismProperties`. Confirmed: the 3 test-writer rows failed on `3e06e96`.
+
+Fix:
+`uriEnd` now loops: when the whitespace that ends a run falls inside a secret option value (new `endsInSecretOption`, split out of `endsInSecret`), the value runs on to the next `&`, `#` or line break (never across a line break, never past the end of the text); after `&`/`#` the connection string continues to the next whitespace with the same checks (embedded-scheme splitting included). `mask()` then hides the whole value, e.g. `...proxyPassword=**** ` without the tail. Over-masking (prose up to the next `&`/`#`/line break is swallowed into the masked value) is documented in a code comment. Option keys or `authMechanismProperties` values that can't be decoded are invalid for the driver and keep their previous behavior (value ends at whitespace, `mask()` hides it): two existing tests pin that exact output (`x mongodb://h/?%ZZ=**** y`).
+
+Validation:
+- `npx vitest run --root packages/core` — Pass (3 TW-6 rows pass)
+
+#### TW-5 — `maskText()` splits an invalid URI whose password is digits followed by a scheme
+
+Files changed:
+- `packages/core/src/uri/mask.ts`
+
+Problem:
+In `endsInSecret`'s authority branch, `:` + digits + any non-alphanumeric character counted as a port, so in `x mongodb://u:123-mongodb://digitTailSecret@h y` the scanner split before the second scheme and `digitTailSecret` stayed visible as a user name. Confirmed: the test failed on `3e06e96`.
+
+Fix:
+A `:` followed by digits is a port only when the digits are followed by a host delimiter (`,`, `/`, `?`, `#`, whitespace, a quote, backtick, bracket/brace/paren, `<`, `>`) or the end of the prefix; otherwise it is treated as credentials. Joined connection strings after a real port (`mongodb://h:27017,mongodb://...`, quoted/JSON forms) still split; the existing tests for them pass.
+
+Validation:
+- `npx vitest run --root packages/core` — Pass
+
+### Not fixed
+
+None.
+
+### Validation summary (Round 3)
+
+Focused tests:
+- `npx vitest run --root packages/core` (repo root) — Pass: 3 files, 261 tests passed (was 4 failed | 257 passed)
+
+Full test suite:
+- `npm run check` (repo root: eslint `--max-warnings 0`, prettier, typecheck, root `vitest run` 7 files / 859 tests, renderer 2 files / 46 tests) — Pass
+
+Lint/type-check/build:
+- Included in `npm run check` — Pass
+
+`.taskcheck`:
+- Runs `npm run check` (result above) — Pass; `tasks.py done` not run by the fixer
+
+Remaining unresolved findings:
+0
+
 ## Final status
 
 All validated findings fixed and validation passed.

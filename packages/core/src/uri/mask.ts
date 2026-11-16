@@ -110,18 +110,29 @@ export function mask(uri: string): string {
  * True when `prefix` (a connection string cut just before an embedded scheme) ends inside a
  * secret, so the scheme belongs to that secret and must not start a new connection string:
  * - still in the authority, no `@` yet, and a `:` that isn't a port (`u:pw-mongodb://...`);
- * - in the value of `proxyPassword` / `tlsCertificateKeyFilePassword`, of an option key that
- *   can't be decoded, or of an `authMechanismProperties` entry whose key is secret.
+ * - in a secret option value (see `endsInSecretOption`).
  * Thicket writes `:` and `/` unencoded in option values, so such values can contain a scheme.
  */
 function endsInSecret(prefix: string): boolean {
   const body = prefix.replace(SCHEME, '');
-  const authorityEnd = body.search(/[/?#]/);
-  if (authorityEnd < 0) {
+  if (body.search(/[/?#]/) < 0) {
     if (body.includes('@')) return false;
-    // IPv6 literals in brackets contain ':'; a port is ':' + digits, then a non-word character.
-    return /:(?!\d+(?:[^A-Za-z0-9]|$))/.test(body.replace(/\[[^\]]*\]/g, ''));
+    // IPv6 literals in brackets contain ':'. A port is ':' + digits followed by a host delimiter
+    // (or the end); anything else after the digits (TW-5: "u:123-mongodb://...") is a password.
+    return /:(?!\d+(?:[,/?#\s"'`()[\]{}<>]|$))/.test(body.replace(/\[[^\]]*\]/g, ''));
   }
+  return endsInSecretOption(prefix);
+}
+
+/**
+ * True when `prefix` (a connection string cut anywhere) ends in the value of `proxyPassword` /
+ * `tlsCertificateKeyFilePassword` or of an `authMechanismProperties` entry whose key is secret.
+ * An option key or `authMechanismProperties` value that can't be decoded can't be checked:
+ * `undecodable` is returned for it.
+ */
+function endsInSecretOption(prefix: string, undecodable = true): boolean {
+  const body = prefix.replace(SCHEME, '');
+  if (body.search(/[/?#]/) < 0) return false;
   const q = body.indexOf('?');
   if (q < 0 || body.lastIndexOf('#') > q) return false;
   const last =
@@ -132,10 +143,11 @@ function endsInSecret(prefix: string): boolean {
   const eq = last.indexOf('=');
   if (eq < 0) return false;
   const key = tryDecode(last.slice(0, eq))?.toLowerCase();
-  if (key === undefined || SECRET_OPTIONS.has(key)) return true;
+  if (key === undefined) return undecodable;
+  if (SECRET_OPTIONS.has(key)) return true;
   if (key !== 'authmechanismproperties') return false;
   const value = tryDecode(last.slice(eq + 1));
-  if (value === undefined) return true;
+  if (value === undefined) return undecodable;
   const entry = value.split(',').pop() ?? '';
   const colon = entry.indexOf(':');
   return colon >= 0 && SECRET_MECHANISM_PROPERTIES.has(entry.slice(0, colon).toLowerCase());
@@ -157,15 +169,29 @@ function uriEnd(text: string, start: number, bodyStart: number): number {
   // string. Quotes, '<', '>' and backticks may appear unencoded in a password, so they don't end
   // it; a quote after the hosts just stays in the token and `mask()` keeps it as it is.
   const ws = /\s/g;
-  ws.lastIndex = end;
-  const runEnd = ws.exec(text)?.index ?? text.length;
   const inner = new RegExp(SCHEME_SOURCE, 'gi');
-  inner.lastIndex = end;
-  for (let m = inner.exec(text); m !== null && m.index < runEnd; m = inner.exec(text)) {
-    // TW-4: a scheme inside a secret value is part of it, not a new connection string.
-    if (!endsInSecret(text.slice(start, m.index))) return m.index;
+  const valueEnd = /[&#\r\n]/g;
+  for (;;) {
+    ws.lastIndex = end;
+    const runEnd = ws.exec(text)?.index ?? text.length;
+    inner.lastIndex = end;
+    for (let m = inner.exec(text); m !== null && m.index < runEnd; m = inner.exec(text)) {
+      // TW-4: a scheme inside a secret value is part of it, not a new connection string.
+      if (!endsInSecret(text.slice(start, m.index))) return m.index;
+    }
+    // TW-6: the driver also keeps a raw space or tab in an option value. When the whitespace
+    // falls inside a secret option value, that value runs on to the next '&', '#' or line break
+    // (never across lines); after '&' or '#' the connection string continues. Masking more is
+    // acceptable, leaking is not. A key or value that can't be decoded is invalid for the driver,
+    // so its value doesn't run on past whitespace (`mask()` still hides it).
+    if (runEnd >= text.length || /[\r\n]/.test(text.charAt(runEnd))) return runEnd;
+    if (!endsInSecretOption(text.slice(start, runEnd), false)) return runEnd;
+    valueEnd.lastIndex = runEnd;
+    const stop = valueEnd.exec(text);
+    if (stop === null) return text.length;
+    if (stop[0] !== '&' && stop[0] !== '#') return stop.index;
+    end = stop.index;
   }
-  return runEnd;
 }
 
 /** Masks every MongoDB connection string inside free text (log lines, error messages). */
