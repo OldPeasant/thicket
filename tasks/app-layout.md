@@ -17,3 +17,4 @@ The main window layout: resizable sidebar, tabbed workspace (tabs for collection
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 21:00+0100 by felix/agent-1): Sidebar width is a new settings key sidebarWidth (contract SIDEBAR_WIDTH 180..560 px, default 260) in settings.json, so it persists per user, not per window
