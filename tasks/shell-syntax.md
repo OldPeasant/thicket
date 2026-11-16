@@ -13,7 +13,8 @@ Parse mongosh-style literals (`ObjectId("…")`, `ISODate`, `NumberLong`, `Numbe
 ## Acceptance criteria
 - [x] Parser rejects code (`function`, calls other than the known constructors, `this`) with a position (tests)
   - verified (2026-11-16 20:12+0100 by dell26/agent-3): npx vitest run src/shellsyntax (packages/core) -> 390 passed; 'refuses code with a position' suite (function, this, eval, unknown calls, arrows, operators, property access, spread, methods, template literals...) asserts message + line/column
-- [ ] print(parse(x)) round-trips for a corpus of 30+ queries/documents (test)
+- [x] print(parse(x)) round-trips for a corpus of 30+ queries/documents (test)
+  - verified (2026-11-16 20:12+0100 by dell26/agent-3): npx vitest run src/shellsyntax -> passed: printShellSyntax(parseShellSyntax(x)) === x for a 34-entry corpus of queries/documents/pipelines, plus 9 normalized variants and an every-BSON-type EJSON->shell->model round trip (single-line and indented)
 - [ ] Errors carry line/column for the raw editor and query bar
 
 ## Notes
