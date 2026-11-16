@@ -13,7 +13,8 @@ Token sets for Business (default) and Tron, each light and dark, selected by `da
 ## Acceptance criteria
 - [x] Four combinations render the explorer demo; Playwright screenshots of each attached in reviews/
   - verified (2026-11-16 20:47+0100 by dell26/agent-1): npm run test:electron -w apps/desktop -- test/theme.electron.spec.ts at d370b59 -> 4 passed; 'renders the explorer demo in all four combinations, switched without reload' wrote 4 screenshots, byte-identical (sha1) to reviews/themes/screenshots/explorer-{business,tron}-{light,dark}.png, viewed in review rounds
-- [ ] Business light and dark pass WCAG AA contrast for text/background token pairs (unit test computing ratios)
+- [x] Business light and dark pass WCAG AA contrast for text/background token pairs (unit test computing ratios)
+  - verified (2026-11-16 20:47+0100 by dell26/agent-1): cd packages/renderer && npx ng test --include='src/app/theme/*.spec.ts' at d370b59 -> 64 passed, incl. theme-tokens.spec.ts 'business/{light,dark}: every pair >= 4.5' and focus ring >= 3:1 (WCAG ratios computed from tokens.css)
 - [ ] Tron keeps Canopy's look (fonts bundled locally, glow/scanlines only in Tron)
 - [ ] Switching style/mode applies without reload; `system` follows `prefers-color-scheme` changes (test)
 - [ ] Tokens exist for production accent, read-only marker and each BSON type in all four sets (test enumerates)
