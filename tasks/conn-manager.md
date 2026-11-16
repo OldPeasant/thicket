@@ -17,7 +17,8 @@ Backend conn.test/open/close/status/serverInfo; builds MongoClient options from 
   - verified (2026-11-16 20:59+0100 by dell26/agent-2): npx vitest run src/guard src/connections in packages/backend -> 208 passed; guard.spec.ts it.each(WRITE_METHODS): read-only refuses every write method (READ_ONLY, also when confirmed), production without confirmed:true -> CONFIRMATION_REQUIRED
 - [x] Logs mask passwords (test captures log output)
   - verified (2026-11-16 21:00+0100 by dell26/agent-2): npx vitest run src/connections in packages/backend -> passed incl. manager.spec.ts 'log lines never contain passwords or passphrases' and 'masks a user:password connection string in the log line' (captured log fn); int spec 'typed password never reaches the log' passed
-- [ ] Several connections open at once and close independently (int test)
+- [x] Several connections open at once and close independently (int test)
+  - verified (2026-11-16 21:00+0100 by dell26/agent-2): npm run test:int -- conn-manager -> 'several connections > open at once and close independently (through the conn.* handlers)' passed
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
