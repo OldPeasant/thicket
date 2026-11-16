@@ -126,7 +126,8 @@ export class CollectionResults implements OnDestroy {
     const first = state.page?.first;
     if (this.fromEndState() !== null && state.mode === 'range' && first) {
       // The index is a placeholder, so paging-core's previousPage could fall back to page 1:
-      // read the rows before the shown page instead. A short answer is page 1 (pageLoaded).
+      // read the rows before the shown page instead. A short answer reached the start; page 1 is
+      // then read again from the start (pageArrived).
       this.load({
         pageIndex: Math.max(1, state.pageIndex - 1),
         sort: state.sort,
@@ -276,7 +277,9 @@ export class CollectionResults implements OnDestroy {
     this.pagingState.set(setCount(this.pagingState(), clipped, exact));
     // An estimate does not place a page read from the end (a full page, not the remainder, and
     // the estimate may be off): it keeps its "from the end" name. Only an exact count does.
-    if (exact) this.realign();
+    // While a page read runs (e.g. Previous from the last page), that page is placed once it
+    // arrived (pageArrived realigns), so the user's navigation is not replaced.
+    if (exact && this.find === null) this.realign();
     else this.updateFirstRow();
   }
 
@@ -340,6 +343,13 @@ export class CollectionResults implements OnDestroy {
   }
 
   private pageArrived(request: PageRequest, docs: readonly string[], pageSize?: number): void {
+    if (request.before && this.fromEndState() !== null && docs.length < request.limit) {
+      // Paging back by range from a page of unknown position reached the start. The short (or
+      // empty) answer is not an aligned page 1 (the count need not be a multiple of the page
+      // size): read page 1 from the start instead; the shown page stays until it arrived.
+      this.load(firstPage(this.pagingState()), pageSize);
+      return;
+    }
     const plain = docs.map((text) => JSON.parse(text) as unknown);
     const base = this.pagingState();
     let state = pageLoaded(

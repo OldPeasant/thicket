@@ -580,7 +580,7 @@ describe('CollectionResults', () => {
       expect(results.pagesFromEnd()).toBe(1);
     });
 
-    it('pages back by range all the way; a short page before a bound is page 1', async () => {
+    it('pages back by range all the way; a short page before a bound reads page 1 aligned', async () => {
       await runAndLoad(query({ filter: '{ a: 1 }' }));
       results.last();
       await flush();
@@ -595,10 +595,51 @@ describe('CollectionResults', () => {
       await flush();
       expect(lastFind()).toMatchObject({ before: '{"_id":{"$numberInt":"21"}}', limit: 50 });
       await answer(4, docs(1, 20));
-      // Fewer rows than asked: the start was reached, so this is page 1 with a known position.
+      // Fewer rows than asked: the start was reached. Rows 1-20 are not page 1 (rows 1-50), so
+      // page 1 is read again from the start; the shown page stays until it arrived.
+      expect(finds()).toHaveLength(5);
+      expect(lastFind()).toMatchObject({ limit: 50 });
+      expect(lastFind()).not.toHaveProperty('before');
+      expect(lastFind()).not.toHaveProperty('after');
+      expect(lastFind()).not.toHaveProperty('skip');
+      expect(results.page()?.docs[0]).toBe(docs(21, 1)[0]);
+      await answer(5, docs(1, 50));
       expect(results.pagesFromEnd()).toBeNull();
       expect(results.paging().pageIndex).toBe(0);
+      expect(results.page()?.firstRow).toBe(0);
       expect(results.canPrevious()).toBe(false);
+      // Next continues aligned: rows 51-100 numbered from 51.
+      results.next();
+      await flush();
+      expect(lastFind()).toMatchObject({ after: '{"_id":{"$numberInt":"50"}}', limit: 50 });
+      await answer(6, docs(51, 50));
+      expect(results.paging().pageIndex).toBe(1);
+      expect(results.page()?.firstRow).toBe(50);
+    });
+
+    it('paging back from Last over a multiple of the page size never shows an empty page', async () => {
+      // 100 documents: Last shows 51-100, Previous 1-50 (still of unknown position).
+      await runAndLoad(query({ filter: '{ a: 1 }' }));
+      results.last();
+      await flush();
+      await answer(2, docs(51, 50));
+      results.previous();
+      await flush();
+      await answer(3, docs(1, 50));
+      expect(results.pagesFromEnd()).toBe(1);
+      expect(results.canPrevious()).toBe(true);
+      results.previous();
+      await flush();
+      expect(lastFind()).toMatchObject({ before: '{"_id":{"$numberInt":"1"}}' });
+      await answer(4, []);
+      // The empty answer is not shown; page 1 is read from the start.
+      expect(results.page()?.docs).toHaveLength(50);
+      expect(lastFind()).not.toHaveProperty('before');
+      await answer(5, docs(1, 50));
+      expect(results.pagesFromEnd()).toBeNull();
+      expect(results.paging().pageIndex).toBe(0);
+      expect(results.page()?.docs).toHaveLength(50);
+      expect(results.page()?.firstRow).toBe(0);
     });
 
     it('next from one page before an unknown last page reaches the last page', async () => {
