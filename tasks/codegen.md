@@ -5,7 +5,7 @@ owner: dell26/agent-3
 deps: [shell-syntax]
 touches: [packages/core/src/codegen]
 prio: 2
-lease_until: 2026-11-16T19:38:41Z
+lease_until: 2026-11-16T19:43:45Z
 ---
 ## Goal
 Generate code for a find query or an aggregation pipeline in mongosh syntax, Node driver, PyMongo and Java driver, with correct BSON type constructors per language.

@@ -15,7 +15,8 @@ profiles.* in main: list/get/save/delete/duplicate, folders, color, read-only an
   - verified (2026-11-16 20:23+0100 by dell26/agent-2): npx vitest run apps/desktop/src/profiles -t 'CRUD|duplicate|migrat|v0' -> 38 passed (create/list/get/update/delete, unknown ids NOT_FOUND, duplicate copies no secrets checked against real SecretsStore, v0 fixture fixtures/connections.v0.json migrated with password moved to secrets.bin and file rewritten as v1)
 - [x] A saved profile with a password writes it only to secrets.bin (test inspects both files)
   - verified (2026-11-16 20:23+0100 by dell26/agent-2): npx vitest run apps/desktop/src/profiles -t 'secrets stay out' -> passed: profiles.save + profiles.setSecret via handlers on a temp userData dir; connections.json text lacks the password, secrets.bin raw bytes lack it and decrypt (FakeSafeStorage) to {version:1,profiles:{<id>:{password}}}; profiles.get returns only storedSecrets kinds
-- [ ] Atomic writes as in app-settings (test)
+- [x] Atomic writes as in app-settings (test)
+  - verified (2026-11-16 20:23+0100 by dell26/agent-2): npx vitest run apps/desktop/src/profiles -t 'atomic' -> passed: writes go to connections.json.tmp with flush=true then rename over connections.json (same as app-settings SettingsStore); simulated crash between write and rename keeps previous file and in-memory state; stale .tmp removed on next load
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
