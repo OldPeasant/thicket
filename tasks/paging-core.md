@@ -11,7 +11,8 @@ lease_until: 2026-11-16T19:09:26Z
 Pure functions for paging state: page size, page index, range paging on an indexed unique sort key (default `_id`) with fallback to skip/limit, last page via reversed sort, estimated vs exact count.
 
 ## Acceptance criteria
-- [ ] Unit tests: next/previous/jump/last in range mode and skip mode; switching sort resets to page 1
+- [x] Unit tests: next/previous/jump/last in range mode and skip mode; switching sort resets to page 1
+  - verified (2026-11-16 19:49+0100 by felix/agent-2): cd packages/core && npx vitest run src/paging -> 100 passed; state.spec.ts walks next/previous over all pages in range mode (_id asc/desc, compound with desc keys, non-_id unique index) and skip mode (non-unique sort) against an in-memory server evaluating the generated filters; jump (far jump via skip then range, neighbours, clamp) and last (reversed sort, exact/estimated count) tests; setSort resets to page 1 tests
 - [ ] Range bounds built correctly for compound sort keys and descending sorts (tests)
 
 ## Notes
