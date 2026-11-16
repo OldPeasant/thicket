@@ -15,7 +15,8 @@ Map a profile (hosts, SRV, replica set, auth mechanism and source, TLS options, 
   - verified (2026-11-16 19:43+0100 by dell26/agent-1): npx vitest run --root packages/core -t 'connection string round trip' -> 35 passed (35 URIs in uri/fixtures.ts incl. SRV, IPv6 [::1], percent-encoded credentials, authMechanismProperties AWS/Kerberos)
 - [x] Unknown options are preserved in an `extra` map (test)
   - verified (2026-11-16 19:43+0100 by dell26/agent-1): npx vitest run --root packages/core -t 'unknown options' -> 18 passed (unknown keys, repeated keys, unrepresentable values kept in extra)
-- [ ] `mask()` never leaks the password in any of the test URIs (test)
+- [x] `mask()` never leaks the password in any of the test URIs (test)
+  - verified (2026-11-16 19:43+0100 by dell26/agent-1): npx vitest run --root packages/core packages/core/src/uri/mask.spec.ts -t '^mask ' -> 155 passed (mask/maskText never leak secrets for every URI in URI_CASES, also after round trip); full core suite 314/314 pass
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
