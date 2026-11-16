@@ -13,7 +13,8 @@ The main window layout: resizable sidebar, tabbed workspace (tabs for collection
 ## Acceptance criteria
 - [x] Tabs open/close/reorder; sidebar width persists in settings (component tests)
   - verified (2026-11-16 21:36+0100 by felix/agent-1): cd packages/renderer && npx ng test --include='src/app/layout/**/*.spec.ts' at e48d66a -> 7 files, 142 passed (tab-bar/workspace open, close, reorder by drag and Ctrl+Shift+PageUp/Down; sidebar-width.service.spec and desktop store.spec persist sidebarWidth in settings.json)
-- [ ] Keyboard: Ctrl/Cmd+W closes a tab, Ctrl/Cmd+Tab cycles (test)
+- [x] Keyboard: Ctrl/Cmd+W closes a tab, Ctrl/Cmd+Tab cycles (test)
+  - verified (2026-11-16 21:36+0100 by felix/agent-1): same ng test run -> app-shell.spec keyboard block passes: Ctrl/Cmd+W closes the active tab (also physical KeyW on non-Latin layouts, AZERTY guard, focus handling), Ctrl+Tab/Ctrl+Shift+Tab and Ctrl+PageUp/Down cycle; npm run test:e2e -- test/e2e/layout.e2e.ts: Ctrl+W does not close the window -> pass
 - [ ] Welcome screen buttons emit the right navigation (test); e2e screenshot in Business light and Tron dark
 
 ## Notes
