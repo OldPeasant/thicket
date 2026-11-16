@@ -17,3 +17,4 @@ secrets.bin encrypted with safeStorage, keyed by profile id; detection of Linux 
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 19:43+0100 by dell26/agent-2): Status API is a new main-routed contract method profiles.secretStorage -> { level: secure|weak|unavailable, backend, defaultSecretMode: saved|ask }; the contract had no status method and SPEC lists profiles.* as main's group
