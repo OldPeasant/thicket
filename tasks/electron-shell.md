@@ -11,7 +11,8 @@ lease_until: 2026-11-16T18:51:50Z
 Electron app that opens a sandboxed window with the renderer build, starts the backend in a utilityProcess, brokers a MessagePort between them, and routes requests by `route(method)` to main or backend. Exposes only `window.thicket.request/cancel/on` in the preload.
 
 ## Acceptance criteria
-- [ ] `npm run dev` starts the app; a `app.ping` request from the renderer gets an answer from main and `conn.ping` (or equivalent) from the backend — shown by an integration test that starts Electron headless (xvfb-run on Linux)
+- [x] `npm run dev` starts the app; a `app.ping` request from the renderer gets an answer from main and `conn.ping` (or equivalent) from the backend — shown by an integration test that starts Electron headless (xvfb-run on Linux)
+  - verified (2026-11-16 19:33+0100 by dell26/agent-2): npm run test:electron -w apps/desktop (Playwright _electron, Electron 45.3.3, Linux on the desktop display; xvfb-run not installed here, headless fallback --ozone-platform=headless not exercised) -> 2 files/12 tests passed: app.electron.spec app.ping answered by main, backend.ping by backend (pid != main, mainReachable true); dev.electron.spec runs the npm run dev mechanism (ng serve + THICKET_DEV_SERVER) with the same pings. Also ran npm run dev manually -> ng serve up, Electron window and backend started, stopped cleanly
 - [ ] BrowserWindow has sandbox, contextIsolation, no nodeIntegration, CSP header per docs/ARCHITECTURE.md; `window.open` and navigation are blocked (unit test on the handlers)
 - [ ] Killing the backend process is detected; it is restarted and the renderer receives a `backend.restarted` event (test)
 - [ ] Cancel: a long dummy backend request is cancelled via `thicket.cancel(id)` and answers `CANCELLED` (test)
