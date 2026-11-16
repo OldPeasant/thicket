@@ -8,7 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./bson": "./src/bson/index.ts",
-    "./shellsyntax": "./src/shellsyntax/index.ts",
+    "./paging": "./src/paging/index.ts",
+    "./shellsyntax":"./src/shellsyntax/index.ts",
     "./testing": "./src/bson/fixtures.ts"
   },
   "scripts": {

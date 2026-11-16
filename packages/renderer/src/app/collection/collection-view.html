@@ -1,0 +1,309 @@
+<section class="collection" [attr.aria-label]="'Collection ' + target().coll">
+  <!-- The query bar reads as the mongosh call it runs. -->
+  <form class="query" (submit)="run($event)" data-testid="query-bar" novalidate>
+    <div class="call">
+      <span class="code ns" [title]="target().db + '.' + target().coll"
+        >db.<span class="coll">{{ target().coll }}</span>.find(</span
+      >
+      <input
+        class="arg filter"
+        data-testid="query-filter"
+        [attr.aria-label]="labels.filter"
+        placeholder="{ status: 'open' }"
+        spellcheck="false"
+        autocomplete="off"
+        [value]="text().filter"
+        (input)="edit('filter', $event)"
+        [attr.aria-invalid]="errors().filter ? true : null"
+        [attr.aria-describedby]="errors().filter ? errorId('filter') : null"
+      />
+      <span class="code">,</span>
+      <input
+        class="arg projection"
+        data-testid="query-projection"
+        [attr.aria-label]="labels.projection"
+        placeholder="projection"
+        spellcheck="false"
+        autocomplete="off"
+        [value]="text().projection"
+        (input)="edit('projection', $event)"
+        [attr.aria-invalid]="errors().projection ? true : null"
+        [attr.aria-describedby]="errors().projection ? errorId('projection') : null"
+      />
+      <span class="code">)</span>
+    </div>
+    <div class="call chain">
+      <span class="code">.sort(</span>
+      <input
+        class="arg sort"
+        data-testid="query-sort"
+        [attr.aria-label]="labels.sort"
+        placeholder="{ _id: 1 }"
+        spellcheck="false"
+        autocomplete="off"
+        [value]="text().sort"
+        (input)="edit('sort', $event)"
+        [attr.aria-invalid]="errors().sort ? true : null"
+        [attr.aria-describedby]="errors().sort ? errorId('sort') : null"
+      />
+      <span class="code">).collation(</span>
+      <input
+        class="arg collation"
+        data-testid="query-collation"
+        [attr.aria-label]="labels.collation"
+        placeholder="{ locale: 'en' }"
+        spellcheck="false"
+        autocomplete="off"
+        [value]="text().collation"
+        (input)="edit('collation', $event)"
+        [attr.aria-invalid]="errors().collation ? true : null"
+        [attr.aria-describedby]="errors().collation ? errorId('collation') : null"
+      />
+      <span class="code">).limit(</span>
+      <input
+        class="arg limit"
+        data-testid="query-limit"
+        [attr.aria-label]="labels.limit"
+        placeholder="0"
+        inputmode="numeric"
+        spellcheck="false"
+        autocomplete="off"
+        [value]="text().limit"
+        (input)="edit('limit', $event)"
+        [attr.aria-invalid]="errors().limit ? true : null"
+        [attr.aria-describedby]="errors().limit ? errorId('limit') : null"
+      />
+      <span class="code">)</span>
+      <span class="actions">
+        <button type="button" class="btn quiet" data-testid="query-reset" (click)="reset()">
+          Reset
+        </button>
+        @if (results.busy()) {
+          <button
+            type="button"
+            class="btn stop"
+            data-testid="query-cancel"
+            (click)="results.cancel()"
+          >
+            Cancel
+          </button>
+        }
+        <button type="submit" class="btn run" data-testid="query-run">Run</button>
+      </span>
+    </div>
+    @if (errorList().length) {
+      <ul class="errors" data-testid="query-errors">
+        @for (e of errorList(); track e.field) {
+          <li [id]="errorId(e.field)" [attr.data-testid]="'query-error-' + e.field" role="alert">
+            <strong>{{ labels[e.field] }}:</strong> {{ e.message }}
+          </li>
+        }
+      </ul>
+    }
+  </form>
+
+  <div class="bar">
+    <nav class="pager" aria-label="Pages">
+      <button
+        type="button"
+        class="icon-btn"
+        data-testid="pager-first"
+        title="First page"
+        aria-label="First page"
+        [disabled]="!results.canPrevious()"
+        (click)="results.first()"
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3v10M12 3 7 8l5 5" /></svg>
+      </button>
+      <button
+        type="button"
+        class="icon-btn"
+        data-testid="pager-prev"
+        title="Previous page"
+        aria-label="Previous page"
+        [disabled]="!results.canPrevious()"
+        (click)="results.previous()"
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" /></svg>
+      </button>
+      <form class="jump" (submit)="$event.preventDefault()">
+        <label>
+          Page
+          <input
+            #jumpInput
+            type="number"
+            min="1"
+            data-testid="pager-page"
+            aria-label="Page number"
+            [value]="pageNumber()"
+            (change)="jump()"
+          />
+        </label>
+        @if (pagesText(); as pages) {
+          <span data-testid="pager-pages">of {{ pages }}</span>
+        }
+      </form>
+      <button
+        type="button"
+        class="icon-btn"
+        data-testid="pager-next"
+        title="Next page"
+        aria-label="Next page"
+        [disabled]="!results.canNext()"
+        (click)="results.next()"
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg>
+      </button>
+      <button
+        type="button"
+        class="icon-btn"
+        data-testid="pager-last"
+        title="Last page"
+        aria-label="Last page"
+        [disabled]="!results.canNext()"
+        (click)="results.last()"
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12 3v10M4 3l5 5-5 5" /></svg>
+      </button>
+    </nav>
+
+    <p class="rows" data-testid="pager-rows" aria-live="polite">
+      @if (rowRange(); as range) {
+        <span>{{ range }}</span>
+      }
+      @if (countText(); as count) {
+        <span>
+          of <span data-testid="pager-count-value">{{ count }}</span>
+          {{ results.count()?.exact ? 'documents' : 'documents (estimated)' }}
+        </span>
+      }
+    </p>
+    @if (!results.count()?.exact) {
+      <button
+        type="button"
+        class="btn quiet"
+        data-testid="pager-count"
+        [disabled]="results.counting()"
+        (click)="results.countExact()"
+      >
+        {{ results.counting() ? 'Counting…' : 'Count exactly' }}
+      </button>
+    }
+
+    <label class="size">
+      Per page
+      <select data-testid="pager-size" (change)="changePageSize($event)">
+        @for (size of pageSizes; track size) {
+          <option [value]="size" [selected]="size === results.paging().pageSize">
+            {{ size }}
+          </option>
+        }
+      </select>
+    </label>
+
+    <div class="views" role="group" aria-label="Result view">
+      <button
+        type="button"
+        data-testid="view-table"
+        [attr.aria-pressed]="view() === 'table'"
+        (click)="view.set('table')"
+      >
+        Table
+      </button>
+      <button
+        type="button"
+        data-testid="view-list"
+        [attr.aria-pressed]="view() === 'list'"
+        (click)="view.set('list')"
+      >
+        Documents
+      </button>
+      <button
+        type="button"
+        data-testid="view-raw"
+        [attr.aria-pressed]="view() === 'raw'"
+        (click)="view.set('raw')"
+      >
+        Raw
+      </button>
+    </div>
+  </div>
+
+  <div
+    class="results"
+    data-testid="results"
+    [attr.data-view]="view()"
+    [attr.aria-busy]="results.loading()"
+    [class.loading]="results.loading()"
+  >
+    @if (results.error(); as error) {
+      <p class="message error" data-testid="results-error" role="alert">{{ error }}</p>
+    } @else if (results.notice(); as notice) {
+      <p class="message" data-testid="results-notice" role="status">{{ notice }}</p>
+    }
+    @if (results.loading() && results.page() === null) {
+      <p class="message" data-testid="results-loading">Loading documents…</p>
+    }
+    @if (results.page(); as page) {
+      @if (page.docs.length === 0) {
+        <p class="message" data-testid="results-empty">
+          No documents match this query. Change the filter or press Reset to see the whole
+          collection.
+        </p>
+      } @else {
+        @switch (view()) {
+          @case ('table') {
+            <app-json-explorer [value]="explorerDocs()" layout="tables" />
+          }
+          @case ('list') {
+            <div class="list-head">
+              <button
+                type="button"
+                class="btn quiet"
+                [attr.aria-pressed]="display.utc()"
+                (click)="display.toggleUtc()"
+                title="Show dates in UTC instead of local time"
+              >
+                UTC
+              </button>
+            </div>
+            <ol class="doc-list" [start]="page.firstRow + 1">
+              @for (doc of explorerDocs(); track $index) {
+                <li class="doc" data-testid="result-doc">
+                  @if (doc === null) {
+                    <p class="message error">This document could not be read.</p>
+                  } @else {
+                    <app-json-form [value]="doc" path="" [uid]="uid + '-' + $index" />
+                  }
+                </li>
+              }
+            </ol>
+          }
+          @case ('raw') {
+            <div class="list-head" role="group" aria-label="Raw format">
+              <button
+                type="button"
+                class="btn quiet"
+                data-testid="raw-shell"
+                [attr.aria-pressed]="rawFormat() === 'shell'"
+                (click)="rawFormat.set('shell')"
+              >
+                Shell syntax
+              </button>
+              <button
+                type="button"
+                class="btn quiet"
+                data-testid="raw-ejson"
+                [attr.aria-pressed]="rawFormat() === 'ejson'"
+                (click)="rawFormat.set('ejson')"
+              >
+                Canonical EJSON
+              </button>
+            </div>
+            <pre class="raw" data-testid="raw-text" tabindex="0">{{ rawText() }}</pre>
+          }
+        }
+      }
+    }
+  </div>
+</section>
