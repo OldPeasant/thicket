@@ -127,6 +127,29 @@ describe('EditableValueComponent type dropdown with a schema', () => {
     expect(ev.typeOptions.map((o) => o.target)).toEqual(['int', 'long']);
   });
 
+  // Round 2: choosing the current type, or a disabled (stale) option, changes nothing.
+  it('emits nothing for the current type or a conversion that is not possible', async () => {
+    const fixture = await create(new BsonLeaf({ type: 'double', value: 1.5 }));
+    const select = (fixture.nativeElement as HTMLElement).querySelector<HTMLSelectElement>(
+      'select.type-select[data-bson-type]',
+    );
+    expect(select).not.toBeNull();
+    if (!select) return;
+    for (const target of ['double', 'int']) {
+      select.value = target;
+      select.dispatchEvent(new Event('change'));
+    }
+    expect(emitted).toEqual([]);
+    await new Promise((resolve) => setTimeout(resolve));
+    expect(select.value).toBe('double');
+    select.value = 'long';
+    select.dispatchEvent(new Event('change'));
+    expect(emitted).toEqual([]);
+    select.value = 'decimal';
+    select.dispatchEvent(new Event('change'));
+    expect(emitted).toEqual([new BsonLeaf({ type: 'decimal', value: '1.5' })]);
+  });
+
   it('a plain number typed becomes the configured BSON number', async () => {
     TestBed.inject(NumberDefaultService).integers.set('int64');
     const fixture = await create(1);

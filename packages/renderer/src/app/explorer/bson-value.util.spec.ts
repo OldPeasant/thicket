@@ -113,6 +113,20 @@ describe('toExplorerValue / fromExplorerValue', () => {
     });
   });
 
+  // Round 2: the edges of the integer default.
+  it('maps unsafe, -0 and non-finite numbers to Double under every integer default', () => {
+    for (const integers of ['int32', 'int64', 'double'] as const) {
+      expect(fromExplorerValue(2 ** 53 + 2, integers).type).toBe('double');
+      expect(fromExplorerValue(-0, integers).type).toBe('double');
+      expect(fromExplorerValue(Infinity, integers).type).toBe('double');
+    }
+    expect(fromExplorerValue(2 ** 31, 'int32')).toEqual({ type: 'double', value: 2 ** 31 });
+    expect(fromExplorerValue(-(2 ** 31), 'int64')).toEqual({
+      type: 'long',
+      value: -(2n ** 31n),
+    });
+  });
+
   it('maps undefined to null and rejects values that are not explorer values', () => {
     expect(fromExplorerValue(undefined)).toEqual({ type: 'null' });
     expect(() => fromExplorerValue(() => 1)).toThrow(TypeError);

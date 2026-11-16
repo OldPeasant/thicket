@@ -408,6 +408,28 @@ describe('Explorer edits BSON values without changing their types', () => {
       expect(el().querySelector('button[data-move]')).toBeNull();
       expect(field('a')?.querySelector('.del-btn')).not.toBeNull();
     });
+
+    // Round 2: only declared keys hide the moves, not any loaded schema.
+    it('offers moves under a schema that declares no keys for the object', async () => {
+      expect(TestBed.inject(SchemaService).load('{"type":"object"}', 'any.schema.json')).toBe(true);
+      await renderEJson('{"a":1,"b":2}');
+      await move('b', 'up');
+      expect(keys()).toEqual(['b', 'a']);
+      expect(shown()).toEqual(['b', 'a']);
+    });
+
+    // Round 2: the cached key positions follow a deleted field.
+    it('after deleting the last field, the new last one cannot move down', async () => {
+      await renderEJson('{"a":1,"b":2,"c":3}');
+      field('c')?.querySelector<HTMLButtonElement>('.del-btn')?.click();
+      await fixture.whenStable();
+      expect(keys()).toEqual(['a', 'b']);
+      const down = field('b')?.querySelector<HTMLButtonElement>('button[data-move="down"]');
+      expect(down?.disabled).toBe(true);
+      expect(
+        field('a')?.querySelector<HTMLButtonElement>('button[data-move="down"]')?.disabled,
+      ).toBe(false);
+    });
   });
 });
 

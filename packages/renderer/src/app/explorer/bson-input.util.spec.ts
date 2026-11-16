@@ -342,6 +342,45 @@ describe('parseDate', () => {
     expect(error(parseDate('1850-01-01T00:00:00+00:60:00', UTC))).toContain('not');
     expect(error(parseDate('1850-02-30T00:00:00+00:34:08', UTC))).toContain('not');
   });
+
+  // Round 2: both Int64 ends and the units of a seconds offset.
+  it('accepts the lowest Int64 milliseconds and rejects one below', () => {
+    expect(value(parseDate('-9223372036854775808', UTC)).ms).toBe(INT64_MIN);
+    expect(error(parseDate('-9223372036854775809', UTC))).toContain('overflows');
+    expect(value(parseDate('-0', ZURICH)).ms).toBe(0n);
+  });
+
+  it('bounds each unit of a seconds offset (hours < 24, minutes and seconds < 60)', () => {
+    expect(iso(value(parseDate('2000-01-01T00:00:00+23:59:59', UTC)).ms)).toBe(
+      '1999-12-31T00:00:01.000Z',
+    );
+    expect(iso(value(parseDate('2000-01-01T00:00:00-23:59:59', UTC)).ms)).toBe(
+      '2000-01-01T23:59:59.000Z',
+    );
+    for (const off of ['+24:00:00', '+00:00:60', '-24:00:00']) {
+      expect(error(parseDate(`2000-01-01T00:00:00${off}`, UTC)), off).toContain('not');
+    }
+    // A seconds offset needs a time; a date alone with one is not ISO-8601.
+    expect(error(parseDate('2000-01-01+00:34:08', UTC))).toContain('not');
+  });
+
+  it('the shown text of extended-year dates in local mean time parses back', () => {
+    for (const t of ['-000001-01-01T00:00:00.000Z', '+010000-06-01T12:00:00.000Z']) {
+      const d = { type: 'date' as const, ms: BigInt(Date.parse(t)) };
+      const shown = editText(d, ZURICH);
+      const back = parseDate(shown, ZURICH);
+      expect(back.ok ? back.value.ms : back.error, `shown as ${shown}`).toBe(d.ms);
+    }
+  });
+
+  it('the bare milliseconds shown for out-of-range dates parse back in any zone', () => {
+    for (const t of [10n ** 17n, -(10n ** 17n), INT64_MIN, 2n ** 63n - 1n]) {
+      for (const dates of [UTC, ZURICH]) {
+        const shown = editText({ type: 'date', ms: t }, dates);
+        expect(value(parseDate(shown, dates)).ms, `shown as ${shown}`).toBe(t);
+      }
+    }
+  });
 });
 
 describe('wallTimeToMs', () => {

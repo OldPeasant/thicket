@@ -121,6 +121,75 @@ describe('BsonInputComponent', () => {
     expect(emitted).toEqual([]);
   });
 
+  // Round 2: the error belongs to the input holding the invalid text.
+  it('leaving another, untouched part keeps the error of the invalid one', async () => {
+    await render({ type: 'timestamp', t: 10, i: 1 });
+    await blur(inputs()[0], 'x');
+    const shown = errorText();
+    expect(shown).not.toBe('');
+    await blur(inputs()[1]);
+    expect(errorText()).toBe(shown);
+    expect(inputs()[0]?.value).toBe('x');
+    expect(emitted).toEqual([]);
+  });
+
+  it('a new value from outside rewrites the invalid part, not the others', async () => {
+    await render({ type: 'regex', pattern: 'a', options: 'i' });
+    await blur(inputs()[1], 'q');
+    expect(errorText()).not.toBe('');
+    fixture.componentRef.setInput('value', { type: 'regex', pattern: 'b', options: 'i' });
+    await fixture.whenStable();
+    expect(errorText()).toBe('');
+    expect(inputs()[0]?.value).toBe('b');
+    expect(inputs()[1]?.value).toBe('i');
+    expect(inputs()[1]?.classList.contains('invalid')).toBe(false);
+    expect(emitted).toEqual([]);
+  });
+
+  it('a new value of another type from outside clears the error', async () => {
+    await render({ type: 'long', value: 7n });
+    await blur(inputs()[0], 'abc');
+    expect(errorText()).not.toBe('');
+    fixture.componentRef.setInput('value', { type: 'double', value: 2.5 });
+    await fixture.whenStable();
+    expect(errorText()).toBe('');
+    expect(inputs()[0]?.value).toBe('2.5');
+    expect(emitted).toEqual([]);
+  });
+
+  it('after an outside change, the old shown text is an edit again', async () => {
+    await render({ type: 'int', value: 7 });
+    fixture.componentRef.setInput('value', { type: 'int', value: 8 });
+    await fixture.whenStable();
+    await blur(inputs()[0], '7');
+    expect(emitted).toEqual([{ type: 'int', value: 7 }]);
+    expect(errorText()).toBe('');
+  });
+
+  // Round 2: the input holding the invalid text may be gone after a type change.
+  it('a type change that replaces the invalid input clears the error safely', async () => {
+    await render({ type: 'long', value: 7n });
+    await blur(inputs()[0], 'abc');
+    expect(errorText()).not.toBe('');
+    fixture.componentRef.setInput('value', { type: 'timestamp', t: 3, i: 4 });
+    await fixture.whenStable();
+    expect(errorText()).toBe('');
+    expect(inputs().map((i) => i.value)).toEqual(['3', '4']);
+    expect(inputs().some((i) => i.classList.contains('invalid'))).toBe(false);
+    expect(emitted).toEqual([]);
+  });
+
+  it('a date outside the JS range is edited as milliseconds; Int64 overflow is rejected', async () => {
+    const out = { type: 'date' as const, ms: 10n ** 17n };
+    await render(out);
+    expect(inputs()[0]?.value).toBe('100000000000000000');
+    await blur(inputs()[0], '100000000000000001');
+    expect(emitted).toEqual([{ type: 'date', ms: 10n ** 17n + 1n }]);
+    await blur(inputs()[0], '9223372036854775808');
+    expect(errorText()).toContain('overflows');
+    expect(emitted).toHaveLength(1);
+  });
+
   it('-0 and 0 are different Doubles', async () => {
     await render({ type: 'double', value: 0 });
     await blur(inputs()[0], '-0');
