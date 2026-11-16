@@ -19,3 +19,4 @@ A WriteGuard service and confirm dialog showing the exact operation (shell synta
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 21:48+0100 by felix/agent-1): Type-to-confirm applies to docs.deleteMany with more than 1000 documents (count option or expectedCount); other destructive writes (coll.drop, db.drop) can opt in via the typeToConfirm option. SPEC only names deletes over 1 000 documents.
 - ASSUMPTION (2026-11-16 21:48+0100 by felix/agent-1): WriteGuard rejects with ApiError CANCELLED when the dialog is cancelled and READ_ONLY (nothing sent) on read-only profiles; profile flags come from ProfileSafetyService, which connection-ui must fill with set() when it loads profiles.
+- ASSUMPTION (2026-11-16 21:48+0100 by felix/agent-1): Added a ./shellsyntax subpath export to @thicket/core: importing the core root in the renderer crashes it at startup (SharedArrayBuffer is not defined).
