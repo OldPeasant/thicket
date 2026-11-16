@@ -1,11 +1,11 @@
 ---
 title: M1: Edit session and explicit save
-status: in_progress
+status: done
 owner: felix/agent-1
 deps: [collection-view,docs-write-backend,bson-inputs,safety-ui]
 touches: [packages/renderer/src/app/document]
 prio: 1
-lease_until: 2026-11-17T00:02:44Z
+lease_until: 
 ---
 ## Goal
 Edit session per document: modified marker and change count, undo/redo within unsaved edits, Revert, Save via diff-ops + docs.update through WriteGuard; insert (empty/copy), clone and delete.
@@ -29,3 +29,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 00:12+0100 by felix/agent-1): Delete always asks (alwaysConfirm) and sends docs.delete without expected values; a CONFLICT on save keeps the edits and shows a message plus a 'Changed on the server' marker with the server version kept in DocumentActions.conflicts for conflict-ui. Added the './diff' export to packages/core/package.json so the renderer can import diffDocuments.
 - ASSUMPTION (2026-11-17 00:40+0100 by felix/agent-1): With a projection active, replacing a field that holds a sub-document/array by a scalar, or unsetting it, is still saved (hidden nested fields go with it): the user deliberately replaced/removed the whole field. Only container-over-container sets and whole-document replaces are refused.
 - ASSUMPTION (2026-11-17 00:43+0100 by felix/agent-1): Deferred review P3 (round 2): with a nested or $slice projection, a save touching the partly loaded field fails with a misleading 'changed on the server' conflict (no data loss, edits kept). Left for conflict-ui to show a projection-specific message.
+- done by felix/agent-1: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 73s on 1c3aecef1; criteria verified 4/4
