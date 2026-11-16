@@ -11,7 +11,8 @@ lease_until: 2026-11-16T22:27:04Z
 Tree: connections → databases → collections/views/time series with lazy loading, counts/sizes on demand, context menus for create/drop/rename (drop asks to type the name), open collection in a tab.
 
 ## Acceptance criteria
-- [ ] Component tests with the fake API for lazy load, errors, context actions
+- [x] Component tests with the fake API for lazy load, errors, context actions
+  - verified (2026-11-16 23:08+0100 by felix/agent-1): cd packages/renderer && npx ng test --include='src/app/sidebar/*.spec.ts' (fake API: lazy db/coll load, errors+retry, stale answers, context actions create/rename/drop/refresh/disconnect) -> 2 files, 173 passed
 - [ ] e2e against a fixture: create db+collection, rename, drop with typed name
 - [ ] Read-only profile hides/disables write actions (test)
 
