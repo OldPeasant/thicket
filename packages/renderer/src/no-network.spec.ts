@@ -15,9 +15,10 @@ function files(dir: string, pattern: RegExp): string[] {
 
 // Remote or protocol-relative URLs in places the browser would fetch them. Attributes may be
 // Angular bindings (`[src]="'https://...'"`, a string literal inside the bound expression), and
-// `srcset` may name the remote URL in any of its comma-separated candidates.
+// `srcset` may name the remote URL in any of its comma-separated candidates. `ngSrc`/`ngSrcset`
+// are NgOptimizedImage's equivalents.
 const REMOTE =
-  /(?:\b(?:src|href)\]?\s*=\s*["']?'?|\bsrcset\]?\s*=\s*["']?'?(?:[^"'>]*?,\s*)?|url\(\s*["']?|@import\s+["']?)(?:https?:)?\/\//i;
+  /(?:\b(?:ng)?(?:src|href)\]?\s*=\s*["']?'?|\b(?:ng)?srcset\]?\s*=\s*["']?'?(?:[^"'>]*?,\s*)?|url\(\s*["']?|@import\s+["']?)(?:https?:)?\/\//i;
 
 describe('no external network resources', () => {
   // Templates and inline styles of components live in .ts files too.
@@ -61,6 +62,16 @@ describe('no external network resources', () => {
     ['srcset', '<img srcset="https://img.example.test/a.png 2x">'],
     ['srcset second candidate', '<img srcset="a.png 1x, https://img.example.test/b.png 2x">'],
     ['Angular [srcset] binding', `<img [srcset]="'https://img.example.test/a.png 2x'">`],
+    [
+      'single-quoted srcset, protocol-relative',
+      "<img srcset='a.png 1x, //img.example.test/b.png 2x'>",
+    ],
+    ['NgOptimizedImage ngSrc', '<img ngSrc="https://img.example.test/a.png" width="1" height="1">'],
+    ['NgOptimizedImage [ngSrc] binding', `<img [ngSrc]="'https://img.example.test/a.png'">`],
+    [
+      'NgOptimizedImage ngSrcset',
+      '<img ngSrc="a.png" ngSrcset="https://img.example.test/a.png 2x">',
+    ],
   ])('REMOTE flags %s', (_name, text) => {
     expect(text).toMatch(REMOTE);
   });
@@ -77,6 +88,8 @@ describe('no external network resources', () => {
     ['Angular [src] binding to a field', '<img [src]="logoUrl">'],
     ['Angular [src] binding to a local literal', `<img [src]="'./media/logo.png'">`],
     ['local srcset', '<img srcset="logo.png 1x, logo@2x.png 2x">'],
+    ['Angular [srcset] binding to a field', '<img [srcset]="images">'],
+    ['NgOptimizedImage local ngSrc', '<img ngSrc="media/logo.png" ngSrcset="100w, 200w">'],
   ])('REMOTE leaves %s alone', (_name, text) => {
     expect(text).not.toMatch(REMOTE);
   });
