@@ -19,3 +19,4 @@ Tree: connections → databases → collections/views/time series with lazy load
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 22:23+0100 by felix/agent-1): Sidebar loads profiles itself (profiles.list) and registers their flags in ProfileSafetyService; SidebarTreeService.reloadProfiles() is the hook connection-ui calls after save/delete (there is no profiles-changed broadcast); a refresh button reloads too.
 - ASSUMPTION (2026-11-16 22:23+0100 by felix/agent-1): Profiles with secretMode 'ask' get a password prompt in the sidebar before conn.open; the password is passed once and not kept. connection-ui may replace this prompt.
+- ASSUMPTION (2026-11-16 22:23+0100 by felix/agent-1): Counts and sizes on demand = context menu: 'Show counts and sizes' (coll.stats / db.stats) and 'Show database sizes' (db.listDatabases withSizes); results shown inline on the node. Views have no stats and cannot be renamed (menu items disabled).
