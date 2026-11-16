@@ -285,6 +285,68 @@ describe('CollectionResults', () => {
       expect(lastFind()).not.toHaveProperty('fromEnd');
     });
 
+    it('last with a limit and an exact count reads the last page at once, without counting again', async () => {
+      await runAndLoad(query({ filter: '{ a: 1 }', limit: '120' }));
+      results.countExact();
+      await flush();
+      counts[0]?.resolve({ count: 120 });
+      await flush();
+      results.last();
+      await flush();
+      expect(fake.requestsFor('docs.count')).toHaveLength(1);
+      expect(lastFind()).toMatchObject({ skip: 100, limit: 20 });
+      await answer(2, docs(101, 20));
+      expect(results.paging().pageIndex).toBe(2);
+      expect(results.pagesFromEnd()).toBeNull();
+      expect(results.canNext()).toBe(false);
+    });
+
+    it('last with a limit, counted to fewer rows than the limit, reads the real last page', async () => {
+      await runAndLoad(query({ filter: '{ a: 1 }', limit: '500' }));
+      results.last();
+      await flush();
+      counts[0]?.resolve({ count: 77 }); // fewer matches than the limit
+      await flush();
+      expect(results.count()).toEqual({ value: 77, exact: true });
+      // The limit turns the read from the end into a skip read of page 2 (at most a full page).
+      expect(lastFind()).toMatchObject({ skip: 50 });
+      expect(lastFind()['limit']).toBeGreaterThanOrEqual(27);
+      expect(lastFind()).not.toHaveProperty('fromEnd');
+      await answer(2, docs(51, 27));
+      expect(results.page()?.firstRow).toBe(50);
+      expect(results.canNext()).toBe(false);
+    });
+
+    it('a pending Last is dropped when a new query runs before its count answers', async () => {
+      await runAndLoad(query({ filter: '{ a: 1 }', limit: '120' }));
+      results.last();
+      await flush();
+      const countId = fake.requestsFor('docs.count')[0]?.id;
+      results.run(query({ filter: '{ b: 2 }' }));
+      await flush();
+      expect(fake.cancels).toContain(countId);
+      counts[0]?.resolve({ count: 120 });
+      await flush();
+      expect(finds()).toHaveLength(2); // only page 1 of each query
+      expect(results.count()).toBeNull();
+      expect(results.counting()).toBe(false);
+    });
+
+    it('pressing Last again while its count runs reads the last page once', async () => {
+      await runAndLoad(query({ filter: '{ a: 1 }', limit: '120' }));
+      results.last();
+      await flush();
+      results.last();
+      await flush();
+      expect(fake.requestsFor('docs.count')).toHaveLength(2);
+      counts[1]?.resolve({ count: 120 });
+      await flush();
+      counts[0]?.resolve({ count: 120 });
+      await flush();
+      expect(finds()).toHaveLength(2);
+      expect(lastFind()).toMatchObject({ skip: 100, limit: 20 });
+    });
+
     it('a result shorter than the limit ends where the documents end', async () => {
       await runAndLoad(query({ filter: '{ a: 1 }', limit: '500' }), docs(1, 30));
       expect(results.canNext()).toBe(false);
@@ -575,6 +637,58 @@ describe('CollectionResults', () => {
       expect(results.page()?.firstRow).toBe(50);
     });
 
+    it('first, jump to page 1 and a page-size change leave the unknown position', async () => {
+      for (const leave of [
+        () => results.first(),
+        () => results.jump(1),
+        () => results.setPageSize(20),
+      ]) {
+        await runAndLoad(query({ filter: '{ a: 1 }' }));
+        results.last();
+        await flush();
+        await answer(finds().length, docs(9951, 50));
+        expect(results.pagesFromEnd()).toBe(0);
+        leave();
+        await flush();
+        expect(lastFind()).not.toHaveProperty('skip');
+        expect(lastFind()).not.toHaveProperty('before');
+        await answer(finds().length, docs(1, results.paging().pageSize === 50 ? 50 : 20));
+        expect(results.pagesFromEnd()).toBeNull();
+        expect(results.paging().pageIndex).toBe(0);
+        expect(results.page()?.firstRow).toBe(0);
+      }
+    });
+
+    it('a cancelled read from an unknown last page keeps it named from the end', async () => {
+      await runAndLoad(query({ filter: '{ a: 1 }' }));
+      results.last();
+      await flush();
+      await answer(2, docs(9951, 50));
+      results.previous();
+      await flush();
+      results.cancel();
+      expect(results.pagesFromEnd()).toBe(0);
+      expect(results.page()?.docs[0]).toBe(docs(9951, 1)[0]);
+      expect(results.canPrevious()).toBe(true);
+    });
+
+    it('previous from rows that are really page 1 shows page 1, not an empty result', async () => {
+      // The filter matches exactly 50 documents: page 1 is full, so Last is offered (no count).
+      await runAndLoad(query({ filter: '{ a: 1 }' }));
+      results.last();
+      await flush();
+      await answer(2, docs(1, 50)); // the same 50 rows, read from the end
+      expect(results.canPrevious()).toBe(true);
+      results.previous();
+      await flush();
+      expect(lastFind()).toMatchObject({ before: '{"_id":{"$numberInt":"1"}}' });
+      await answer(3, []); // nothing lies before the first document
+      // Whatever the service reads next (if anything), it must end on page 1 with its documents.
+      if (finds().length > 3) await answer(finds().length, docs(1, 50));
+      expect(results.paging().pageIndex).toBe(0);
+      expect(results.page()?.docs).toHaveLength(50);
+    });
+
     it('an exact count arriving during a last-page read reads it again aligned', async () => {
       await runAndLoad(query({ filter: '{ a: 1 }' }));
       results.last();
@@ -618,6 +732,57 @@ describe('CollectionResults', () => {
       await answer(4, docs(1151, 50));
       expect(results.pagesFromEnd()).toBeNull();
       expect(results.paging().pageIndex).toBe(23);
+    });
+
+    it('an estimate arriving on a page before the unknown last page keeps its name', async () => {
+      results.run(query({}));
+      await flush();
+      await answer(1, docs(1, 50));
+      results.last();
+      await flush();
+      await answer(2, docs(1185, 50));
+      results.previous();
+      await flush();
+      await answer(3, docs(1135, 50));
+      estimates[0]?.resolve({ count: 1_234 });
+      await flush();
+      expect(results.pagesFromEnd()).toBe(1);
+      expect(results.count()).toEqual({ value: 1_234, exact: false });
+      expect(finds()).toHaveLength(3);
+    });
+
+    it('an exact count answering while Previous runs from an unknown last page keeps Previous', async () => {
+      // 1 234 documents; the user is on the last page (position unknown), starts an exact count,
+      // and presses Previous before the count answers.
+      results.run(query({}));
+      estimates[0]?.resolve({ count: 1_234 });
+      await flush();
+      await answer(1, docs(1, 50));
+      results.last();
+      await flush();
+      await answer(2, docs(1185, 50));
+      results.countExact();
+      await flush();
+      results.previous();
+      await flush();
+      expect(lastFind()).toMatchObject({ before: '{"_id":{"$numberInt":"1185"}}' });
+      counts[0]?.resolve({ count: 1_234 });
+      await flush();
+      // Answer every read the service still makes, as the collection would.
+      for (let guard = 0; results.loading() && guard < 5; guard++) {
+        const p = lastFind();
+        const limit = p['limit'] as number;
+        let rows: string[];
+        if (p['before'] !== undefined) rows = docs(1135, limit);
+        else if (p['fromEnd']) rows = docs(1_234 - limit + 1, limit);
+        else rows = docs(((p['skip'] as number | undefined) ?? 0) + 1, limit);
+        await answer(finds().length, rows);
+      }
+      // The page the user asked for: the one before the last (page 24 of 25: rows 1 151-1 200),
+      // not the last page again.
+      expect(results.pagesFromEnd()).toBeNull();
+      expect(results.paging().pageIndex).toBe(23);
+      expect(results.page()?.docs[0]).toBe(docs(1151, 1)[0]);
     });
   });
 

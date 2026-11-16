@@ -590,6 +590,58 @@ describe('CollectionView', () => {
     expect(get<HTMLInputElement>('pager-page').value).toBe('200');
   });
 
+  it('with a filter and a limit, Last counts first and then shows the last page by number', async () => {
+    type('query-filter', '{ a: 1 }');
+    type('query-limit', '120');
+    click('query-run');
+    await settle();
+    click('pager-last');
+    await settle();
+    expect(fake.requestsFor('docs.count')[0]?.params).toMatchObject({ limit: 120 });
+    expect(lastFind()).toMatchObject({ skip: 100, limit: 20 });
+    expect(lastFind()).not.toHaveProperty('fromEnd');
+    expect(q('pager-rows')?.textContent).toMatch(/101–120\s+of 120 documents/);
+    expect(get<HTMLInputElement>('pager-page').value).toBe('3');
+    expect(q<HTMLButtonElement>('pager-next')?.disabled).toBe(true);
+  });
+
+  it('cancelling the count that Last waits for reads no page and keeps the shown one', async () => {
+    fake.handle('docs.count', () => new Promise(() => undefined));
+    type('query-filter', '{ a: 1 }');
+    type('query-limit', '120');
+    click('query-run');
+    await settle();
+    click('pager-last');
+    await settle();
+    expect(q('pager-count')?.textContent).toContain('Counting');
+    expect(q('query-cancel')).not.toBeNull();
+    click('query-cancel');
+    await settle();
+    expect(finds()).toHaveLength(2);
+    expect(q('results-notice')?.textContent).toContain('Query cancelled');
+    expect(q('pager-rows')?.textContent).toContain('1–50');
+    expect(get<HTMLInputElement>('pager-page').value).toBe('1');
+  });
+
+  it('previous from a last page that is really page 1 shows its documents, not an empty result', async () => {
+    // The filter matches exactly 50 documents (ids 1-50): page 1 is full, so Last is offered.
+    answer = (p) => {
+      if (p['before'] !== undefined) return []; // nothing lies before document 1
+      return docs(1, 50);
+    };
+    type('query-filter', '{ a: 1 }');
+    click('query-run');
+    await settle();
+    click('pager-last');
+    await settle();
+    expect(q('pager-rows')?.textContent).toContain('Last 50');
+    click('pager-prev');
+    await settle();
+    expect(q('results-empty')).toBeNull();
+    expect(q('pager-rows')?.textContent).toContain('1–50');
+    expect(get<HTMLInputElement>('pager-page').value).toBe('1');
+  });
+
   it('shows the explorer read-only', () => {
     const toggle = el().querySelector<HTMLButtonElement>('.mode-toggle');
     expect(toggle?.disabled).toBe(true);
