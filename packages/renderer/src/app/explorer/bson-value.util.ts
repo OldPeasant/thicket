@@ -216,7 +216,7 @@ export interface DateDisplay {
 }
 
 /** Largest |ms| a JS `Date` can hold. */
-const DATE_LIMIT_MS = 8_640_000_000_000_000n;
+export const DATE_LIMIT_MS = 8_640_000_000_000_000n;
 
 /**
  * The text shown for a value (and searched): exact for every type. Int64 and

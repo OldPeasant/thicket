@@ -324,11 +324,29 @@ describe('parseDate', () => {
 
   // CR-1 / TW-2: dates outside the JS date range are shown as their bare
   // millisecond count, so that text must be editable too.
-  it('reads a bare signed integer as milliseconds since 1970, within Int64', () => {
-    expect(value(parseDate('1700000000000', ZURICH)).ms).toBe(1700000000000n);
+  it('reads a bare signed integer outside the JS date range as milliseconds, within Int64', () => {
     expect(value(parseDate(' -100000000000000000 ', UTC)).ms).toBe(-(10n ** 17n));
+    expect(value(parseDate('8640000000000001', UTC)).ms).toBe(8_640_000_000_000_001n);
+    expect(value(parseDate('-8640000000000001', ZURICH)).ms).toBe(-8_640_000_000_000_001n);
     expect(value(parseDate('+9223372036854775807', UTC)).ms).toBe(2n ** 63n - 1n);
     expect(error(parseDate('9223372036854775808', UTC))).toContain('overflows');
+  });
+
+  // Round-2 CR-1: within the JS date range a bare number is more likely a
+  // year or a compact date than milliseconds; it must not become a 1970 date.
+  it('rejects a bare integer within the JS date range as not ISO-8601', () => {
+    for (const text of [
+      '2024',
+      '20240501',
+      '1700000000000',
+      '0',
+      '-0',
+      '8640000000000000',
+      '-8640000000000000',
+    ]) {
+      expect(error(parseDate(text, UTC)), text).toContain('is not an ISO-8601 date');
+      expect(error(parseDate(text, ZURICH)), text).toContain('is not an ISO-8601 date');
+    }
   });
 
   // CR-1 / TW-1: local mean time offsets have seconds.
@@ -347,7 +365,6 @@ describe('parseDate', () => {
   it('accepts the lowest Int64 milliseconds and rejects one below', () => {
     expect(value(parseDate('-9223372036854775808', UTC)).ms).toBe(INT64_MIN);
     expect(error(parseDate('-9223372036854775809', UTC))).toContain('overflows');
-    expect(value(parseDate('-0', ZURICH)).ms).toBe(0n);
   });
 
   it('bounds each unit of a seconds offset (hours < 24, minutes and seconds < 60)', () => {
@@ -374,7 +391,14 @@ describe('parseDate', () => {
   });
 
   it('the bare milliseconds shown for out-of-range dates parse back in any zone', () => {
-    for (const t of [10n ** 17n, -(10n ** 17n), INT64_MIN, 2n ** 63n - 1n]) {
+    for (const t of [
+      10n ** 17n,
+      -(10n ** 17n),
+      8_640_000_000_000_001n,
+      -8_640_000_000_000_001n,
+      INT64_MIN,
+      2n ** 63n - 1n,
+    ]) {
       for (const dates of [UTC, ZURICH]) {
         const shown = editText({ type: 'date', ms: t }, dates);
         expect(value(parseDate(shown, dates)).ms, `shown as ${shown}`).toBe(t);

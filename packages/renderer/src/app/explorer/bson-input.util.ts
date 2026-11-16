@@ -16,6 +16,7 @@ import {
 import {
   BsonLeaf,
   type BsonLeafValue,
+  DATE_LIMIT_MS,
   type DateDisplay,
   bsonTypeOf,
   formatDate,
@@ -144,15 +145,20 @@ const SECONDS_OFFSET = /^(.+T.+)([+-])(\d{2}):(\d{2}):(\d{2})$/;
  * A date from ISO text: with `Z` or an offset (`±HH:MM`, or `±HH:MM:SS` as
  * shown for local mean time) as is, a trailing zone name (as the explorer
  * shows it) ignored; a date-time without offset is wall time in the zone dates
- * are shown in (UTC or local); a date alone is UTC midnight. A bare integer is
- * milliseconds since 1970 (how dates outside the JS date range are shown).
+ * are shown in (UTC or local); a date alone is UTC midnight. A bare integer
+ * outside the JS date range is milliseconds since 1970 (how such dates are
+ * shown); within it, it is rejected.
  */
 export function parseDate(text: string, dates: DateDisplay): Parsed<{ type: 'date'; ms: bigint }> {
   const t = text.trim().replace(/\s+[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+)*$/, '');
+  // Bare milliseconds only outside the JS date range (the only dates shown
+  // that way): within it, a bare number is more likely a year or a compact
+  // date (`2024`, `20240501`) and is rejected as not ISO-8601.
   if (INT_TEXT.test(t)) {
     const ms = BigInt(t);
     if (ms < INT64_MIN || ms > INT64_MAX) return err(`${t} ms overflows a Date (Int64)`);
-    return ok({ type: 'date', ms });
+    if (ms > DATE_LIMIT_MS || ms < -DATE_LIMIT_MS) return ok({ type: 'date', ms });
+    return err(`"${text}" is not an ISO-8601 date`);
   }
   if (WALL_TIME.test(t)) {
     const ms = wallTimeToMs(t, dates);

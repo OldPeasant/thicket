@@ -190,6 +190,14 @@ describe('BsonInputComponent', () => {
     expect(emitted).toHaveLength(1);
   });
 
+  // Round-2 CR-1: a year typed into a date input is not saved as a 1970 date.
+  it('a bare year typed into a date input is rejected, not read as milliseconds', async () => {
+    await render({ type: 'date', ms: 1_700_000_000_000n });
+    await blur(inputs()[0], '2024');
+    expect(errorText()).toContain('ISO-8601');
+    expect(emitted).toEqual([]);
+  });
+
   it('-0 and 0 are different Doubles', async () => {
     await render({ type: 'double', value: 0 });
     await blur(inputs()[0], '-0');
