@@ -15,7 +15,8 @@ docs.find (filter, projection, sort, collation, limit) streaming pages as EJSON,
   - verified (2026-11-16 22:48+0100 by felix/agent-2): npm run test:int -- test/integration/docs-query.int.spec.ts (MongoDB container via int-harness) at fd4b4de -> 35/35 passed; 'docs.find paging in range mode / skip mode (10 000 docs)': forward over every page, backward from the last page (3 sorts incl. compound with missing keys), and jump-to-middle next/previous all equal a plain sorted find
 - [x] Cancelling a slow query (`$where` sleep or large sort) ends with CANCELLED and the server op is gone (currentOp check in the test)
   - verified (2026-11-16 22:48+0100 by felix/agent-2): npm run test:int -- test/integration/docs-query.int.spec.ts (MongoDB container via int-harness) at fd4b4de -> 35/35 passed; 'cancel' suite: slow $where find stream ends CANCELLED and currentOp shows no op with the thicket comment; also immediate cancel after the docs.find response, cancel between batches (cursor killed), slow count cancel
-- [ ] getSlice returns items n..m of a 50 000-item array without sending the whole document (assert response size)
+- [x] getSlice returns items n..m of a 50 000-item array without sending the whole document (assert response size)
+  - verified (2026-11-16 22:48+0100 by felix/agent-2): npm run test:int -- test/integration/docs-query.int.spec.ts (MongoDB container via int-harness) at fd4b4de -> 35/35 passed; 'getSlice returns items n..m and the total without sending the whole document': items 30000..30049 of a 50 000-item array, total 50000, response < 10 000 bytes and < 1/100 of the full document size
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
