@@ -1,10 +1,11 @@
 ---
 title: M1: Safety UI: production accent, read-only state, confirm dialog service
-status: todo
-owner:
+status: in_progress
+owner: felix/agent-1
 deps: [app-layout,api-client]
 touches: [packages/renderer/src/app/safety]
 prio: 1
+lease_until: 2026-11-16T20:58:14Z
 ---
 ## Goal
 A WriteGuard service and confirm dialog showing the exact operation (shell syntax) used by all write UIs; production connections get the red accent on tabs/sidebar/status bar; read-only exposes a signal that write controls bind to; typing the collection name for deletes over 1 000 documents. Use the frontend-design skill for the visual direction; respect the Business and Tron tokens (no hard-coded colors).
