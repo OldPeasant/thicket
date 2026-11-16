@@ -13,7 +13,8 @@ listDatabases, list collections/views/time series, stats on demand, create/drop/
 ## Acceptance criteria
 - [x] Integration tests for each method against the 8.x replica set fixture
   - verified (2026-11-16 22:05+0100 by felix/agent-2): npm run test:int -- browse (Podman, 8.x replica set fixture + mongo 8.2 --auth standalone) on fc9f289 -> 30/30 passed; covers db.listDatabases/create/drop/stats, coll.list/create/drop/rename/stats
-- [ ] Drop/rename refused on a read-only profile (int test)
+- [x] Drop/rename refused on a read-only profile (int test)
+  - verified (2026-11-16 22:05+0100 by felix/agent-2): npm run test:int -- browse -> read-only profile drop/rename refused tests passed (guardWrites, 30/30)
 - [ ] Listing works for a user with only `read` on one database (`authorizedDatabases`) (int test)
 
 ## Notes
