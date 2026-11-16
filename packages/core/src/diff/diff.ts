@@ -134,14 +134,13 @@ function diffFields(o: BsonDocument, e: BsonDocument, prefix: string): UpdateOp[
   if (sharedInOriginal.some((k, i) => k !== sharedInEdited[i])) return 'replace';
 
   const ops: UpdateOp[] = [];
-  const unsets: UpdateOp[] = [];
   for (const { key, value: ov } of o.fields) {
     const ev = editByKey.get(key);
     if (ev && bsonEquals(ov, ev)) continue;
     if (!isAddressableKey(key)) return 'replace';
     const path = prefix + key;
     if (!ev) {
-      unsets.push({ op: 'unset', path });
+      ops.push({ op: 'unset', path });
     } else if (ov.type === 'object' && ev.type === 'object') {
       const inner = diffFields(ov, ev, path + '.');
       if (inner === 'replace') ops.push({ op: 'set', path, value: ev });
@@ -157,12 +156,13 @@ function diffFields(o: BsonDocument, e: BsonDocument, prefix: string): UpdateOp[
     if (!isAddressableKey(key)) return 'replace';
     ops.push({ op: 'set', path: prefix + key, value });
   }
-  return [...ops, ...unsets];
+  return ops;
 }
 
 function diffArray(o: BsonArray, e: BsonArray, path: string): UpdateOp {
   const appendOnly =
-    e.items.length > o.items.length && o.items.every((v, i) => bsonEquals(v, e.items[i] as BsonValue));
+    e.items.length > o.items.length &&
+    o.items.every((v, i) => bsonEquals(v, e.items[i] as BsonValue));
   return appendOnly
     ? { op: 'push', path, items: e.items.slice(o.items.length) }
     : { op: 'set', path, value: e };
@@ -193,7 +193,8 @@ function conflict(original: BsonDocument, id: BsonValue, keys: readonly string[]
     }
   }
   if (exprs.length === 1) expected.push({ key: '$expr', value: exprs[0] as BsonValue });
-  if (exprs.length > 1) expected.push({ key: '$expr', value: doc([{ key: '$and', value: arr(exprs) }]) });
+  if (exprs.length > 1)
+    expected.push({ key: '$expr', value: doc([{ key: '$and', value: arr(exprs) }]) });
   const filter = doc([{ key: '_id', value: id }, ...expected]);
   return { expected: doc(expected), filter, changedFields: keys };
 }
