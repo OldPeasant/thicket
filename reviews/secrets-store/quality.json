@@ -32,8 +32,8 @@
     }
   ],
   "validation": [
-    { "command": "npm run check", "result": "pass (vitest 1530, renderer 181)" },
-    { "command": "npx vitest run --project desktop --project contract", "result": "pass (865)" },
-    { "command": "npm run test:electron", "result": "pass (17)" }
+    { "command": "npm run check", "result": "pass" },
+    { "command": "npx vitest run --project desktop --project contract", "result": "pass" },
+    { "command": "npm run test:electron", "result": "pass" }
   ]
 }
