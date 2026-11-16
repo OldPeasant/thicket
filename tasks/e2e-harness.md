@@ -5,7 +5,7 @@ owner: felix/agent-2
 deps: [electron-shell,int-harness]
 touches: [test/e2e/harness,playwright.config.ts,package.json]
 prio: 1
-lease_until: 2026-11-16T19:35:41Z
+lease_until: 2026-11-16T19:39:47Z
 ---
 ## Goal
 Playwright `_electron` launches the built app with an isolated userData dir; helpers to start a MongoDB fixture from int-harness when available; `npm run test:e2e`.
