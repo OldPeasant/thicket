@@ -199,6 +199,11 @@ describe('badgeColorVar', () => {
     expect(badgeColorVar('long')).toBe('var(--bson-long)');
   });
 
+  it('colors Code with scope with the Code token', () => {
+    expect(badgeColorVar('javascriptWithScope')).toBe('var(--bson-javascript)');
+    expect(badgeColorVar('javascript')).toBe('var(--bson-javascript)');
+  });
+
   it('only names tokens every theme defines', () => {
     // `ng test` runs from the workspace folder (packages/renderer).
     const css = readFileSync(join(process.cwd(), 'src', 'app', 'theme', 'tokens.css'), 'utf8');
@@ -352,6 +357,37 @@ describe('formatDate', () => {
 
   it('shows the lower JS date limit in a zone behind UTC without throwing', () => {
     expect(() => local(-8640000000000000n, 'America/New_York')).not.toThrow();
+  });
+
+  it('falls back to UTC when the local wall clock lies outside the JS date range', () => {
+    expect(local(8640000000000000n, 'Europe/Zurich')).toBe('+275760-09-13T00:00:00.000Z');
+    expect(local(-8640000000000000n, 'America/New_York')).toBe('-271821-04-20T00:00:00.000Z');
+    // One second below the limit: any zone ahead of UTC still passes the limit.
+    expect(local(8639999999999000n, 'Asia/Tokyo')).toBe('+275760-09-12T23:59:59.000Z');
+    // Behind UTC at the upper limit, the wall clock is in range: local time is shown.
+    expect(local(8640000000000000n, 'America/New_York')).toMatch(
+      /^\+275760-09-12T\d\d:\d\d:\d\d\.000-\d\d:\d\d(:\d\d)? America\/New_York$/,
+    );
+  });
+
+  it('gives the same text when zones and the UTC mode alternate between calls', () => {
+    // Formatters are cached per zone; reusing them must not leak one zone into another.
+    const zones = ['Europe/Zurich', 'America/New_York', 'Asia/Kathmandu', 'Europe/Zurich'];
+    const dates = [1700000000000n, 1690000000123n, -1n, 0n];
+    const first = zones.flatMap((z) => dates.map((d) => local(d, z)));
+    const utcTexts = dates.map(utc);
+    const second = zones.flatMap((z) => dates.map((d) => local(d, z)));
+    expect(second).toEqual(first);
+    expect(dates.map(utc)).toEqual(utcTexts);
+    expect(first[0]).toBe('2023-11-14T23:13:20.000+01:00 Europe/Zurich');
+    expect(first[4]).toBe('2023-11-14T17:13:20.000-05:00 America/New_York');
+    expect(first[1]).toBe('2023-07-22T06:26:40.123+02:00 Europe/Zurich');
+    expect(first[12]).toBe(first[0]);
+    // The same zone with and without a time zone option resolves to the same output.
+    const system = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    expect(formatDate(1700000000000n, { utc: false })).toBe(local(1700000000000n, system));
+    expect(local(1700000000000n, 'Asia/Tokyo')).toBe('2023-11-15T07:13:20.000+09:00 Asia/Tokyo');
+    expect(formatDate(1700000000000n, { utc: false })).toBe(local(1700000000000n, system));
   });
 
   it('shows dates near the JS limits whose wall clock stays in range', () => {

@@ -114,6 +114,9 @@ describe('Explorer with BSON values', () => {
     expect(badge('_id')?.style.getPropertyValue('--badge-color')).toBe('var(--bson-object-id)');
     expect(badge('uuid')?.style.getPropertyValue('--badge-color')).toBe('var(--bson-bin-data)');
     expect(badge('int64')?.dataset['bsonType']).toBe('long');
+    expect(badge('codeWithScope')?.style.getPropertyValue('--badge-color')).toBe(
+      'var(--bson-javascript)',
+    );
     for (const key of ['undefined', 'symbol', 'dbPointer', 'codeWithScope']) {
       expect(badge(key)?.classList.contains('deprecated'), key).toBe(true);
     }
@@ -259,6 +262,16 @@ describe('Explorer with BSON values', () => {
     await render('{"d":{"$date":{"$numberLong":"8640000000000000"}},"x":"after"}', 'form');
     expect(valueOf('d')).toContain('275760');
     expect(field('x')).not.toBeNull();
+  });
+
+  it('shows a date whose local wall clock is past the JS range in UTC and finds it', async () => {
+    await render('{"d":{"$date":{"$numberLong":"8640000000000000"}},"x":"after"}', 'form');
+    expect(valueOf('d')).toBe('+275760-09-13T00:00:00.000Z');
+    expect(valueOf('x')).toBe('after');
+    const filter = TestBed.inject(FilterService);
+    filter.set('275760-09-13');
+    await fixture.whenStable();
+    expect(shownKeys()).toEqual(['d']);
   });
 
   it('marks the UTC button pressed while dates show in UTC', async () => {
