@@ -19,7 +19,8 @@ Create the npm-workspaces monorepo described in docs/ARCHITECTURE.md (apps/deskt
   - verified (2026-11-16 18:21+0100 by dell26/agent-1): sh .taskcheck in fresh clone of ef8b880 -> runs npm run check, exit 0
 - [x] Node version pinned (`engines` + `.nvmrc` = 24); README.md has a 5-line dev quick start
   - verified (2026-11-16 18:21+0100 by dell26/agent-1): package.json engines.node '>=24 <25', .nvmrc '24'; README.md 'Dev quick start' with 5 numbered steps (nvm/Node 24, npm ci, npm run check, npm run coverage, npm run format)
-- [ ] `dashboard/` (TFP tooling, own Angular app) and the TFP Python files are excluded from workspaces, ESLint, Prettier and Vitest (grep the configs; `npm run check` does not touch them)
+- [x] `dashboard/` (TFP tooling, own Angular app) and the TFP Python files are excluded from workspaces, ESLint, Prettier and Vitest (grep the configs; `npm run check` does not touch them)
+  - verified (2026-11-16 18:21+0100 by dell26/agent-1): configs: package.json workspaces lists only apps/desktop + packages/*; eslint.config.mjs ignores dashboard/**, tasks/**, reviews/**, .claude/**; .prettierignore has dashboard/, *.py, tasks/; vitest.config.ts projects = the 5 workspace configs. Test: planted lint-violating failing dashboard/bad.spec.ts in a clean clone -> npm run check still passed (5 files); same file in packages/core/src -> 4 lint errors
 - [ ] Library versions chosen are recorded in docs/ARCHITECTURE.md "Stack" if they differ from the plan
 
 ## Notes
