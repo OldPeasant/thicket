@@ -4,37 +4,45 @@ Date: 2026-11-16
 
 Task: contract - M0: Typed IPC contract (envelope, errors, all method groups)
 
-Scope: `git diff 721a273..692c9ac` (task commit "Add typed IPC contract: envelope, error codes, all method groups"): `packages/contract/**`, `eslint.config.mjs`, `docs/ARCHITECTURE.md`, `package-lock.json`. Committed changes only.
+Scope: second pass on the final revision. `git diff 721a273..a414a09`, limited to this task's commits: bfebc59 (contract), 7bf1c08 (contract tests and reports) and a414a09 (fixes for CR-1..CR-5, TW-1 and the `ejsonValue` blank-text observation). The other commits in the range belong to `int-harness`, `uri-model` and `explorer-copy` (task bookkeeping and integration fixtures). They were not reviewed here. Committed changes only; the working tree was clean.
 
 Requirements:
 - `tasks/contract.md` acceptance criteria and recorded assumptions
-- `SPEC.md` section 4 (API contract), section 3 M1 "Safety", M2/M3 feature list, sections 5 and 6
+- `SPEC.md` section 4 (API contract), section 3 M1 "Safety", sections 5 and 6
 - `docs/ARCHITECTURE.md` (API contract section)
 - `AGENTS.md`
+- First review `reviews/contract/review.md` (CR-1..CR-5) and fixer report `reviews/contract/fixes.md`
 
 Git range:
 - Branch: main
-- HEAD: 692c9ac0df74dae2a7a9fd1c9683414797e59f87
+- HEAD: a414a09494d73ba47f92c19d9ccb4d3d97e32414
 - Base/start: 721a27361eadde378e1225eb2d7fd03043ae1c7e
-- Commits reviewed: 1
+- Commits reviewed: 3 (bfebc59, 7bf1c08, a414a09)
 
-Summary: 0 P0, 0 P1, 2 P2, 3 P3
+Summary: 0 P0, 0 P1, 0 P2, 1 P3
 
 ## Commands run
 
-- `npx eslint packages/contract --max-warnings 0` -> no problems (no `any`; `no-explicit-any` pinned to `error` for the package)
-- `npx prettier --check` on every committed changed file -> all formatted
-- `npm run typecheck` -> passed (no errors)
-- `npx vitest run src/index.spec.ts` (in `packages/contract`) -> 1 file, 298 tests passed
-- `npm run check` in the working tree -> failed at `prettier --check` because of `packages/contract/src/probe.tmp.spec.ts`. That file is untracked, appeared while this review ran (probably another helper's scratch file), and is not part of the reviewed commit. Delete it before running `.taskcheck`.
-- Behaviour checks with `node -e` against the installed zod 4.6.7: `strictObject(...).extend(...)` still rejects unknown keys. The `profile.connectionString` regex accepts `mongodb://alice:<password>@host`. `ejsonDocument` accepts `{not json` (this matches the recorded assumption that only the outer shape is checked).
+- `cd packages/contract && npx vitest run`: 2 files, 596 tests passed.
+- `npx eslint packages/contract --max-warnings 0`: no problems.
+- `npm run check` (repo root): lint and prettier passed. `typecheck` failed, but only in `test/integration/**` (`Cannot find module 'mongodb' / 'testcontainers' / 'node-forge'`). These dependencies belong to the `int-harness` task. They are declared in `package.json` and `package-lock.json`, but they are not installed in this clone's `node_modules`. This is a local environment problem, not a problem in the contract task. Running `npx tsc -p tsconfig.json` and filtering out `test/integration` leaves no errors. `npm run typecheck --workspaces` passed. The parent worker should run `npm ci` and then `.taskcheck` again before `done`.
+- I reproduced the `hasPassword` logic with `node -e` on edge-case URIs. Results are under CR-6.
+
+## Status of earlier findings
+
+- **CR-1 (password in `connectionString`)**: resolved. `profiles.ts:49-54,105-113` adds `hasPassword` and a `.refine` with a readable message that does not echo the password. Because the check is on the `profile` field, it applies to `profiles.save` params, `conn.test` drafts (through `profileDraft = profile.extend`), and the `profiles.list/get/save/duplicate` and import results. The tests cover these cases: multi-host, srv, IPv6, query/path/fragment text that contains `@` or `:`, an empty username, an unescaped `@`, a percent-encoded password, and leaks in results and drafts (`methods.spec.ts:555-630`). One remaining edge case is listed as CR-6.
+- **CR-2 (no file picker)**: resolved. `profiles.chooseFile` (`profiles.ts:197-203`) is main-routed, takes `purpose` as an enum with strict params, and returns `{ path: string | null }`. The exception to "the renderer never sends file paths" is documented on the fields and in ARCHITECTURE.md. A sample was added to `SAMPLES`, so the every-method test covers it, and dedicated tests were added.
+- **CR-3 (cancel routing)**: resolved as documentation (`envelope.ts:53-64`, ARCHITECTURE.md "Cancel routing"). The owner rule and the streamId to owner map are now stated, and the wrong field name in the comment (`target` instead of `cancel`) was corrected.
+- **CR-4 (`docs.find` paging)**: resolved. `docs.ts:56-77` has two refines with readable messages. They reject `after` together with `before`, and `skip` together with either range-paging field. The tests cover each rejected combination. The schema walker and the every-method sample test still pass with the refined object.
+- **CR-5 (rule for `confirmed`)**: resolved. `define.ts`, `common.ts` (`writeFields`) and ARCHITECTURE.md now state the bulk-write rule. It matches `errors.ts` and the recorded assumption.
+- **TW-1 / blank `ejsonValue`**: checked. `ejsonDocumentOrArray` (`common.ts:53-65`) is a single string schema registered as `documentOrArray`, and the message names both accepted shapes. `ejsonValue` rejects whitespace-only text. Both have tests.
 
 ## Acceptance criteria
 
-1. Every method has a schema, valid samples parse, invalid samples fail with a readable message: met. The tests iterate over `METHOD_NAMES`, require one sample per method, and check that the message starts with `Invalid params for <method>:` and names the field path.
-2. Documents are EJSON strings everywhere: met. The schema walker in `index.spec.ts` flags object, record and unknown fields, and a field from `DOC_FIELDS` that is not EJSON text. A self-test shows the walker catches a plain-object document field.
-3. Writes carry `profileId` and an optional boolean `confirmed`: met. The `EXPECTED_WRITES` list is compared with `WRITE_METHODS`, and for each write the tests check that `profileId` is required and that `confirmed` is optional and boolean only.
-4. `npm run check` passes and the package has no `any`: met for the committed code (see "Commands run" above for the stray untracked file).
+1. Every method has a schema, valid samples parse, and invalid samples fail with a readable message: met. `profiles.chooseFile` is included.
+2. Documents are EJSON strings everywhere: met. The new `documentOrArray` kind is registered in `ejsonSchemas`, so the walker accepts `docs.updateMany.update`.
+3. Writes carry `profileId` and optional `confirmed`: met. Unchanged by the fixes.
+4. `npm run check` passes and the package has no `any`: met for the contract package (lint, prettier, contract tests and contract typecheck pass). The root `typecheck` fails only because the `int-harness` dependencies are missing locally (see "Commands run").
 
 ## P0 Critical
 
@@ -46,43 +54,17 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | `profile.connectionString` says "without password" but the schema accepts a password**
-    - File: `packages/contract/src/profiles.ts:76`
-    - Category: Security
-    - Problem: The field's doc comment says "Connection string without password", but the schema is only `z.string().regex(/^mongodb(\+srv)?:\/\//)`. `mongodb://alice:<password>@host` passes (checked with `node -e`). The same `profile` schema is used for the `profiles.save` params, for the `profiles.list/get/save/duplicate` results and for the `importResult` of `profiles.importUris` / `profiles.importCompass`. So neither direction of the contract enforces the rule.
-    - Why it matters: SPEC section 5 requires `connections.json` to hold "profiles without secrets", and section 6 says "Secrets never leave the backend/main processes". A user who pastes a URI with a password (demo step 2 in SPEC section 2), or a Compass import, could get the password stored in plain text in `connections.json` and sent back to the renderer by `profiles.list`. `parseResult` is meant to be the safety net for results, but here it would let the password through.
-    - Suggested fix: Add a refinement on `connectionString` that rejects a password in the userinfo part (for example `/^mongodb(\+srv)?:\/\/[^/@]*:[^/@]*@/`) with a readable message ("move the password to the keychain"). Add a test for `profiles.save` params and for `profiles.list` / `profiles.importUris` results. The main-process handlers then strip the password into `setSecret` before saving.
-
-- [ ] **CR-2 | Profile file paths (TLS CA, client certificate, SSH key) come from the renderer, and no main-process file picker exists**
-    - File: `packages/contract/src/profiles.ts:54-55,65`
-    - Category: Integration / Security
-    - Problem: `tls.caFile`, `tls.certificateKeyFile` and `ssh.privateKeyFile` are free strings that the renderer sends in `profiles.save` and `conn.test` (the `conn.test` draft goes straight to the backend). The contract has no method for choosing these files with a native dialog in `main`. The `io` group was designed the other way on purpose (`io.ts:9-12`: "The renderer never sends file paths"; the matching assumption is recorded in the task). The renderer is sandboxed and its preload exposes only `request`, `cancel` and `on` (SPEC sections 4 and 6). A sandboxed renderer cannot read a real path from an `<input type=file>`, so the only way to fill these fields is typing a path by hand.
-    - Why it matters: SPEC demo step 10 and M2 ("SSH tunnel ... private key", "X.509 client certificates (cert + key file, or PEM bundle)") need users to pick key and certificate files. The connectivity tasks will have to invent a method outside this contract task, or ship a type-the-path UX. They will also have to choose without guidance whether the backend may read any renderer-supplied path. The contract's own "renderer never sends file paths" rule is applied inconsistently.
-    - Suggested fix: Add a main-routed method such as `profiles.chooseFile({ purpose: 'tlsCaFile' | 'tlsCertificateKeyFile' | 'sshPrivateKeyFile' })` that returns the chosen path, or `null` when the dialog is cancelled. Alternatively, record an `assume` entry that profile file paths are an explicit exception to the rule, so later tasks don't have to guess.
+None.
 
 ## P3 Low
 
-- [ ] **CR-3 | The `Cancel` message has no routing information, but methods (including streaming ones) are split between `main` and `backend`**
-    - File: `packages/contract/src/envelope.ts:55-63`, `packages/contract/src/io.ts:259-328`
-    - Category: Integration
-    - Problem: `cancel` carries only a request id or a `streamId`. `route()` can only route by method name, and `io.export` / `io.import` are routed to `main` but return a `streamId`. The contract does not say which process owns a stream, whether stream ids are unique across both processes, or where `thicket.cancel()` should be sent for a main-routed request or stream.
-    - Why it matters: The preload/transport task has to guess. A wrong guess means cancelling an import or export silently does nothing (unknown targets are "ignored" by design).
-    - Suggested fix: Document in `envelope.ts` (and in ARCHITECTURE "Contract layout") that the backend owns every stream, including the ones started by `main` for `io.*`, and that cancel is delivered to whichever process serves the target. Or add the owning route to the cancel message.
-
-- [ ] **CR-4 | `docs.find` accepts contradictory paging parameters**
-    - File: `packages/contract/src/docs.ts:53-66`
-    - Category: Correctness
-    - Problem: `after`, `before` and `skip` can all be sent together. Their combined meaning is not defined. `conn.test` already uses a `.refine` to enforce "exactly one of", so there is a precedent.
-    - Why it matters: Paging (SPEC M1) chooses range paging or skip/limit. Ambiguous params push the decision into each backend handler, and buggy renderer input passes validation.
-    - Suggested fix: Add a refine that allows at most one of `after` / `before`, and does not allow either of them together with `skip`. Add an invalid sample to the tests.
-
-- [ ] **CR-5 | The rule for when `confirmed: true` is required is documented inconsistently**
-    - File: `packages/contract/src/define.ts:7-10`, `packages/contract/src/common.ts:87-90`, `docs/ARCHITECTURE.md` (the "Writes carry `profileId` and optional `confirmed`" bullet)
-    - Category: Quality
-    - Problem: These places say `confirmed: true` is required only on production profiles. The recorded assumption and `errors.ts` (`CONFIRMATION_REQUIRED`: "or a bulk write") say the backend requires it for `updateMany` / `deleteMany` on every profile. SPEC M1 Safety says bulk operations "always ... need confirmation".
-    - Why it matters: Whoever implements the backend write guard will read `define.ts` / ARCHITECTURE.md and may enforce only the production rule. Bulk writes on non-production profiles would then not fail closed.
-    - Suggested fix: Mention the bulk rule in `define.ts`, in `writeFields` in `common.ts`, and in ARCHITECTURE.md. Optionally add a `confirm: 'production' | 'always'` attribute to `MethodDef` so the rule is in the data, not only in prose.
+- [ ] **CR-6 | `hasPassword` misses a password that contains an unescaped `/`, `?` or `#`**
+    - File: `packages/contract/src/profiles.ts:49-54`
+    - Category: Security
+    - Problem: The authority is cut at the first `/`, `?` or `#` before the code looks for `@`. So in `mongodb://u:pa?ss@h`, `mongodb://u:pa/ss@h/db` and `mongodb://u:pa#ss@h` the `@` is never found, and `hasPassword` returns `false` (checked by running the same logic with `node -e`). Those URIs pass `profile.connectionString`. The Node driver's parser (`mongodb-connection-string-url`) matches the userinfo as `[^:@]*:[^@]*@` before it looks at the host list. It treats these strings as a password and rejects them only later ("Password contains unescaped characters"), when it connects. The doc comment at `profiles.ts:100-104` promises that a password "can neither be stored in `connections.json` nor reach the renderer". That promise does not hold for these inputs. Passwords with `?`, `/` or `#` are common, and users often paste them without percent-encoding.
+    - Why it matters: This is the contract's safety net for SPEC sections 5 and 6 (no secrets in `connections.json`, secrets never leave main/backend). If the `profiles.save` / `importUris` handler does not parse and strip the URI first, such a password is stored and returned in plain text. The main-process handler is the primary guard, so this is low priority.
+    - Suggested fix: Find the password the way the driver's parser does. For example, report a password when the URI matches `^mongodb(\+srv)?:\/\/[^:@/?#]*:[^@]*@[^/?@]*$|^mongodb(\+srv)?:\/\/[^:@/?#]*:[^@]*@[^/?@]*[/?]`. Here the username cannot contain `/?#`, and the password runs up to the `@` before the host list. Add `u:pa?ss@h`, `u:pa/ss@h/db` and `u:pa#ss@h` to the "detects a password" test, and keep the existing false-positive cases passing. A plain-regex approach also flags `host:port/?x=y@z`; the driver misreads that URI as well. If that false positive is not acceptable, keep the current check, weaken the doc comment at `profiles.ts:100-104`, and record an `assume` entry that the main-process handler must parse the URI and strip the password.
 
 ## Review conclusion
 
-Material issues found; fix before completing the task. All acceptance criteria are met by the committed code. CR-1 is a security gap in the contract: SPEC sections 5 and 6 forbid secrets in `connections.json`, and the schema does not enforce that. CR-2 and the P3 findings are design and documentation gaps that later tasks would otherwise have to guess about. The parent worker decides which of them to fix in this task and which to record as assumptions.
+No material issues found. CR-1..CR-5 and the test-writer observations are resolved correctly, and the acceptance criteria are met by the contract code. CR-6 is a low-priority edge case in the new password check. The parent worker can fix it or record it as an assumption. Before `done`, run `npm ci` so the root `typecheck` (int-harness dependencies) can pass in `.taskcheck`.

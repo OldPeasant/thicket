@@ -585,6 +585,41 @@ describe('profile connection strings', () => {
     }
   });
 
+  it('ignores "@" and ":" outside the authority (query, path, fragment) and in IPv6 hosts', () => {
+    for (const uri of [
+      'mongodb://db.example.test/?appName=a@b:c',
+      'mongodb://db.example.test/shop@x:y',
+      'mongodb://db.example.test/#frag:x@y',
+      'mongodb://alice@h1.example.test:1,h2.example.test:2/?authMechanismProperties=A:B&x=y@z',
+      'mongodb://[::1]:27017',
+      'mongodb://alice@[::1]:27017,[fe80::1]:27018/?replicaSet=rs0',
+      'mongodb://alice%40corp.example.test@db.example.test',
+      'mongodb://alice%3Apw@db.example.test',
+      'mongodb://',
+    ]) {
+      expect([uri, hasPassword(uri)]).toEqual([uri, false]);
+    }
+    for (const uri of [
+      'mongodb://[::1]:27017',
+      'mongodb://alice@[::1]:27017,[fe80::1]:27018/?replicaSet=rs0',
+      'mongodb://db.example.test/?appName=a@b:c',
+    ]) {
+      expect([uri, save(uri).ok]).toEqual([uri, true]);
+    }
+  });
+
+  it('detects a password with an empty username, an unescaped "@", IPv6 hosts or an srv URI', () => {
+    for (const uri of [
+      'mongodb://:pw@db.example.test',
+      'mongodb://alice:p@ss@db.example.test',
+      'mongodb://alice:pw@[::1]:27017,[fe80::1]:27018',
+      'mongodb+srv://alice:pw@cluster0.example.test',
+      'mongodb+srv://alice:pw@cluster0.example.test/shop?appName=x@y',
+    ]) {
+      expect([uri, hasPassword(uri), save(uri).ok]).toEqual([uri, true, false]);
+    }
+  });
+
   it('rejects a password in results and drafts too', () => {
     const leaked = { ...PROFILE, connectionString: 'mongodb://alice:pw@db.example.test' };
     expect(parseResult('profiles.list', { profiles: [leaked] }).ok).toBe(false);
@@ -600,6 +635,8 @@ describe('profiles.chooseFile', () => {
       expect(parseParams('profiles.chooseFile', { purpose }).ok).toBe(true);
     }
     expect(parseParams('profiles.chooseFile', {}).ok).toBe(false);
+    expect(parseParams('profiles.chooseFile', { purpose: 'exportFile' }).ok).toBe(false);
+    expect(parseResult('profiles.chooseFile', { path: '/home/alice/ca.pem' }).ok).toBe(true);
     expect(parseParams('profiles.chooseFile', { purpose: 'tlsCaFile', path: '/x' }).ok).toBe(false);
   });
 
