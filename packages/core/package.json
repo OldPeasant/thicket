@@ -14,6 +14,7 @@
     "coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "bson": "^7.3.4",
     "mongodb-connection-string-url": "^7.0.3"
   }
 }
