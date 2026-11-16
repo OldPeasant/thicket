@@ -137,6 +137,28 @@ export const importResult = z.object({
   skipped: z.array(z.object({ source: z.string(), reason: z.string() })),
 });
 
+/**
+ * Protection of `secrets.bin`:
+ * - `secure`: encrypted with a key from the OS keychain (macOS Keychain, Windows DPAPI, libsecret
+ *   or KWallet on Linux).
+ * - `weak`: Linux without a keyring (`basic_text` backend): encrypted with a hard-coded key, so
+ *   anyone who can read the file can read the secrets. New profiles default to not saving them.
+ * - `unavailable`: no encryption at all; secrets cannot be saved.
+ */
+export const SECRET_STORAGE_LEVELS = ['secure', 'weak', 'unavailable'] as const;
+
+export type SecretStorageLevel = (typeof SECRET_STORAGE_LEVELS)[number];
+
+export const secretStorageStatus = z.object({
+  level: z.enum(SECRET_STORAGE_LEVELS),
+  /** Electron's backend name, e.g. `keychain`, `dpapi`, `gnome_libsecret`, `kwallet5`, `basic_text`. */
+  backend: z.string(),
+  /** `secretMode` for new profiles: `saved` only when the storage is `secure`. */
+  defaultSecretMode: z.enum(['saved', 'ask']),
+});
+
+export type SecretStorageStatus = z.infer<typeof secretStorageStatus>;
+
 export const profilesMethods = defineMethods({
   'profiles.list': {
     summary: 'List all profiles',
@@ -219,5 +241,11 @@ export const profilesMethods = defineMethods({
     route: 'main',
     params: z.strictObject({ profileId, kind: z.enum(SECRET_KINDS).optional() }),
     result: emptyResult,
+  },
+  'profiles.secretStorage': {
+    summary: 'How well the OS keychain protects saved secrets (for the weak-keychain warning)',
+    route: 'main',
+    params: emptyParams,
+    result: secretStorageStatus,
   },
 });

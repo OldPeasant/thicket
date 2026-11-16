@@ -13,6 +13,7 @@ import {
   MessageChannelMain,
   app,
   protocol,
+  safeStorage,
   session,
   utilityProcess,
   type MessagePortMain,
@@ -20,6 +21,7 @@ import {
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { SecretsStore } from '../secrets';
 import { BackendHost } from './backend-host';
 import { mainHandlers, privilegedHandlers } from './handlers';
 import {
@@ -67,6 +69,19 @@ app.on('web-contents-created', (_event, contents) => {
   contents.on('will-attach-webview', blockWebview);
 });
 
+/** `secrets.bin` in `userData`; created once the app is ready (safeStorage needs that on Linux). */
+let secrets: SecretsStore | undefined;
+
+function secretsStore(): SecretsStore {
+  secrets ??= new SecretsStore({
+    file: path.join(app.getPath('userData'), 'secrets.bin'),
+    safeStorage,
+    platform: process.platform,
+    log: (message) => log(`secrets: ${message}`),
+  });
+  return secrets;
+}
+
 const host = new BackendHost<MessagePortMain>({
   fork: () =>
     utilityProcess.fork(path.join(distDir, 'backend.cjs'), [], {
@@ -78,7 +93,7 @@ const host = new BackendHost<MessagePortMain>({
     serve(fromMainPort(port), {
       table: privilegedMethods,
       route: 'main',
-      handlers: privilegedHandlers(),
+      handlers: privilegedHandlers({ secrets: secretsStore() }),
       onError: (error) => log(`privileged handler: ${String(error)}`),
     }),
   closePort: (port) => port.close(),
@@ -103,7 +118,7 @@ function createWindow(): void {
     preload: path.join(distDir, 'preload.cjs'),
     url: devServer ?? `${APP_ORIGIN}/index.html`,
     host,
-    mainHandlers: mainHandlers({ version: app.getVersion() }),
+    mainHandlers: mainHandlers({ version: app.getVersion(), secrets: secretsStore() }),
     log,
   });
 }
@@ -117,6 +132,10 @@ void app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler(denyPermission);
   session.defaultSession.setPermissionCheckHandler(() => false);
 
+  // Detect the keychain backend now (on Linux this also enables the plain-text key for `basic_text`).
+  void secretsStore()
+    .status()
+    .then((status) => log(`secret storage: ${status.level} (${status.backend})`));
   host.start();
   createWindow();
   app.on('activate', () => {

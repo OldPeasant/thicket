@@ -109,9 +109,23 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   a new backend port with `restarted` info; the preload fails the old process's requests
   (`INTERNAL`) and streams (`error` event) and emits `backend.restarted` (`BackendRestarted`).
 - Privileged port: one `MessageChannelMain` per backend process, `{ type: 'privileged' }`; main
-  serves `privilegedMethods` (contract `backend.ts`: `main.ping`, `secrets.get` — a stub until the
-  secrets store exists) on it. These methods are not in `methods`, so `route()` and the backend's
-  renderer-facing `serve()` refuse them (`UNKNOWN_METHOD`).
+  serves `privilegedMethods` (contract `backend.ts`: `main.ping`, `secrets.get`) on it. These
+  methods are not in `methods`, so `route()` and the backend's renderer-facing `serve()` refuse
+  them (`UNKNOWN_METHOD`).
+- Secrets (`src/secrets/`): `SecretsStore` keeps `secrets.bin` in `userData` — one JSON document
+  `{ version: 1, profiles: { <profileId>: { <SecretKind>: value } } }` encrypted as a whole with
+  `safeStorage`'s async API, rewritten atomically (temp file + rename, mode 0600), operations
+  serialized. A file that can't be decrypted or parsed is renamed to `secrets.bin.corrupt-<time>`
+  and the store starts empty; while encryption is unavailable the file is left alone. `status()`
+  (`profiles.secretStorage`): `secure` (keychain, DPAPI, libsecret, KWallet), `weak` (Linux
+  `basic_text` or `unknown`: Electron's plain-text key is switched on, `defaultSecretMode: 'ask'`,
+  `setSecret` answers `secureStorage: false`), `unavailable` (`setSecret` → `UNSUPPORTED`).
+  Renderer-facing: `profiles.secretStorage`, `profiles.setSecret`, `profiles.clearSecret`
+  (`secretsHandlers`); values only go out via `secrets.get` on the privileged port. The profiles
+  store uses `kinds()` for `profiles.get`'s `storedSecrets`, `delete(id)` on profile deletion and
+  `status().defaultSecretMode` for new profiles. Tests use `FakeSafeStorage`
+  (`src/secrets/testing.ts`). `packages/contract/src/no-secrets.spec.ts` fails when any
+  renderer-visible result, stream or broadcast schema gets a text field named like a secret.
 - Wiring diagnostics in the contract: `app.ping` (main), `backend.ping` (backend; also checks the
   privileged port), `backend.sleep` (cancellable wait for tests).
 - Tests: unit specs next to the code; `npm run test:electron` (root: builds the renderer first)

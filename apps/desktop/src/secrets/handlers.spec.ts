@@ -1,0 +1,93 @@
+import { RpcError } from '@thicket/backend';
+import { parseResult } from '@thicket/contract';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { secretsGetHandler, secretsHandlers } from './handlers';
+import { SecretsStore } from './store';
+import { FakeSafeStorage } from './testing';
+
+const ctx = { signal: new AbortController().signal, requestId: '1' };
+let dir: string;
+
+beforeEach(async () => {
+  dir = await mkdtemp(path.join(tmpdir(), 'thicket-secrets-handlers-'));
+});
+
+afterEach(async () => {
+  await rm(dir, { recursive: true, force: true });
+});
+
+function setup(safeStorage = new FakeSafeStorage()) {
+  const store = new SecretsStore({
+    file: path.join(dir, 'secrets.bin'),
+    safeStorage,
+    platform: 'linux',
+  });
+  const handlers = secretsHandlers(store);
+  const call = (method: string, params: unknown) =>
+    Promise.resolve(handlers[method]?.(params as never, ctx));
+  return { store, call };
+}
+
+describe('secrets handlers', () => {
+  it('profiles.secretStorage reports the status within the contract', async () => {
+    const { call } = setup(new FakeSafeStorage({ backend: 'basic_text' }));
+    const result = await call('profiles.secretStorage', {});
+    expect(result).toEqual({ level: 'weak', backend: 'basic_text', defaultSecretMode: 'ask' });
+    expect(parseResult('profiles.secretStorage', result).ok).toBe(true);
+  });
+
+  it('profiles.setSecret stores and reports secureStorage', async () => {
+    const { store, call } = setup();
+    const result = await call('profiles.setSecret', {
+      profileId: 'p',
+      kind: 'password',
+      value: 'pw',
+    });
+    expect(result).toEqual({ secureStorage: true });
+    expect(await store.get('p')).toEqual({ password: 'pw' });
+  });
+
+  it('profiles.setSecret on basic_text stores but reports secureStorage: false', async () => {
+    const { store, call } = setup(new FakeSafeStorage({ backend: 'basic_text' }));
+    const result = await call('profiles.setSecret', {
+      profileId: 'p',
+      kind: 'password',
+      value: 'pw',
+    });
+    expect(result).toEqual({ secureStorage: false });
+    expect(await store.get('p')).toEqual({ password: 'pw' });
+  });
+
+  it('profiles.setSecret without encryption fails with UNSUPPORTED', async () => {
+    const { call } = setup(new FakeSafeStorage({ available: false }));
+    const error: unknown = await call('profiles.setSecret', {
+      profileId: 'p',
+      kind: 'password',
+      value: 'pw',
+    }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RpcError);
+    expect((error as RpcError).code).toBe('UNSUPPORTED');
+  });
+
+  it('profiles.clearSecret removes one kind or all', async () => {
+    const { store, call } = setup();
+    await store.set('p', 'password', 'pw');
+    await store.set('p', 'sshPassword', 'ssh');
+    expect(await call('profiles.clearSecret', { profileId: 'p', kind: 'password' })).toEqual({});
+    expect(await store.get('p')).toEqual({ sshPassword: 'ssh' });
+    expect(await call('profiles.clearSecret', { profileId: 'p' })).toEqual({});
+    expect(await store.get('p')).toBeNull();
+  });
+
+  it('secrets.get (privileged) returns the stored secrets or null', async () => {
+    const { store } = setup();
+    await store.set('p', 'password', 'pw');
+    const get = secretsGetHandler(store);
+    expect(await get({ profileId: 'p' } as never, ctx)).toEqual({ secrets: { password: 'pw' } });
+    expect(await get({ profileId: 'q' } as never, ctx)).toEqual({ secrets: null });
+  });
+});

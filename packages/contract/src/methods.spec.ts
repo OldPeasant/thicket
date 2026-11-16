@@ -99,6 +99,10 @@ const RESULTS: { [M in MethodName]: { valid: ResultOf<M>; invalid: unknown } } =
   },
   'profiles.setSecret': { valid: { secureStorage: false }, invalid: { secureStorage: 'no' } },
   'profiles.clearSecret': { valid: {}, invalid: 'done' },
+  'profiles.secretStorage': {
+    valid: { level: 'weak', backend: 'basic_text', defaultSecretMode: 'ask' },
+    invalid: { level: 'plaintext', backend: 'basic_text', defaultSecretMode: 'ask' },
+  },
 
   'conn.test': {
     valid: { latencyMS: 2.5, server: SERVER },
