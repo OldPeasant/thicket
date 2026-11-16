@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 Task: bson-model - Core: BSON value model with lossless EJSON round trip
 
-Final reviewed revision: d0474169113d4dd0a199c67bedfc9dc811b0e5e5
+Final reviewed revision: baf3ba3dd760f22a26766a1bc2cf68c6162968f4 (rebased; the code was reviewed at d0474169113d4dd0a199c67bedfc9dc811b0e5e5, see "Rebase pass")
 
 Scope: final revision of the task. The parent asked for the committed diff from `git merge-base HEAD origin/main` to HEAD, limited to `packages/core` and `package-lock.json`. That covers the BSON model, EJSON, conversions and path API (`e6a1a96`), the test-writer's tests and reports (`efe5a9c`), the fixes for CR-1..CR-4 and TW-1/OBS-1..3 (`e5ddbe4`), and the test-writer's follow-up spec-only commit (`d047416`). The production code was reviewed at `e5ddbe4` (first section below). The delta `e5ddbe4..d047416` was reviewed in a second pass (section "Delta pass").
 
@@ -18,9 +18,9 @@ Requirements:
 
 Git range:
 - Branch: main
-- HEAD: d0474169113d4dd0a199c67bedfc9dc811b0e5e5
-- Base/start: `git merge-base HEAD origin/main`, as the parent specified. The task commits sit on top of `ce1963a`.
-- Commits reviewed: 4 (e6a1a96, efe5a9c, e5ddbe4, d047416)
+- HEAD: baf3ba3dd760f22a26766a1bc2cf68c6162968f4 (before the rebase: d0474169113d4dd0a199c67bedfc9dc811b0e5e5)
+- Base/start: 2ad72d2d5d76b68f3f9d834418ad86e4e37d3cf0 after the rebase (before it: `ce1963a`)
+- Commits reviewed: 5 after the rebase (fe32363, 7dac9bd, c510559, 668c57b, baf3ba3); before it 4 (e6a1a96, efe5a9c, e5ddbe4, d047416)
 
 Limitation of the first pass (at e5ddbe4): shell access was denied in that session, so I could not run `git diff`, `git merge-base`, vitest or coverage. That pass read the committed files at e5ddbe4 in full: model.ts, json-tree.ts, ejson.ts, iso-date.ts, convert.ts, path.ts, src/index.ts, package.json, convert.spec.ts and the ejson.spec.ts fixture. I did not re-read the package-lock.json diff. package.json declares only `bson ^7.3.4` as a runtime dependency, which matches the first review and docs/ARCHITECTURE.md. The delta pass had shell access; see below for what I ran.
 
@@ -51,6 +51,19 @@ Test correctness and quality of the added specs:
 No findings in the delta.
 
 OBS-4 (String/Decimal → Double underflow, e.g. `"1e-400"` → 0): I agree with the test-writer that this is not a defect in the current scope. The recorded task assumption (tasks/bson-model.md, 19:31) says lossy conversions are errors "except Decimal->Double which rounds like Number()", and a value too small for a double rounding to 0 or to a subnormal is the same kind of precision loss as `0.1` rounding. CR-2 was about overflow to Infinity, which changes the value class, not about rounding. Rejecting underflow would also make the String → Double rule inconsistent with Decimal → Double. If a human later wants "non-zero must not become zero", that is a product decision for the assumption, not a fix for this task. A test pinning the current behavior would be optional documentation, not a required gap.
+
+## Rebase pass (d047416 -> baf3ba3, base 2ad72d2)
+
+The branch was rebased onto main, which now contains the `uri-model` task (packages/core/src/uri, dependency `mongodb-connection-string-url`). Conflicts in packages/core/package.json, packages/core/src/index.ts and package-lock.json were resolved by keeping both sides. Commands run (repo root, HEAD = baf3ba3):
+- `git diff d047416 baf3ba3 -- packages/core/src/bson`: empty. The BSON code and specs are byte-identical to the reviewed revision.
+- `git diff --stat 2ad72d2 baf3ba3 -- . ':(exclude)reviews' ':(exclude)tasks'`: besides packages/core/src/bson, only package-lock.json (2 lines), packages/core/package.json (+1) and packages/core/src/index.ts (+1/-1 comment, +1 export) change.
+- packages/core/package.json: `dependencies` holds both `bson ^7.3.4` and `mongodb-connection-string-url ^7.0.3`.
+- packages/core/src/index.ts: `export * from './bson';` and `export * from './uri';`, each once. The exported names do not clash (bson: `parseEJson`, `parseEJsonDocument`, `stringifyEJson`, `convert`, `uuidOf`, `ConversionError`, `ConversionTarget`, `parseIsoDate`, `formatIsoDate` and the model/path/json-tree exports; uri: `ConnectionStringError`, `parseConnectionString`, `toConnectionString`, `MASK`, `mask`, `maskText` and the model types). TypeScript would report a conflicting `export *` name as TS2308, and the typecheck passes.
+- package-lock.json vs base: the `packages/core` entry lists `bson ^7.3.4` and `mongodb-connection-string-url ^7.0.3`, and `node_modules/bson` (7.3.4) is no longer flagged `"dev": true`. That is right now that it is a runtime dependency of core. `node_modules/mongodb-connection-string-url` is present. No other lock changes.
+- `npm run typecheck -w packages/core`: passes (tsc, no errors).
+- `npx vitest run --project core`: 9 files, 532 tests passed. That is the bson specs plus the uri specs from main.
+
+No findings in the rebase pass.
 
 ## P0 Critical
 
@@ -101,4 +114,4 @@ No new findings in the final revision. Reading the fix commit found no regressio
 
 ## Review conclusion
 
-No material issues found. All four acceptance criteria are met by the final revision d0474169113d4dd0a199c67bedfc9dc811b0e5e5, and CR-1..CR-5 are resolved. The delta e5ddbe4..d047416 changes only spec files, and the production code is identical to the code reviewed at e5ddbe4. `npx vitest run --project core` passes at the final revision (219 tests). I did not re-measure coverage, so the parent must keep its own `npm run check` and coverage results as the executed evidence for criterion 4.
+No material issues found. All four acceptance criteria are met by the final revision baf3ba3dd760f22a26766a1bc2cf68c6162968f4. Its BSON code is identical to the reviewed d0474169113d4dd0a199c67bedfc9dc811b0e5e5, and the rebase conflict resolution is correct (typecheck passes, 532 core tests pass). CR-1..CR-5 are resolved. The delta e5ddbe4..d047416 changes only spec files, and the production code is identical to the code reviewed at e5ddbe4. `npx vitest run --project core` passed with 219 tests at d047416 and with 532 tests (bson + uri) at baf3ba3. I did not re-measure coverage, so the parent must keep its own `npm run check` and coverage results as the executed evidence for criterion 4.

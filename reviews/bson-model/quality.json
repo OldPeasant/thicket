@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "task": "bson-model",
+  "reviewed_revision": "baf3ba3dd760f22a26766a1bc2cf68c6162968f4",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/bson-model/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/bson-model/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/bson-model/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    { "id": "TW-1", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "Decimal128 integral values with trailing zeros (1200.0) now convert to Int32/Int64" },
+    { "id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "same defect as TW-1" },
+    { "id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "String to Double overflow and Regex to String option loss now fail" },
+    { "id": "CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "getAt returns undefined for negative/fractional indices" },
+    { "id": "CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "Binary base64 normalized to canonical form on parse" },
+    { "id": "CR-5", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "model.ts and json-tree.ts tests added by test-writer" },
+    { "id": "OBS-1", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "extended-year ISO dates round trip String to/from Date" },
+    { "id": "OBS-2", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "same as CR-3" },
+    { "id": "OBS-3", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "subtype 4 binaries without 16 bytes fail the uuid conversion" },
+    { "id": "OBS-4", "source": "test-writer", "severity": "Low", "disposition": "accepted", "note": "underflow to 0 on String/Decimal to Double is ordinary rounding, consistent with the recorded assumption that Decimal to Double rounds like Number(); reviewer agrees" }
+  ],
+  "validation": [
+    { "command": "npx vitest run --project core", "result": "pass" },
+    { "command": "cd packages/core && npx vitest run src/bson/convert.spec.ts --coverage --coverage.include=src/bson/convert.ts (148/148 branches)", "result": "pass" },
+    { "command": "npm run check", "result": "pass" }
+  ]
+}
