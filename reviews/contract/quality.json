@@ -1,0 +1,73 @@
+{
+  "schema": 1,
+  "task": "contract",
+  "reviewed_revision": "77349c5d864a0bbab16dc8cd282e172e5a63ec5d",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/contract/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/contract/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/contract/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "TW-1",
+      "source": "test-writer",
+      "severity": "Low",
+      "disposition": "fixed",
+      "note": "docs.updateMany update union gave generic 'Invalid input'; replaced by ejsonDocumentOrArray with a readable message"
+    },
+    {
+      "id": "TW-obs",
+      "source": "test-writer",
+      "severity": "Low",
+      "disposition": "fixed",
+      "note": "ejsonValue accepted whitespace-only text"
+    },
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "profile.connectionString now rejects a password in the userinfo (hasPassword)"
+    },
+    {
+      "id": "CR-2",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "added main-routed profiles.chooseFile for TLS/SSH file paths"
+    },
+    {
+      "id": "CR-3",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "cancel routing documented in envelope.ts and ARCHITECTURE.md"
+    },
+    {
+      "id": "CR-4",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "docs.find rejects after+before and skip with range paging"
+    },
+    {
+      "id": "CR-5",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "confirmed rule (production writes + bulk writes on every profile) documented consistently"
+    },
+    {
+      "id": "CR-6",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "deferred",
+      "note": "hasPassword misses passwords with unescaped / ? # (invalid URIs the driver refuses anyway); follow-up in task profiles-store, which must parse URIs with mongodb-connection-string-url and strip passwords before saving (recorded with tasks.py assume)"
+    }
+  ],
+  "validation": [
+    { "command": "cd packages/contract && npx vitest run", "result": "pass" },
+    { "command": "npm run check", "result": "pass" }
+  ]
+}
