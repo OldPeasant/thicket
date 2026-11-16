@@ -25,3 +25,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 18:14+0100 by dell26/agent-1): Vitest projects live in root vitest.config.ts (test.projects) instead of the vitest.workspace.ts named in touches; the workspace file is deprecated since Vitest 3.2
 - ASSUMPTION (2026-11-16 18:14+0100 by dell26/agent-1): Workspace packages are named @thicket/<folder> and export src/index.ts directly (no build step) until a build/packaging task needs compiled output
 - ASSUMPTION (2026-11-16 18:14+0100 by dell26/agent-1): Prettier check is part of npm run lint and ignores *.md (human-written docs keep their formatting), tasks/, reviews/, .claude/, dashboard/
+- ASSUMPTION (2026-11-16 18:14+0100 by dell26/agent-1): ESLint uses typescript-eslint strict+stylistic without type-aware rules to keep the check well under 2 min; core gets a no-restricted-imports rule for node:* and electron
