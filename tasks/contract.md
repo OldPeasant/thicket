@@ -1,11 +1,11 @@
 ---
 title: M0: Typed IPC contract (envelope, errors, all method groups)
-status: in_progress
+status: done
 owner: dell26/agent-2
 deps: [scaffold]
 touches: [packages/contract]
 prio: 1
-lease_until: 2026-11-16T18:26:37Z
+lease_until: 
 ---
 ## Goal
 Implement SPEC.md section 4 in packages/contract: envelope types, stable error codes, and params/result types with zod schemas for every method group (profiles, conn, db, coll, docs, agg, idx, schema, io, shell, admin, app). One file per group (`src/<group>.ts`) so later tasks extend only their group. Also a `route(method)` helper saying whether a method is served by `main` (profiles.*, app.*, io dialogs) or `backend`.
@@ -30,3 +30,4 @@ Exact method signatures are decided here; record notable choices with `assume`.
 - ASSUMPTION (2026-11-16 18:54+0100 by dell26/agent-2): Write methods: db.create/drop, coll.create/drop/rename/validator.set, docs.insert/update/replace/delete/updateMany/deleteMany, agg.createView, idx.create/drop/hide, io.import, admin.killOp; agg.run is a conditional write (only with out/merge stages). shell.eval is not a contract write (spec: server permissions are the only guard there)
 - ASSUMPTION (2026-11-16 18:54+0100 by dell26/agent-2): app.* methods are app.settings.get, app.settings.set, app.theme, app.checkForUpdate; theme and connection-state changes are broadcast on well-known streams app.theme and conn.status
 - ASSUMPTION (2026-11-16 19:05+0100 by dell26/agent-2): CR-6 deferred to profiles-store: the contract's hasPassword() misses passwords containing unescaped / ? # (driver would treat them as password); profiles-store (main) must parse connection strings with mongodb-connection-string-url and strip/move any password to the keychain before saving
+- done by dell26/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 7s on 2728a900e; criteria verified 4/4
