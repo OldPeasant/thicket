@@ -244,6 +244,20 @@ export class CollectionResults implements OnDestroy {
     }
   }
 
+  /**
+   * A shown document changed on the server (saved or deleted from this tab): replaces the
+   * document at `index` of the shown page with `doc` (canonical EJSON), or removes it for `null`.
+   * The page is not read again; paging and counts stay as they are.
+   */
+  patchDocument(index: number, doc: string | null): void {
+    const page = this.pageState();
+    if (page === null || index < 0 || index >= page.docs.length) return;
+    const docs = page.docs.slice();
+    if (doc === null) docs.splice(index, 1);
+    else docs[index] = doc;
+    this.pageState.set({ ...page, docs });
+  }
+
   ngOnDestroy(): void {
     this.cancel(false);
   }

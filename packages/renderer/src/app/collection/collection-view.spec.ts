@@ -723,8 +723,9 @@ describe('CollectionView', () => {
     expect(q('pager-rows')?.textContent).toMatch(/of 1,234 documents/);
   });
 
-  it('shows the explorer read-only', () => {
+  it('lets the explorer edit documents on a writable profile', () => {
     const toggle = el().querySelector<HTMLButtonElement>('.mode-toggle');
-    expect(toggle?.disabled).toBe(true);
+    expect(toggle?.disabled).toBe(false);
+    expect(q('edit-bar')).not.toBeNull();
   });
 });

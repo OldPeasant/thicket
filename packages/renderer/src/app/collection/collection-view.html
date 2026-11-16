@@ -1,4 +1,8 @@
-<section class="collection" [attr.aria-label]="'Collection ' + target().coll">
+<section
+  class="collection"
+  [attr.aria-label]="'Collection ' + target().coll"
+  (keydown)="keydown($event)"
+>
   <!-- The query bar reads as the mongosh call it runs. -->
   <form class="query" (submit)="run($event)" data-testid="query-bar" novalidate>
     <div class="call">
@@ -226,6 +230,9 @@
     </div>
   </div>
 
+  <app-edit-bar [profileId]="target().profileId" />
+  <app-draft-documents [profileId]="target().profileId" [uid]="uid + '-drafts'" />
+
   <div
     class="results"
     data-testid="results"
@@ -257,7 +264,11 @@
       } @else {
         @switch (view()) {
           @case ('table') {
-            <app-json-explorer [value]="explorerDocs()" layout="tables" />
+            <app-json-explorer
+              [value]="explorerDocs()"
+              layout="tables"
+              (valueChange)="tableChanged($event)"
+            />
           }
           @case ('list') {
             <div class="list-head">
@@ -272,12 +283,26 @@
               </button>
             </div>
             <ol class="doc-list" [attr.start]="positionUnknown() ? null : page.firstRow + 1">
-              @for (doc of explorerDocs(); track $index) {
+              @for (tree of explorerDocs(); track $index) {
                 <li class="doc" data-testid="result-doc">
-                  @if (doc === null) {
+                  @if (tree === null) {
                     <p class="message error">This document could not be read.</p>
                   } @else {
-                    <app-json-form [value]="doc" path="" [uid]="uid + '-' + $index" />
+                    @let loaded = docs()[$index];
+                    @let shown = shownDocs()[$index];
+                    @if (loaded && shown) {
+                      <app-document-header
+                        [doc]="loaded"
+                        [shown]="shown"
+                        [profileId]="target().profileId"
+                      />
+                    }
+                    <app-json-form
+                      [value]="tree"
+                      path=""
+                      [uid]="uid + '-' + $index"
+                      (valueChange)="docChanged($index, $event)"
+                    />
                   }
                 </li>
               }

@@ -1,0 +1,101 @@
+/* Shared by the edit bar, the document header and the drafts (same look as the query bar). */
+:host {
+  display: block;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+}
+
+.btn {
+  padding: 0.2rem 0.65rem;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.btn:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.btn.primary {
+  color: var(--accent-contrast);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.btn.primary:hover:not(:disabled) {
+  background: var(--accent);
+  box-shadow: var(--glow);
+}
+
+.btn.primary:disabled {
+  color: var(--text-faint);
+  background: var(--bg-elevated);
+  border-color: var(--border);
+}
+
+.btn.quiet {
+  color: var(--text-muted);
+  background: none;
+}
+
+.btn.danger {
+  color: var(--danger-text);
+  border-color: var(--danger-border);
+  background: none;
+}
+
+.btn.danger:hover:not(:disabled) {
+  background: var(--danger-bg);
+}
+
+.btn[aria-pressed='true'] {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+/* The "modified" marker: a dot and the change count. */
+.modified {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.modified::before {
+  content: '';
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.message {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.message.error {
+  color: var(--danger-text);
+}

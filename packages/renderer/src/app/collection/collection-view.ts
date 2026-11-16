@@ -10,10 +10,19 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import { type BsonDocument, parseEJsonDocument } from '@thicket/core/bson';
+import { type BsonDocument, parseEJsonDocument, stringifyEJson } from '@thicket/core/bson';
 import { printShellSyntax } from '@thicket/core/shellsyntax';
 
-import { toExplorerValue } from '../explorer/bson-value.util';
+import {
+  DocumentActions,
+  DocumentEdits,
+  DocumentHeader,
+  documentKey,
+  DraftDocuments,
+  EditBar,
+  handleEditKeys,
+} from '../document';
+import { fromExplorerValue, toExplorerValue } from '../explorer/bson-value.util';
 import { JsonExplorerComponent } from '../explorer/json-explorer.component';
 import { JsonFormComponent } from '../explorer/json-form/json-form.component';
 import { BsonDisplayService } from '../explorer/services/bson-display.service';
@@ -26,11 +35,13 @@ import { JsonLinesService } from '../explorer/services/json-lines.service';
 import { JumpService } from '../explorer/services/jump.service';
 import { LayoutService } from '../explorer/services/layout.service';
 import { NodeVisibilityService } from '../explorer/services/node-visibility.service';
+import { NumberDefaultService } from '../explorer/services/number-default.service';
 import { PanelService } from '../explorer/services/panel.service';
 import { RevealService } from '../explorer/services/reveal.service';
 import { SchemaService } from '../explorer/services/schema.service';
 import { TableOrientationService } from '../explorer/services/table-orientation.service';
 import type { WorkspaceTab } from '../layout/workspace.service';
+import { ProfileSafetyService } from '../safety/profile-safety.service';
 import type { CollectionTabData } from '../sidebar/sidebar-tree.service';
 import { CollectionResults, PAGE_SIZES } from './collection-results.service';
 import {
@@ -61,16 +72,19 @@ const numberFormat = new Intl.NumberFormat();
 
 /**
  * A collection tab: the query bar (filter, projection, sort, collation, limit in shell syntax),
- * the pager and the result views (table, document list, raw). Editing documents is a later task:
- * the explorer is shown read-only here. Each tab has its own explorer state (search, collapse,
- * columns), so the explorer services are provided per view.
+ * the pager, the edit bar and the result views (table, document list, raw). Edits in the table
+ * and the document list stay in the tab's `DocumentEdits` until saved (`DocumentActions`). Each
+ * tab has its own explorer state (search, collapse, columns), so the explorer services are
+ * provided per view.
  */
 @Component({
   selector: 'app-collection-view',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [JsonExplorerComponent, JsonFormComponent],
+  imports: [JsonExplorerComponent, JsonFormComponent, EditBar, DocumentHeader, DraftDocuments],
   providers: [
     CollectionResults,
+    DocumentEdits,
+    DocumentActions,
     BsonDisplayService,
     CollapseService,
     ColumnSyncService,
@@ -93,6 +107,11 @@ export class CollectionView {
   readonly tab = input.required<WorkspaceTab>();
 
   protected readonly results = inject(CollectionResults);
+  protected readonly edits = inject(DocumentEdits);
+  protected readonly actions = inject(DocumentActions);
+  private readonly editMode = inject(EditModeService);
+  private readonly numbers = inject(NumberDefaultService);
+  private readonly safety = inject(ProfileSafetyService);
   protected readonly display = inject(BsonDisplayService);
   protected readonly pageSizes = PAGE_SIZES;
   protected readonly labels = FIELD_LABELS;
@@ -135,14 +154,27 @@ export class CollectionView {
       }
     }),
   );
+  /** The page's documents as shown: with their unsaved edits. */
+  protected readonly shownDocs = computed<readonly (BsonDocument | null)[]>(() =>
+    this.docs().map((doc) => (doc === null ? null : this.edits.current(doc))),
+  );
+  /**
+   * Explorer trees of the shown documents. A document that did not change keeps its tree, so an
+   * edit in the table can be told apart from the rows it left alone (by identity).
+   */
+  private readonly trees = new WeakMap<BsonDocument, unknown>();
   protected readonly explorerDocs = computed(() =>
-    this.docs().map((doc) => (doc === null ? null : toExplorerValue(doc))),
+    this.shownDocs().map((doc) => (doc === null ? null : this.treeOf(doc))),
   );
   protected readonly rawText = computed(() => {
     const page = this.results.page();
     if (page === null) return '';
-    if (this.rawFormat() === 'ejson') return page.docs.join('\n');
-    return this.docs()
+    if (this.rawFormat() === 'ejson') {
+      return this.shownDocs()
+        .map((doc, i) => (doc === null ? (page.docs[i] ?? '') : stringifyEJson(doc)))
+        .join('\n');
+    }
+    return this.shownDocs()
       .map((doc) =>
         doc === null ? '// unreadable document' : printShellSyntax(doc, { indent: 2 }),
       )
@@ -217,11 +249,19 @@ export class CollectionView {
       const target = this.target();
       untracked(() => {
         this.results.setTarget(target);
+        this.actions.setHost({
+          ...target,
+          projection: () => this.results.query().projection,
+          documentChanged: (key, doc) => this.documentChanged(key, doc),
+        });
         this.run();
       });
     });
-    // Documents are not edited here yet (doc-edit-save): the explorer shows them read-only.
-    inject(EditModeService).setReadOnly(true);
+    // Read-only profiles show the documents without editing controls.
+    effect(() => {
+      const readOnly = this.safety.readOnly(this.target().profileId)();
+      untracked(() => this.editMode.setReadOnly(readOnly));
+    });
     // The table view shows one row per document: the root table (path '') starts horizontal
     // (the explorer's default is one row per field). The user can still flip it.
     const orientation = inject(TableOrientationService);
@@ -275,6 +315,65 @@ export class CollectionView {
 
   protected changePageSize(event: Event): void {
     this.results.setPageSize(Number((event.target as HTMLSelectElement).value));
+  }
+
+  /** The root table changed: an edited row is an edit of its document. */
+  protected tableChanged(value: unknown): void {
+    if (!Array.isArray(value)) return;
+    const shown = this.explorerDocs();
+    const docs = this.docs();
+    if (value.length === shown.length) {
+      value.forEach((tree, i) => {
+        if (tree !== shown[i]) this.docChanged(i, tree);
+      });
+      return;
+    }
+    if (value.length === shown.length + 1) {
+      // A row added in the table is a new document: it becomes a draft to fill in and insert.
+      const added = value.find((tree, i) => tree !== shown[i]);
+      const doc = this.toDocument(added);
+      if (doc !== null) this.actions.cloneDocument(doc);
+      return;
+    }
+    if (value.length === shown.length - 1) {
+      // A row removed in the table deletes its document (after the confirm dialog).
+      const index = shown.findIndex((tree, i) => tree !== value[i]);
+      const doc = docs[index === -1 ? shown.length - 1 : index];
+      if (doc) void this.actions.delete(doc);
+    }
+  }
+
+  /** The document at `index` of the page was edited in the explorer. */
+  protected docChanged(index: number, tree: unknown): void {
+    const original = this.docs()[index];
+    const edited = this.toDocument(tree);
+    if (original && edited !== null) this.edits.edit(original, edited);
+  }
+
+  protected keydown(event: KeyboardEvent): void {
+    const canWrite = !this.safety.readOnly(this.target().profileId)();
+    handleEditKeys(event, this.edits, this.actions, canWrite);
+  }
+
+  private toDocument(tree: unknown): BsonDocument | null {
+    if (tree === null || typeof tree !== 'object' || Array.isArray(tree)) return null;
+    const value = fromExplorerValue(tree, this.numbers.integers());
+    return value.type === 'object' ? value : null;
+  }
+
+  private treeOf(doc: BsonDocument): unknown {
+    let tree = this.trees.get(doc);
+    if (tree === undefined) {
+      tree = toExplorerValue(doc);
+      this.trees.set(doc, tree);
+    }
+    return tree;
+  }
+
+  /** A document of this tab was saved or deleted: the shown page follows. */
+  private documentChanged(key: string, doc: string | null): void {
+    const index = this.docs().findIndex((d) => d !== null && documentKey(d) === key);
+    if (index !== -1) this.results.patchDocument(index, doc);
   }
 
   protected errorId(field: QueryField): string {
