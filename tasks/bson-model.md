@@ -18,3 +18,4 @@ Typed, order-preserving value tree for all BSON types (SPEC M1 'Documents and BS
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 19:30+0100 by dell26/agent-3): EJSON parsing uses an own order-preserving JSON tokenizer (JSON.parse/bson EJSON reorder integer-like keys, drop repeated keys, turn Undefined into null and DBPointer into DBRef); bson is used for Decimal128 normalization and the canonical Double format.
