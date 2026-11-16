@@ -1,4 +1,4 @@
-@if (editMode.enabled() && !locked) {
+@if (editMode.enabled() && !locked && type !== 'bson') {
   <span class="ev">
     @if (choices; as options) {
       <select
@@ -61,7 +61,28 @@
     }
   </span>
 } @else {
-  @if (type === 'null') {
+  @if (showBadge) {
+    <span
+      class="badge"
+      [class.deprecated]="deprecated"
+      [attr.data-bson-type]="badge.type"
+      [style.--badge-color]="badgeColor"
+      [title]="badge.title"
+      >{{ badge.label }}</span
+    >
+  }
+  @if (type === 'bson') {
+    <span
+      class="val bson"
+      [class.deprecated]="deprecated"
+      [attr.data-bson-type]="badge.type"
+      [style.--badge-color]="badgeColor"
+      ><app-hl [text]="bsonText"
+    /></span>
+    @if (deprecated && editMode.enabled()) {
+      <span class="lock" title="Deprecated BSON type: kept unchanged, can't be edited">🔒</span>
+    }
+  } @else if (type === 'null') {
     <span class="val null">null</span>
   } @else if (type === 'boolean') {
     <span class="val bool"><app-hl [text]="'' + value" /></span>

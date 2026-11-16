@@ -1,3 +1,4 @@
+import { isContainer } from '../bson-value.util';
 import { appendKey, type Path, type ProblemIndex } from '../../schema';
 
 export interface OutlineRow {
@@ -15,8 +16,7 @@ export interface OutlineRow {
 const MAX_DEPTH = 2;
 const MAX_PER_LEVEL = 40;
 
-const isObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
+const isObject = (v: unknown): v is Record<string, unknown> => isContainer(v) && !Array.isArray(v);
 
 /**
  * The document's structure as a flat list for navigation: every object and
@@ -45,8 +45,8 @@ function walk(
     const childPath = [...path, name];
     const key = appendKey(uid, name);
     const problems = index.at(key).length + index.countBelow(key);
-    const isContainer = typeof child === 'object' && child !== null;
-    if (!isContainer && !problems) continue;
+    const nested = isContainer(child);
+    if (!nested && !problems) continue;
     if (shown >= MAX_PER_LEVEL) {
       left++;
       continue;
@@ -58,7 +58,7 @@ function walk(
       label: name,
       depth,
       kind: isObject(child) ? 'object' : Array.isArray(child) ? 'array' : 'scalar',
-      size: isContainer ? Object.keys(child as object).length : 0,
+      size: nested ? Object.keys(child as object).length : 0,
       problems,
     });
     if (isObject(child) && depth < MAX_DEPTH) walk(child, childPath, key, depth + 1, index, rows);

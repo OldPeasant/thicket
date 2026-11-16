@@ -1,13 +1,14 @@
 import '@angular/compiler';
 import { Injector } from '@angular/core';
 import { describe, expect, it } from 'vitest';
+import { BsonDisplayService } from './bson-display.service';
 import { CollapseService } from './collapse.service';
 import { type FilterMode, FilterService } from './filter.service';
 
 function search(term: string, mode: FilterMode): FilterService {
-  const filter = Injector.create({ providers: [FilterService, CollapseService] }).get(
-    FilterService,
-  );
+  const filter = Injector.create({
+    providers: [FilterService, CollapseService, BsonDisplayService],
+  }).get(FilterService);
   filter.setMode(mode);
   filter.set(term);
   return filter;

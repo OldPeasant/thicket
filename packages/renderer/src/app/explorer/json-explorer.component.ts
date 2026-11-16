@@ -10,6 +10,7 @@ import { EditModeService } from './services/edit-mode.service';
 import { ColumnSyncService } from './services/column-sync.service';
 import { JsonLinesService } from './services/json-lines.service';
 import { PanelService } from './services/panel.service';
+import { BsonDisplayService } from './services/bson-display.service';
 import { SchemaService } from './services/schema.service';
 
 @Component({
@@ -49,6 +50,7 @@ export class JsonExplorerComponent {
   protected panels = inject(PanelService);
   protected schema = inject(SchemaService);
   protected lines = inject(JsonLinesService);
+  protected display = inject(BsonDisplayService);
   private colSync = inject(ColumnSyncService);
 
   // Shown as buttons next to the search box, in this order.

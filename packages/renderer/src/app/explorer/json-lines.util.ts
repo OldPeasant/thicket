@@ -1,4 +1,5 @@
 import { formatPath, type Path } from '../schema';
+import { isContainer } from './bson-value.util';
 
 // JSON Lines (also called NDJSON): one JSON document per line. Pure and
 // Angular-free. A file is read this way when it is not one JSON document as a
@@ -140,7 +141,7 @@ export function shapeOf(value: unknown): Set<string> {
         shape.add(p);
         walk(item, p);
       }
-    } else if (typeof v === 'object' && v !== null) {
+    } else if (isContainer(v)) {
       for (const [k, child] of Object.entries(v)) {
         const p = `${path}.${k}`;
         shape.add(p);
@@ -154,7 +155,7 @@ export function shapeOf(value: unknown): Set<string> {
 
 function rootKind(value: unknown): string {
   if (Array.isArray(value)) return 'array';
-  if (typeof value === 'object' && value !== null) return 'object';
+  if (isContainer(value)) return 'object';
   return 'scalar';
 }
 

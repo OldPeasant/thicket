@@ -1,3 +1,4 @@
+import { isContainer } from './bson-value.util';
 import { appendKey, type Path } from '../schema';
 
 // What must be true of each container on the way to a node for that node to
@@ -22,8 +23,7 @@ export interface RevealStep {
   key?: string;
 }
 
-const isObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
+const isObject = (v: unknown): v is Record<string, unknown> => isContainer(v) && !Array.isArray(v);
 
 /**
  * The containers between the document root and the node at `path`, with

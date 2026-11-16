@@ -23,7 +23,7 @@ const underId = (path: string): boolean => coversPath('_id', path);
 function isInclusion(projection: Projection): boolean {
   const entries = Object.entries(projection).filter(([k]) => k !== '_id');
   if (entries.some(([, v]) => isIncluded(v) || (!isExcluded(v) && !isNeutral(v)))) return true;
-  return !entries.some(([, v]) => isExcluded(v)) && isIncluded(projection._id);
+  return !entries.some(([, v]) => isExcluded(v)) && isIncluded(projection['_id']);
 }
 
 /**

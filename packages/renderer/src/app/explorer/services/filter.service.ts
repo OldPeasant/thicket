@@ -1,4 +1,6 @@
 import { Injectable, inject, signal } from '@angular/core';
+import { isBsonLeaf, isContainer } from '../bson-value.util';
+import { BsonDisplayService } from './bson-display.service';
 import { CollapseService } from './collapse.service';
 
 // A "node" is a single key/value pair anywhere in the tree (an object entry,
@@ -21,6 +23,7 @@ export type FilterMode = 'strict' | 'context';
 @Injectable({ providedIn: 'root' })
 export class FilterService {
   private collapse = inject(CollapseService);
+  private display = inject(BsonDisplayService);
 
   readonly text = signal('');
   readonly mode = signal<FilterMode>('strict');
@@ -52,10 +55,13 @@ export class FilterService {
     return !!term && key !== null && key.toLowerCase().includes(term);
   }
 
-  // Primitive values only; containers match through their descendants.
+  // Primitive values only; containers match through their descendants. A
+  // BSON value matches by the text it is shown with (exact numbers, dates in
+  // the zone shown).
   valueMatch(value: unknown): boolean {
     const term = this.term();
     if (!term) return false;
+    if (isBsonLeaf(value)) return this.display.text(value).toLowerCase().includes(term);
     if (value === null || value === undefined || typeof value === 'object') return false;
     return String(value).toLowerCase().includes(term);
   }
@@ -75,7 +81,7 @@ export class FilterService {
   }
 
   descendantMatch(value: unknown): boolean {
-    if (value === null || typeof value !== 'object') return false;
+    if (!isContainer(value)) return false;
     if (Array.isArray(value)) return value.some((item) => this.treeMatch(null, item));
     return Object.entries(value as Record<string, unknown>).some(([k, v]) => this.treeMatch(k, v));
   }
@@ -108,7 +114,7 @@ export class FilterService {
   // nothing inside did. In 'context' mode: it is only there as an ancestor's
   // sibling.
   collapsedByFilter(key: string | null, value: unknown): boolean {
-    if (!this.active || value === null || typeof value !== 'object') return false;
+    if (!this.active || !isContainer(value)) return false;
     if (this.mode() === 'context') return !this.treeMatch(key, value);
     return this.keyMatch(key) && !this.descendantMatch(value);
   }

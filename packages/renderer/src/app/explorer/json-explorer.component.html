@@ -26,6 +26,16 @@
         </button>
       }
     </div>
+    <button
+      type="button"
+      class="panel-toggle date-zone"
+      [class.is-active]="display.utc()"
+      [attr.aria-pressed]="display.utc()"
+      (click)="display.toggleUtc()"
+      title="Show dates in UTC instead of local time"
+    >
+      UTC
+    </button>
     @if (layout === 'form' && !lines.active()) {
       <button
         type="button"

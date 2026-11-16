@@ -1,7 +1,7 @@
+import { isContainer } from './bson-value.util';
 export type Layout = 'tables' | 'form';
 
-const isObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
+const isObject = (v: unknown): v is Record<string, unknown> => isContainer(v) && !Array.isArray(v);
 
 /**
  * Which layout suits a document when the user has not chosen. Tables are

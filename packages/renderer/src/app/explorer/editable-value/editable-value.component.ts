@@ -1,5 +1,7 @@
 import { Component, EventEmitter, Input, Output, inject } from '@angular/core';
+import { type Badge, badgeColorVar, badgeOf, isDeprecatedValue } from '../bson-value.util';
 import { type JsonType, defaultForType, typeOf } from '../json-edit.util';
+import { BsonDisplayService } from '../services/bson-display.service';
 import { HighlightComponent } from '../highlight/highlight.component';
 import { EditModeService } from '../services/edit-mode.service';
 import { SchemaService } from '../services/schema.service';
@@ -19,8 +21,33 @@ export class EditableValueComponent {
 
   protected editMode = inject(EditModeService);
   private schema = inject(SchemaService);
+  private display = inject(BsonDisplayService);
 
   readonly types: JsonType[] = ['string', 'number', 'boolean', 'null', 'object', 'array'];
+
+  get badge(): Badge {
+    return badgeOf(this.value);
+  }
+
+  // The document root needs no badge: it is what the whole view shows.
+  get showBadge(): boolean {
+    return this.uid !== '' || (this.type !== 'object' && this.type !== 'array');
+  }
+
+  get badgeColor(): string {
+    return badgeColorVar(this.badge.type);
+  }
+
+  // A deprecated BSON type (Undefined, Symbol, DBPointer, Code with scope)
+  // is kept as it is: never edited, not even in edit mode.
+  get deprecated(): boolean {
+    return isDeprecatedValue(this.value);
+  }
+
+  // The exact text of a BSON value (Int64, Decimal128, Date in the zone shown…).
+  get bsonText(): string {
+    return this.display.text(this.value);
+  }
 
   // Read-only per the schema: shown as plain text even in edit mode.
   get locked(): boolean {
@@ -52,7 +79,9 @@ export class EditableValueComponent {
   // a single option there is nothing to choose, so the dropdown is hidden.
   get typeOptions(): JsonType[] {
     const allowed = this.schema.typesFor(this.uid);
-    return allowed ? this.types.filter((t) => allowed.includes(t) || t === this.type) : this.types;
+    return allowed
+      ? this.types.filter((t) => (allowed as readonly string[]).includes(t) || t === this.type)
+      : this.types;
   }
 
   onChoice(event: Event): void {

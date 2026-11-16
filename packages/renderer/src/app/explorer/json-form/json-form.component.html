@@ -86,7 +86,7 @@
               >⚠</span
             >
           }
-          @if (kind === 'object' && !f.ghost && canEdit) {
+          @if (kind === 'object' && !f.ghost) {
             <app-editable-value
               [value]="child"
               [uid]="childUid(f.key)"

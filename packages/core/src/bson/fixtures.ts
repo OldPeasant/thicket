@@ -1,0 +1,60 @@
+/**
+ * Test fixture shared by core and renderer tests (`@thicket/core/testing`): a document with every
+ * BSON type and edge case. Not part of the runtime API.
+ */
+
+/** One field per BSON type and edge case, in canonical EJSON v2 as `bson` writes it. */
+export const ALL_TYPES_FIELDS: readonly (readonly [string, string])[] = [
+  ['_id', '{"$oid":"5f1d7a3e9c1b2a0012345678"}'],
+  ['double', '{"$numberDouble":"3.14"}'],
+  ['doubleIntegral', '{"$numberDouble":"1.0"}'],
+  ['negativeZero', '{"$numberDouble":"-0.0"}'],
+  ['nan', '{"$numberDouble":"NaN"}'],
+  ['infinity', '{"$numberDouble":"Infinity"}'],
+  ['negativeInfinity', '{"$numberDouble":"-Infinity"}'],
+  ['hugeDouble', '{"$numberDouble":"1e+21"}'],
+  ['tinyDouble', '{"$numberDouble":"5e-324"}'],
+  ['string', JSON.stringify('héllo "quoted" \n ☃ \\ \u0001')],
+  ['object', '{"a":{"$numberInt":"1"},"b":{"c":"d"}}'],
+  ['array', '[{"$numberInt":"1"},"x",null,[],{}]'],
+  ['binaryGeneric', '{"$binary":{"base64":"AQID","subType":"00"}}'],
+  ['binaryFunction', '{"$binary":{"base64":"AQ==","subType":"01"}}'],
+  ['binaryOld', '{"$binary":{"base64":"AAAAAA==","subType":"02"}}'],
+  ['uuidLegacy', '{"$binary":{"base64":"D4+tW9nLRp+hZXCGdyiVDg==","subType":"03"}}'],
+  ['uuid', '{"$binary":{"base64":"D4+tW9nLRp+hZXCGdyiVDg==","subType":"04"}}'],
+  ['md5', '{"$binary":{"base64":"1B2M2Y8AsgTpgAmY7PhCfg==","subType":"05"}}'],
+  ['encrypted', '{"$binary":{"base64":"","subType":"06"}}'],
+  ['column', '{"$binary":{"base64":"AA==","subType":"07"}}'],
+  ['sensitive', '{"$binary":{"base64":"AA==","subType":"08"}}'],
+  ['vector', '{"$binary":{"base64":"EAA=","subType":"09"}}'],
+  ['userDefined', '{"$binary":{"base64":"/w==","subType":"80"}}'],
+  ['undefined', '{"$undefined":true}'],
+  ['true', 'true'],
+  ['false', 'false'],
+  ['date', '{"$date":{"$numberLong":"1700000000000"}}'],
+  ['dateBeforeEpoch', '{"$date":{"$numberLong":"-62135596800000"}}'],
+  ['dateBeyondJs', '{"$date":{"$numberLong":"9223372036854775807"}}'],
+  ['null', 'null'],
+  ['regex', '{"$regularExpression":{"pattern":"^a.*\\\\d+$","options":"imsux"}}'],
+  ['dbPointer', '{"$dbPointer":{"$ref":"db.coll","$id":{"$oid":"5f1d7a3e9c1b2a0012345679"}}}'],
+  ['code', '{"$code":"function () { return 1; }"}'],
+  ['symbol', '{"$symbol":"sym"}'],
+  ['codeWithScope', '{"$code":"x + 1","$scope":{"x":{"$numberInt":"1"}}}'],
+  ['int32', '{"$numberInt":"42"}'],
+  ['int32Min', '{"$numberInt":"-2147483648"}'],
+  ['int32Max', '{"$numberInt":"2147483647"}'],
+  ['timestamp', '{"$timestamp":{"t":4294967295,"i":1}}'],
+  ['int64', '{"$numberLong":"9007199254740993"}'],
+  ['int64Min', '{"$numberLong":"-9223372036854775808"}'],
+  ['int64Max', '{"$numberLong":"9223372036854775807"}'],
+  ['decimal', '{"$numberDecimal":"-1.10"}'],
+  ['decimalExp', '{"$numberDecimal":"1E+3"}'],
+  ['decimalMax', '{"$numberDecimal":"9.999999999999999999999999999999999E+6144"}'],
+  ['decimalNaN', '{"$numberDecimal":"NaN"}'],
+  ['decimalNegZero', '{"$numberDecimal":"-0"}'],
+  ['minKey', '{"$minKey":1}'],
+  ['maxKey', '{"$maxKey":1}'],
+];
+
+/** The fixture as one canonical EJSON v2 document, fields in the order above. */
+export const ALL_TYPES_EJSON = `{${ALL_TYPES_FIELDS.map(([k, v]) => `${JSON.stringify(k)}:${v}`).join(',')}}`;

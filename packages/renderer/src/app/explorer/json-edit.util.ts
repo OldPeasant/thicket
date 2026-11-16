@@ -1,7 +1,12 @@
-export type JsonType = 'null' | 'boolean' | 'number' | 'string' | 'array' | 'object';
+import { isBsonLeaf } from './bson-value.util';
+
+// 'bson': a BSON value other than a string, boolean, null, document or array
+// (see bson-value.util), shown as one scalar.
+export type JsonType = 'null' | 'boolean' | 'number' | 'string' | 'array' | 'object' | 'bson';
 
 export function typeOf(value: unknown): JsonType {
   if (value === null) return 'null';
+  if (isBsonLeaf(value)) return 'bson';
   if (Array.isArray(value)) return 'array';
   return typeof value as JsonType;
 }
@@ -9,6 +14,7 @@ export function typeOf(value: unknown): JsonType {
 export function defaultForType(type: JsonType): unknown {
   switch (type) {
     case 'null':
+    case 'bson':
       return null;
     case 'boolean':
       return false;
