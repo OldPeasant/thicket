@@ -5,7 +5,9 @@
       "Bash(git:*)", "Bash(npm:*)", "Bash(npx:*)", "Bash(node:*)",
       "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(grep:*)", "Bash(find:*)",
       "Bash(wc:*)", "Bash(mkdir:*)", "Bash(sh .taskcheck:*)",
-      "Bash(docker ps:*)", "Bash(docker logs:*)", "Bash(podman ps:*)", "Bash(podman logs:*)",
+      "Bash(rm:*)", "Bash(sed:*)", "Bash(printf:*)", "Bash(date:*)", "Bash(cd:*)",
+      "Bash(python3:*)", "Bash(timeout:*)", "Bash(xvfb-run:*)",
+      "Bash(docker:*)", "Bash(podman:*)",
       "Agent", "Task", "Skill"
     ],
     "deny": ["Bash(git push:*)"]
