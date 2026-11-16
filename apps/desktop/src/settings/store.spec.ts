@@ -281,6 +281,92 @@ describe('SettingsStore unreadable file', () => {
     expect(await readJson(file)).toMatchObject({ settings: { mode: 'dark' } });
     expect(listener).toHaveBeenCalledTimes(1);
   });
+
+  const unreadableBackups = async () =>
+    (await fs.readdir(dir)).filter((n) => n.includes('.unreadable-'));
+
+  it('a set that changes nothing or is invalid leaves the unreadable file in place; a real change still moves it', async () => {
+    await fs.writeFile(file, original);
+    const store = await SettingsStore.open(file, { fs: unreadableFs(), now });
+
+    await store.set({ style: DEFAULT_SETTINGS.style }); // same as the defaults: no write
+    await expect(store.set({ pageSize: 30 } as never)).rejects.toThrow(); // refused by the schema
+    expect(await fs.readFile(file, 'utf8')).toBe(original);
+    expect(await unreadableBackups()).toEqual([]);
+
+    await store.set({ style: 'tron' });
+    expect(await fs.readFile(backup(), 'utf8')).toBe(original);
+    expect(await readJson(file)).toMatchObject({ settings: { style: 'tron' } });
+  });
+
+  it('concurrent sets on an unreadable file make one backup and end with the last change', async () => {
+    await fs.writeFile(file, original);
+    const store = await SettingsStore.open(file, { fs: unreadableFs(), now });
+    const listener = vi.fn();
+    store.onChange(listener);
+
+    await Promise.all([
+      store.set({ pageSize: 20 }),
+      store.set({ pageSize: 100 }),
+      store.set({ mode: 'dark' }),
+    ]);
+    expect(await unreadableBackups()).toEqual([path.basename(backup())]);
+    expect(await fs.readFile(backup(), 'utf8')).toBe(original);
+    expect(await readJson(file)).toMatchObject({ settings: { pageSize: 100, mode: 'dark' } });
+    expect(listener).toHaveBeenCalledTimes(3);
+  });
+
+  it('a write that fails after the move keeps the backup; the retry writes without a second backup', async () => {
+    await fs.writeFile(file, original);
+    let failWrite = true;
+    const base = unreadableFs();
+    const flaky: SettingsFs = {
+      ...base,
+      writeFile: (p, d, o) =>
+        failWrite ? Promise.reject(new Error('disk full')) : fs.writeFile(p, d, o),
+    };
+    let tick = 0;
+    const clock = () => new Date(Date.UTC(2026, 10, 16, 12, 0, tick++));
+    const store = await SettingsStore.open(file, { fs: flaky, now: clock });
+
+    await expect(store.set({ mode: 'dark' })).rejects.toThrow('disk full');
+    expect(store.get()).toEqual(DEFAULT_SETTINGS);
+    const [first] = await unreadableBackups();
+    expect(first).toBeDefined();
+    expect(await fs.readFile(path.join(dir, first ?? ''), 'utf8')).toBe(original);
+    await expect(fs.access(file)).rejects.toThrow(); // moved aside, not yet replaced
+
+    failWrite = false;
+    await store.set({ mode: 'dark' });
+    expect(await unreadableBackups()).toEqual([first]);
+    expect(await fs.readFile(path.join(dir, first ?? ''), 'utf8')).toBe(original);
+    expect(await readJson(file)).toMatchObject({ settings: { mode: 'dark' } });
+  });
+
+  it('a read error without an error code is treated as unreadable: the first set moves the file aside', async () => {
+    await fs.writeFile(file, original);
+    const odd: SettingsFs = {
+      readFile: (p, e) =>
+        p === file ? Promise.reject(new Error('device gone')) : fs.readFile(p, e),
+      writeFile: (p, d, o) => fs.writeFile(p, d, o),
+      rename: (a, b) => fs.rename(a, b),
+      unlink: (p) => fs.unlink(p),
+    };
+    const store = await SettingsStore.open(file, { fs: odd, now });
+    await store.set({ mode: 'light' });
+    expect(await fs.readFile(backup(), 'utf8')).toBe(original);
+    expect(await readJson(file)).toMatchObject({ settings: { mode: 'light' } });
+  });
+
+  it('with the real fs, a settings.json that is a directory (EISDIR) is moved aside on the first set', async () => {
+    await fs.mkdir(file);
+    await fs.writeFile(path.join(file, 'keep.txt'), 'fictitious content');
+    const store = await SettingsStore.open(file, { now });
+    await store.set({ dateDisplay: 'utc' });
+    expect((await fs.stat(backup())).isDirectory()).toBe(true);
+    expect(await fs.readFile(path.join(backup(), 'keep.txt'), 'utf8')).toBe('fictitious content');
+    expect(await readJson(file)).toMatchObject({ settings: { dateDisplay: 'utc' } });
+  });
 });
 
 /** Real fs, but `rename` of the temp file over the settings file "crashes" (never happens). */

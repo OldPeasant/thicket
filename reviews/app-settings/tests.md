@@ -4,136 +4,173 @@ Date: 2026-11-16
 
 Task: app-settings - M0: Settings store in main (settings.json, app.* methods)
 
-Scope: `git diff e46732c98118f1cae207337fdc22e418298430c0..HEAD` on branch `main`. Task-owned
-commits 3613a30 (settings store) and 2e365ba (handlers, broadcast, Electron test). The parent named
-them 38ac946 and 8b19fb3, the pre-rebase hashes, and they hold the same file set. Test measurements
-ran at HEAD 2e365ba37bd3f54401b8d1aaf5cf19ef869238ad. During the run the parent added b21a38b
-(`docs/ARCHITECTURE.md` only, 9 lines). That commit has no production or test code, so the
-measurements still apply to HEAD b21a38b2ec9f51211411475d0d58e9f399c8faf8. Uncommitted inputs are
-the four test files listed below. No production files had uncommitted changes.
+Scope: `git diff e46732c98118f1cae207337fdc22e418298430c0..HEAD` on branch `main`, HEAD
+21f43f03461a44f196c162b31862f9341e283a0c (second pass, after the CR-1 fix). Task-owned commits:
+3613a30 (settings store), 2e365ba (handlers, broadcast, Electron test), b21a38b (docs only),
+6f8d535 (first-pass tests and review), 21f43f0 (CR-1 fix: an unreadable settings.json is moved to
+`settings.json.unreadable-<time>` before the first write, and the write is refused if that move
+fails). Uncommitted input: `apps/desktop/src/settings/store.spec.ts`, which has the 5 tests added in
+this pass. No production file had uncommitted changes. `reviews/app-settings/review.md` was also
+uncommitted. The code-reviewer changed it in parallel. This helper did not touch it.
 
 Requirements:
-- `tasks/app-settings.md` acceptance criteria 1-3 and its recorded assumptions (settings.json layout
+- `tasks/app-settings.md` acceptance criteria 1-3 and the recorded assumptions (layout
   `{version:1, settings:{...}}`, invalid known values fall back to the default, unparseable or
   wrong-layout files count as corrupt, the event is sent only when a value changes,
   `THICKET_USER_DATA`)
-- `docs/QUALITY.md` (report contract), `docs/ARCHITECTURE.md` "Coverage" (coverage command)
-- `AGENTS.md`
+- `reviews/app-settings/review.md` finding CR-1 and `reviews/app-settings/fixes.md` (the expected
+  behavior of the fix)
+- `docs/QUALITY.md` (report contract), `docs/ARCHITECTURE.md` "Coverage", `AGENTS.md`
 
 ## Test files changed
 
-- `apps/desktop/src/settings/store.spec.ts`
-- `apps/desktop/src/main/handlers.spec.ts`
-- `apps/desktop/src/main/broadcast.spec.ts`
-- `packages/contract/src/index.spec.ts`
+- `apps/desktop/src/settings/store.spec.ts` (first pass and second pass)
+- `apps/desktop/src/main/handlers.spec.ts` (first pass)
+- `apps/desktop/src/main/broadcast.spec.ts` (first pass)
+- `packages/contract/src/index.spec.ts` (first pass)
 
 ## Tests added or updated
 
-Count: 20 test cases added (18 `it` blocks, two of them `it.each` with 6 rows). No existing test was changed or weakened.
+Count: 25 test cases across both passes. The first pass added 20, committed in 6f8d535. This pass
+adds 5. The fixer also added 3 CR-1 regression tests in 21f43f0. No existing test was changed or
+weakened.
 
-- store.spec.ts (16 cases):
-  - corrupt layouts: version 0, a negative version, a fractional version, version as a string, settings as an array, settings as null. Each is treated as corrupt: defaults plus a backup.
-  - a corrupt file that cannot be moved aside still gives the defaults and is logged.
-  - without an injected clock, the backup is named after the current time.
-  - a read error without an error code gives the defaults and is logged.
-  - a version-1 file logs no warning.
-  - `__proto__` and `constructor` keys in the file are dropped and pollute nothing.
-  - a crash while the temp file is being written (torn temp) keeps settings.json. A restart cleans up.
-  - a set queued behind a failed one starts from the saved settings, not from the failed change.
-  - a stale temp file that cannot be removed is logged, and loading still works.
-  - with no stale temp file, nothing is logged.
-  - a set() with an invalid value is refused: nothing is written, nobody is notified, and the queue is not blocked.
-- handlers.spec.ts (1): the real SettingsStore, Broadcaster and `serve` are wired as in index.ts. A set saves, answers, and broadcasts exactly one `app.settings.changed` that matches the `settingsChanged` schema. Setting the same value again sends no event. An invalid value gets INVALID_PARAMS and no event. A get returns the saved value.
-- broadcast.spec.ts (2): without a log, a failing sink is swallowed and the other sinks still receive the event. Emitting with no renderers connected does nothing.
-- contract index.spec.ts (1): the `settingsChanged` payload accepts full, valid settings. It rejects partial settings, invalid values, extra keys, and a missing `settings` field.
+This pass adds 5 tests to `describe('SettingsStore unreadable file')` in store.spec.ts. They cover
+edge cases of the CR-1 fix:
+- `a set that changes nothing or is invalid leaves the unreadable file in place; a real change still moves it`.
+  A no-op set and a schema-refused set do not move the file aside and do not clear the flag. The
+  next real change still makes the backup.
+- `concurrent sets on an unreadable file make one backup and end with the last change`. Three sets
+  queued together make exactly one `.unreadable-` backup, which holds the original content. The
+  file ends with the last values, and the listener is called 3 times.
+- `a write that fails after the move keeps the backup; the retry writes without a second backup`.
+  The move succeeds, then the temp write fails (disk full). `set()` rejects and the settings stay
+  the defaults. The backup holds the original, and settings.json is absent. The retry writes the
+  file and makes no second backup. A clock that advances on each call proves that no second
+  backup is attempted, not just that two backups shared the same name.
+- `a read error without an error code is treated as unreadable: the first set moves the file aside`.
+- `with the real fs, a settings.json that is a directory (EISDIR) is moved aside on the first set`.
+  This runs end to end on the real file system with no injected fs. The directory and its content
+  are kept under the backup name.
+
+The fixer's 3 CR-1 tests were reviewed and are sound. They cover the backup on the first set (only
+once), ENOENT on the move, and a failed move (EBUSY), with retry: the set is rejected, nothing is
+written, nobody is notified, and the next set succeeds.
 
 ## Requirement coverage
 
 | Requirement | Tests | Command | Result |
 |---|---|---|---|
-| AC1 unit: defaults | `SettingsStore defaults` (4 existing); `no stale temp file: nothing is logged` | `npx vitest run --project desktop --project contract` | Pass |
-| AC1 unit: unknown keys dropped | `SettingsStore unknown keys` (3 existing) + `__proto__ and constructor keys in the file are dropped...`; handlers `extra` key refused (existing) | `npx vitest run --project desktop --project contract` | Pass |
-| AC1 unit: corrupt file -> defaults + backup | `%s -> defaults, the bad file is kept as a backup` (6 existing) + `%s -> treated as corrupt` (6 new) + `cannot be moved aside` + `without an injected clock...` + `read error without an error code` + existing EISDIR test | `npx vitest run --project desktop --project contract` | Pass |
-| AC2 atomic writes, crash between write and rename | `writes to a temp file and renames it` (existing), `a crash between write and rename keeps the previous file` (existing), `a crash before the first file existed` (existing), `torn temp` (new), `queued behind a failed one` (new), `stale temp file that cannot be removed` (new) | `npx vitest run --project desktop --project contract` | Pass |
+| AC1 unit: defaults | `SettingsStore defaults` (4) + `no stale temp file: nothing is logged` | `npx vitest run --project desktop --project contract` | Pass |
+| AC1 unit: unknown keys dropped | `SettingsStore unknown keys` (4, incl. `__proto__`/`constructor`); handlers `extra` key refused | `npx vitest run --project desktop --project contract` | Pass |
+| AC1 unit: corrupt file -> defaults + backup | `%s -> defaults, the bad file is kept as a backup` (6), `%s -> treated as corrupt` (6), `cannot be moved aside`, `without an injected clock...`, `read error without an error code`, `a file that cannot be read (not ENOENT)...` | `npx vitest run --project desktop --project contract` | Pass |
+| AC1 / CR-1: an unreadable (non-ENOENT) file is not lost on the first write | fixer's 3 tests + this pass's 5 tests in `SettingsStore unreadable file` | `npx vitest run --project desktop --project contract` | Pass |
+| AC2 atomic writes, crash between write and rename | `writes to a temp file and renames it`, `a crash between write and rename keeps the previous file`, `a crash before the first file existed`, `torn temp`, `queued behind a failed one`, `stale temp file that cannot be removed`, `a write that fails after the move keeps the backup...` | `npx vitest run --project desktop --project contract` | Pass |
 | AC3 renderer gets app.settings.changed after a set (Electron harness) | `apps/desktop/test/settings.electron.spec.ts` `the renderer gets app.settings.changed after app.settings.set` (+4 others in that file) | `npm run test:electron` (repo root; builds renderer + desktop, runs Electron via Playwright `_electron`) | Pass (3 files, 17 tests) |
 | AC3 supporting: handler + broadcast wiring, payload schema | handlers `a set over the port saves, answers and broadcasts one valid app.settings.changed`; contract `the app.settings.changed payload carries the full, valid settings`; broadcast tests | `npx vitest run --project desktop --project contract` | Pass |
-| Assumption: event only when a value changes; invalid values change nothing | store `notifies listeners...` (existing), `a set() with an invalid value is refused` (new), handlers integration test (new), Electron `invalid settings are refused` (existing) | both commands above | Pass |
+| Assumption: event only when a value changes; invalid values change nothing | store `notifies listeners...`, `a set() with an invalid value is refused`, handlers integration test, Electron `invalid settings are refused` | both commands above | Pass |
 
 ## Focused test execution
 
 Command:
 
+`npx vitest run --project desktop apps/desktop/src/settings/store.spec.ts`, then
 `npx vitest run --project desktop --project contract` (repo root)
 
 Result:
 
-Pass: 10 files, 753 tests. Before my additions the baseline was 733 tests.
+Pass. store.spec.ts: 48 tests. Desktop + contract: 10 files, 761 tests. That is 756 at 21f43f0
+plus the 5 added in this pass.
 
 ## Full test execution
 
 Command:
 
-`npm run check` (repo root: eslint + prettier, tsc in every workspace, vitest for all projects, renderer `ng test`), and `npm run test:electron` (repo root)
+`npm run check` (repo root: eslint + prettier, tsc in every workspace, vitest for all projects,
+renderer `ng test`) and `npm run test:electron` (repo root)
 
 Result:
 
-Pass. `npm run check` passed: lint and typecheck passed, vitest ran 22 files / 1318 tests, and the renderer ran 5 files / 181 tests. `npm run test:electron` passed: 3 files, 17 tests.
+Pass. `npm run check`: lint and typecheck passed (they are chained before the tests). Vitest ran 22
+files / 1326 tests, and the renderer ran 5 files / 181 tests. `npm run test:electron`: 3 files, 17
+tests.
 
 ## .taskcheck
 
 Result:
 
-Pass. `.taskcheck` runs `npm run check`, which passed on the final test snapshot (see above).
+Pass. `.taskcheck` runs `npm run check`, which passed on the final snapshot (see above). It was not
+run as a separate command.
 
 ## Bugs found
 
-None. No production defect was found. Every new test passed against the unchanged production code.
+None. Every new test passed against the unchanged production code at 21f43f0. CR-1 is fixed as
+`fixes.md` describes, and no new defect was found in the fix.
+
+Observation, not a defect: if the move succeeds and the following temp write fails, settings.json
+is absent until the next successful set. A restart in that window starts with the defaults. The
+user's data is kept in `settings.json.unreadable-<time>`, and on that start the file could not
+have been read anyway. This matches the intent of CR-1 (do not destroy the file), so no fix is
+requested. The test `a write that fails after the move keeps the backup...` pins this behavior.
 
 ## Coverage
 
 Status: verified
 
 Metric: whole-file coverage of task-changed production files.
-Changed-line coverage: not measured. The configured reporters (text-summary, json-summary, lcov) give no diff-aware result. All three measured files are new or mostly new in this task, and every one is at 100%, so changed-line coverage of those files can be no lower.
+Changed-line coverage: not measured. The configured reporters (text-summary, json-summary, lcov)
+give no diff-aware result. All three files are new in this task and each is at 100%, so
+changed-line coverage of these files can be no lower.
 
 Evidence:
-- Task id: app-settings. Immutable base: e46732c98118f1cae207337fdc22e418298430c0. Measured HEAD: 2e365ba37bd3f54401b8d1aaf5cf19ef869238ad (now b21a38b, which adds only docs). Task ownership comes from the parent-supplied commit list, checked against `git log e46732c..HEAD` and `git diff --stat e46732c..HEAD`.
-- Source/test snapshot (sha256): store.ts 7fff0f36..., broadcast.ts 9bc5ab06..., handlers.ts 37dedca5..., store.spec.ts cd9ef75a..., broadcast.spec.ts 226d5fec..., handlers.spec.ts c79a2f26..., contract index.spec.ts f3f0eb81.... Hashes were taken before the final run and checked again after it; nothing changed.
+- Task id: app-settings. Immutable base: e46732c98118f1cae207337fdc22e418298430c0. Measured HEAD: 21f43f03461a44f196c162b31862f9341e283a0c. Task ownership comes from the parent-supplied base and commit list, checked against `git log e46732c..HEAD` and `git show --stat 21f43f0`.
+- Source/test snapshot (sha256 prefix): store.ts ac2e6a02539e54c0, broadcast.ts 9bc5ab0641d63d6f, handlers.ts 37dedca5be05fb6a, store.spec.ts b0a46e7e2f6367e9 (uncommitted, includes this pass's tests), broadcast.spec.ts 226d5fecfac33d7e, handlers.spec.ts c79a2f266ef7a858, contract index.spec.ts f3f0eb81464cdf4b. The hashes were taken before the runs and checked again after `npm run check` and `npm run test:electron`. Nothing changed.
 - Included: `apps/desktop/src/settings/store.ts`, `apps/desktop/src/main/broadcast.ts`, `apps/desktop/src/main/handlers.ts`. Excluded:
-  - `apps/desktop/src/main/index.ts` and `window.ts`: Electron entry and window wiring. They import `electron`, so they cannot run under unit vitest. The Electron harness test exercises them (AC3), but that harness has no coverage provider.
-  - `packages/contract/src/app.ts` and `envelope.ts`: declarative zod schema and constant additions. They are tested by the contract spec but were not instrumented in this run.
+  - `apps/desktop/src/main/index.ts` and `window.ts`: Electron entry and window wiring. They import `electron`, so unit vitest cannot load them. The Electron harness (AC3) exercises them but collects no coverage.
+  - `packages/contract/src/app.ts` and `envelope.ts`: declarative zod schema and constant additions. The contract spec tests them, but they were not instrumented.
   - Test files and docs.
   - No renamed or deleted files.
-- Provider/version: vitest 5.1.0 with @vitest/coverage-v8 5.1.0. Command: `npx vitest run --coverage --coverage.include='src/settings/store.ts' --coverage.include='src/main/broadcast.ts' --coverage.include='src/main/handlers.ts'`. Working directory: `apps/desktop`. Test selection: all desktop unit specs (7 files, 127 tests).
-- Run start 2026-11-16T19:52:04+01:00, completed 19:52:06+01:00. Exit status 0. All tests passed.
-- Reports: `apps/desktop/coverage/coverage-summary.json` (sha256 bd1887e231bf9122...) and `apps/desktop/coverage/lcov.info` (sha256 d9a5943cdeaa67eb...). Both have mtime 19:52:06, which is within the run.
-- Freshness: the provider rewrote the coverage directory during this run. An earlier run before the last test additions (19:51:18) measured 108/110 statements, 44/47 branches and 33/35 functions. Its gaps are listed below and are now covered.
-- Final run after latest test additions and production fixes: yes. There were no production fixes.
+- Provider/version: vitest 5.1.0 with @vitest/coverage-v8 5.1.0. Command: `npx vitest run --coverage --coverage.include='src/settings/store.ts' --coverage.include='src/main/broadcast.ts' --coverage.include='src/main/handlers.ts'`. Working directory: `apps/desktop`. Test selection: all desktop unit specs (7 files, 135 tests).
+- Run start 2026-11-16T19:55:55+01:00, completed 19:55:56+01:00. Exit status 0. All tests passed.
+- Reports: `apps/desktop/coverage/coverage-summary.json` (sha256 d8a9f2e7cbb7e36db031de33f9d376f04007d35bc06e73200d3bca2b1191498c) and `apps/desktop/coverage/lcov.info` (sha256 5f45005355ff5136d455b4312a9fe2a7b1571be1d46e2b37582a1ef0c2d47233). Both have mtime 19:55:56, which is within the run.
+- Freshness: the provider rewrote the coverage directory during this run. The counters reflect the CR-1 code (store.ts grew from 87 to 100 statements). The first-pass numbers (store.ts 87/87) are stale and replaced below.
+- Final run after the latest test additions and production fixes: yes. It measured 21f43f0, which includes the CR-1 fix, plus this pass's tests.
 
 Values below use covered/total (percentage); zero-denominator or unsupported metrics are N/A.
 
 | Changed file | Statements | Branches | Functions | Lines |
 |---|---:|---:|---:|---:|
-| `apps/desktop/src/settings/store.ts` | 87/87 (100%) | 44/44 (100%) | 23/23 (100%) | 75/75 (100%) |
+| `apps/desktop/src/settings/store.ts` | 100/100 (100%) | 48/48 (100%) | 25/25 (100%) | 87/87 (100%) |
 | `apps/desktop/src/main/broadcast.ts` | 11/11 (100%) | 1/1 (100%) | 5/5 (100%) | 9/9 (100%) |
 | `apps/desktop/src/main/handlers.ts` | 12/12 (100%) | 2/2 (100%) | 7/7 (100%) | 11/11 (100%) |
-| Aggregate (summed counters, the 3 files above) | 110/110 (100%) | 47/47 (100%) | 35/35 (100%) | 95/95 (100%) |
+| Aggregate (summed counters, the 3 files above) | 123/123 (100%) | 51/51 (100%) | 37/37 (100%) | 107/107 (100%) |
 
-The aggregate leaves out `main/index.ts`, `main/window.ts` (Electron-only, covered behaviorally by `npm run test:electron`), `contract/src/app.ts` and `contract/src/envelope.ts` (schema declarations, not instrumented in this run).
+The aggregate leaves out `main/index.ts` and `main/window.ts` (Electron-only; `npm run test:electron`
+covers them behaviorally). It also leaves out `contract/src/app.ts` and `contract/src/envelope.ts`
+(schema declarations, not instrumented).
 
 | File and uncovered lines/branch locations | Required behavior or risk | Action/test added or reason left uncovered |
 |---|---|---|
-| `apps/desktop/src/settings/store.ts:44` (first run: branch where the error has no string `code`) | A read or unlink failure without an errno code must still fall back to the defaults | Added `a read error without an error code gives the defaults (logged)`. Covered now. |
-| `apps/desktop/src/settings/store.ts:101` (first run: the default clock was never called) | The real backup name uses the current time | Added `without an injected clock the backup is named after the current time`. Covered now. |
-| `apps/desktop/src/main/broadcast.ts:12` (first run: the default no-op log) | A broadcast to a closed port must not throw when no log is given | Added `without a log, a failing sink is swallowed...`. Covered now. |
-| `apps/desktop/src/main/index.ts`, `window.ts` (not instrumented) | Settings store opened in userData, onChange -> broadcaster, sink per window removed on detach | Covered by the Electron harness (AC3) and by the new handlers integration test, which mirrors the index.ts wiring. Line coverage is not measurable without Electron-side instrumentation. |
+| `apps/desktop/src/settings/store.ts` (CR-1 code: `backUpUnreadable`, `unreadable` flag) | An unreadable file must survive the first write | Fully covered by the fixer's 3 tests. This pass adds 5 behavioral edge-case tests (no-op/invalid set, concurrency, a write failure after the move, a code-less error, real EISDIR). These cover behavior, not lines that were missing. |
+| First-pass gaps (`store.ts` code-less error, default clock; `broadcast.ts` default log) | See first pass | Covered since the first pass |
+| `apps/desktop/src/main/index.ts`, `window.ts` (not instrumented) | Settings store opened in userData, onChange -> broadcaster, sink per window removed on detach | Covered by the Electron harness (AC3) and by the handlers integration test, which mirrors the index.ts wiring. Line coverage cannot be measured without Electron-side instrumentation. |
 
 ## Unable to test
 
-- Line-level coverage of `apps/desktop/src/main/index.ts` and `window.ts`. Unit vitest cannot load `electron`, and the Electron harness collects no coverage. Their behavior is tested end-to-end by `npm run test:electron`. No follow-up is needed for this task.
-- A real process kill between `writeFile` and `rename`. The crash is simulated with an injected fs that rejects `rename`, or writes half of the content to the temp file and then rejects. AC2 asks for exactly this simulation.
-- Removing a window's broadcast sink when it detaches (`window.ts`) is not tested directly. A test would need several windows or a renderer reload in the harness. This is low risk because the Broadcaster logs and swallows errors from closed ports.
+- Line-level coverage of `apps/desktop/src/main/index.ts` and `window.ts`. Unit vitest cannot load
+  `electron`, and the Electron harness collects no coverage. `npm run test:electron` tests their
+  behavior end to end. No follow-up is needed for this task.
+- A real process kill between `writeFile` and `rename`. It is simulated with an injected fs that
+  rejects `rename`, or that writes half of the temp file and then rejects. AC2 asks for exactly this
+  simulation.
+- A real EACCES on settings.json. The tests inject EACCES through the fs wrapper, because chmod-based
+  tests behave differently when they run as root. A real EISDIR is tested on the real file system.
+- Removing a window's broadcast sink when it detaches (`window.ts`) is not tested directly. Low risk:
+  the Broadcaster logs and swallows errors from closed ports.
 
 ## Summary
 
-Tests and task-scoped coverage are sufficient; no production defects found. I added 20 test cases. The focused suites, `npm run check` (.taskcheck) and the Electron harness all pass, and the three measured task files are at 100% statement, branch, function and line coverage.
+Tests and task-scoped coverage are sufficient; no production defects found. The CR-1 fix behaves as
+`fixes.md` describes. This pass adds 5 edge-case tests, and all of them pass. The focused suites,
+`npm run check` (.taskcheck) and `npm run test:electron` pass on the final snapshot. The three
+measured task files are at 100% statement, branch, function and line coverage.
