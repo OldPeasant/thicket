@@ -1,10 +1,11 @@
 ---
 title: M0: Copy the JSON Canopy explorer into the renderer
-status: todo
-owner:
+status: in_progress
+owner: dell26/agent-3
 deps: [renderer-scaffold]
 touches: [packages/renderer/src/app/explorer,packages/renderer/src/app/schema,packages/renderer/src/styles.css]
 prio: 1
+lease_until: 2026-11-16T18:23:10Z
 ---
 ## Goal
 Copy `src/app/json-explorer` and `src/app/schema` from ../json-master-plugin (Apache-2.0, keep NOTICE attribution) into the renderer; remove the IDE host bridge; a dev route shows samples/canopy-demo.json in tables and form layouts with search, collapse, column hiding and editing.
