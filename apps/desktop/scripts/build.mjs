@@ -1,6 +1,7 @@
 // Bundles the Electron main process, the preload script and the backend utilityProcess into
 // apps/desktop/dist/ (CommonJS: the sandboxed preload can't load ES modules).
-// `--watch` rebuilds on change (npm run dev).
+// `--watch` keeps rebuilding on change (manual use only: `npm run dev` bundles once, so changes to
+// main, preload or backend need a restart of `npm run dev`).
 import { build, context } from 'esbuild';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

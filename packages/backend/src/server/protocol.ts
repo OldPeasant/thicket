@@ -6,7 +6,14 @@
  */
 export type BackendControlMessage =
   | { type: 'privileged' }
-  | { type: 'renderer'; /** Electron `webContents.id`, for logs. */ window: number };
+  | {
+      type: 'renderer';
+      /**
+       * The host's renderer connection counter (a new one per window load, also on reload; not
+       * Electron's `webContents.id`), for logs.
+       */
+      window: number;
+    };
 
 export function isBackendControlMessage(value: unknown): value is BackendControlMessage {
   if (typeof value !== 'object' || value === null) return false;

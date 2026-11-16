@@ -116,7 +116,8 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   privileged port), `backend.sleep` (cancellable wait for tests).
 - Tests: unit specs next to the code; `npm run test:electron` (root: builds the renderer first)
   starts the real app with Playwright's `_electron` driver (`playwright-core`) and checks pings,
-  cancel, restart after `SIGKILL`, the CSP header and the navigation guards. On Linux it needs a
+  cancel, restart after `SIGKILL`, the CSP header and the navigation guards; `dev.electron.spec.ts`
+  checks the `npm run dev` path (`ng serve` + `THICKET_DEV_SERVER`). On Linux it needs a
   display: `xvfb-run -a npm run test:electron`, or without one it uses `--ozone-platform=headless`
   (also forced with `THICKET_TEST_HEADLESS=1`). Not part of `npm run check`.
 - The Electron binary is downloaded by the `electron` package's postinstall; if
@@ -142,9 +143,10 @@ Contract layout (`packages/contract/src/`):
   profiles and requires `confirmed: true` for every write on production profiles and for
   `docs.updateMany` / `docs.deleteMany` on every profile.
 - Cancel routing: a request and its stream belong to the process that served the request
-  (`route(method)`). The preload/main sends `cancel` to the owner of the target: by the request's
-  method for a request id, and through a streamId → owner map kept by `main` for a stream id.
-  Streams of main-routed `io.*` methods run in the backend, so `main` forwards their cancel there.
+  (`route(method)`). The preload sends `cancel` to the owner of the target: by the request's
+  method for a request id, and through a streamId → owner map (kept by the preload, filled from
+  responses with a `streamId`) for a stream id. Streams of main-routed `io.*` methods run in the
+  backend, so `main` forwards cancels of the streams it proxies to the backend (a later task).
 - File paths: the renderer never sends paths for `io.*` (opaque tokens from native dialogs). The
   exception is the profile's TLS/SSH file paths, which are stored in the profile; the renderer
   gets them from `profiles.chooseFile` (native dialog in `main`).

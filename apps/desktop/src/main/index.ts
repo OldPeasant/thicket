@@ -59,6 +59,11 @@ app.on('web-contents-created', (_event, contents) => {
   contents.on('will-redirect', (event) => {
     blockNavigation(event, event.url, contents.getURL());
   });
+  // Subframes (also refused by the CSP's `frame-src 'none'`); the main frame is `will-navigate`'s.
+  contents.on('will-frame-navigate', (event) => {
+    if (!event.isMainFrame && blockNavigation(event))
+      log(`blocked frame navigation to ${event.url}`);
+  });
   contents.on('will-attach-webview', blockWebview);
 });
 

@@ -50,7 +50,13 @@ const server = run(npm, ['run', 'dev', '-w', 'packages/renderer', '--', '--port'
 });
 server.on('exit', (code) => stopAll(code ?? 1));
 
-await waitFor(devServer, 120_000);
+try {
+  await waitFor(devServer, 120_000);
+} catch (error) {
+  // Don't leave `ng serve` running (and holding the port) when startup fails.
+  console.error(`[dev] ${error instanceof Error ? error.message : String(error)}`);
+  stopAll(1);
+}
 const app = run(electron, [appDir], {
   cwd: appDir,
   env: { ...process.env, THICKET_DEV_SERVER: devServer },

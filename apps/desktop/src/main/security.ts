@@ -80,9 +80,9 @@ export interface PreventableEvent {
 }
 
 /**
- * `will-navigate` / `will-redirect` / `will-frame-navigate`: every navigation away from the loaded
- * page is blocked (the renderer is a single-page app; in-page history changes don't fire these).
- * Returns whether it was blocked.
+ * `will-navigate` / `will-redirect` / `will-frame-navigate` (subframes only): every navigation away
+ * from the loaded page is blocked (the renderer is a single-page app; in-page history changes don't
+ * fire these). Without `url`/`current` (a subframe) it always blocks. Returns whether it was blocked.
  */
 export function blockNavigation(event: PreventableEvent, url?: string, current?: string): boolean {
   if (url !== undefined && current !== undefined && sameDocument(url, current)) return false;

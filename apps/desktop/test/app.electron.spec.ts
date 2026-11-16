@@ -1,28 +1,8 @@
-import type { Event, Request, Response } from '@thicket/contract';
-import { createRequire } from 'node:module';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { _electron, type ElectronApplication, type Page } from 'playwright-core';
+import type { Request, Response } from '@thicket/contract';
+import type { ElectronApplication, Page } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-/** What the preload exposes; redeclared so the page functions below type-check. */
-interface Thicket {
-  request(request: Request): Promise<Response>;
-  cancel(id: string): void;
-  on(stream: string, listener: (event: Event) => void): () => void;
-}
-type TestWindow = typeof globalThis & { thicket: Thicket; restartEvents: Event[] };
-
-const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-// The `electron` package's main export is the path of the Electron binary.
-const electronPath = createRequire(import.meta.url)('electron') as string;
-
-/** Without a display (CI without xvfb-run), use Chromium's headless Ozone backend. */
-function headlessArgs(): string[] {
-  const noDisplay = !process.env['DISPLAY'] && !process.env['WAYLAND_DISPLAY'];
-  const wanted = process.env['THICKET_TEST_HEADLESS'] === '1';
-  return process.platform === 'linux' && (noDisplay || wanted) ? ['--ozone-platform=headless'] : [];
-}
+import { launchApp, type TestWindow } from './helpers';
 
 let app: ElectronApplication;
 let page: Page;
@@ -33,13 +13,7 @@ function call(request: Request): Promise<Response> {
 }
 
 beforeAll(async () => {
-  app = await _electron.launch({
-    executablePath: electronPath,
-    args: [...headlessArgs(), appDir],
-    env: { ...process.env, ELECTRON_ENABLE_LOGGING: '1' } as Record<string, string>,
-  });
-  app.process().stdout?.on('data', (chunk: Buffer) => output.push(chunk.toString()));
-  app.process().stderr?.on('data', (chunk: Buffer) => output.push(chunk.toString()));
+  app = await launchApp(output);
   page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
 });

@@ -22,6 +22,11 @@ export interface ThicketApi {
   /**
    * Listens to the events of one stream (a `streamId` or a broadcast stream name), or to every
    * event when called with just a listener. Returns an unsubscribe function.
+   *
+   * Events of a stream nobody listens to yet are buffered and replayed to its first `on(stream)`
+   * listener, but only while no `on(listener)` (every-event) listener is registered (when the
+   * stream starts and when its events arrive): an event delivered to an every-event listener is
+   * not buffered for a later `on(stream)`.
    */
   on(stream: string, listener: (event: Event) => void): () => void;
   on(listener: (event: Event) => void): () => void;
