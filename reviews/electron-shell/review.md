@@ -4,41 +4,41 @@ Date: 2026-11-16
 
 Task: electron-shell - M0: Electron main, preload, backend utilityProcess and port broker
 
-Scope: `git diff b93d0f2..HEAD -- . ':!tasks' ':!reviews'` (task commits 89a69ae, ca88857, 18f97c6), committed changes only
+Scope: second pass, `git diff 2693efc..HEAD -- . ':!tasks' ':!reviews'` (task commits 82b552e..6dd230b). Focus: the fixes for CR-1..CR-5 from the first pass (commit 6dd230b, `reviews/electron-shell/fixes.md`) and the final code. Committed changes only.
 
 Requirements:
 - tasks/electron-shell.md acceptance criteria and recorded assumptions
 - SPEC.md section 4 (thicket.request/cancel/on) and section 6 (renderer sandbox, CSP, navigation / window.open)
-- docs/ARCHITECTURE.md "Processes" and "Electron shell (apps/desktop, M0)", "API between parts" (cancel routing)
+- docs/ARCHITECTURE.md "Electron shell (apps/desktop, M0)" and "API between parts"
 - AGENTS.md (Evidence, quality gate)
-- Compatibility target: `origin/wip/api-client:packages/renderer/src/app/api/thicket-bridge.ts`
+- First-pass review (CR-1..CR-5) and reviews/electron-shell/fixes.md
 
 Git range:
 - Branch: main
-- HEAD: 18f97c6287496989a8bda6ccea6de951feb57126
-- Base/start: b93d0f27ec0c9375109365a71c4c820b97163e18
-- Commits reviewed: 3 (89a69ae, ca88857, 18f97c6); no uncommitted changes at start
+- HEAD: 6dd230be1460f24b70da49c207a692def35fe0a6
+- Base/start: 2693efcf889a05c8ab14886508568ec74bbecf6d (origin/main)
+- Commits reviewed: 5 (82b552e, 0526f2e, a42e950, 6cfe1a0, 6dd230b). The first pass covered the same code before it was rebased. This pass reads 6dd230b in full and rechecks the files it touches. No uncommitted changes at start.
 
 Commands run (read-only):
-- `git diff --stat b93d0f2..HEAD -- . :!tasks :!reviews` -> 39 files, +2805/-9
-- `git diff b93d0f2..HEAD -- packages/contract/src packages/backend/src/index.ts <package.json files>` -> reviewed
-- `git show origin/wip/api-client:packages/renderer/src/app/api/thicket-bridge.ts` -> interface compatible (request/cancel/on(listener))
-- `git show HEAD:vitest.config.ts`, `grep include vitest.shared.ts` -> `test/app.electron.spec.ts` is outside the unit include (`src/**/*.spec.ts`), so not part of `npm run check`
-- `git check-ignore -v apps/desktop/dist/main.cjs` -> ignored by `.gitignore:3 dist/`
-- `grep inlineCritical packages/renderer/angular.json` -> `inlineCritical: false` (no inline `onload` handlers that the CSP would block)
-- `python tasks.py verify electron-shell` -> not permitted in this session; the task file shows no criteria verified yet
-- Tests were not re-run by the reviewer; the parent reports `npm run check` and `npm run test:electron -w apps/desktop` passing.
+- `git show 6dd230b -- apps packages docs` -> reviewed in full
+- Read `apps/desktop/scripts/dev.mjs`, `apps/desktop/src/main/index.ts`, `apps/desktop/test/app.electron.spec.ts`, `apps/desktop/src/preload/bridge.ts` (receive/emit), `apps/desktop/vitest.electron.config.ts`
+- `grep` of the renderer, desktop and root `package.json` scripts -> renderer `dev` is `ng serve`, so the dev spec's direct `ng.js serve --port` matches what `dev.mjs` starts through `npm run dev -w packages/renderer -- --port`
+- `apps/desktop/tsconfig.json` includes `test/**/*.ts` -> the new `helpers.ts` and `dev.electron.spec.ts` are type-checked by `npm run check`
+- `vitest.electron.config.ts` includes `test/**/*.electron.spec.ts` with `fileParallelism: false` -> the dev spec runs and does not start a second Electron while the app spec runs
+- playwright-core version 1.65.1 (has `page.consoleMessages()`)
+- Tests were not re-run by the reviewer. fixes.md reports `npm run test:electron -w apps/desktop` 2 files / 11 tests passing, and `npm run check` passing.
 
-Summary: 0 P0, 0 P1, 1 P2, 4 P3
+Verification of first-pass findings:
+- CR-1 (dev path not tested): Resolved. `dev.electron.spec.ts` starts `ng serve` on a free port and launches the built app with `THICKET_DEV_SERVER`. It asserts the dev-server URL, the CSP header (including `ws://localhost:<port>` in `connect-src`) on a response that passes through `onHeadersReceived`, `app.ping` from main, `backend.ping` from the backend with `mainReachable: true`, and no console CSP violations. `ng serve` runs in its own process group, which is killed in `afterAll`. `scripts/dev.mjs` itself is still not executed by a test, and fixes.md says so. The parent's evidence for criterion 1 should name `dev.electron.spec.ts` and say that it covers the mechanism `dev.mjs` uses. It should also say the test ran with the display or headless fallback, not with xvfb-run (see the existing assumption). See CR-1 below for one weakness in the CSP-violation check.
+- CR-2 (dev.mjs leftovers, build comment): Resolved. `waitFor` failure now logs and calls `stopAll(1)`, which kills the children and exits before Electron is spawned (`dev.mjs:53-59`). The `build.mjs` header no longer claims `npm run dev` uses `--watch`.
+- CR-3 (`window` doc comment): Resolved (`protocol.ts:9-16`). The comment now describes the host's per-load connection counter.
+- CR-4 (ARCHITECTURE stream-owner map): Resolved (`ARCHITECTURE.md:145-149`). It now says the preload keeps the map, which matches `bridge.ts:175`. Main forwarding of proxied `io.*` stream cancels is marked as a later task.
+- CR-5 (`will-frame-navigate` not registered): Resolved (`index.ts:62-66`). Subframe navigations (`!event.isMainFrame`) are always blocked and logged. Main-frame navigations stay with `will-navigate`, so same-document checks still apply. The `security.ts` comment matches.
+- Test-writer note (bridge buffering with `on(listener)`): the new JSDoc (`bridge.ts:26-29`) matches `receive()`/`emit()` (`bridge.ts:177`, `bridge.ts:200-203`).
 
-Verified without findings:
-- BrowserWindow: `sandbox`, `contextIsolation`, `nodeIntegration: false` (+ worker/subframe, `webviewTag: false`) in `security.ts:39`; CSP sent as response header for `thicket://` (`index.ts:89`) and for http(s) via `onHeadersReceived` (`index.ts:109`); CSP matches ARCHITECTURE (`default-src 'self'; script-src 'self'`, inline styles documented at ARCHITECTURE.md:43).
-- `window.open` denied and navigation / redirects / webviews blocked for every web contents (`index.ts:53`); permissions denied. Unit-tested in `security.spec.ts`, also exercised in the Electron test.
-- `resolveAppFile`: host and scheme checked, percent-decoded `..`, `.`, `\`, NUL segments refused (including `%2F`-smuggled separators); malformed escapes refused.
-- Privileged port: created per backend process in main, transferred only to the utilityProcess (`backend-host.ts:111`); `privilegedMethods` are not in `methods`, so `route()` and the renderer-facing `serve()` answer `UNKNOWN_METHOD`; the preload has no IPC path to obtain it. Tested in unit and Electron tests.
-- Cancel: `serve()` answers `CANCELLED` at once, aborts the handler signal, drops the late result; the preload routes cancel by request owner or stream owner and answers queued requests locally.
-- Restart: exit detected, stale exits ignored, back-off capped, `stop()` cancels pending restarts; preload fails old requests with `INTERNAL`, ends streams with `error`, emits `backend.restarted`.
-- `window.thicket` shape is compatible with the wip/api-client `ThicketBridge` (`request` resolves with `Response`, `cancel(id)`, `on(listener)` returning an unsubscribe function).
+No new correctness, security or integration problems were found in the fix commit. `helpers.ts` keeps the earlier launch behavior (same args and env, plus optional extra env) and adds `freePort`/`waitForUrl`. The `app.electron.spec.ts` refactor keeps every assertion unchanged.
+
+Summary: 0 P0, 0 P1, 0 P2, 1 P3
 
 ## P0 Critical
 
@@ -50,43 +50,17 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | `npm run dev` path of criterion 1 is not exercised by any test**
-    - File: `apps/desktop/test/app.electron.spec.ts:36`
-    - Category: Tests
-    - Problem: Criterion 1 starts with "`npm run dev` starts the app". The Electron integration test launches the bundled app with `electron .` against the built renderer on `thicket://app` (it asserts `page.url()` is `thicket://app/index.html`). The dev path is different code: `scripts/dev.mjs` orchestration (build, `ng serve`, wait, Electron with `THICKET_DEV_SERVER`), the renderer loaded from `http://localhost:4200`, the CSP applied through `session.webRequest.onHeadersReceived` together with the renderer's own CSP meta tag, and `connect-src` for the live-reload socket. None of that runs in any test, and the criterion also names xvfb-run, which the assumption says was not available.
-    - Why it matters: Evidence recorded for criterion 1 from `npm run test:electron` alone would not show that `npm run dev` starts the app. For example, a dev-server script or socket blocked by the CSP header would go unnoticed.
-    - Suggested fix: Run `npm run dev` yourself, call `app.ping` and `backend.ping` from the dev window (DevTools or a small Playwright run with `THICKET_DEV_SERVER`), and record that run in the evidence. If you can't, mark that part `--skip` with the reason. Record the integration test run as evidence for the ping half only.
+None.
 
 ## P3 Low
 
-- [ ] **CR-2 | `npm run dev` can leave `ng serve` running after a startup failure; build comment claims dev uses `--watch`**
-    - File: `apps/desktop/scripts/dev.mjs:53`
-    - Category: Quality
-    - Problem: If `waitFor(devServer, 120_000)` throws, the top-level await rejects and Node exits without calling `stopAll`. The spawned `ng serve` child is not detached, but it is not killed either, so it keeps running and holds port 4200. Separately, `scripts/build.mjs:3` says "`--watch` rebuilds on change (npm run dev)", but `dev.mjs:42` runs the build without `--watch`, which matches the documented "changes need a restart".
-    - Why it matters: The next `npm run dev` fails because the port is taken. The comment misleads anyone maintaining the dev loop.
-    - Suggested fix: Wrap `waitFor` in `try`/`catch` and call `stopAll(1)` on failure. Fix the `build.mjs` comment, or remove the unused watch mode.
-
-- [ ] **CR-3 | `renderer` control message's `window` documented as `webContents.id` but carries an internal counter**
-    - File: `packages/backend/src/server/protocol.ts:9`
-    - Category: Quality
-    - Problem: The doc comment says `window` is the "Electron `webContents.id`, for logs". `BackendHost.broker` sends `sink.id` (`backend-host.ts:126`), a host-local counter that also increments on every page reload.
-    - Why it matters: Backend log lines ("renderer N disconnected") can't be correlated with Electron's webContents ids as the comment promises.
-    - Suggested fix: Update the comment to describe the real value (a connection id per window load), or pass `webContents.id` through `connectRenderer`.
-
-- [ ] **CR-4 | ARCHITECTURE contradicts itself on who keeps the streamId -> owner map**
-    - File: `docs/ARCHITECTURE.md:146`
-    - Category: Integration
-    - Problem: "API between parts" says the stream owner map is "kept by `main`". The new "Electron shell" section (`ARCHITECTURE.md:104`) and the implementation (`bridge.ts:53`) keep it in the preload. The preload sends a stream cancel straight to the process that answered the request.
-    - Why it matters: Later tasks for main-routed `io.*` streams (whose cancels must reach the backend) will read two different designs.
-    - Suggested fix: Change line 146 to say the preload keeps the map, and that main forwards cancels of streams it proxies to the backend.
-
-- [ ] **CR-5 | `blockNavigation` documents `will-frame-navigate`, but it is not registered**
-    - File: `apps/desktop/src/main/security.ts:83`
-    - Category: Quality
-    - Problem: The doc comment lists `will-frame-navigate` among the events it guards. `index.ts:53-63` registers only `will-navigate`, `will-redirect` and `will-attach-webview`. Subframes are prevented by CSP `frame-src 'none'`, so this is not exploitable today.
-    - Why it matters: A reader may assume subframe navigation is guarded in main when it is guarded only by the CSP.
-    - Suggested fix: Register `will-frame-navigate` with the same guard, or remove it from the comment.
+- [ ] **CR-1 | Dev-mode CSP-violation check may miss violations that happen during the initial load**
+    - File: `apps/desktop/test/dev.electron.spec.ts:61`
+    - Category: Tests
+    - Problem: The `console` listener is attached only after `await app.firstWindow()` resolves. Console messages the page logs before that (for example a CSP refusal of the dev server's client script or live-reload WebSocket during the first load) are not collected. Playwright does not replay earlier events to a new `page.on('console')` listener. So the check "reports no Content Security Policy violations" only covers messages logged after the listener is attached, plus the 1 s wait.
+    - Why it matters: This was the regression the first-pass CR-1 was about: a dev-server script or socket blocked by the CSP header. The test can still pass when that block happens early in the load.
+    - Suggested fix: Also check `page.consoleMessages()` (available in the installed playwright-core 1.65.1; it returns messages logged since the page was created). Or attach the listener, then `page.reload()` and wait for the load before asserting.
 
 ## Review conclusion
 
-Material issues found; fix before completing the task. No P0 or P1 defects in the code. The one material item (CR-1) is missing evidence for the `npm run dev` part of criterion 1. Add that evidence, or skip that part with a reason, before `done`. CR-2 to CR-5 are small cleanups.
+No material issues found. CR-1..CR-5 from the first pass are resolved in 6dd230b. The one new finding (CR-1 above, P3) is a small test-robustness improvement and does not block completion. The parent still has to record evidence for each acceptance criterion. For criterion 1, the evidence should name `dev.electron.spec.ts` and the display configuration actually used.

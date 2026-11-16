@@ -102,6 +102,41 @@ describe('Electron shell', () => {
     expect(app.windows()).toHaveLength(1);
   });
 
+  it('will-frame-navigate blocks subframe navigation and leaves the main frame to will-navigate', async () => {
+    // The CSP (`frame-src 'none'`) stops a real iframe before Electron emits the event, so the
+    // registered listeners are driven with synthetic events to check main's wiring.
+    const result = await app.evaluate(({ BrowserWindow }) => {
+      const [window] = BrowserWindow.getAllWindows();
+      if (!window) throw new Error('no window');
+      const contents = window.webContents;
+      const fire = (isMainFrame: boolean) => {
+        let prevented = false;
+        const event = {
+          isMainFrame,
+          url: isMainFrame ? 'thicket://app/index.html#main' : 'https://frame.example.test/',
+          preventDefault: () => {
+            prevented = true;
+          },
+        };
+        contents.emit('will-frame-navigate', event);
+        return prevented;
+      };
+      return {
+        listeners: contents.listenerCount('will-frame-navigate'),
+        subframe: fire(false),
+        mainFrame: fire(true),
+      };
+    });
+    expect(result.listeners).toBeGreaterThanOrEqual(1);
+    expect(result.subframe).toBe(true);
+    expect(result.mainFrame).toBe(false);
+    await expect
+      .poll(() => output.join(''), { timeout: 5_000 })
+      .toContain('[main] blocked frame navigation to https://frame.example.test/');
+    expect(output.join('')).not.toContain('blocked frame navigation to thicket://app');
+    expect(page.url()).toBe('thicket://app/index.html');
+  });
+
   it('restarts a killed backend and tells the renderer', async () => {
     await page.evaluate(() => {
       const w = window as unknown as TestWindow;
