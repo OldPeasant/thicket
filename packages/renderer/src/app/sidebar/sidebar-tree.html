@@ -177,12 +177,7 @@
                   row.text
                 }}</span>
                 @if (row.retry) {
-                  <button
-                    type="button"
-                    class="link"
-                    data-testid="tree-retry"
-                    (click)="row.retry()"
-                  >
+                  <button type="button" class="link" data-testid="tree-retry" (click)="row.retry()">
                     {{ row.tone === 'error' ? 'Retry' : 'Connect' }}
                   </button>
                 }

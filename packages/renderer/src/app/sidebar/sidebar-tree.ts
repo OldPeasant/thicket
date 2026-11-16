@@ -26,7 +26,15 @@ import {
 /** One visible line of the tree. Status lines (loading, error, empty) are not focusable. */
 export type TreeRow =
   | { kind: 'conn'; key: string; level: 1; profile: Profile; state: ConnState; expanded: boolean }
-  | { kind: 'db'; key: string; level: 2; profileId: string; db: string; expanded: boolean; size?: number }
+  | {
+      kind: 'db';
+      key: string;
+      level: 2;
+      profileId: string;
+      db: string;
+      expanded: boolean;
+      size?: number;
+    }
   | { kind: 'coll'; key: string; level: 3; profileId: string; db: string; info: CollectionInfo }
   | {
       kind: 'status';
@@ -107,9 +115,12 @@ export class SidebarTree {
   private readonly expanded = signal<ReadonlySet<string>>(new Set());
   /** Key of the focused (selected) node. */
   protected readonly focusKey = signal<string | null>(null);
-  protected readonly menu = signal<{ x: number; y: number; row: NodeRow; items: MenuItem[] } | null>(
-    null,
-  );
+  protected readonly menu = signal<{
+    x: number;
+    y: number;
+    row: NodeRow;
+    items: MenuItem[];
+  } | null>(null);
   protected readonly prompt = signal<Prompt | null>(null);
   protected readonly promptValues = signal<Record<string, string>>({});
   protected readonly promptError = signal<string | null>(null);
@@ -118,6 +129,8 @@ export class SidebarTree {
   /** Error of the last action without its own place to show it (drop, disconnect). */
   protected readonly notice = signal<string | null>(null);
 
+  /** Bumped whenever focus should move to `tabStop()` after the next render. */
+  private readonly focusRequest = signal(0);
   private focusPending = false;
   private menuFocusPending = false;
   private promptFocusPending = false;
@@ -223,6 +236,7 @@ export class SidebarTree {
     this.tree.start();
     afterRenderEffect(() => {
       this.rows();
+      this.focusRequest();
       this.menu();
       this.prompt();
       const root = this.host.nativeElement;
@@ -269,7 +283,9 @@ export class SidebarTree {
 
   protected statsTitle(profileId: string, db: string, coll?: string): string | null {
     const stats =
-      coll === undefined ? this.tree.dbStats(profileId, db) : this.tree.collStats(profileId, db, coll);
+      coll === undefined
+        ? this.tree.dbStats(profileId, db)
+        : this.tree.collStats(profileId, db, coll);
     return stats?.status === 'error' ? stats.message : null;
   }
 
@@ -289,7 +305,10 @@ export class SidebarTree {
   protected toggle(row: NodeRow, open?: boolean): void {
     if (row.kind === 'coll') return;
     const willOpen = open ?? !row.expanded;
-    if (willOpen === row.expanded && !(row.kind === 'conn' && willOpen && row.state !== 'connected'))
+    if (
+      willOpen === row.expanded &&
+      !(row.kind === 'conn' && willOpen && row.state !== 'connected')
+    )
       return;
     this.setExpanded(row.key, willOpen);
     if (!willOpen) return;
@@ -340,7 +359,11 @@ export class SidebarTree {
       const connected = row.state === 'connected';
       return [
         connected || row.state === 'connecting'
-          ? { id: 'disconnect', label: 'Disconnect', run: () => void this.run(() => this.tree.disconnect(id)) }
+          ? {
+              id: 'disconnect',
+              label: 'Disconnect',
+              run: () => void this.run(() => this.tree.disconnect(id)),
+            }
           : { id: 'connect', label: 'Connect', run: () => this.connect(id) },
         {
           id: 'refresh',
@@ -369,7 +392,11 @@ export class SidebarTree {
     if (row.kind === 'db') {
       const { profileId, db } = row;
       return [
-        { id: 'refresh', label: 'Refresh', run: () => void this.tree.loadCollections(profileId, db) },
+        {
+          id: 'refresh',
+          label: 'Refresh',
+          run: () => void this.tree.loadCollections(profileId, db),
+        },
         {
           id: 'stats',
           label: 'Show counts and sizes',
@@ -606,7 +633,7 @@ export class SidebarTree {
       if (!target) return;
       event.preventDefault();
       this.focusKey.set(target.key);
-      this.focusPending = true;
+      this.requestFocus();
     };
     switch (event.key) {
       case 'ArrowDown':
@@ -674,7 +701,12 @@ export class SidebarTree {
     const key = this.returnFocus;
     this.returnFocus = null;
     if (key !== null) this.focusKey.set(key);
+    this.requestFocus();
+  }
+
+  private requestFocus(): void {
     this.focusPending = true;
+    this.focusRequest.update((n) => n + 1);
   }
 
   private nodeElement(key: string): HTMLElement | null {

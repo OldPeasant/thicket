@@ -16,9 +16,7 @@ import { WriteGuard } from '../safety/write-guard.service';
 
 /** A lazily loaded value: still loading, loaded, or failed with a readable message. */
 export type Load<T> =
-  | { status: 'loading' }
-  | { status: 'loaded'; value: T }
-  | { status: 'error'; message: string };
+  { status: 'loading' } | { status: 'loaded'; value: T } | { status: 'error'; message: string };
 
 export type ConnState = ConnStatus['state'];
 
@@ -61,7 +59,8 @@ const DB_NAME_FORBIDDEN = /[/\\. "$*<>:|?]/;
 /** Why `name` is not a valid database name, or `null`. */
 export function dbNameProblem(name: string): string | null {
   if (name === '') return 'Enter a name.';
-  if (DB_NAME_FORBIDDEN.test(name)) return 'A database name cannot contain / \\ . " $ * < > : | ? or spaces.';
+  if (DB_NAME_FORBIDDEN.test(name))
+    return 'A database name cannot contain / \\ . " $ * < > : | ? or spaces.';
   if (new TextEncoder().encode(name).length > 63) return 'A database name has at most 63 bytes.';
   return null;
 }
@@ -72,7 +71,8 @@ export function collNameProblem(name: string): string | null {
   if (name.includes('$')) return 'A collection name cannot contain $.';
   if (name.includes('\u0000')) return 'A collection name cannot contain the null character.';
   if (name.startsWith('system.')) return 'Names starting with "system." are reserved.';
-  if (name.startsWith('.') || name.endsWith('.')) return 'A collection name cannot start or end with a dot.';
+  if (name.startsWith('.') || name.endsWith('.'))
+    return 'A collection name cannot start or end with a dot.';
   return null;
 }
 
@@ -266,8 +266,8 @@ export class SidebarTreeService {
     this.dbStatsState.update((m) => new Map(m).set(k, { status: 'loading' }));
     let next: Load<DbStats>;
     try {
-      const { raw: _raw, ...stats } = await this.api.request('db.stats', { profileId, db });
-      next = { status: 'loaded', value: stats };
+      const result = await this.api.request('db.stats', { profileId, db });
+      next = { status: 'loaded', value: withoutRaw(result) };
     } catch (error) {
       next = { status: 'error', message: describeError(error) };
     }
@@ -281,12 +281,12 @@ export class SidebarTreeService {
     this.collStatsState.update((m) => new Map(m).set(k, { status: 'loading' }));
     let next: Load<CollStats>;
     try {
-      const { raw: _raw, ...stats } = await this.api.request('coll.stats', {
+      const result = await this.api.request('coll.stats', {
         profileId,
         db,
         coll,
       });
-      next = { status: 'loaded', value: stats };
+      next = { status: 'loaded', value: withoutRaw(result) };
     } catch (error) {
       next = { status: 'error', message: describeError(error) };
     }
@@ -325,7 +325,11 @@ export class SidebarTreeService {
 
   /** Creates a collection, then reloads the collection list. */
   async createCollection(profileId: string, db: string, coll: string): Promise<void> {
-    await this.guard.run('coll.create', { profileId, db, coll }, { confirmLabel: 'Create collection' });
+    await this.guard.run(
+      'coll.create',
+      { profileId, db, coll },
+      { confirmLabel: 'Create collection' },
+    );
     await this.loadCollections(profileId, db);
   }
 
@@ -347,7 +351,12 @@ export class SidebarTreeService {
   }
 
   /** Renames a collection within its database. */
-  async renameCollection(profileId: string, db: string, coll: string, newName: string): Promise<void> {
+  async renameCollection(
+    profileId: string,
+    db: string,
+    coll: string,
+    newName: string,
+  ): Promise<void> {
     await this.guard.run(
       'coll.rename',
       { profileId, db, coll, newName },
@@ -439,4 +448,10 @@ function without<T>(map: ReadonlyMap<string, T>, key: string): ReadonlyMap<strin
   const next = new Map(map);
   next.delete(key);
   return next;
+}
+
+function withoutRaw<T extends { raw: unknown }>(value: T): Omit<T, 'raw'> {
+  const copy: Partial<T> = { ...value };
+  delete copy.raw;
+  return copy as Omit<T, 'raw'>;
 }
