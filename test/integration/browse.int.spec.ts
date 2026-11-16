@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 
-import { MongoClient } from 'mongodb';
+import { Double, Long, MongoClient } from 'mongodb';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 
 import {
@@ -171,11 +171,28 @@ describe('coll.* on the 8.x replica set', () => {
     const db = direct.db(DB);
     await db.collection('plain').insertOne({ a: 1 });
     await db.createCollection('series', { timeseries: { timeField: 't', metaField: 'm' } });
-    await db.createCollection('plain_view', { viewOn: 'plain', pipeline: [{ $match: {} }] });
+    await db.createCollection('plain_view', {
+      viewOn: 'plain',
+      pipeline: [{ $match: { x: new Double(1), y: Long.fromNumber(2), z: 3 } }],
+    });
     const { collections } = await backend.call('coll.list', { profileId: RW.id, db: DB });
     const byName = Object.fromEntries(collections.map((c) => [c.name, c]));
     expect(byName['plain']?.type).toBe('collection');
     expect(byName['plain_view']).toMatchObject({ type: 'view', viewOn: 'plain' });
+    // raw is lossless: a whole-number Double stays a Double, Int64 stays Int64, Int32 stays Int32.
+    expect(JSON.parse(byName['plain_view']?.raw ?? '{}')).toMatchObject({
+      options: {
+        pipeline: [
+          {
+            $match: {
+              x: { $numberDouble: '1.0' },
+              y: { $numberLong: '2' },
+              z: { $numberInt: '3' },
+            },
+          },
+        ],
+      },
+    });
     expect(byName['series']?.type).toBe('timeseries');
     // The time series' bucket collection is not listed next to it.
     expect(collections.map((c) => c.name)).not.toContain('system.buckets.series');

@@ -381,10 +381,15 @@ describe('listDatabases', () => {
     expect(client.sent[0]).toMatchObject({
       db: 'admin',
       command: { listDatabases: 1, nameOnly: true },
-      options: { promoteLongs: false, bsonRegExp: true },
+      options: {
+        promoteLongs: false,
+        bsonRegExp: true,
+        fieldsAsRaw: { firstBatch: true, nextBatch: true },
+      },
     });
-    // promoteValues: false would turn MongoServerError.code into an Int32 object (CR-2).
-    expect(client.sent[0]?.options?.promoteValues).not.toBe(false);
+    // promoteValues: false in the command options would turn MongoServerError.code into an
+    // Int32 object (round-1 CR-2): batch documents are kept by decoding their bytes instead.
+    expect(client.sent[0]?.options?.promoteValues).toBeUndefined();
     expect(client.sent[1]).toMatchObject({
       db: 'admin',
       command: { connectionStatus: 1, showPrivileges: true },
@@ -572,6 +577,38 @@ describe('db.create / db.drop / db.stats', () => {
     expect(error.code).toBe('SERVER_ERROR');
   });
 
+  it('decodes batch documents given as bytes without promotion: whole-number Doubles stay Doubles in raw', async () => {
+    const entry = {
+      name: 'v',
+      type: 'view',
+      options: {
+        viewOn: 'c',
+        pipeline: [{ $match: { x: new BSON.Double(1), y: BSON.Long.fromNumber(2), z: 3 } }],
+      },
+    };
+    const cursor = {
+      id: BSON.Long.fromNumber(0),
+      ns: 'shop.$cmd',
+      firstBatch: [BSON.serialize(entry)],
+    };
+    const client = fakeClient(() => ({ cursor, ok: 1 }));
+    const { collections } = await listCollections(client, 'shop');
+    expect(collections.map((c) => [c.name, c.type, c.viewOn])).toEqual([['v', 'view', 'c']]);
+    expect(JSON.parse(collections[0]?.raw ?? '{}')).toMatchObject({
+      options: {
+        pipeline: [
+          {
+            $match: {
+              x: { $numberDouble: '1.0' },
+              y: { $numberLong: '2' },
+              z: { $numberInt: '3' },
+            },
+          },
+        ],
+      },
+    });
+  });
+
   it('databaseStats reads unpromoted numerics and keeps raw canonical EJSON', async () => {
     const client = fakeClient(() => ({
       db: 'shop',
@@ -659,7 +696,7 @@ describe('listCollections', () => {
     expect(client.sent[0]).toMatchObject({
       db: 'shop',
       command: { listCollections: 1, cursor: {} },
-      options: { promoteLongs: false },
+      options: { fieldsAsRaw: { firstBatch: true, nextBatch: true } },
     });
     const raw = JSON.parse(collections[0]?.raw ?? '{}') as Document;
     expect(raw).toMatchObject({ name: 'metrics', options: { timeseries: { timeField: 't' } } });

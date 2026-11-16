@@ -8,21 +8,41 @@ import { RpcError } from '../server/rpc';
 
 /**
  * Databases and collections (`db.*`, `coll.*`) as plain server commands on an open client.
- * Commands read Int64 values without converting them to JS numbers, so the `raw` documents the
- * renderer sees keep Int64 lossless in canonical EJSON; sizes and counts are read as numbers.
+ * Cursor answers (`listCollections` entries, `$collStats` documents) are decoded without any
+ * promotion, so their `raw` EJSON is lossless (Int64 stays Int64, a whole-number Double stays a
+ * Double, also inside view pipelines and validators). Other replies keep Int64 as `Long`;
+ * their Int32/Double values become JS numbers (`dbStats` sizes in `raw` may then print a
+ * whole-number Double as an integer). Sizes and counts are read with `toNumber`.
  */
 
 /**
- * Keep Int64 as `Long` (lossless in `raw`, cursor ids stay Long for getMore) and regular
- * expressions as BSON. Int32/Double are still promoted to JS numbers: `promoteValues: false`
- * would also apply to the driver's error documents and turn `MongoServerError.code` into an
- * Int32 object, which breaks the driver's own numeric error handling.
+ * Command options. `promoteValues: false` can't be used here: it would also apply to the
+ * driver's error documents and turn `MongoServerError.code` into an Int32 object, breaking the
+ * driver's own numeric error handling. Instead the cursor's batch documents are kept as BSON
+ * bytes (`fieldsAsRaw`; error replies have no such fields) and decoded with `DECODE`.
  */
 const RAW: RunCommandOptions = {
   promoteLongs: false,
   promoteBuffers: false,
   bsonRegExp: true,
+  fieldsAsRaw: { firstBatch: true, nextBatch: true },
 };
+
+/** Decoding of batch documents: no Long → number, no Int32/Double unwrapping, regexes as BSON. */
+const DECODE = {
+  promoteLongs: false,
+  promoteValues: false,
+  promoteBuffers: false,
+  bsonRegExp: true,
+} as const;
+
+/** A cursor batch's documents, decoded losslessly when they came as bytes (test fakes send documents). */
+function decodeBatch(batch: unknown): Document[] {
+  if (!Array.isArray(batch)) return [];
+  return batch.map((doc: unknown) =>
+    doc instanceof Uint8Array ? BSON.deserialize(doc, DECODE) : (doc as Document),
+  );
+}
 
 /** Server error codes with a contract code of their own. */
 const NAMESPACE_NOT_FOUND = 26;
@@ -124,7 +144,7 @@ async function runCursor(
   const first = await run(client, db, command);
   const cursor = first['cursor'] as { id: unknown; firstBatch: Document[] } | undefined;
   if (!cursor) throw new RpcError('INTERNAL', 'The server answered without a cursor');
-  const docs = [...cursor.firstBatch];
+  const docs = decodeBatch(cursor.firstBatch);
   let id = cursor.id;
   while (toNumber(id) !== 0 && id !== undefined) {
     if (signal?.aborted) {
@@ -133,7 +153,7 @@ async function runCursor(
     }
     const next = await run(client, db, { getMore: id, collection });
     const batch = next['cursor'] as { id: unknown; nextBatch: Document[] };
-    docs.push(...batch.nextBatch);
+    docs.push(...decodeBatch(batch.nextBatch));
     id = batch.id;
   }
   return docs;
