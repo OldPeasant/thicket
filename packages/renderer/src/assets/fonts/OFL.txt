@@ -2,7 +2,7 @@ Orbitron (orbitron.woff2):
 Copyright 2018 The Orbitron Project Authors (https://github.com/theleagueof/orbitron), with Reserved Font Name: "Orbitron".
 
 Share Tech Mono (share-tech-mono.woff2):
-Copyright (c) 2012, Carrois Type Design, Ralph du Carrois (post@carrois.com www.carrois.com), with Reserved Font Name 'Share'.
+Copyright (c) 2012, Carrois Type Design, Ralph du Carrois (post@carrois.com www.carrois.com), with Reserved Font Name 'Share'
 
 The font files come from JSON Canopy 0.4.0, which inlined them in its CSS as data: URLs;
 Thicket ships them as separate woff2 files (see the root NOTICE).
