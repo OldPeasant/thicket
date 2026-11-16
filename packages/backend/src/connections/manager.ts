@@ -5,6 +5,8 @@ import type {
   ProfileDraft,
   ServerInfo,
 } from '@thicket/contract';
+import { isDeepStrictEqual } from 'node:util';
+
 import { BSON, MongoClient, type Document, type MongoClientOptions } from 'mongodb';
 
 import { RpcError } from '../server/rpc';
@@ -37,6 +39,8 @@ interface Entry {
   client?: ClientLike;
   /** Settles when the connect in progress is over (connected or failed). */
   opening?: Promise<ConnStatus>;
+  /** `open` callers waiting for `opening`; when the last one cancels, the connect is closed. */
+  waiters: number;
 }
 
 /**
@@ -54,21 +58,35 @@ export class ConnectionManager {
     this.now = deps.now ?? (() => performance.now());
   }
 
-  /** Connects with a saved profile or a draft, measures a ping, reads server info, disconnects. */
+  /**
+   * Connects with a saved profile or a draft, measures a ping, reads server info, disconnects.
+   * A draft with an `id` uses that profile's stored secrets only when its connection string,
+   * auth, TLS and SSH settings equal the saved ones; otherwise only `password` is used.
+   */
   async test(
     target: { profileId: string } | { profile: ProfileDraft },
     password: string | undefined,
     signal?: AbortSignal,
   ): Promise<{ latencyMS: number; server: ServerInfo }> {
-    const profile =
-      'profileId' in target ? await this.deps.loadProfile(target.profileId) : target.profile;
-    const secrets = await this.secretsFor(profile, password);
+    let profile: ProfileDraft;
+    let storedFrom: string | undefined;
+    if ('profileId' in target) {
+      profile = await this.deps.loadProfile(target.profileId);
+      storedFrom = target.profileId;
+    } else {
+      profile = target.profile;
+      storedFrom = (await this.matchesSaved(profile)) ? profile.id : undefined;
+    }
+    const secrets = await this.secretsFor(profile, storedFrom, password);
     const { uri, options } = clientConfig(profile, secrets);
     const label = `test ${profile.name}`;
     this.log(`${label}: connecting to ${uri}`, secrets);
     const client = this.createClient(uri, options);
+    const connecting = client.connect();
+    let connected = false;
     try {
-      await abortable(client.connect(), signal);
+      await abortable(connecting, signal);
+      connected = true;
       const start = this.now();
       await abortable(client.db('admin').command({ ping: 1 }), signal);
       const latencyMS = Math.max(0, this.now() - start);
@@ -81,52 +99,102 @@ export class ConnectionManager {
       throw failure;
     } finally {
       await closeQuietly(client);
+      if (!connected) {
+        // Abandoned while the driver was still connecting (cancelled): a close before the driver
+        // has its topology does nothing, so close again once its connect is over.
+        void connecting.then(
+          () => closeQuietly(client),
+          () => undefined,
+        );
+      }
     }
   }
 
-  /** Opens the connection of a saved profile; answers at once when it is already open. */
+  /**
+   * Opens the connection of a saved profile; answers at once when it is already open. Callers
+   * opening a profile that is already connecting share that connect, and a later caller's
+   * `password` is ignored. Each caller's `signal` cancels only its own wait; the connect itself is
+   * closed (and ends `CANCELLED`) when every waiting caller has cancelled.
+   */
   async open(
     profileId: string,
     password: string | undefined,
     signal?: AbortSignal,
   ): Promise<ConnStatus> {
+    if (signal?.aborted) throw cancelled();
     const current = this.entries.get(profileId);
     if (current?.state === 'connected') return this.statusOf(profileId);
-    if (current?.opening) return current.opening;
+    if (current?.opening) return this.waitFor(profileId, current, current.opening, signal);
 
-    const entry: Entry = { state: 'connecting' };
+    const entry: Entry = { state: 'connecting', waiters: 0 };
     this.entries.set(profileId, entry);
-    entry.opening = this.connect(profileId, entry, password, signal).finally(() => {
+    const opening = this.connect(profileId, entry, password).finally(() => {
       delete entry.opening;
     });
-    return entry.opening;
+    entry.opening = opening;
+    return this.waitFor(profileId, entry, opening, signal);
+  }
+
+  /** One caller's wait for a shared connect; its abort leaves the connect to the other callers. */
+  private async waitFor(
+    profileId: string,
+    entry: Entry,
+    opening: Promise<ConnStatus>,
+    signal: AbortSignal | undefined,
+  ): Promise<ConnStatus> {
+    entry.waiters += 1;
+    if (!signal) return opening;
+    const leave = () => {
+      entry.waiters -= 1;
+      if (
+        entry.waiters <= 0 &&
+        entry.state === 'connecting' &&
+        this.entries.get(profileId) === entry
+      ) {
+        void this.close(profileId);
+      }
+    };
+    signal.addEventListener('abort', leave, { once: true });
+    try {
+      return await abortable(opening, signal);
+    } finally {
+      signal.removeEventListener('abort', leave);
+    }
   }
 
   private async connect(
     profileId: string,
     entry: Entry,
     password: string | undefined,
-    signal: AbortSignal | undefined,
   ): Promise<ConnStatus> {
     let secrets: ConnectSecrets = {};
     try {
       const profile = await this.deps.loadProfile(profileId);
-      secrets = await this.secretsFor(profile, password);
+      secrets = await this.secretsFor(profile, profileId, password);
+      if (this.entries.get(profileId) !== entry) throw closedWhileConnecting();
       const { uri, options } = clientConfig(profile, secrets);
       this.log(`open ${profileId}: connecting to ${uri}`, secrets);
       const client = this.createClient(uri, options);
       entry.client = client;
-      await abortable(client.connect(), signal);
+      // No caller's signal here: the connect is shared, `waitFor` handles cancellation. A close
+      // meanwhile may come before the driver has its topology (and do nothing), so the client is
+      // closed again below once the driver's connect is over.
+      await client.connect();
       if (this.entries.get(profileId) !== entry) {
         // Closed (or replaced) while connecting.
         await closeQuietly(client);
-        throw new RpcError('CANCELLED', 'The connection was closed while connecting');
+        throw closedWhileConnecting();
       }
       entry.state = 'connected';
       this.log(`open ${profileId}: connected`, secrets);
       return this.statusOf(profileId);
     } catch (error) {
-      const failure = toConnectError(error, Object.values(secrets).filter(isString));
+      // Closed (or replaced) meanwhile: the driver's error (e.g. "Topology is closed") is a
+      // consequence of that close, so the answer is CANCELLED whatever it says.
+      const failure =
+        this.entries.get(profileId) !== entry
+          ? closedWhileConnecting()
+          : toConnectError(error, Object.values(secrets).filter(isString));
       if (entry.client) await closeQuietly(entry.client);
       delete entry.client;
       if (this.entries.get(profileId) === entry) {
@@ -190,18 +258,42 @@ export class ConnectionManager {
   }
 
   /**
-   * Secrets for a connect: the stored ones (profiles with an id), with `password` from the
-   * request winning. With `secretMode: 'ask'` a stored password is ignored.
+   * Secrets for a connect: the stored ones of the profile `storedFrom` (none when undefined),
+   * with `password` from the request winning. With `secretMode: 'ask'` a stored password is
+   * ignored.
    */
   private async secretsFor(
     profile: ProfileDraft,
+    storedFrom: string | undefined,
     password: string | undefined,
   ): Promise<ConnectSecrets> {
-    const stored = profile.id !== undefined ? await this.loadStored(profile.id) : null;
+    const stored = storedFrom !== undefined ? await this.loadStored(storedFrom) : null;
     const secrets: ConnectSecrets = { ...(stored ?? {}) };
     if (profile.auth?.secretMode === 'ask') delete secrets['password'];
     if (password !== undefined) secrets['password'] = password;
     return secrets;
+  }
+
+  /**
+   * Whether a draft with an `id` still targets what its saved profile targets (same connection
+   * string, auth, TLS and SSH settings), so that profile's stored secrets may be used for it. A
+   * draft that changed any of these (another host, TLS off, ...) must not receive them.
+   */
+  private async matchesSaved(draft: ProfileDraft): Promise<boolean> {
+    if (draft.id === undefined) return false;
+    let saved: Profile;
+    try {
+      saved = await this.deps.loadProfile(draft.id);
+    } catch (error) {
+      if (error instanceof RpcError && error.code === 'NOT_FOUND') return false;
+      throw error;
+    }
+    return (
+      saved.connectionString === draft.connectionString &&
+      isDeepStrictEqual(saved.auth, draft.auth) &&
+      isDeepStrictEqual(saved.tls, draft.tls) &&
+      isDeepStrictEqual(saved.ssh, draft.ssh)
+    );
   }
 
   private async loadStored(profileId: string): Promise<Record<string, string> | null> {
@@ -230,10 +322,17 @@ async function closeQuietly(client: ClientLike): Promise<void> {
   }
 }
 
+function cancelled(): RpcError {
+  return new RpcError('CANCELLED', 'The operation was cancelled');
+}
+
+function closedWhileConnecting(): RpcError {
+  return new RpcError('CANCELLED', 'The connection was closed while connecting');
+}
+
 /** Rejects with `CANCELLED` as soon as `signal` aborts (the operation itself runs on). */
 function abortable<T>(operation: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (!signal) return operation;
-  const cancelled = () => new RpcError('CANCELLED', 'The operation was cancelled');
   if (signal.aborted) {
     operation.catch(() => undefined);
     return Promise.reject(cancelled());

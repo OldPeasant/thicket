@@ -167,7 +167,12 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   and report `disconnected`) and serves `conn.test/open/close/status/serverInfo`
   (`connHandlers`). It loads the profile from main over the privileged port
   (`profiles.forConnect`, `NOT_FOUND` for unknown ids) and its secrets (`secrets.get`); a
-  `password` in the request wins, and `secretMode: 'ask'` ignores a stored one. `clientConfig()`
+  `password` in the request wins, and `secretMode: 'ask'` ignores a stored one. A `conn.test`
+  draft with an `id` gets that profile's stored secrets only while its connection string, auth,
+  TLS and SSH settings equal the saved profile's. Concurrent `conn.open`s of one profile share
+  one connect (the first caller's `password`); each caller's cancel ends only its own wait, and
+  the connect is closed (`CANCELLED`) once every caller cancelled or `conn.close` ran; a client
+  abandoned mid-connect is closed again when the driver's connect settles. `clientConfig()`
   keeps the saved connection string as the URI (hosts, SRV, `replicaSet`, `directConnection`)
   and passes the form fields and secrets as driver options (`auth`, `authMechanism`
   SCRAM-SHA-1/256, `authSource`, `tls`, `tlsCAFile`, `tlsCertificateKeyFile` + passphrase,
