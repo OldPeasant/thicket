@@ -11,7 +11,8 @@ lease_until: 2026-11-16T20:10:15Z
 On a `v*` tag build AppImage/deb/rpm (x64, arm64), dmg (arm64, x64), NSIS + zip (x64), with SHA-256 checksums, and upload them to a draft GitHub release.
 
 ## Acceptance criteria
-- [ ] Workflow validates locally (actionlint)
+- [x] Workflow validates locally (actionlint)
+  - verified (2026-11-16 20:50+0100 by felix/agent-1): podman run --rm -v <repo>:/repo:ro,Z --workdir /repo docker.io/rhysd/actionlint:latest -no-color (actionlint 1.7.12, shellcheck integrated) -> 0 errors in check.yml and release.yml; plus local npm run dist -w apps/desktop -- --linux --x64 -c.extraMetadata.version=0.1.0-test -> AppImage+deb named 0.1.0-test (rpm needs rpmbuild, which the workflow apt-installs)
 - [ ] A test tag on the GitHub repo produces all artefacts in a draft release — skip with reason if no remote yet
 
 ## Notes
