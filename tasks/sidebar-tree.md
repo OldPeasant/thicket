@@ -13,7 +13,8 @@ Tree: connections → databases → collections/views/time series with lazy load
 ## Acceptance criteria
 - [x] Component tests with the fake API for lazy load, errors, context actions
   - verified (2026-11-16 23:08+0100 by felix/agent-1): cd packages/renderer && npx ng test --include='src/app/sidebar/*.spec.ts' (fake API: lazy db/coll load, errors+retry, stale answers, context actions create/rename/drop/refresh/disconnect) -> 2 files, 173 passed
-- [ ] e2e against a fixture: create db+collection, rename, drop with typed name
+- [x] e2e against a fixture: create db+collection, rename, drop with typed name
+  - verified (2026-11-16 23:08+0100 by felix/agent-1): npm run test:e2e -- test/e2e/sidebar.e2e.ts (Electron app against mongo:8.2 testcontainers fixture) -> 'create a database and collection, rename, and drop with the typed name' passed, 2 passed
 - [ ] Read-only profile hides/disables write actions (test)
 
 ## Notes
