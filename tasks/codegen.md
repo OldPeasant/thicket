@@ -11,7 +11,8 @@ lease_until: 2026-11-16T19:58:56Z
 Generate code for a find query or an aggregation pipeline in mongosh syntax, Node driver, PyMongo and Java driver, with correct BSON type constructors per language.
 
 ## Acceptance criteria
-- [ ] Snapshot tests for each language over 10 queries/pipelines including every BSON type
+- [x] Snapshot tests for each language over 10 queries/pipelines including every BSON type
+  - verified (2026-11-16 20:42+0100 by dell26/agent-3): npx vitest run --project core packages/core/src/codegen -> 130 passed; codegen.spec.ts snapshots shell/node/python/java x 10 samples (find + aggregate), a test asserts the samples contain all 21 BSON types
 - [ ] Generated Node and Python code for 3 samples actually runs against a fixture (int test; skip Java if no JDK, with reason)
 
 ## Notes
