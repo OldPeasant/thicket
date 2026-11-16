@@ -185,6 +185,32 @@ describe('layout', () => {
     expect(layout(concat(group, '.'), '', '  ', 0, 1)).not.toContain('\n');
   });
 
+  it('counts an empty list after a group as unbreakable text', () => {
+    const group = list('(', ['a'.repeat(WIDTH - 4)], ')'); // flat: WIDTH - 2 columns
+    const empty = list('[', [], ']');
+    // `group[]` is exactly WIDTH: one line.
+    expect(layout(concat(group, empty), '', '  ')).toBe(`${flat(group)}[]`);
+    // `group[];` is one column over, and `[]` can't break, so the group must.
+    expect(layout(concat(group, empty, ';'), '', '  ').split('\n')[0]).toBe('(');
+  });
+
+  it('generated find statements stay within WIDTH when `;` or `)` follows the group (TW-1)', () => {
+    // Before the fix, these lengths gave 81-column lines: node 41, shell 18, java 37.
+    for (const language of CODEGEN_LANGUAGES) {
+      for (let n = 1; n <= 45; n++) {
+        const code = generateCode(
+          find(fields(['a', { type: 'string', value: 'v'.repeat(n) }])),
+          language,
+        );
+        const lines = code.split('\n').filter((line) => line.includes('"v'));
+        expect(lines.length, `${language} n=${n}`).toBeGreaterThan(0);
+        for (const line of lines) {
+          expect(line.length, `${language} n=${n}: ${line}`).toBeLessThanOrEqual(WIDTH);
+        }
+      }
+    }
+  });
+
   it('continues a concat after a broken part at the column of its last line', () => {
     const node = concat(list('(', ['a'.repeat(WIDTH)], ')'), '.next()');
     expect(layout(node, '', '  ')).toBe(`(\n  ${'a'.repeat(WIDTH)}\n).next()`);
