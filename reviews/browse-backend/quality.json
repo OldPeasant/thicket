@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "task": "browse-backend",
+  "reviewed_revision": "fc9f289d4375d5e75210bed0b309c4b05220f82b",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/browse-backend/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/browse-backend/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/browse-backend/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    { "id": "R1-CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "round 1: server-error mapping owned by browse (NOT_FOUND/SERVER_ERROR with serverCode/codeName); fixer round 1" },
+    { "id": "R1-CR-2", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "round 1: MongoServerError.code became Int32 under promoteValues:false; promotion kept for replies, codes read via toNumber" },
+    { "id": "R1-CR-3", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "round 1: browse writes no longer abortable; transport-level serve() CANCELLED behaviour recorded as assumption" },
+    { "id": "R1-CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "round 1: listDatabases fallback paths covered by unit tests" },
+    { "id": "R1-CR-5", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "round 1: original Unauthorized rethrown when connectionStatus fallback fails" },
+    { "id": "R1-CR-6", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "round 1: error message prefixes no longer mention connecting" },
+    { "id": "R1-TW-1", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "round 1: EJSON value wrappers rejected as create options" },
+    { "id": "R2-CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "round 2: coll.list/coll.stats raw lossless again via fieldsAsRaw cursor batches decoded with promoteValues:false (cce0dff); db.stats raw whole-number Doubles remain lossy, recorded as task assumption" },
+    { "id": "R2-CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "round 2: corrected assumption recorded and module comment aligned with code" }
+  ],
+  "validation": [
+    { "command": "cd packages/backend && npx vitest run src/browse", "result": "pass" },
+    { "command": "npm run test:int -- browse (Podman)", "result": "pass" },
+    { "command": "sh .taskcheck (npm run check)", "result": "pass" }
+  ]
+}

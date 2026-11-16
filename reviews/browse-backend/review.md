@@ -4,35 +4,34 @@ Date: 2026-11-16
 
 Task: browse-backend - M1: Databases and collections (db.*, coll.*)
 
-Scope: round 2. Task commits 5a9cfcd (implementation), 8dfb6f9 (test-writer tests, round-1 reports) and 101d24f (fixes for round-1 CR-1..CR-6 and TW-1) on top of base d61f0bc (`git diff d61f0bc..101d24f`, restricted to the task's files: packages/backend/src/browse/*, packages/backend/src/connections/manager.ts, packages/backend/src/server/backend.ts, packages/backend/src/index.ts, test/integration/browse.int.spec.ts, test/integration/fixtures/mongo.ts). The range also contains app-layout/safety-ui commits merged from main; those are not part of this review. The local HEAD d7823d1 is a rebased copy of 101d24f with identical content for packages/ and test/ (`git diff 101d24f d7823d1 -- packages test` is empty). Uncommitted spec edits by a concurrent test-writer are not reviewed. Known/accepted and not reported: the shared `serve()` in rpc.ts answers CANCELLED immediately for a cancelled write (recorded assumption); coll.validator.* belongs to the validator task.
+Scope: round 3. Task commits 871f350..fc9f289 on `main`: a2f4db9 (implementation), 1280719 (round-1 tests and reports), 1fae938 (round-1 fixes), bbd72ba (round-2 tests and reports), cce0dff (fix for round-2 CR-1: cursor batches kept as BSON bytes with `fieldsAsRaw` and decoded with `promoteValues: false`), fc9f289 (round-3 tests and test report). The focus of this round is cce0dff and fc9f289; the full task diff was re-read for the final state of packages/backend/src/browse/*, packages/backend/src/connections/manager.ts, packages/backend/src/server/backend.ts, packages/backend/src/index.ts, test/integration/browse.int.spec.ts and test/integration/fixtures/mongo.ts. The working tree was clean at the start of the review. Known and accepted, so not reported: the shared `serve()` answers CANCELLED at once for a cancelled write (recorded assumption), and coll.validator.* belongs to the validator task.
 
 Requirements:
-- tasks/browse-backend.md acceptance criteria and recorded assumptions
+- tasks/browse-backend.md acceptance criteria and recorded assumptions (including the 21:54 correction note)
 - SPEC.md section 4 (canonical EJSON v2, lossless; stable error codes)
-- docs/ARCHITECTURE.md, AGENTS.md, docs/QUALITY.md
-- packages/contract/src/db.ts, coll.ts (raw fields are `ejsonDocument`)
-- Round-1 review (CR-1..CR-6) and reviews/browse-backend/fixes.md
+- docs/ARCHITECTURE.md, AGENTS.md
+- Round-2 review (CR-1 lossy raw Doubles, CR-2 stale assumption/comment) and reviews/browse-backend/tests.md (round 3)
 
 Git range:
 - Branch: main
-- HEAD: 101d24facc5426b495450d4f811d22bceebb0a08
-- Base/start: d61f0bc2c23cb4e70d20ea8ce55abb5784358fcb
-- Commits reviewed: 3 (5a9cfcd, 8dfb6f9, 101d24f)
+- HEAD: fc9f289d4375d5e75210bed0b309c4b05220f82b
+- Base/start: 871f3501b68cc5de83bf72feaa534c4b448ebb80
+- Commits reviewed: 6
 
-Summary: 0 P0, 0 P1, 1 P2, 1 P3
+Summary: 0 P0, 0 P1, 0 P2, 0 P3
 
-Verification performed by the reviewer: static review of the committed code and tests; the driver/BSON behaviour was checked in node_modules (bson/lib/bson.cjs EJSON number serialisation at lines 4492-4501; mongodb/lib/cmap/connection.js builds `MongoServerError` from `document.toObject(bsonOptions)`). Tests were not re-run by the reviewer in this round; the fixer reports `npx vitest run --project backend` 338 passed, `npm run test:int -- browse` 26 passed, `npm run check` passed.
+Verification performed by the reviewer: a static review of the committed code and tests. The reviewer checked how bson handles `fieldsAsRaw` in node_modules/bson/lib/bson.cjs (line 3565: an array named in `fieldsAsRaw` is decoded with `raw: true`, so each batch element is returned as a byte slice). The reviewer did not re-run the tests. The test-writer reports `npx vitest run src/browse` 126 passed, `npm run test:int -- browse` 30/30 passed, and `npm run check` passed (reviews/browse-backend/tests.md).
 
-Round-1 findings:
-- CR-1 (server errors classified by message text as TLS_ERROR/TIMEOUT): resolved. `toBrowseError` (browse.ts:60-81) answers any error carrying a server code, code name or `MongoServerError` name as NOT_FOUND/SERVER_ERROR without looking at the text; only errors without a server answer reach `toConnectError`. Unit tests with "certificates", "TLS", "timed out", "SSL handshake" messages exist (browse.spec.ts:100 ff.).
-- CR-2 (`MongoServerError.code` became Int32, no `serverCode`): resolved. `RAW` (browse.ts:21-25) no longer sets `promoteValues: false`; codes are additionally read via `toNumber`. The int tests now assert `detail` equals `{ serverCode: 48, codeName: 'NamespaceExists' }` and `{ serverCode: 13, codeName: 'Unauthorized' }`. The fix introduces a new regression, see CR-1 below.
-- CR-3 (cancelled writes answered CANCELLED by the handler): resolved at the handler level. db.create/drop and coll.create/drop/rename no longer use `abortable` (handlers.ts:31-44); handler tests show a cancelled write waits for and returns the server's answer. The remaining transport-level behaviour of `serve()` is a recorded, accepted assumption.
-- CR-4 (listDatabases fallback paths untested): resolved. browse.spec.ts covers the privilege merge, `db: ""` exclusion, the Unauthorized fallback (by code and code name), connectionStatus failure, and both failing (browse.spec.ts:346); the auth int test covers an authorized database without data.
-- CR-5 (empty list instead of the error): resolved. browse.ts:189-196 rethrows the original refusal when listDatabases was Unauthorized and connectionStatus fails.
-- CR-6 (connect-time message prefixes): resolved. Server errors use "The server refused the command", unclassified errors "Unexpected error while browsing"; non-RpcErrors thrown outside `run()` reach `serve()`'s generic "Unexpected error: ..." which no longer mentions connecting.
-- TW-1 (EJSON value wrappers accepted as create options): resolved. `parseCreateOptions` (browse.ts:288-297) accepts only plain objects without `_bsontype`.
+Round-2 findings:
+- CR-1 (raw outputs lost Double types): resolved for the cursor outputs. `RAW` (browse.ts:24-29) keeps the driver's default value promotion, so `MongoServerError.code` stays numeric. It adds `fieldsAsRaw: { firstBatch, nextBatch }`, and `decodeBatch` (browse.ts:40-45) decodes each batch document with `DECODE` (`promoteValues: false`, `promoteLongs: false`, `bsonRegExp: true`). Both the first batch and getMore batches go through `decodeBatch` (browse.ts:147, 156). The cursor id is not inside a raw field, so it stays a `Long` and is passed to getMore and killCursors unchanged. Size reads in coll.stats use `toNumber`, which accepts Int32, Double, Long and Decimal128 (browse.ts:109-116), so the unpromoted values do not break the numeric results. The tests cover this. Unit tests feed BSON bytes and check byte-exact round trips for validators, getMore batches, sharded stats, and a Uint8Array view with an offset. Integration tests check a view pipeline with a Double, an Int64 and an Int32, a validator with an Int64 beyond 2^53, a Decimal128 and a regex, 130 collections, a real getMore past a 16 MB first batch (a direct probe first checks that the server really pages), and coll.stats raw types compared with an unpromoted direct `$collStats` read. db.stats raw remains lossy for whole-number Doubles. That trade-off is now an explicit, recorded assumption (21:54 note) for a non-cursor reply, where `promoteValues: false` would break the driver's error codes. The humans review this assumption; it is not reported again.
+- CR-2 (stale assumption and module comment): resolved. The 21:54 assumption corrects the earlier "no BSON promotion" note. The module comment (browse.ts:9-16) and the `RAW` comment (browse.ts:18-23) describe the current behaviour accurately: cursor documents are lossless, and dbStats Int32/Double values are promoted.
 
-Acceptance criteria: AC1 (int tests for each method on the 8.x replica set), AC2 (drop/rename refused on a read-only profile) and AC3 (listing for a user with only `read` on one database, on the dedicated auth fixture per the recorded assumption) remain covered by test/integration/browse.int.spec.ts; the fix commit did not weaken those tests.
+Acceptance criteria:
+- AC1 (integration tests for each method against the 8.x replica set fixture): covered by the `db.*` and `coll.*` suites in test/integration/browse.int.spec.ts. Round 3 strengthened them and did not weaken them. The test-writer renamed the test that was misnamed "pages through more than one batch" and added a test that pages for real.
+- AC2 (drop/rename refused on a read-only profile): covered by the READ_ONLY int tests through `guardWrites`, which `startBackend` wraps around the browse handlers (backend.ts).
+- AC3 (listing for a user with only `read` on one database): covered by the auth-fixture suite on its own mongo:8.2 `--auth` standalone, as the recorded assumption describes.
+
+The checkboxes in the task file are still unticked. The parent worker records the evidence with `tasks.py verify`.
 
 ## P0 Critical
 
@@ -44,24 +43,14 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | `raw` outputs are no longer lossless: every Double is promoted to a JS number and re-serialised as `$numberInt`/`$numberLong` when integral**
-    - File: `packages/backend/src/browse/browse.ts:21-25` (used by `canonical()` at `:104-106` for db.stats, coll.list and coll.stats `raw`)
-    - Category: Integration
-    - Problem: the CR-2 fix dropped `promoteValues: false`, so Double (and Int32) values come back as plain JS numbers. `BSON.EJSON.stringify(..., { relaxed: false })` then writes an integral number as `{"$numberInt": ...}` if it fits in 32 bits and as `{"$numberLong": ...}` otherwise (node_modules/bson/lib/bson.cjs:4492-4501); only non-integral values stay `$numberDouble`. Concretely, dbStats on 8.x reports `dataSize`, `storageSize`, `indexSize`, `totalSize`, `fsUsedSize`, `fsTotalSize` as Doubles, which now appear in `raw` as Int32/Int64; in `coll.list`, user data inside `options` (a view `pipeline` such as `{ $match: { x: 1.0 } }`, a `validator` with `minimum: 5.0`) changes type the same way. The module doc comment (browse.ts:11-12) and recorded assumption #5 still describe the raw documents as lossless. No test asserts a Double in `raw`, so this is not detected.
-    - Why it matters: SPEC section 4 requires documents to travel as canonical EJSON v2 text, lossless, and the contract types these `raw` fields as EJSON documents. A renderer that shows or copies the listCollections entry (e.g. a view pipeline or validator) presents wrong BSON types, and anything that reuses that text would write Int32/Int64 where the server held Double.
-    - Suggested fix: keep the error path on promoted values (as now) but obtain the `raw` documents without value promotion, e.g. run the commands whose output is returned as `raw` with options that preserve Int32/Double (`promoteValues: false`) while still reading the error code with `toNumber` and confirming the driver's SDAM error handling is unaffected for those commands, or request the response unpromoted only for the raw part (for instance a `raw: true` buffer decoded with `BSON.deserialize(..., { promoteValues: false, promoteLongs: false })`, after checking the driver's error construction for that option). Add a unit test with a Double such as `1.0` in a dbStats answer and a listCollections `options.pipeline`, and an int test that a view created with `{ $match: { x: 1.0 } }` lists its pipeline with `$numberDouble`. If the lossy behaviour is accepted instead, record it as an assumption and correct the doc comment.
+None.
 
 ## P3 Low
 
-- [ ] **CR-2 | Recorded assumption #5 and the module comment no longer match the code**
-    - File: `tasks/browse-backend.md` (assumption dated 2026-11-16 21:32, "passed RAW: no BSON promotion"); `packages/backend/src/browse/browse.ts:11-12`
-    - Category: Quality
-    - Problem: the assumption says commands are run with no BSON promotion so raw outputs are lossless canonical EJSON; since 101d24f, Int32/Double are promoted (browse.ts:16-20 says so). The module comment still claims lossless raw documents for Int64 only, which is accurate but silent on the Double change.
-    - Why it matters: humans review assumptions to confirm decisions; the recorded one describes behaviour that no longer exists and hides the trade-off made in CR-2's fix.
-    - Suggested fix: once CR-1 is decided, record an updated assumption (the parent worker owns `tasks.py assume`) and align the comment.
+None.
 
 ## Review conclusion
 
-Material issues found; fix before completing the task.
+No material issues found.
 
-All round-1 findings (CR-1..CR-6) and TW-1 are resolved in 101d24f, and the acceptance criteria remain covered. The CR-2 fix trades the error-code problem for a loss of BSON type fidelity in the `raw` outputs, which conflicts with SPEC section 4's lossless EJSON rule; fix it or explicitly accept and record it. No security issues found: writes still pass through `guardWrites` in `startBackend`, error messages are masked with `redact`, and test credentials are generated at run time.
+The round-2 findings are resolved: cursor-based `raw` outputs (coll.list, coll.stats) are lossless, and server error codes stay numeric. The one remaining lossy case (whole-number Doubles in db.stats raw) is a recorded assumption for humans to confirm. The fix is small and local to browse.ts, its tests exercise byte-level decoding on both fake and real servers, and it introduces no security, integration or architecture issues. Writes still go through `guardWrites`, error messages are masked with `redact`, and test credentials are generated at run time.
