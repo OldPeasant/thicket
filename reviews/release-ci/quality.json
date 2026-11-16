@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "task": "release-ci",
+  "reviewed_revision": "9236e90a2fea438afecbf6b1aec405c0ff15b8ad",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/release-ci/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/release-ci/review.md" },
+    "fixer": {
+      "status": "not_required",
+      "reason": "no defects found; the only finding (CR-1, P3) is accepted"
+    }
+  },
+  "fixes_required": false,
+  "findings": [
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "accepted",
+      "note": "re-running the workflow after a human published the draft would replace assets; publishing and re-running are deliberate human actions, left as-is (installer-smoke also edits release.yml and can add an isDraft guard)"
+    }
+  ],
+  "validation": [
+    {
+      "command": "podman run --rm -v <repo>:/repo:ro,Z --workdir /repo docker.io/rhysd/actionlint:latest -no-color (actionlint 1.7.12 + shellcheck)",
+      "result": "pass"
+    },
+    { "command": "npx prettier --check .github/workflows/release.yml", "result": "pass" },
+    { "command": "npm run check", "result": "pass" }
+  ]
+}
