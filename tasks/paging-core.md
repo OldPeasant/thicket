@@ -5,7 +5,7 @@ owner: felix/agent-2
 deps: [scaffold]
 touches: [packages/core/src/paging]
 prio: 1
-lease_until: 2026-11-16T18:59:18Z
+lease_until: 2026-11-16T19:04:24Z
 ---
 ## Goal
 Pure functions for paging state: page size, page index, range paging on an indexed unique sort key (default `_id`) with fallback to skip/limit, last page via reversed sort, estimated vs exact count.
