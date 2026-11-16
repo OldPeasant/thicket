@@ -1,10 +1,11 @@
 ---
 title: M0: Integration test harness with MongoDB containers
-status: todo
-owner:
+status: in_progress
+owner: dell26/agent-3
 deps: [scaffold]
 touches: [test/integration/fixtures,test/integration/vitest.config.ts,package.json]
 prio: 1
+lease_until: 2026-11-16T18:06:32Z
 ---
 ## Goal
 Testcontainers fixtures for MongoDB Community 8.x (replica set and standalone) and 7.0 (standalone), with TLS variants using a CA and server cert generated at test time; `npm run test:int` runs test/integration.
