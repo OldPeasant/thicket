@@ -5,7 +5,7 @@ owner: felix/agent-2
 deps: [conn-manager]
 touches: [packages/backend/src/browse]
 prio: 1
-lease_until: 2026-11-16T21:20:44Z
+lease_until: 2026-11-16T21:25:50Z
 ---
 ## Goal
 listDatabases, list collections/views/time series, stats on demand, create/drop/rename database and collection, through the write guard.
