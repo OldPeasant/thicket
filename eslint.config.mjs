@@ -18,7 +18,6 @@ export default tseslint.config(
       '**/out/**',
       '**/coverage/**',
       '**/.angular/**',
-      'vendor/**',
     ],
   },
   js.configs.recommended,

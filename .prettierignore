@@ -3,8 +3,6 @@ dashboard/
 tasks/
 .claude/
 reviews/
-# Vendored third-party source (removed by the explorer-copy task)
-vendor/
 BOARD.md
 board.html
 *.py

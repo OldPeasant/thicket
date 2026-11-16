@@ -1,0 +1,25 @@
+Thicket
+Copyright 2026 Sonensei.ch
+
+This product includes software developed by Sonensei.ch (https://sonensei.ch).
+
+The JSON explorer (packages/renderer/src/app/explorer), its schema support
+(packages/renderer/src/app/schema), the Tron theme tokens in
+packages/renderer/src/styles.css and the demo document
+packages/renderer/src/assets/samples/canopy-demo.json originate from
+JSON Canopy 0.4.0 (commit 1edaee8 of github.com/OldPeasant/json-canopy),
+Copyright 2026 Sonensei.ch, licensed under the Apache License, Version 2.0.
+The original JSON Canopy NOTICE reads:
+
+  JSON Canopy
+  Copyright 2026 Sonensei.ch
+
+  This product includes software developed by Sonensei.ch
+  (https://sonensei.ch).
+
+Third-party components bundled in the built application:
+  - Angular (MIT License)
+  - RxJS (Apache License 2.0)
+  - Ajv and ajv-formats (MIT License)
+  - Orbitron and Share Tech Mono webfonts (SIL Open Font License 1.1),
+    inlined in packages/renderer/src/styles.css
