@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -452,6 +452,45 @@ describe('SecretsStore edge cases', () => {
     await store.delete('p');
     await store.delete('p', 'password');
     expect(await readdir(dir)).toEqual([]);
+  });
+
+  it('while encryption is unavailable, an unreadable secrets.bin fails delete with the read error', async () => {
+    // A folder in place of the file: readFile fails with EISDIR, not ENOENT.
+    await mkdir(file);
+    const { store } = makeStore(new FakeSafeStorage({ available: false }));
+    const error: unknown = await store.delete('p').catch((e: unknown) => e);
+    expect(error).not.toBeInstanceOf(SecretStorageUnavailableError);
+    expect(error).toMatchObject({ code: 'EISDIR' });
+    // The queue is not stuck after the failure.
+    expect(await store.get('p')).toBeNull();
+  });
+
+  it('weak backend lock keeps keyring secrets: they are readable again once the keyring is back', async () => {
+    /** On basic_text this session can't decrypt files written with the real keyring. */
+    class NoKeyringBasicText extends FakeSafeStorage {
+      constructor() {
+        super({ backend: 'basic_text' });
+      }
+      override decryptStringAsync(): Promise<never> {
+        return Promise.reject(new Error('Error while decrypting the ciphertext provided'));
+      }
+    }
+    const { store: keyring } = makeStore();
+    await keyring.set('p', 'password', 'keyring-pw');
+    const { store: weak } = makeStore(new NoKeyringBasicText());
+    expect(await weak.get('p')).toBeNull();
+    await expect(weak.set('q', 'password', 'x')).rejects.toBeInstanceOf(
+      SecretStorageUnavailableError,
+    );
+    await expect(weak.delete('p')).rejects.toBeInstanceOf(SecretStorageUnavailableError);
+    // Still locked on later calls in the same session (the lock is cached, not retried).
+    expect(await weak.kinds('p')).toEqual([]);
+    await expect(weak.delete('p', 'password')).rejects.toBeInstanceOf(
+      SecretStorageUnavailableError,
+    );
+    const { store: back } = makeStore();
+    expect(await back.get('p')).toEqual({ password: 'keyring-pw' });
+    expect(await readdir(dir)).toEqual(['secrets.bin']);
   });
 
   it('a write into a missing folder rejects with the write error and stays consistent', async () => {

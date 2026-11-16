@@ -1,6 +1,6 @@
 import { RpcError } from '@thicket/backend';
 import { parseResult } from '@thicket/contract';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -127,6 +127,32 @@ describe('secrets handlers', () => {
     );
     expect(error).toBeInstanceOf(RpcError);
     expect((error as RpcError).code).toBe('UNSUPPORTED');
+  });
+
+  it('profiles.setSecret on a weak backend with an undecryptable file fails with UNSUPPORTED', async () => {
+    const keyringFile = Buffer.from('v11-keyring-ciphertext');
+    await writeFile(path.join(dir, 'secrets.bin'), keyringFile);
+    const { call } = setup(new FakeSafeStorage({ backend: 'basic_text' }));
+    const error: unknown = await call('profiles.setSecret', {
+      profileId: 'p',
+      kind: 'password',
+      value: 'fictitious-pw',
+    }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RpcError);
+    expect((error as RpcError).code).toBe('UNSUPPORTED');
+    expect((error as RpcError).message).not.toContain('fictitious-pw');
+    expect(await readFile(path.join(dir, 'secrets.bin'))).toEqual(keyringFile);
+  });
+
+  it('profiles.clearSecret passes other failures on unchanged (not as UNSUPPORTED)', async () => {
+    // Without encryption, a folder in place of secrets.bin fails the existence check with EISDIR.
+    await mkdir(path.join(dir, 'secrets.bin'));
+    const { call } = setup(new FakeSafeStorage({ available: false }));
+    const error: unknown = await call('profiles.clearSecret', { profileId: 'p' }).catch(
+      (e: unknown) => e,
+    );
+    expect(error).not.toBeInstanceOf(RpcError);
+    expect(error).toMatchObject({ code: 'EISDIR' });
   });
 
   it('secrets.get (privileged) returns the stored secrets or null', async () => {
