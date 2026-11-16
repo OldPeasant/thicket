@@ -54,11 +54,19 @@ function strictBeyond(value: unknown, greater: boolean): Record<string, unknown>
  *     k1 > v1  OR  (k1 = v1 AND k2 > v2)  OR ...  OR  (k1 = v1 AND ... AND kn > vn)
  *
  * where ">" means "later in sort order": `$gt` for ascending keys, `$lt` for descending ones
- * (flipped for `before`). With more than one key, the first key also gets a non-strict bound
- * (`$gte`/`$lte`) at top level so the server can narrow the index scan.
+ * (flipped for `before`).
  *
- * The sort must be range pageable (see `isRangePageable`), `bound` must hold a value for every sort
- * key, and the sort keys should hold values of one BSON type: `$gt`/`$lt` compare within one type.
+ * Null and missing values sort below every other value, but `$lt: v` doesn't match them (type
+ * bracketing). So wherever a key must be "lower than" a non-null `v`, the clause is split in two:
+ * `{..., k: {$lt: v}}` and `{..., k: {$eq: null}}` (`$eq: null` also matches missing fields).
+ * When the first key must be "greater than" a non-null value and there are several clauses, it
+ * also gets a non-strict bound (`$gte`) at top level so the server can narrow the index scan. On
+ * the "lower" side no such bound is added, because it would exclude the null region.
+ *
+ * The sort must be range pageable (see `isRangePageable`) and `bound` must hold a value for every
+ * sort key. Non-null values of one sort key should have one BSON type: `$gt`/`$lt` compare within
+ * one type, so non-null values of another type beyond the bound are not matched. The rows the
+ * bounds come from must contain the sort keys: build the projection with `projectionWithSortKeys`.
  */
 export function rangeFilter(sort: SortSpec, bound: SortKeyValues, side: RangeSide): Filter {
   if (sort.length === 0) throw new Error('rangeFilter needs at least one sort key');
@@ -67,21 +75,23 @@ export function rangeFilter(sort: SortSpec, bound: SortKeyValues, side: RangeSid
       throw new Error(`range bound has no value for sort key "${key.field}"`);
     }
   }
-  const clauses: Filter[] = sort.map((key, i) => {
-    const clause: Filter = {};
-    for (const prev of sort.slice(0, i)) clause[prev.field] = { $eq: bound[prev.field] };
+  const clauses: Filter[] = [];
+  sort.forEach((key, i) => {
+    const prefix: Filter = {};
+    for (const prev of sort.slice(0, i)) prefix[prev.field] = { $eq: bound[prev.field] };
     const greater = (key.direction === 1) === (side === 'after');
-    clause[key.field] = strictBeyond(bound[key.field], greater);
-    return clause;
+    const value = bound[key.field];
+    clauses.push({ ...prefix, [key.field]: strictBeyond(value, greater) });
+    // Null/missing sorts below every non-null value, i.e. "lower" than the bound.
+    if (!greater && value !== null) clauses.push({ ...prefix, [key.field]: { $eq: null } });
   });
   if (clauses.length === 1) return clauses[0] as Filter;
 
   const first = sort[0] as SortSpec[number];
   const firstValue = bound[first.field];
   const filter: Filter = { $or: clauses };
-  if (firstValue !== null) {
-    const greater = (first.direction === 1) === (side === 'after');
-    filter[first.field] = greater ? { $gte: firstValue } : { $lte: firstValue };
+  if (firstValue !== null && (first.direction === 1) === (side === 'after')) {
+    filter[first.field] = { $gte: firstValue };
   }
   return filter;
 }

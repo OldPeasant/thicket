@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { projectionWithSortKeys } from './projection';
 import { rangeFilter, sortKeyValues, valueAtPath, type Filter } from './range';
 import { parseSort, type SortSpec } from './sort';
 import {
@@ -600,5 +601,93 @@ describe('documents missing a sort key (sorted as null)', () => {
     const sort = parseSort({ last: 1, _id: 1 }) ?? [];
     const start = createPaging({ sort, pageSize: 3 });
     expect(ids(collectForward(PEOPLE, start).rows)).toEqual(ids(sortDocs(PEOPLE, sort)));
+  });
+});
+
+// --- Added by the fixer for paging-core (CR-2..CR-5). ---
+
+describe('canNext after "before" reads (CR-2)', () => {
+  it('an empty "before" result becomes page 1 and is not the last page', () => {
+    const s: PagingState = {
+      ...createPaging({ pageSize: 5 }),
+      pageIndex: 2,
+      page: { rows: 5, first: { _id: 0 }, last: { _id: 4 }, isLast: false },
+    };
+    const r = load(DOCS, s, previousPage(s));
+    expect(r.rows).toEqual([]);
+    expect(r.state.pageIndex).toBe(0);
+    expect(r.state.page?.isLast).toBe(false);
+    expect(canNext(r.state)).toBe(true);
+  });
+
+  it('a short page read forward is still the end', () => {
+    let s = createPaging({ pageSize: 5 });
+    s = load(DOCS, s, jumpToPage(s, 4)).state;
+    expect(s.page?.rows).toBe(3);
+    expect(canNext(s)).toBe(false);
+  });
+});
+
+describe('range paging with a projection (CR-3)', () => {
+  /** Applies a plain inclusion projection (`_id` included unless `_id: 0`). */
+  function project(doc: Doc, projection: Record<string, unknown>): Doc {
+    const out: Doc = {};
+    if (projection._id !== 0 && Object.hasOwn(doc, '_id')) out._id = doc._id;
+    for (const [k, v] of Object.entries(projection)) {
+      if (k !== '_id' && v === 1 && Object.hasOwn(doc, k)) out[k] = doc[k];
+    }
+    return out;
+  }
+
+  it('the projection from projectionWithSortKeys keeps the bounds correct', () => {
+    const sort = parseSort({ group: -1, _id: 1 }) ?? [];
+    const projection = projectionWithSortKeys({ _id: 0, name: 1 }, sort) ?? {};
+    expect(projection).toEqual({ name: 1, group: 1 });
+    const shown = DOCS.map((d) => project(d, projection));
+    const fwd = collectForward(shown, createPaging({ sort, pageSize: 4 }));
+    expect(ids(fwd.rows)).toEqual(ids(sortDocs(DOCS, sort)));
+  });
+});
+
+describe('collation (CR-4)', () => {
+  it('a non-default collation selects skip mode, also for _id sorts', () => {
+    expect(createPaging({ collation: true })).toMatchObject({
+      mode: 'skip',
+      sort: [],
+      collation: true,
+    });
+    expect(createPaging({ sort: parseSort({ _id: -1 }), collation: true }).mode).toBe('skip');
+    expect(createPaging({ collation: false }).mode).toBe('range');
+    expect(createPaging().collation).toBe(false);
+  });
+
+  it('setSort keeps the collation flag', () => {
+    const s = setSort(createPaging({ collation: true }), parseSort({ _id: 1 }));
+    expect(s).toMatchObject({ mode: 'skip', collation: true });
+    expect(setSort(createPaging(), parseSort({ _id: 1 }))).toMatchObject({
+      mode: 'range',
+      collation: false,
+    });
+  });
+
+  it('pages by skip with a collation', () => {
+    let s = createPaging({ sort: parseSort({ _id: 1 }), pageSize: 5, collation: true });
+    s = load(DOCS, s, firstPage(s)).state;
+    const req = nextPage(s);
+    expect(req).toMatchObject({ skip: 5 });
+    expect(req.after).toBeUndefined();
+    expect(ids(load(DOCS, s, req).rows)).toEqual([5, 6, 7, 8, 9]);
+  });
+});
+
+describe('last page in natural order or with an opaque sort (CR-5)', () => {
+  it('natural order (empty sort, skip mode) skips to the last page by count', () => {
+    const s = setCount(createPaging({ pageSize: 5, collation: true }), 23, true);
+    expect(lastPage(s)).toMatchObject({ pageIndex: 4, skip: 20, limit: 5, fromEnd: false });
+  });
+
+  it('without a count an opaque sort reads the next page', () => {
+    const s = createPaging({ sort: null, pageSize: 5 });
+    expect(lastPage(s)).toMatchObject({ pageIndex: 1, skip: 5, fromEnd: false });
   });
 });

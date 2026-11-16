@@ -18,17 +18,21 @@ describe('valueAtPath / sortKeyValues', () => {
 });
 
 describe('rangeFilter', () => {
-  it('single ascending key: after -> $gt, before -> $lt', () => {
+  it('single ascending key: after -> $gt, before -> $lt or null', () => {
     expect(rangeFilter([asc('_id')], { _id: 5 }, 'after')).toEqual({ _id: { $gt: 5 } });
-    expect(rangeFilter([asc('_id')], { _id: 5 }, 'before')).toEqual({ _id: { $lt: 5 } });
+    expect(rangeFilter([asc('_id')], { _id: 5 }, 'before')).toEqual({
+      $or: [{ _id: { $lt: 5 } }, { _id: { $eq: null } }],
+    });
   });
 
-  it('single descending key: after -> $lt, before -> $gt', () => {
-    expect(rangeFilter([desc('_id')], { _id: 5 }, 'after')).toEqual({ _id: { $lt: 5 } });
+  it('single descending key: after -> $lt or null, before -> $gt', () => {
+    expect(rangeFilter([desc('_id')], { _id: 5 }, 'after')).toEqual({
+      $or: [{ _id: { $lt: 5 } }, { _id: { $eq: null } }],
+    });
     expect(rangeFilter([desc('_id')], { _id: 5 }, 'before')).toEqual({ _id: { $gt: 5 } });
   });
 
-  it('compound key builds the lexicographic $or with a first-key prefix bound', () => {
+  it('compound key builds the lexicographic $or; the "lower" side also matches null', () => {
     const sort: SortSpec = [asc('last'), desc('age'), asc('_id')];
     const bound = { last: 'Lee', age: 40, _id: 7 };
     expect(rangeFilter(sort, bound, 'after')).toEqual({
@@ -36,23 +40,33 @@ describe('rangeFilter', () => {
       $or: [
         { last: { $gt: 'Lee' } },
         { last: { $eq: 'Lee' }, age: { $lt: 40 } },
+        { last: { $eq: 'Lee' }, age: { $eq: null } },
         { last: { $eq: 'Lee' }, age: { $eq: 40 }, _id: { $gt: 7 } },
       ],
     });
+    // No prefix bound on the "lower" side: it would exclude null/missing `last`.
     expect(rangeFilter(sort, bound, 'before')).toEqual({
-      last: { $lte: 'Lee' },
       $or: [
         { last: { $lt: 'Lee' } },
+        { last: { $eq: null } },
         { last: { $eq: 'Lee' }, age: { $gt: 40 } },
         { last: { $eq: 'Lee' }, age: { $eq: 40 }, _id: { $lt: 7 } },
+        { last: { $eq: 'Lee' }, age: { $eq: 40 }, _id: { $eq: null } },
       ],
     });
   });
 
   it('compound key with a descending first key', () => {
     expect(rangeFilter([desc('d'), asc('_id')], { d: 3, _id: 1 }, 'after')).toEqual({
-      d: { $lte: 3 },
-      $or: [{ d: { $lt: 3 } }, { d: { $eq: 3 }, _id: { $gt: 1 } }],
+      $or: [{ d: { $lt: 3 } }, { d: { $eq: null } }, { d: { $eq: 3 }, _id: { $gt: 1 } }],
+    });
+    expect(rangeFilter([desc('d'), asc('_id')], { d: 3, _id: 1 }, 'before')).toEqual({
+      d: { $gte: 3 },
+      $or: [
+        { d: { $gt: 3 } },
+        { d: { $eq: 3 }, _id: { $lt: 1 } },
+        { d: { $eq: 3 }, _id: { $eq: null } },
+      ],
     });
   });
 
@@ -64,6 +78,10 @@ describe('rangeFilter', () => {
     // No prefix bound on a null first key.
     expect(rangeFilter([asc('a'), asc('_id')], { a: null, _id: 2 }, 'after')).toEqual({
       $or: [{ a: { $ne: null, $not: { $type: 'minKey' } } }, { a: { $eq: null }, _id: { $gt: 2 } }],
+    });
+    // A null bound is not split again: only MinKey lies below null.
+    expect(rangeFilter([desc('a'), asc('_id')], { a: null, _id: 2 }, 'after')).toEqual({
+      $or: [{ a: { $type: 'minKey' } }, { a: { $eq: null }, _id: { $gt: 2 } }],
     });
   });
 

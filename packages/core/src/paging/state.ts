@@ -46,6 +46,8 @@ export interface PagingState {
   readonly pageIndex: number;
   readonly count: CountInfo | null;
   readonly page: LoadedPage | null;
+  /** A non-default collation is in use (see {@link PagingOptions.collation}). */
+  readonly collation: boolean;
 }
 
 /**
@@ -70,6 +72,12 @@ export interface PagingOptions {
   readonly uniqueIndexes?: readonly UniqueIndexKeys[];
   readonly pageSize?: number;
   readonly count?: CountInfo | null;
+  /**
+   * True when the query uses a non-default collation. Range mode is not used then: with e.g.
+   * strength 2, distinct values ("A", "a") compare equal, so the sort-key tuple no longer
+   * identifies one row and `$gt`/`$lt` bounds would skip rows.
+   */
+  readonly collation?: boolean;
 }
 
 function checkPageSize(pageSize: number): number {
@@ -79,10 +87,15 @@ function checkPageSize(pageSize: number): number {
   return pageSize;
 }
 
-/** Initial state on page 1 (index 0). Chooses range mode when the sort allows it. */
+/**
+ * Initial state on page 1 (index 0). Chooses range mode when the sort allows it and no
+ * non-default collation is in use; otherwise skip mode (an empty sort then keeps natural order).
+ */
 export function createPaging(options: PagingOptions = {}): PagingState {
   const userSort = options.sort === undefined ? [] : options.sort;
-  const mode: PagingMode = isRangePageable(userSort, options.uniqueIndexes) ? 'range' : 'skip';
+  const collation = options.collation ?? false;
+  const mode: PagingMode =
+    !collation && isRangePageable(userSort, options.uniqueIndexes) ? 'range' : 'skip';
   const sort = mode === 'range' && userSort?.length === 0 ? DEFAULT_SORT : userSort;
   return {
     pageSize: checkPageSize(options.pageSize ?? DEFAULT_PAGE_SIZE),
@@ -91,16 +104,26 @@ export function createPaging(options: PagingOptions = {}): PagingState {
     pageIndex: 0,
     count: options.count ?? null,
     page: null,
+    collation,
   };
 }
 
-/** Changes the sort: picks the mode again and goes back to page 1. The count is kept. */
+/**
+ * Changes the sort: picks the mode again and goes back to page 1. The count and the collation
+ * flag are kept.
+ */
 export function setSort(
   state: PagingState,
   sort: SortSpec | null,
   uniqueIndexes: readonly UniqueIndexKeys[] = [],
 ): PagingState {
-  return createPaging({ sort, uniqueIndexes, pageSize: state.pageSize, count: state.count });
+  return createPaging({
+    sort,
+    uniqueIndexes,
+    pageSize: state.pageSize,
+    count: state.count,
+    collation: state.collation,
+  });
 }
 
 /** Changes the page size and goes back to page 1. */
@@ -131,12 +154,15 @@ export function canPrevious(state: PagingState): boolean {
   return state.pageIndex > 0;
 }
 
+/**
+ * True unless the current page is known to be the last one: `page.isLast` (a short page that was
+ * not read `before` a bound, or a page read from the end) or an exact count. A short page read
+ * `before` a bound reached the start, not the end, so rows may still follow it.
+ */
 export function canNext(state: PagingState): boolean {
   if (state.page?.isLast) return false;
   const pages = pageCount(state);
-  if (state.count?.exact && pages !== null && state.pageIndex >= pages - 1) return false;
-  // A short page means the end even when the count is only estimated.
-  return state.page === null || state.page.rows >= state.pageSize;
+  return !(state.count?.exact && pages !== null && state.pageIndex >= pages - 1);
 }
 
 /** Request for page 1. */
@@ -181,6 +207,11 @@ export function previousPage(state: PagingState): PageRequest {
  * Request for the last page. With a sort that can be reversed, reads the final rows with the
  * reversed sort (no deep skip); its size is the remainder of an exact count, else a full page.
  * Without a count the page index can't be known and stays one past the current page.
+ *
+ * An opaque sort (`null`) or natural order (empty sort, skip mode with a collation) can't be
+ * reversed, so the last page is read with skip from the count. Without a count this is just the
+ * next page (`pageIndex + 1`), and `pageLoaded` marks it last only if it comes back short: get a
+ * count first to offer a real "last page" for such sorts.
  */
 export function lastPage(state: PagingState): PageRequest {
   const pages = pageCount(state);
@@ -226,7 +257,9 @@ function skipRequest(state: PagingState, pageIndex: number): PageRequest {
 
 /**
  * Records a loaded page. `docs` are in display order (after `findPlan`'s `reverseResults`).
- * A `before` request that returns fewer rows than asked has reached the start: it becomes page 1.
+ * A `before` request that returns fewer rows than asked has reached the start: it becomes page 1
+ * (and is not the last page). In range mode the docs must contain every sort key (an absent key
+ * reads as `null`), so callers must build the query projection with `projectionWithSortKeys`.
  */
 export function pageLoaded(
   state: PagingState,
