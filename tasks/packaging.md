@@ -20,3 +20,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 20:27+0100 by felix/agent-1): @thicket/backend and @thicket/contract moved to devDependencies of apps/desktop: main/preload/backend are esbuild bundles, so the asar only needs dist/*.cjs; native modules added later must be externals + dependencies
 - ASSUMPTION (2026-11-16 20:27+0100 by felix/agent-1): electron pinned to exact 45.3.3 (electron-builder refuses a range when electron is hoisted to the root node_modules)
 - ASSUMPTION (2026-11-16 20:27+0100 by felix/agent-1): productName Thicket set in apps/desktop/package.json so app.getName() and the userData folder are 'Thicket' (was '@thicket/desktop'); desktopName thicket.desktop for WM_CLASS
+- ASSUMPTION (2026-11-16 20:27+0100 by felix/agent-1): homepage https://github.com/oldpeasant/thicket and maintainer 'Thicket contributors <thicket@users.noreply.github.com>' guessed from the app id; deb/rpm need them
