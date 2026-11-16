@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "task": "profiles-store",
+  "reviewed_revision": "30ff843ce9a41b468bcaf1f775bd91cb935fb0af",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/profiles-store/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/profiles-store/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/profiles-store/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "TW-1 (pass 1)",
+      "source": "test-writer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "v0 password without a username was moved into secrets.bin but unusable; now dropped (parent worker, commit 1255a4d; reviewed in passes 1-3)"
+    },
+    {
+      "id": "CR-1 (pass 1)",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "id-less v0 entries get deterministic v0-<sha-256> ids so a retried migration orphans no secret (fixer, commit 8381359)"
+    },
+    {
+      "id": "CR-2 (pass 1)",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "migration falls back to secretMode ask only for SecretStorageUnavailableError; other errors keep the v0 file and retry (fixer, commit 8381359)"
+    },
+    {
+      "id": "CR-3 (pass 1)",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "ARCHITECTURE.md no longer claims the store applies defaultSecretMode (fixer, commit 8381359)"
+    },
+    {
+      "id": "CR-4 (pass 2)",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "accepted",
+      "note": "locked secrets.bin during a v0 migration switches the profile to ask; v0 is pre-release only, recorded as an assumption in tasks/profiles-store.md"
+    }
+  ],
+  "validation": [
+    { "command": "npm run check", "result": "pass" },
+    { "command": "npx vitest run apps/desktop/src/profiles apps/desktop/src/main/handlers.spec.ts", "result": "pass" }
+  ]
+}
