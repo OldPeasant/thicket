@@ -296,6 +296,39 @@ describe('AppShell', () => {
       expect(document.activeElement).toBe(selectOf('a'));
     });
 
+    it('Ctrl+W on the focused last tab moves focus to the Start tab', async () => {
+      await start();
+      ws.open(tab('a'));
+      await settle();
+      const only = must(
+        el.querySelector<HTMLElement>('[data-testid="tab"][data-tab-id="a"] [role="tab"]'),
+      );
+      only.focus();
+      only.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'w', ctrlKey: true, bubbles: true, cancelable: true }),
+      );
+      await settle();
+      expect(tabIds()).toEqual([]);
+      expect(document.activeElement?.id).toBe('ws-start-tab');
+    });
+
+    it('Ctrl+W on the focused Start tab with no tab open keeps focus on Start', async () => {
+      await start();
+      const startTab = must(el.querySelector<HTMLElement>('#ws-start-tab'));
+      startTab.focus();
+      const event = new KeyboardEvent('keydown', {
+        key: 'w',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      startTab.dispatchEvent(event);
+      await settle();
+      expect(event.defaultPrevented).toBe(true);
+      expect(tabIds()).toEqual([]);
+      expect(document.activeElement).toBe(startTab);
+    });
+
     it('Ctrl+W with focus outside the tab strip leaves focus where it is', async () => {
       await start();
       ['a', 'b'].forEach((id) => ws.open(tab(id)));
