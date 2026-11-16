@@ -6,6 +6,7 @@ import {
   type MethodName,
   type ParamsOf,
   type ResultOf,
+  type SettingsChanged,
   type StreamDataOf,
   type StreamMethodName,
   type ThemeInfo,
@@ -39,6 +40,7 @@ const BROADCAST_STREAM_NAMES: ReadonlySet<string> = new Set(Object.values(BROADC
 export interface BroadcastPayloads {
   [BROADCAST_STREAMS.connStatus]: ConnStatus;
   [BROADCAST_STREAMS.theme]: ThemeInfo;
+  [BROADCAST_STREAMS.settingsChanged]: SettingsChanged;
 }
 
 export type BroadcastStream = keyof BroadcastPayloads;

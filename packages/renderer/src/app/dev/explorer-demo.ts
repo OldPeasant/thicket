@@ -3,6 +3,7 @@ import { ChangeDetectionStrategy, Component, computed, signal } from '@angular/c
 import demo from '../../assets/samples/canopy-demo.json';
 import { JsonExplorerComponent } from '../explorer/json-explorer.component';
 import type { Layout } from '../explorer/layout.util';
+import { ThemeSwitcher } from '../theme/theme-switcher';
 
 /**
  * Development page (`#/dev/explorer`): the copied JSON Canopy explorer on its demo document, with
@@ -11,7 +12,7 @@ import type { Layout } from '../explorer/layout.util';
 @Component({
   selector: 'app-explorer-demo',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [JsonExplorerComponent],
+  imports: [JsonExplorerComponent, ThemeSwitcher],
   template: `
     <section class="demo">
       <header class="bar">
@@ -29,6 +30,7 @@ import type { Layout } from '../explorer/layout.util';
             </button>
           }
         </div>
+        <app-theme-switcher class="theme" />
       </header>
       <app-json-explorer [value]="data()" [layout]="layout()" (valueChange)="data.set($event)" />
       <details class="raw">
@@ -55,6 +57,9 @@ import type { Layout } from '../explorer/layout.util';
       text-transform: var(--heading-transform);
       letter-spacing: var(--heading-tracking);
       color: var(--accent);
+    }
+    .theme {
+      margin-left: auto;
     }
     .layouts {
       display: flex;

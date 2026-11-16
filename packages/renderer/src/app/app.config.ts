@@ -6,6 +6,7 @@ import {
 import { provideRouter, withHashLocation } from '@angular/router';
 
 import { routes } from './app.routes';
+import { provideTheme } from './theme';
 
 /** Root providers. Zoneless change detection: state lives in signals, no zone.js. */
 export const appConfig: ApplicationConfig = {
@@ -13,5 +14,6 @@ export const appConfig: ApplicationConfig = {
     provideBrowserGlobalErrorListeners(),
     provideZonelessChangeDetection(),
     provideRouter(routes, withHashLocation()),
+    provideTheme(),
   ],
 };

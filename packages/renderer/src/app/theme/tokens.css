@@ -1,0 +1,353 @@
+/*
+ * Theme tokens: four complete sets of the same CSS custom properties, one per
+ * `data-style` x `data-theme` combination on the root element (set by ThemeService).
+ * Components only use these variables, never literal colors.
+ *
+ * Every set defines every token (theme-tokens.spec.ts enumerates them), including the
+ * production-connection accent, the read-only marker and one color per BSON type.
+ *
+ * Business (default): system UI font, cool neutral greys, one muted ink-blue accent, no
+ * glow/grid/scanline effects, compact type; text/background pairs meet WCAG AA.
+ * Tron: the JSON Canopy look (Apache-2.0, see NOTICE), its dark and light variants unchanged,
+ * plus the tokens Thicket adds (production, read-only, BSON types).
+ */
+
+/* ---------------------------------------------------------------- Business light (default) */
+:root,
+:root[data-style='business'][data-theme='light'] {
+  color-scheme: light;
+
+  --bg-page: #f6f7f9;
+  --bg-elevated: #ffffff;
+  --bg-panel: #eef0f3;
+  --bg-hover: #e3e7ec;
+  --bg-input: #ffffff;
+
+  --border: #d3d8de;
+  --border-strong: #8a949e;
+
+  --text: #1d2228;
+  --text-muted: #4c5560;
+  --text-faint: #636c76;
+
+  --accent: #2c5a85;
+  --accent-2: #234a6e;
+  --accent-soft: rgba(44, 90, 133, 0.18);
+  --accent-bg: #e4edf6;
+  --accent-contrast: #ffffff;
+
+  --danger: #b42318;
+  --danger-text: #7a1a12;
+  --danger-bg: #fdecea;
+  --danger-border: #d0453a;
+
+  --focus: #2c5a85;
+  --focus-ring: 0 0 0 2px var(--bg-elevated), 0 0 0 4px var(--focus);
+
+  --production: #c0261d;
+  --production-bg: #fdeceb;
+  --production-text: #8c1c15;
+  --readonly: #8a5a00;
+  --readonly-bg: #fbf1d9;
+  --readonly-text: #5f3e00;
+
+  --bson-double: #0550ae;
+  --bson-string: #17703a;
+  --bson-object: #3d434a;
+  --bson-array: #3d434a;
+  --bson-bin-data: #4a5a6a;
+  --bson-undefined: #5f6670;
+  --bson-object-id: #6e3bbf;
+  --bson-bool: #8a4b00;
+  --bson-date: #9a3d14;
+  --bson-null: #5f6670;
+  --bson-regex: #a1166f;
+  --bson-db-pointer: #5f6670;
+  --bson-javascript: #586600;
+  --bson-symbol: #6b4c8a;
+  --bson-int: #005f73;
+  --bson-timestamp: #7a4f00;
+  --bson-long: #00548c;
+  --bson-decimal: #3a4aa0;
+  --bson-min-key: #5f6670;
+  --bson-max-key: #5f6670;
+
+  --val-null: var(--bson-null);
+  --val-bool: var(--bson-bool);
+  --val-num: var(--bson-double);
+  --val-str: var(--bson-string);
+
+  --font-ui:
+    system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', 'Noto Sans', sans-serif;
+  --font-mono:
+    ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace;
+  --font-size-ui: 13px;
+  --heading-transform: none;
+  --heading-tracking: normal;
+
+  --shadow-pop: 0 4px 14px rgba(29, 34, 40, 0.14);
+  --glow: none;
+  --glow-strong: none;
+  --grid-overlay: none;
+  --scanline-overlay: none;
+  --scrollbar-thumb: #b4bcc5;
+  --scrollbar-glow: none;
+}
+
+/* ---------------------------------------------------------------------------- Business dark */
+:root[data-style='business'][data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg-page: #1d2024;
+  --bg-elevated: #24282d;
+  --bg-panel: #191c20;
+  --bg-hover: #2e3339;
+  --bg-input: #16191c;
+
+  --border: #363c43;
+  --border-strong: #6b747e;
+
+  --text: #e4e7eb;
+  --text-muted: #adb4bc;
+  --text-faint: #929aa3;
+
+  --accent: #8cb4dd;
+  --accent-2: #a9c7e6;
+  --accent-soft: rgba(140, 180, 221, 0.22);
+  --accent-bg: #23303d;
+  --accent-contrast: #14181c;
+
+  --danger: #ff8a80;
+  --danger-text: #ffc9c4;
+  --danger-bg: #3b1d1c;
+  --danger-border: #e0645a;
+
+  --focus: #8cb4dd;
+  --focus-ring: 0 0 0 2px var(--bg-elevated), 0 0 0 4px var(--focus);
+
+  --production: #ff7b72;
+  --production-bg: #3d1f1e;
+  --production-text: #ffcdc8;
+  --readonly: #e3b341;
+  --readonly-bg: #352c18;
+  --readonly-text: #f4dca0;
+
+  --bson-double: #79b8ff;
+  --bson-string: #8fd19e;
+  --bson-object: #c3c8ce;
+  --bson-array: #c3c8ce;
+  --bson-bin-data: #a7b6c4;
+  --bson-undefined: #9aa2ab;
+  --bson-object-id: #c4a7ff;
+  --bson-bool: #e3c46b;
+  --bson-date: #f0b37e;
+  --bson-null: #9aa2ab;
+  --bson-regex: #f08ac0;
+  --bson-db-pointer: #9aa2ab;
+  --bson-javascript: #c6d47a;
+  --bson-symbol: #c9b3e0;
+  --bson-int: #6cc4d9;
+  --bson-timestamp: #d9b38c;
+  --bson-long: #8fb8ff;
+  --bson-decimal: #a5b4fc;
+  --bson-min-key: #9aa2ab;
+  --bson-max-key: #9aa2ab;
+
+  --val-null: var(--bson-null);
+  --val-bool: var(--bson-bool);
+  --val-num: var(--bson-double);
+  --val-str: var(--bson-string);
+
+  --font-ui:
+    system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', 'Noto Sans', sans-serif;
+  --font-mono:
+    ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, 'DejaVu Sans Mono', monospace;
+  --font-size-ui: 13px;
+  --heading-transform: none;
+  --heading-tracking: normal;
+
+  --shadow-pop: 0 4px 16px rgba(0, 0, 0, 0.45);
+  --glow: none;
+  --glow-strong: none;
+  --grid-overlay: none;
+  --scanline-overlay: none;
+  --scrollbar-thumb: #4a525b;
+  --scrollbar-glow: none;
+}
+
+/* -------------------------------------------------------------------------------- Tron dark */
+/* The original "Tron" look of JSON Canopy. */
+:root[data-style='tron'][data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg-page: #030608;
+  --bg-elevated: #071018;
+  --bg-panel: #060d13;
+  --bg-hover: #0d1f2b;
+  --bg-input: #030a0f;
+
+  --border: #0f3d52;
+  --border-strong: #1c7fa3;
+
+  --text: #d6faff;
+  --text-muted: #6fb8cc;
+  --text-faint: #3d7185;
+
+  --accent: #00e5ff;
+  --accent-2: #58f4ff;
+  --accent-soft: rgba(0, 229, 255, 0.35);
+  --accent-bg: #072832;
+  --accent-contrast: #030608;
+
+  --danger: #ff3860;
+  --danger-text: #ffc1cf;
+  --danger-bg: #2a0512;
+  --danger-border: #ff3860;
+
+  --focus: #58f4ff;
+  --focus-ring: 0 0 0 1px var(--accent), 0 0 10px var(--accent);
+
+  --production: #ff3860;
+  --production-bg: #2a0512;
+  --production-text: #ffc1cf;
+  --readonly: #ffd166;
+  --readonly-bg: #2a2205;
+  --readonly-text: #ffe9a8;
+
+  --bson-double: #00e5ff;
+  --bson-string: #4dffb8;
+  --bson-object: #6fb8cc;
+  --bson-array: #6fb8cc;
+  --bson-bin-data: #7aa5b8;
+  --bson-undefined: #3d7185;
+  --bson-object-id: #c77dff;
+  --bson-bool: #ff8a00;
+  --bson-date: #ffd166;
+  --bson-null: #3d7185;
+  --bson-regex: #ff5fd2;
+  --bson-db-pointer: #3d7185;
+  --bson-javascript: #b8ff5f;
+  --bson-symbol: #c9a7ff;
+  --bson-int: #00e5ff;
+  --bson-timestamp: #ffb86b;
+  --bson-long: #00c8ff;
+  --bson-decimal: #58f4ff;
+  --bson-min-key: #3d7185;
+  --bson-max-key: #3d7185;
+
+  --val-null: var(--bson-null);
+  --val-bool: var(--bson-bool);
+  --val-num: var(--bson-double);
+  --val-str: var(--bson-string);
+
+  --font-ui: 'Orbitron', system-ui, sans-serif;
+  --font-mono: 'Share Tech Mono', ui-monospace, monospace;
+  --font-size-ui: 16px;
+  --heading-transform: uppercase;
+  --heading-tracking: 0.12em;
+
+  --shadow-pop: 0 0 18px rgba(0, 229, 255, 0.35);
+  --glow: 0 0 6px currentColor;
+  --glow-strong: 0 0 2px #fff, 0 0 10px currentColor, 0 0 24px currentColor;
+  --grid-overlay:
+    linear-gradient(rgba(0, 229, 255, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 229, 255, 0.06) 1px, transparent 1px);
+  --scanline-overlay: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 229, 255, 0.035) 0px,
+    rgba(0, 229, 255, 0.035) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  --scrollbar-thumb: #00e5ff;
+  --scrollbar-glow: 0 0 6px #00e5ff;
+}
+
+/* ------------------------------------------------------------------------------- Tron light */
+/* Same cyan/monospace "terminal" identity, recolored for a white background: darker accent and
+   value colors for contrast, much fainter grid/scanline/glow effects. */
+:root[data-style='tron'][data-theme='light'] {
+  color-scheme: light;
+
+  --bg-page: #f3f7f9;
+  --bg-elevated: #ffffff;
+  --bg-panel: #eaf3f6;
+  --bg-hover: #dcedf2;
+  --bg-input: #ffffff;
+
+  --border: #bcd7e0;
+  --border-strong: #0e7490;
+
+  --text: #0b2530;
+  --text-muted: #4a6b78;
+  --text-faint: #8aa8b3;
+
+  --accent: #0891b2;
+  --accent-2: #0e7490;
+  --accent-soft: rgba(8, 145, 178, 0.2);
+  --accent-bg: #e0f4f8;
+  --accent-contrast: #ffffff;
+
+  --danger: #dc2626;
+  --danger-text: #7f1d1d;
+  --danger-bg: #fde8e8;
+  --danger-border: #dc2626;
+
+  --focus: #0e7490;
+  --focus-ring: 0 0 0 1px var(--accent), 0 0 6px rgba(8, 145, 178, 0.45);
+
+  --production: #dc2626;
+  --production-bg: #fde8e8;
+  --production-text: #7f1d1d;
+  --readonly: #a16207;
+  --readonly-bg: #fef3c7;
+  --readonly-text: #713f12;
+
+  --bson-double: #0e7490;
+  --bson-string: #047857;
+  --bson-object: #4a6b78;
+  --bson-array: #4a6b78;
+  --bson-bin-data: #475569;
+  --bson-undefined: #64748b;
+  --bson-object-id: #7e22ce;
+  --bson-bool: #b45309;
+  --bson-date: #a16207;
+  --bson-null: #64748b;
+  --bson-regex: #be185d;
+  --bson-db-pointer: #64748b;
+  --bson-javascript: #4d7c0f;
+  --bson-symbol: #6d28d9;
+  --bson-int: #0e7490;
+  --bson-timestamp: #9a3412;
+  --bson-long: #0e7490;
+  --bson-decimal: #0369a1;
+  --bson-min-key: #64748b;
+  --bson-max-key: #64748b;
+
+  --val-null: var(--bson-null);
+  --val-bool: var(--bson-bool);
+  --val-num: var(--bson-double);
+  --val-str: var(--bson-string);
+
+  --font-ui: 'Orbitron', system-ui, sans-serif;
+  --font-mono: 'Share Tech Mono', ui-monospace, monospace;
+  --font-size-ui: 16px;
+  --heading-transform: uppercase;
+  --heading-tracking: 0.12em;
+
+  --shadow-pop: 0 0 10px rgba(8, 145, 178, 0.2);
+  --glow: 0 0 3px currentColor;
+  --glow-strong: 0 0 1px rgba(255, 255, 255, 0.6), 0 0 5px currentColor;
+  --grid-overlay:
+    linear-gradient(rgba(8, 145, 178, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(8, 145, 178, 0.05) 1px, transparent 1px);
+  --scanline-overlay: repeating-linear-gradient(
+    to bottom,
+    rgba(8, 145, 178, 0.02) 0px,
+    rgba(8, 145, 178, 0.02) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  --scrollbar-thumb: #0891b2;
+  --scrollbar-glow: 0 0 6px #0891b2;
+}

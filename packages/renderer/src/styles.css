@@ -1,9 +1,13 @@
 /*
- * Global styles: the Tron theme tokens (dark and light) from JSON Canopy (Apache-2.0, see NOTICE).
- * No web fonts from a CDN: Orbitron and Share Tech Mono (SIL OFL 1.1, from JSON Canopy) ship as
- * woff2 files with the app (src/assets/fonts/, bundled by the build), so the app works fully
- * offline and within the CSP (font-src 'self'). The themes task may switch to npm font packages.
+ * Global styles (base from JSON Canopy, Apache-2.0, see NOTICE). The theme tokens (Business and
+ * Tron, each light and dark) live in app/theme/tokens.css, selected by `data-style` and
+ * `data-theme` on <html>. No web fonts from a CDN: Orbitron and Share Tech Mono (SIL OFL 1.1, from
+ * JSON Canopy, used by Tron only) ship as woff2 files with the app (src/assets/fonts/, bundled by
+ * the build), so the app works fully offline and within the CSP (font-src 'self'). Business uses
+ * the system UI font.
  */
+@import './app/theme/tokens.css';
+
 @font-face {
   font-family: 'Orbitron';
   font-style: normal;
@@ -24,114 +28,6 @@
   box-sizing: border-box;
 }
 
-/* Dark is the original "Tron" look and the default whenever no theme is
-   picked. The theme is set by the data-theme attribute ("dark" or
-   "light") -- everything below is CSS-variable-driven so that single
-   attribute is the entire theme switch, no component CSS needs to know
-   which theme is active. */
-:root,
-[data-theme='dark'] {
-  --bg-page: #030608;
-  --bg-elevated: #071018;
-  --bg-panel: #060d13;
-  --bg-hover: #0d1f2b;
-  --bg-input: #030a0f;
-
-  --border: #0f3d52;
-  --border-strong: #1c7fa3;
-
-  --text: #d6faff;
-  --text-muted: #6fb8cc;
-  --text-faint: #3d7185;
-
-  --accent: #00e5ff;
-  --accent-2: #58f4ff;
-  --accent-soft: rgba(0, 229, 255, 0.35);
-  --accent-bg: #072832;
-
-  --danger: #ff3860;
-  --danger-text: #ffc1cf;
-  --danger-bg: #2a0512;
-  --danger-border: #ff3860;
-
-  --val-null: #3d7185;
-  --val-bool: #ff8a00;
-  --val-num: #00e5ff;
-  --val-str: #4dffb8;
-
-  --font-ui: 'Orbitron', system-ui, sans-serif;
-  --font-mono: 'Share Tech Mono', ui-monospace, monospace;
-  --heading-transform: uppercase;
-  --heading-tracking: 0.12em;
-
-  --shadow-pop: 0 0 18px rgba(0, 229, 255, 0.35);
-  --glow: 0 0 6px currentColor;
-  --glow-strong: 0 0 2px #fff, 0 0 10px currentColor, 0 0 24px currentColor;
-  --grid-overlay:
-    linear-gradient(rgba(0, 229, 255, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 229, 255, 0.06) 1px, transparent 1px);
-  --scanline-overlay: repeating-linear-gradient(
-    to bottom,
-    rgba(0, 229, 255, 0.035) 0px,
-    rgba(0, 229, 255, 0.035) 1px,
-    transparent 1px,
-    transparent 3px
-  );
-}
-
-/* Light keeps the same cyan/monospace "terminal" identity, recolored for a
-   white background instead of removed -- darker, more saturated accent and
-   value colors for contrast, and much fainter decorative grid/scanline/glow
-   effects (full-strength neon glow reads as muddy on a light ground). */
-[data-theme='light'] {
-  --bg-page: #f3f7f9;
-  --bg-elevated: #ffffff;
-  --bg-panel: #eaf3f6;
-  --bg-hover: #dcedf2;
-  --bg-input: #ffffff;
-
-  --border: #bcd7e0;
-  --border-strong: #0e7490;
-
-  --text: #0b2530;
-  --text-muted: #4a6b78;
-  --text-faint: #8aa8b3;
-
-  --accent: #0891b2;
-  --accent-2: #0e7490;
-  --accent-soft: rgba(8, 145, 178, 0.2);
-  --accent-bg: #e0f4f8;
-
-  --danger: #dc2626;
-  --danger-text: #7f1d1d;
-  --danger-bg: #fde8e8;
-  --danger-border: #dc2626;
-
-  --val-null: #64748b;
-  --val-bool: #b45309;
-  --val-num: #0e7490;
-  --val-str: #047857;
-
-  --font-ui: 'Orbitron', system-ui, sans-serif;
-  --font-mono: 'Share Tech Mono', ui-monospace, monospace;
-  --heading-transform: uppercase;
-  --heading-tracking: 0.12em;
-
-  --shadow-pop: 0 0 10px rgba(8, 145, 178, 0.2);
-  --glow: 0 0 3px currentColor;
-  --glow-strong: 0 0 1px rgba(255, 255, 255, 0.6), 0 0 5px currentColor;
-  --grid-overlay:
-    linear-gradient(rgba(8, 145, 178, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(8, 145, 178, 0.05) 1px, transparent 1px);
-  --scanline-overlay: repeating-linear-gradient(
-    to bottom,
-    rgba(8, 145, 178, 0.02) 0px,
-    rgba(8, 145, 178, 0.02) 1px,
-    transparent 1px,
-    transparent 3px
-  );
-}
-
 html,
 body {
   height: 100%;
@@ -140,12 +36,13 @@ body {
 body {
   margin: 0;
   font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
   color: var(--text);
   background: var(--bg-page);
   position: relative;
 }
 
-/* A faint cyan grid + scanlines pinned behind everything. */
+/* Tron: a faint cyan grid + scanlines pinned behind everything (`none` in Business). */
 body::before {
   content: '';
   position: fixed;
@@ -166,6 +63,11 @@ app-root {
   height: 100%;
 }
 
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
 ::selection {
   background: var(--accent-soft);
 }
@@ -180,8 +82,8 @@ app-root {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--accent);
-  box-shadow: 0 0 6px var(--accent);
+  background: var(--scrollbar-thumb);
+  box-shadow: var(--scrollbar-glow);
   border-radius: 6px;
 }
 

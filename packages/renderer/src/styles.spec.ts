@@ -42,8 +42,9 @@ describe('global styles: Tron fonts', () => {
     }
   });
 
-  it('uses the declared families in the font tokens', () => {
-    expect(css).toMatch(/--font-[a-z-]+:\s*'Orbitron'/);
-    expect(css).toMatch(/--font-[a-z-]+:\s*'Share Tech Mono'/);
+  it('uses the declared families in the (Tron) font tokens', () => {
+    const tokens = readFileSync(join(SRC, 'app', 'theme', 'tokens.css'), 'utf8');
+    expect(tokens).toMatch(/--font-[a-z-]+:\s*'Orbitron'/);
+    expect(tokens).toMatch(/--font-[a-z-]+:\s*'Share Tech Mono'/);
   });
 });
