@@ -1,10 +1,11 @@
 ---
 title: M0: GitHub Actions runs the check on Linux, macOS and Windows
-status: todo
-owner:
+status: in_progress
+owner: felix/agent-1
 deps: [scaffold]
 touches: [.github/workflows/check.yml]
 prio: 1
+lease_until: 2026-11-16T18:24:04Z
 ---
 ## Goal
 Every push and PR runs `npm ci && npm run check` on ubuntu-latest, macos-latest and windows-latest with the Node version from .nvmrc.
