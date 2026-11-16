@@ -11,7 +11,8 @@ lease_until: 2026-11-17T00:02:44Z
 Edit session per document: modified marker and change count, undo/redo within unsaved edits, Revert, Save via diff-ops + docs.update through WriteGuard; insert (empty/copy), clone and delete.
 
 ## Acceptance criteria
-- [ ] Component tests: change count, undo/redo, revert
+- [x] Component tests: change count, undo/redo, revert
+  - verified (2026-11-17 00:43+0100 by felix/agent-1): cd packages/renderer && npx ng test --include='src/app/document/**/*.spec.ts' --include='src/app/collection/**/*.spec.ts' -> 8 files, 218 passed (change count, undo/redo, revert in document-editing/edit-session/document-actions specs)
 - [ ] e2e: edit two fields and save; server document matches (verified by a driver query in the test)
 - [ ] e2e: production profile shows the confirm dialog with the `$set` operation before saving
 - [ ] Read-only profile: edit controls disabled (test)
