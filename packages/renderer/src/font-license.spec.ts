@@ -12,10 +12,12 @@ describe('Tron font licence (SIL OFL 1.1)', () => {
   const ofl = readFileSync(join(FONTS, 'OFL.txt'), 'utf8');
 
   it('names the copyright holder of each bundled font', () => {
-    expect(ofl).toContain(
+    // Whole lines, so an added or missing character at the end of a notice fails the test.
+    const lines = ofl.split(/\r?\n/);
+    expect(lines).toContain(
       'Copyright 2018 The Orbitron Project Authors (https://github.com/theleagueof/orbitron), with Reserved Font Name: "Orbitron".',
     );
-    expect(ofl).toContain(
+    expect(lines).toContain(
       "Copyright (c) 2012, Carrois Type Design, Ralph du Carrois (post@carrois.com www.carrois.com), with Reserved Font Name 'Share'",
     );
   });
