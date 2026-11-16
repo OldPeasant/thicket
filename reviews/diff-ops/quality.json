@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "task": "diff-ops",
+  "reviewed_revision": "ba52caff80700696ec5a578d31707f62f0dfd13f",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/diff-ops/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/diff-ops/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/diff-ops/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "CR-1 (first review)",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "null original checked with $type null instead of $eq null (which also matched a removed field); int test removes each changed field on the server"
+    },
+    {
+      "id": "TW-1",
+      "source": "test-writer",
+      "severity": "Medium",
+      "disposition": "fixed",
+      "note": "same defect as CR-1"
+    },
+    {
+      "id": "CR-2 (first review)",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "BSON undefined original checked with $type undefined (server rejects $eq undefined); unit-tested only, the driver stores undefined as null"
+    },
+    {
+      "id": "TW-2",
+      "source": "test-writer",
+      "severity": "Low",
+      "disposition": "fixed",
+      "note": "replace whose edited doc keeps a top-level $-prefixed key now throws BsonModelError instead of producing a replaceOne the server rejects; recorded assumption"
+    }
+  ],
+  "validation": [
+    { "command": "npx vitest run --root packages/core src/diff", "result": "pass (112 tests)" },
+    { "command": "npm run test:int -- diff-ops (Podman, mongo 8.2 + 7.0)", "result": "pass (308 tests)" },
+    { "command": "task-scoped coverage src/diff/diff.ts, src/diff/equals.ts", "result": "100% statements/branches/functions/lines" },
+    { "command": "sh .taskcheck (npm run check)", "result": "pass" }
+  ]
+}
