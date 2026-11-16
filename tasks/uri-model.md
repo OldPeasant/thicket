@@ -13,7 +13,8 @@ Map a profile (hosts, SRV, replica set, auth mechanism and source, TLS options, 
 ## Acceptance criteria
 - [x] Round-trip tests for 20+ URIs incl. SRV, IPv6 hosts, encoded credentials, authMechanismProperties
   - verified (2026-11-16 19:43+0100 by dell26/agent-1): npx vitest run --root packages/core -t 'connection string round trip' -> 35 passed (35 URIs in uri/fixtures.ts incl. SRV, IPv6 [::1], percent-encoded credentials, authMechanismProperties AWS/Kerberos)
-- [ ] Unknown options are preserved in an `extra` map (test)
+- [x] Unknown options are preserved in an `extra` map (test)
+  - verified (2026-11-16 19:43+0100 by dell26/agent-1): npx vitest run --root packages/core -t 'unknown options' -> 18 passed (unknown keys, repeated keys, unrepresentable values kept in extra)
 - [ ] `mask()` never leaks the password in any of the test URIs (test)
 
 ## Notes
