@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs';
+
 import type { ProfileDraft } from '@thicket/contract';
 import { parseConnectionString } from '@thicket/core';
-import type { MongoClientOptions } from 'mongodb';
+import type { MongoClientOptions, W } from 'mongodb';
 
 import { RpcError } from '../server/rpc';
 
@@ -16,8 +18,8 @@ export interface ClientConfig {
 /** `appName` when the profile sets none, so server logs show who connected. */
 export const DEFAULT_APP_NAME = 'Thicket';
 
-/** Mechanisms this build connects with; the others belong to later tasks (X.509, LDAP, OIDC, AWS, Kerberos). */
-const SUPPORTED_MECHANISMS = new Set(['NONE', 'SCRAM-SHA-1', 'SCRAM-SHA-256']);
+/** Mechanisms this build connects with; the others belong to later tasks (LDAP, OIDC, AWS, Kerberos). */
+const SUPPORTED_MECHANISMS = new Set(['NONE', 'SCRAM-SHA-1', 'SCRAM-SHA-256', 'MONGODB-X509']);
 
 /**
  * Builds the driver configuration of a profile. The connection string stays as saved (hosts,
@@ -38,7 +40,7 @@ export function clientConfig(profile: ProfileDraft, secrets: ConnectSecrets): Cl
       `Authentication mechanism ${auth.mechanism} is not supported by this build yet`,
     );
   }
-  if (auth?.mechanism !== 'NONE') {
+  if (auth?.mechanism !== 'NONE' && auth?.mechanism !== 'MONGODB-X509') {
     const username = auth?.username ?? uriUsername(profile.connectionString);
     const needsPassword = auth !== undefined && auth.secretMode !== 'none';
     const password = auth?.secretMode === 'none' ? undefined : secrets['password'];
@@ -65,9 +67,16 @@ export function clientConfig(profile: ProfileDraft, secrets: ConnectSecrets): Cl
     if (tls.enabled) {
       if (tls.caFile !== undefined) options.tlsCAFile = tls.caFile;
       if (tls.certificateKeyFile !== undefined) {
-        options.tlsCertificateKeyFile = tls.certificateKeyFile;
         const passphrase = secrets['tlsKeyPassphrase'];
-        if (passphrase !== undefined) options.tlsCertificateKeyFilePassword = passphrase;
+        if (tls.keyFile === undefined) {
+          options.tlsCertificateKeyFile = tls.certificateKeyFile;
+          if (passphrase !== undefined) options.tlsCertificateKeyFilePassword = passphrase;
+        } else {
+          // Separate certificate and key files: the driver only reads PEM bundles itself.
+          options.cert = readPem(tls.certificateKeyFile, 'client certificate');
+          options.key = readPem(tls.keyFile, 'client certificate key');
+          if (passphrase !== undefined) options.passphrase = passphrase;
+        }
       }
       if (tls.allowInvalidHostnames !== undefined) {
         options.tlsAllowInvalidHostnames = tls.allowInvalidHostnames;
@@ -78,7 +87,53 @@ export function clientConfig(profile: ProfileDraft, secrets: ConnectSecrets): Cl
     }
   }
 
+  if (auth?.mechanism === 'MONGODB-X509') {
+    if (tls?.enabled !== true || tls.certificateKeyFile === undefined) {
+      throw new RpcError(
+        'AUTH_FAILED',
+        'MONGODB-X509 authentication needs TLS with a client certificate',
+      );
+    }
+    options.authMechanism = 'MONGODB-X509';
+    // X.509 users live in `$external`; another authSource only makes the driver refuse.
+    options.authSource = '$external';
+    // The server takes the user from the certificate's subject when no name is given.
+    if (auth.username !== undefined) options.auth = { username: auth.username };
+  }
+
+  const proxy = profile.proxy;
+  if (proxy) {
+    options.proxyHost = proxy.host;
+    options.proxyPort = proxy.port;
+    if (proxy.username !== undefined) {
+      const proxyPassword = secrets['proxyPassword'];
+      if (proxyPassword === undefined) {
+        throw new RpcError(
+          'AUTH_FAILED',
+          `No password for proxy user ${proxy.username}: save it in the profile`,
+        );
+      }
+      options.proxyUsername = proxy.username;
+      options.proxyPassword = proxyPassword;
+    }
+  }
+
   if (profile.readPreference !== undefined) options.readPreference = profile.readPreference;
+  if (profile.readPreferenceTags !== undefined) {
+    options.readPreferenceTags = profile.readPreferenceTags.map((set) =>
+      Object.fromEntries(set.map(({ name, value }) => [name, value])),
+    );
+  }
+  const writeConcern = profile.writeConcern;
+  if (writeConcern) {
+    options.writeConcern = {
+      // The driver types `w` as a number or 'majority'; custom write concern names (tag sets
+      // in the replica set config) are passed on to the server as they are.
+      ...(writeConcern.w !== undefined ? { w: writeConcern.w as W } : {}),
+      ...(writeConcern.journal !== undefined ? { journal: writeConcern.journal } : {}),
+      ...(writeConcern.wtimeoutMS !== undefined ? { wtimeoutMS: writeConcern.wtimeoutMS } : {}),
+    };
+  }
   if (profile.connectTimeoutMS !== undefined) options.connectTimeoutMS = profile.connectTimeoutMS;
   if (profile.serverSelectionTimeoutMS !== undefined) {
     options.serverSelectionTimeoutMS = profile.serverSelectionTimeoutMS;
@@ -93,5 +148,15 @@ function uriUsername(uri: string): string | undefined {
   } catch {
     // The driver reports an invalid connection string itself, with a better message.
     return undefined;
+  }
+}
+
+/** Reads a PEM file named in the profile; a missing or unreadable file is a `TLS_ERROR`. */
+function readPem(path: string, what: string): string {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch (error) {
+    const reason = (error as NodeJS.ErrnoException).code ?? String(error);
+    throw new RpcError('TLS_ERROR', `Cannot read the ${what} file ${path} (${reason})`);
   }
 }

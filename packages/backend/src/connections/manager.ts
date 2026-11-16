@@ -67,7 +67,7 @@ export class ConnectionManager {
   /**
    * Connects with a saved profile or a draft, measures a ping, reads server info, disconnects.
    * A draft with an `id` uses that profile's stored secrets only when its connection string,
-   * auth, TLS and SSH settings equal the saved ones; otherwise only `password` is used.
+   * auth, TLS, SSH and proxy settings equal the saved ones; otherwise only `password` is used.
    */
   async test(
     target: { profileId: string } | { profile: ProfileDraft },
@@ -282,7 +282,7 @@ export class ConnectionManager {
 
   /**
    * Whether a draft with an `id` still targets what its saved profile targets (same connection
-   * string, auth, TLS and SSH settings), so that profile's stored secrets may be used for it. A
+   * string, auth, TLS, SSH and proxy settings), so that profile's stored secrets may be used for it. A
    * draft that changed any of these (another host, TLS off, ...) must not receive them.
    */
   private async matchesSaved(draft: ProfileDraft): Promise<boolean> {
@@ -298,7 +298,8 @@ export class ConnectionManager {
       saved.connectionString === draft.connectionString &&
       isDeepStrictEqual(saved.auth, draft.auth) &&
       isDeepStrictEqual(saved.tls, draft.tls) &&
-      isDeepStrictEqual(saved.ssh, draft.ssh)
+      isDeepStrictEqual(saved.ssh, draft.ssh) &&
+      isDeepStrictEqual(saved.proxy, draft.proxy)
     );
   }
 

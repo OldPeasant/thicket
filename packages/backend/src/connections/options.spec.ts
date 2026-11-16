@@ -1,5 +1,9 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import type { ProfileDraft } from '@thicket/contract';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { RpcError } from '../server/rpc';
 import { DEFAULT_APP_NAME, clientConfig } from './options';
@@ -154,7 +158,7 @@ describe('clientConfig', () => {
     expect(options.auth).toBeUndefined();
   });
 
-  it.each(['MONGODB-X509', 'PLAIN', 'GSSAPI', 'MONGODB-OIDC', 'MONGODB-AWS'] as const)(
+  it.each(['PLAIN', 'GSSAPI', 'MONGODB-OIDC', 'MONGODB-AWS'] as const)(
     'answers UNSUPPORTED for mechanism %s',
     (mechanism) => {
       const error = errorOf(() =>
@@ -235,5 +239,169 @@ describe('clientConfig', () => {
       { tlsKeyPassphrase: 'fictitious-passphrase' },
     );
     expect(options).toEqual({ appName: DEFAULT_APP_NAME, tls: false });
+  });
+
+  describe('MONGODB-X509', () => {
+    const tls = { enabled: true, certificateKeyFile: '/tmp/fictitious/client.pem' };
+
+    it('authenticates from $external with the certificate, without password', () => {
+      const { options } = clientConfig(
+        draft({ auth: { mechanism: 'MONGODB-X509', secretMode: 'none' }, tls }),
+        { password: PASSWORD },
+      );
+      expect(options).toMatchObject({
+        authMechanism: 'MONGODB-X509',
+        authSource: '$external',
+        tlsCertificateKeyFile: '/tmp/fictitious/client.pem',
+      });
+      expect(options.auth).toBeUndefined();
+      expect(JSON.stringify(options)).not.toContain(PASSWORD);
+    });
+
+    it('passes a user name (the certificate subject) and replaces another authSource', () => {
+      const { options } = clientConfig(
+        draft({
+          auth: {
+            mechanism: 'MONGODB-X509',
+            username: 'CN=alice,O=Example',
+            authSource: 'admin',
+            secretMode: 'saved',
+          },
+          tls,
+        }),
+        {},
+      );
+      expect(options.auth).toEqual({ username: 'CN=alice,O=Example' });
+      expect(options.authSource).toBe('$external');
+    });
+
+    it.each([
+      ['without TLS', undefined],
+      ['with TLS off', { ...tls, enabled: false }],
+      ['without a client certificate', { enabled: true }],
+    ])('answers AUTH_FAILED %s', (_label, tlsOptions) => {
+      const error = errorOf(() =>
+        clientConfig(
+          draft({
+            auth: { mechanism: 'MONGODB-X509', secretMode: 'none' },
+            ...(tlsOptions ? { tls: tlsOptions } : {}),
+          }),
+          {},
+        ),
+      );
+      expect(error?.code).toBe('AUTH_FAILED');
+      expect(error?.message).toMatch(/X509.*client certificate/);
+    });
+  });
+
+  describe('separate certificate and key files', () => {
+    let dir = '';
+    beforeAll(async () => {
+      dir = await mkdtemp(join(tmpdir(), 'thicket-options-'));
+      await writeFile(join(dir, 'cert.pem'), 'fictitious certificate');
+      await writeFile(join(dir, 'key.pem'), 'fictitious key');
+    });
+    afterAll(async () => {
+      await rm(dir, { recursive: true, force: true });
+    });
+
+    it('reads both files and passes them with the passphrase', () => {
+      const { options } = clientConfig(
+        draft({
+          tls: {
+            enabled: true,
+            certificateKeyFile: join(dir, 'cert.pem'),
+            keyFile: join(dir, 'key.pem'),
+          },
+        }),
+        { tlsKeyPassphrase: 'fictitious-passphrase' },
+      );
+      expect(options).toMatchObject({
+        cert: 'fictitious certificate',
+        key: 'fictitious key',
+        passphrase: 'fictitious-passphrase',
+      });
+      expect(options).not.toHaveProperty('tlsCertificateKeyFile');
+      expect(options).not.toHaveProperty('tlsCertificateKeyFilePassword');
+    });
+
+    it('answers TLS_ERROR for a key file that cannot be read', () => {
+      const error = errorOf(() =>
+        clientConfig(
+          draft({
+            tls: {
+              enabled: true,
+              certificateKeyFile: join(dir, 'cert.pem'),
+              keyFile: join(dir, 'missing.pem'),
+            },
+          }),
+          {},
+        ),
+      );
+      expect(error?.code).toBe('TLS_ERROR');
+      expect(error?.message).toContain('missing.pem');
+      expect(error?.message).toContain('ENOENT');
+    });
+  });
+
+  describe('SOCKS5 proxy', () => {
+    it('passes host and port', () => {
+      const { options } = clientConfig(
+        draft({ proxy: { host: 'proxy.example.test', port: 1080 } }),
+        {},
+      );
+      expect(options).toEqual({
+        appName: DEFAULT_APP_NAME,
+        proxyHost: 'proxy.example.test',
+        proxyPort: 1080,
+      });
+    });
+
+    it('passes user and stored proxy password', () => {
+      const { uri, options } = clientConfig(
+        draft({ proxy: { host: 'proxy.example.test', port: 1080, username: 'pat' } }),
+        { proxyPassword: 'fictitious-proxy-pass' },
+      );
+      expect(options).toMatchObject({
+        proxyUsername: 'pat',
+        proxyPassword: 'fictitious-proxy-pass',
+      });
+      expect(uri).not.toContain('fictitious-proxy-pass');
+    });
+
+    it('answers AUTH_FAILED for a proxy user without a stored password', () => {
+      const error = errorOf(() =>
+        clientConfig(
+          draft({ proxy: { host: 'proxy.example.test', port: 1080, username: 'pat' } }),
+          { password: PASSWORD },
+        ),
+      );
+      expect(error?.code).toBe('AUTH_FAILED');
+      expect(error?.message).toMatch(/proxy user pat/);
+    });
+  });
+
+  it('passes read preference tag sets in order and the write concern', () => {
+    const { options } = clientConfig(
+      draft({
+        readPreference: 'secondaryPreferred',
+        readPreferenceTags: [
+          [
+            { name: 'dc', value: 'east' },
+            { name: 'rack', value: '1' },
+          ],
+          [],
+        ],
+        writeConcern: { w: 'majority', journal: true, wtimeoutMS: 5000 },
+      }),
+      {},
+    );
+    expect(options.readPreferenceTags).toEqual([{ dc: 'east', rack: '1' }, {}]);
+    expect(options.writeConcern).toEqual({ w: 'majority', journal: true, wtimeoutMS: 5000 });
+  });
+
+  it('passes only the write concern fields the profile sets', () => {
+    const { options } = clientConfig(draft({ writeConcern: { w: 2 } }), {});
+    expect(options.writeConcern).toEqual({ w: 2 });
   });
 });

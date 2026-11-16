@@ -16,6 +16,7 @@
   "dependencies": {
     "@thicket/contract": "0.0.0",
     "@thicket/core": "0.0.0",
-    "mongodb": "^7.9.0"
+    "mongodb": "^7.9.0",
+    "socks": "^2.8.10"
   }
 }

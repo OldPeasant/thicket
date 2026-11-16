@@ -24,6 +24,7 @@ export const SECRET_KINDS = [
   'sshPassword',
   'sshKeyPassphrase',
   'tlsKeyPassphrase',
+  'proxyPassword',
   'awsSecretAccessKey',
   'awsSessionToken',
   'oidcTokens',
@@ -74,8 +75,17 @@ export const profileTls = z.strictObject({
   enabled: z.boolean(),
   /** Path from `profiles.chooseFile({ purpose: 'tlsCaFile' })`. */
   caFile: optionalString,
-  /** Path from `profiles.chooseFile({ purpose: 'tlsCertificateKeyFile' })`. */
+  /**
+   * Client certificate (X.509): a PEM bundle with certificate and private key, or only the
+   * certificate when `keyFile` is set. Path from `profiles.chooseFile({ purpose:
+   * 'tlsCertificateKeyFile' })`. An encrypted key's passphrase is the `tlsKeyPassphrase` secret.
+   */
   certificateKeyFile: optionalString,
+  /**
+   * Private key (PEM) of `certificateKeyFile` when that file holds only the certificate. Path from
+   * `profiles.chooseFile({ purpose: 'tlsCertificateKeyFile' })`.
+   */
+  keyFile: optionalString,
   allowInvalidHostnames: z.boolean().optional(),
   allowInvalidCertificates: z.boolean().optional(),
 });
@@ -87,6 +97,30 @@ export const profileSsh = z.strictObject({
   method: z.enum(['password', 'privateKey', 'agent']),
   /** Path from `profiles.chooseFile({ purpose: 'sshPrivateKeyFile' })`. */
   privateKeyFile: optionalString,
+});
+
+/** SOCKS5 proxy (driver `proxyHost` options); its password is the `proxyPassword` secret. */
+export const profileProxy = z.strictObject({
+  host: z.string().min(1),
+  port: z.number().int().min(1).max(65535),
+  username: optionalString,
+});
+
+/**
+ * Read preference tag set as name/value pairs, e.g. `[{ name: 'dc', value: 'east' }]` for
+ * `{ dc: 'east' }`; an empty set matches any member.
+ */
+export const readPreferenceTagSet = z.array(
+  z.strictObject({ name: z.string().min(1), value: z.string() }),
+);
+
+/** Default write concern of the profile's connection. */
+export const profileWriteConcern = z.strictObject({
+  /** Number of members, `majority` or a custom write concern name. */
+  w: z.union([z.number().int().nonnegative(), z.string().min(1)]).optional(),
+  /** Wait for the journal. */
+  journal: z.boolean().optional(),
+  wtimeoutMS: z.number().int().nonnegative().optional(),
 });
 
 /** A profile without secrets. Fields are added by the connection tasks; unknown keys are rejected. */
@@ -114,7 +148,11 @@ export const profile = z.strictObject({
   auth: profileAuth.optional(),
   tls: profileTls.optional(),
   ssh: profileSsh.optional(),
+  proxy: profileProxy.optional(),
   readPreference: z.enum(READ_PREFERENCES).optional(),
+  /** Tag sets tried in order (needs a `readPreference` other than `primary`). */
+  readPreferenceTags: z.array(readPreferenceTagSet).min(1).optional(),
+  writeConcern: profileWriteConcern.optional(),
   appName: optionalString,
   connectTimeoutMS: z.number().int().positive().optional(),
   serverSelectionTimeoutMS: z.number().int().positive().optional(),
