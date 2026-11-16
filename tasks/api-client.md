@@ -5,7 +5,7 @@ owner: felix/agent-2
 deps: [renderer-scaffold,contract]
 touches: [packages/renderer/src/app/api]
 prio: 1
-lease_until: 2026-11-16T18:34:04Z
+lease_until: 2026-11-16T18:39:04Z
 ---
 ## Goal
 Typed Angular service wrapping `window.thicket`: `request<M>()` typed by the contract, streams as Observables with cancel on unsubscribe, error codes mapped to user-readable messages, a fake implementation for tests.
