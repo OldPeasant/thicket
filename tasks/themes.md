@@ -19,3 +19,4 @@ Token sets for Business (default) and Tron, each light and dark, selected by `da
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 20:19+0100 by dell26/agent-1): Tokens live in packages/renderer/src/app/theme/tokens.css (imported by styles.css); each of the four data-style x data-theme blocks repeats every token (explicit, testable). :root alone = Business light fallback before ThemeService runs.
