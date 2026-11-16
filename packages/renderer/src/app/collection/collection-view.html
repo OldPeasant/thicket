@@ -3,7 +3,8 @@
   <form class="query" (submit)="run($event)" data-testid="query-bar" novalidate>
     <div class="call">
       <span class="code ns" [title]="target().db + '.' + target().coll"
-        >db.<span class="coll">{{ target().coll }}</span>.find(</span
+        >db.<span class="coll">{{ target().coll }}</span
+        >.find(</span
       >
       <input
         class="arg filter"
@@ -136,6 +137,7 @@
             data-testid="pager-page"
             aria-label="Page number"
             [value]="pageNumber()"
+            [placeholder]="positionUnknown() ? 'last' : ''"
             (change)="jump()"
           />
         </label>

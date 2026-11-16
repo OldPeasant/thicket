@@ -143,15 +143,30 @@ export class CollectionView {
     if (page === null) return '';
     if (this.rawFormat() === 'ejson') return page.docs.join('\n');
     return this.docs()
-      .map((doc) => (doc === null ? '// unreadable document' : printShellSyntax(doc, { indent: 2 })))
+      .map((doc) =>
+        doc === null ? '// unreadable document' : printShellSyntax(doc, { indent: 2 }),
+      )
       .join('\n');
   });
 
+  /**
+   * The page's position is unknown: it was counted from the end (last page) without any count.
+   * The pager then names it relative to the end instead of guessing a number.
+   */
+  protected readonly positionUnknown = computed(
+    () => this.results.pagesFromEnd() !== null && this.results.count() === null,
+  );
   /** "1–50", the rows shown, or `null` before a page arrived. */
   protected readonly rowRange = computed(() => {
     const page = this.results.page();
     if (page === null) return null;
     if (page.docs.length === 0) return 'No documents';
+    if (this.positionUnknown()) {
+      const n = numberFormat.format(page.docs.length);
+      const back = this.results.pagesFromEnd() ?? 0;
+      if (back === 0) return `Last ${n}`;
+      return `${n}, ${back} ${back === 1 ? 'page' : 'pages'} before the last`;
+    }
     const from = page.firstRow + 1;
     return `${numberFormat.format(from)}–${numberFormat.format(page.firstRow + page.docs.length)}`;
   });
@@ -167,7 +182,10 @@ export class CollectionView {
     if (pages === null || count === null) return null;
     return `${count.exact ? '' : '~'}${numberFormat.format(pages)}`;
   });
-  protected readonly pageNumber = computed(() => this.results.paging().pageIndex + 1);
+  /** The page number for the jump field ('' when unknown). */
+  protected readonly pageNumber = computed(() =>
+    this.positionUnknown() ? '' : String(this.results.paging().pageIndex + 1),
+  );
 
   /** Prefix of element ids (tab ids may contain any character). */
   protected readonly uid = `coll-view-${++nextUid}`;
@@ -191,11 +209,10 @@ export class CollectionView {
     const value = (event.target as HTMLInputElement).value;
     this.text.update((t) => ({ ...t, [field]: value }));
     if (this.errors()[field] !== undefined) {
-      this.errors.update((e) => {
-        const rest = { ...e };
-        delete rest[field];
-        return rest;
-      });
+      this.errors.update(
+        (e) =>
+          Object.fromEntries(Object.entries(e).filter(([key]) => key !== field)) as QueryErrors,
+      );
     }
   }
 
@@ -222,7 +239,7 @@ export class CollectionView {
     if (input === undefined) return;
     const page = Number(input.value);
     if (Number.isInteger(page) && page >= 1) this.results.jump(page);
-    else input.value = String(this.pageNumber());
+    else input.value = this.pageNumber();
   }
 
   protected changePageSize(event: Event): void {

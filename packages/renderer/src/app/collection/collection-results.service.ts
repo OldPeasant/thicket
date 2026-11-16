@@ -65,8 +65,12 @@ export class CollectionResults implements OnDestroy {
   /** Bumped for every new read/count, so late answers of older ones are dropped. */
   private findGeneration = 0;
   private countGeneration = 0;
-  /** The page shown was read from the end (last page) before its index was known. */
-  private shownFromEnd = false;
+  /**
+   * Pages between the shown page and the last one, while the shown page's index is not known: the
+   * last page was read from the end without an exact count, and maybe paged back from there.
+   * `null` when the index is known.
+   */
+  private readonly fromEndState = signal<number | null>(null);
 
   readonly query = this.queryState.asReadonly();
   readonly paging = this.pagingState.asReadonly();
@@ -84,6 +88,8 @@ export class CollectionResults implements OnDestroy {
   readonly canPrevious = computed(() => canPrevious(this.pagingState()));
   readonly canNext = computed(() => canNext(this.pagingState()));
   readonly count = computed(() => this.pagingState().count);
+  /** See `fromEndState`; the pager then shows "last page" instead of a guessed number. */
+  readonly pagesFromEnd = this.fromEndState.asReadonly();
 
   /** Sets the collection. Call once before `run`. */
   setTarget(target: CollectionTarget): void {
@@ -102,7 +108,7 @@ export class CollectionResults implements OnDestroy {
       }),
     );
     this.pageState.set(null);
-    this.shownFromEnd = false;
+    this.fromEndState.set(null);
     this.load(firstPage(this.pagingState()));
     if (query.emptyFilter) this.estimateCount();
   }
@@ -131,7 +137,6 @@ export class CollectionResults implements OnDestroy {
 
   setPageSize(size: number): void {
     this.pagingState.update((state) => setPageSize(state, size));
-    this.shownFromEnd = false;
     this.load(firstPage(this.pagingState()));
   }
 
@@ -221,8 +226,12 @@ export class CollectionResults implements OnDestroy {
     const clipped = limit === undefined ? value : Math.min(value, limit);
     let state = setCount(this.pagingState(), clipped, exact);
     const pages = pageCount(state);
-    // A last page read from the end before the count was known now gets its real index.
-    if (this.shownFromEnd && exact && pages !== null) state = { ...state, pageIndex: pages - 1 };
+    // A page counted from the end before the count was known now gets its real index.
+    const fromEnd = this.fromEndState();
+    if (fromEnd !== null && pages !== null) {
+      state = { ...state, pageIndex: Math.max(0, pages - 1 - fromEnd) };
+      if (exact) this.fromEndState.set(null);
+    }
     this.pagingState.set(state);
     this.updateFirstRow();
   }
@@ -275,9 +284,16 @@ export class CollectionResults implements OnDestroy {
       state = { ...state, page: { ...state.page, isLast: true } };
     }
     const pages = pageCount(state);
-    this.shownFromEnd = request.fromEnd && !(state.count?.exact ?? false);
-    if (request.fromEnd && state.count?.exact && pages !== null) {
-      state = { ...state, pageIndex: pages - 1 };
+    const exact = state.count?.exact ?? false;
+    const fromEnd = this.fromEndState();
+    if (request.fromEnd) {
+      this.fromEndState.set(exact ? null : 0);
+      if (exact && pages !== null) state = { ...state, pageIndex: pages - 1 };
+    } else if (fromEnd !== null && state.pageIndex > 0 && (request.after || request.before)) {
+      // Paging by range away from a last page whose index is unknown: count from the end.
+      this.fromEndState.set(Math.max(0, fromEnd + (request.before ? 1 : -1)));
+    } else {
+      this.fromEndState.set(null);
     }
     this.pagingState.set(state);
     this.pageState.set({ docs, firstRow: state.pageIndex * state.pageSize });
