@@ -18,3 +18,4 @@ Profile list (folders, colors), editor with form and connection-string tabs kept
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 00:53+0100 by felix/agent-2): A user name without authMechanism maps to SCRAM-SHA-256 (written into the URI): the contract's profileAuth.mechanism has no 'negotiate/DEFAULT' value; SHA-1-only users must pick SCRAM-SHA-1. Adding DEFAULT to the contract would be a separate task
+- ASSUMPTION (2026-11-17 00:53+0100 by felix/agent-2): The saved connectionString holds the whole URI from the form (without password) and the profile's own fields (auth, tls, readPreference, appName, timeouts) mirror it; the backend's driver options are then equal to the URI's options
