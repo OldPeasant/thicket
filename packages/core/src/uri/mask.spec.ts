@@ -570,6 +570,66 @@ describe('maskText query part across whitespace', () => {
   });
 });
 
+// Round 6: the incremental scan of f477ad0 (next embedded scheme searched once, query state
+// tracked per word) must keep the earlier results and stay linear in the other long-line shapes.
+describe('maskText incremental scan', () => {
+  /** Times `maskText` on `build(n)` for n and 4n; a linear scan takes about 4x, quadratic 16x. */
+  function expectLinear(build: (n: number) => string, n: number, secret: string): void {
+    const time = (k: number): number => {
+      const text = build(k);
+      const started = performance.now();
+      const masked = maskText(text);
+      const elapsed = performance.now() - started;
+      expectNoLeak(masked, [secret]);
+      return elapsed;
+    };
+    time(Math.ceil(n / 25)); // warm-up
+    const small = time(n);
+    const large = time(4 * n);
+    expect(large < 200 || large < 8 * small, `n ${small} ms, 4n ${large} ms`).toBe(true);
+  }
+
+  it('masks a long line after a secret value with a raw space in linear time', () => {
+    expectLinear(
+      (n) => `err mongodb://h/?proxyPassword=lin18Secret a ${'word '.repeat(n)}`,
+      10_000,
+      'lin18Secret',
+    );
+  });
+
+  it('masks many connection strings with queries on one line in linear time', () => {
+    expectLinear(
+      (n) => `${'mongodb://h/?appName=a b '.repeat(n)}mongodb://u:many19Secret@h`,
+      2_000,
+      'many19Secret',
+    );
+  });
+
+  it('masks credentials with a raw space followed by a query with a raw space', () => {
+    expect(maskText('x mongodb://u:my 20Secret@h/?appName=a b&proxyPassword=pp21Secret y')).toBe(
+      `x mongodb://u:${MASK}@h/?appName=a b&proxyPassword=${MASK}`,
+    );
+  });
+
+  it('ends the token at the first whitespace when the first word has a fragment after "?"', () => {
+    expect(maskText('x mongodb://h/?tls=true#frag more mongodb://u:hash22Secret@h2 y')).toBe(
+      `x mongodb://h/?tls=true#frag more mongodb://u:${MASK}@h2 y`,
+    );
+  });
+
+  it('keeps a scheme inside a secret value in a later word of the query', () => {
+    expect(maskText('x mongodb://h/?appName=a b&proxyPassword=mongodb://emb23Secret c')).toBe(
+      `x mongodb://h/?appName=a b&proxyPassword=${MASK}`,
+    );
+  });
+
+  it('splits off an upper-case scheme in a later word after a query', () => {
+    expect(maskText('x mongodb://h/?tls=true down MONGODB+SRV://u:upper24Secret@h2 y')).toBe(
+      `x mongodb://h/?tls=true down MONGODB+SRV://u:${MASK}@h2 y`,
+    );
+  });
+});
+
 describe('maskText port detection', () => {
   it.each([',', '/', '?', '#', ' ', '"', "'", '`', ')', ']', '}', '>'])(
     'splits at a scheme after a port followed by %j',
