@@ -213,6 +213,24 @@ describe('DocumentEdits', () => {
     expect(edits.canRedo()).toBe(false);
   });
 
+  it('rebasing drops pending redo steps of that document only', () => {
+    edits.edit(order(1), order(1, 15));
+    edits.edit(order(1), order(1, 15, 4));
+    edits.edit(order(2), order(2, 25));
+    edits.edit(order(2), order(2, 25, 7));
+    edits.undo(); // redo step for document 2
+    edits.undo(); // undo document 2 again
+    edits.undo(); // redo step for document 1 (its qty edit)
+    edits.rebase('{"$numberInt":"1"}', order(1, 15));
+    // Document 1 is saved as shown: its redo step would re-apply a pre-save edit, so it goes.
+    expect(edits.isModified('{"$numberInt":"1"}')).toBe(false);
+    edits.redo();
+    edits.redo();
+    expect(ejson(edits.current(order(2)))).toBe(ejson(order(2, 25, 7)));
+    expect(edits.canRedo()).toBe(false);
+    expect(edits.isModified('{"$numberInt":"1"}')).toBe(false);
+  });
+
   it('rebasing a key without edits changes nothing', () => {
     edits.edit(order(1), order(1, 15));
     edits.rebase('{"$numberInt":"9"}', order(9));

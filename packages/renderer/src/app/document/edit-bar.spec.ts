@@ -127,6 +127,31 @@ describe('handleEditKeys', () => {
     for (const s of [readOnly, clean, busy]) expect(s.actions.saveAll).not.toHaveBeenCalled();
   });
 
+  it('Ctrl+S in a text field: read-only leaves the field alone; no save when nothing was applied or a write started', async () => {
+    const field = document.createElement('input');
+    document.body.append(field);
+    try {
+      const readOnly = setup();
+      field.focus();
+      expect(readOnly.press({ key: 's', ctrlKey: true }, field, false).prevented).toBe(true);
+      expect(document.activeElement).toBe(field);
+
+      // The field had nothing to apply: still unmodified when the save would run.
+      const clean = setup({ modified: false });
+      clean.press({ key: 's', ctrlKey: true }, field);
+      // A write started between the key and the deferred save.
+      const state = { busy: false };
+      const busy = setup(state);
+      field.focus();
+      busy.press({ key: 's', ctrlKey: true }, field);
+      state.busy = true;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      for (const s of [readOnly, clean, busy]) expect(s.actions.saveAll).not.toHaveBeenCalled();
+    } finally {
+      field.remove();
+    }
+  });
+
   it('does not undo or redo while a write runs', () => {
     const s = setup({ busy: true });
     expect(s.press({ key: 'z', ctrlKey: true }).handled).toBe(false);

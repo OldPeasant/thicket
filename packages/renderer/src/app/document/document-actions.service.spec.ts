@@ -279,6 +279,30 @@ describe('DocumentActions', () => {
       );
     });
 
+    it('checks nested paths: refuses a nested container the loaded document has, sends a new one', async () => {
+      const nested = parseEJsonDocument(
+        '{"_id":{"$numberInt":"1"},"addr":{"city":"Bonn","geo":{"lat":"50.7"}}}',
+      );
+      // addr.geo existed (maybe partially projected): replacing it by an array is refused.
+      edits.edit(
+        nested,
+        parseEJsonDocument('{"_id":{"$numberInt":"1"},"addr":{"city":"Bonn","geo":["50.7"]}}'),
+      );
+      expect(await actions.save(keyOf(1))).toBe(false);
+      expect(fake.requests).toHaveLength(0);
+      expect(actions.message()?.text).toBe(PROJECTION_REFUSED);
+      edits.discardAll();
+      // addr.zone is new: setting a sub-document there hides nothing.
+      edits.edit(
+        nested,
+        parseEJsonDocument(
+          '{"_id":{"$numberInt":"1"},"addr":{"city":"Bonn","geo":{"lat":"50.7"},"zone":{"n":"1"}}}',
+        ),
+      );
+      expect(await actions.save(keyOf(1))).toBe(true);
+      expect(params('docs.update')[0]?.['update']).toBe('{"$set":{"addr.zone":{"n":"1"}}}');
+    });
+
     it('still refuses when the document was edited under a projection that is cleared now', async () => {
       edits.edit(loaded, withFields('"b":"y","a":"x","addr":{"city":"Bonn"},"tags":["p"]'), true);
       projection = undefined;
