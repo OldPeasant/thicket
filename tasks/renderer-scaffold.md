@@ -17,7 +17,8 @@ Angular 22 app in packages/renderer (standalone components, signals, zoneless if
   - verified (2026-11-16 18:52+0100 by dell26/agent-1): npm run dev -w packages/renderer -- --port 4317 (ng serve, development config) -> 'Local: http://localhost:4317/', node fetch GET / -> 200 with app-root + vite client, GET /main.js -> 200 text/javascript; then stopped
 - [x] Unit test for the root component runs in `npm run check`
   - verified (2026-11-16 18:53+0100 by dell26/agent-1): npm run check at 044a8e7 -> lint + typecheck (ngc strictTemplates + tsc) pass; root vitest 4/4, then ng test (Vitest runner, jsdom) 46/46 incl. src/app/app.spec.ts (root component renders title, zoneless); a deliberately failing renderer spec made the test step exit 1 (test-writer probe)
-- [ ] No external network resources (fonts are bundled locally, no CDN)
+- [x] No external network resources (fonts are bundled locally, no CDN)
+  - verified (2026-11-16 18:53+0100 by dell26/agent-1): npm run build -w packages/renderer + node scan of dist/*.{html,js,css} -> 0 external URLs except XML namespace ids (http://www.w3.org/...), no font files, body font system-ui; src/no-network.spec.ts (in npm run check) fails on remote src/href/srcset/ngSrc/url()/@import in src/ (probe with a Google Fonts @import failed as expected); CSP default-src 'self'; font-src 'self'
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
