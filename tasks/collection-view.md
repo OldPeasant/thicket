@@ -1,11 +1,11 @@
 ---
 title: M1: Collection tab: query bar, pager and result views
-status: in_progress
+status: done
 owner: felix/agent-1
 deps: [sidebar-tree,docs-query-backend,bson-display,paging-core,shell-syntax]
 touches: [packages/renderer/src/app/collection]
 prio: 1
-lease_until: 2026-11-16T23:22:22Z
+lease_until: 
 ---
 ## Goal
 Query bar (filter, projection, sort, collation, limit in shell syntax with validation), pager (sizes 20/50/100/500, first/prev/next/last/jump, estimated count with exact on request), cancel, and three result views: table (one row per document), document list, raw. Use the frontend-design skill for the visual direction; respect the Business and Tron tokens (no hard-coded colors).
@@ -25,3 +25,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 23:23+0100 by felix/agent-1): Any collation typed in the query bar counts as non-default for paging (skip mode, per paging-core); a user .limit(n) caps the whole result and makes the last page a skip read.
 - ASSUMPTION (2026-11-16 23:23+0100 by felix/agent-1): Query history and favorites are left to the query-history task; the query bar has no history yet. Added the './paging' subpath export to @thicket/core so the renderer can use paging-core without the Node-only root.
 - ASSUMPTION (2026-11-17 00:01+0100 by felix/agent-1): If an exact count arrives during a page read that is then cancelled or fails, the page keeps its 'Last N' label next to the exact total until the next navigation or count (Cancel must not start a new read); accepted as review finding R3-CR-1.
+- done by felix/agent-1: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 52s on 15c912a3e; criteria verified 3/3
