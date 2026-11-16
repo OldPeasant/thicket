@@ -5,7 +5,7 @@ owner: felix/agent-1
 deps: [electron-shell]
 touches: [apps/desktop/electron-builder.yml,apps/desktop/build]
 prio: 2
-lease_until: 2026-11-16T19:39:47Z
+lease_until: 2026-11-16T19:44:47Z
 ---
 ## Goal
 `npm run dist` produces unsigned installers for the current OS: AppImage/deb/rpm on Linux, dmg on macOS, NSIS + zip on Windows; native modules rebuilt for Electron.
