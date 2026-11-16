@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "task": "themes",
+  "reviewed_revision": "d370b59b2af8f6617d6832096d05d4cf5356e64f",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/themes/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/themes/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/themes/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "Electron test waits for document.getAnimations() to finish and screenshots with animations disabled; PNGs regenerated (fixer round 1)"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "a failed save shows the value stored in main again, per key, not a snapshot (fixer round 1; kept by the CR-4 rule)"},
+    {"id": "TW-1", "source": "test-writer", "severity": "Medium", "disposition": "fixed", "note": "a late app.settings.get answer no longer undoes a newer choice (fixer round 1)"},
+    {"id": "TW-2", "source": "test-writer", "severity": "Medium", "disposition": "fixed", "note": "answers arriving in reverse order: the last choice wins (fixer round 1)"},
+    {"id": "TW-3", "source": "test-writer", "severity": "Medium", "disposition": "fixed", "note": "a failed earlier save no longer reverts a later successful save (fixer round 1)"},
+    {"id": "CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "every valid answer is recorded as stored, so a failed save reverts to what main holds (fixer round 2)"},
+    {"id": "TW-4", "source": "test-writer", "severity": "Medium", "disposition": "fixed", "note": "same defect as CR-3 (fixer round 2)"},
+    {"id": "CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "ThemeService rewritten to one per-key display rule (60a9323, parent worker); also fixes two late-answer sequences pinned by tests in 9563ba9; reviewed in round 4"},
+    {"id": "CR-5", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "test-writer round 4 (d370b59) added tests asserting the display while a broadcast arrives during a pending save; reviewer confirmed resolved at d370b59"}
+  ],
+  "validation": [
+    {"command": "cd packages/renderer && npx ng test --include='src/app/theme/*.spec.ts'", "result": "pass (64/64)"},
+    {"command": "npm run check", "result": "pass"},
+    {"command": "npm run test:electron -w apps/desktop -- test/theme.electron.spec.ts", "result": "pass (4/4); screenshots byte-identical to reviews/themes/screenshots"},
+    {"command": "npm run test:electron", "result": "theme spec passes; 6 failures in app/dev/secrets electron specs, outside this task (4 known on main, 2 secrets safeStorage basic_text)"}
+  ]
+}
