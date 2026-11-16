@@ -21,6 +21,20 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 
+/** Options of `ApiService.stream`. */
+export interface StreamOptions<M extends StreamMethodName> {
+  /** Called once with the request's result (e.g. `path` of `io.export`), before any data. */
+  onStart?: (result: ResultOf<M>) => void;
+}
+
+/**
+ * Most events a stream subscription buffers while its request is pending (its `streamId` is not
+ * known yet). One more fails the stream with `INTERNAL` and cancels it.
+ */
+export const MAX_EARLY_EVENTS = 10_000;
+
+const BROADCAST_STREAM_NAMES: ReadonlySet<string> = new Set(Object.values(BROADCAST_STREAMS));
+
 /** Payload types of the broadcast streams (events not tied to a request). */
 export interface BroadcastPayloads {
   [BROADCAST_STREAMS.connStatus]: ConnStatus;
@@ -31,8 +45,9 @@ export type BroadcastStream = keyof BroadcastPayloads;
 
 /**
  * Typed access to `window.thicket`. Requests are typed by the contract (`ParamsOf`/`ResultOf`),
- * failures reject with `ApiError`; streaming methods are Observables that cancel the server-side
- * operation when the last subscriber unsubscribes before the stream ended.
+ * failures reject with `ApiError`; streaming methods are cold Observables: each subscription sends
+ * its own request and cancels its own server-side stream when it unsubscribes before the stream
+ * ended. Use `share()` to let several subscribers share one stream.
  */
 @Injectable({ providedIn: 'root' })
 export class ApiService {
@@ -76,13 +91,25 @@ export class ApiService {
    * errors with an `ApiError` on an `error` event or a failed request. Unsubscribing before that
    * cancels the request (still pending) or the stream (`streamId` known). The request is sent
    * once per subscription.
+   *
+   * `options.onStart` receives the request's result (e.g. the chosen `path` of `io.export`) once,
+   * before any data is emitted. A result with `streamId: null` (e.g. a cancelled save dialog) then
+   * completes the Observable without emitting.
    */
-  stream<M extends StreamMethodName>(method: M, params: ParamsOf<M>): Observable<StreamDataOf<M>> {
+  stream<M extends StreamMethodName>(
+    method: M,
+    params: ParamsOf<M>,
+    options: StreamOptions<M> = {},
+  ): Observable<StreamDataOf<M>> {
     return new Observable<StreamDataOf<M>>((subscriber) => {
       const id = newRequestId();
       let streamId: string | undefined;
+      /** The response was accepted: events go straight to `handle` instead of the buffer. */
+      let started = false;
+      let responded = false;
       let finished = false;
-      let unsubscribed = false;
+      /** Unsubscribed or given up (buffer overflow): a late `streamId` is cancelled at once. */
+      let abandoned = false;
       /** Events that arrive before the response tells us the `streamId`. */
       let early: Event[] = [];
 
@@ -111,16 +138,34 @@ export class ApiService {
 
       const off = this.bridge.on((event) => {
         if (finished) return;
-        if (streamId === undefined) early.push(event);
-        else handle(event);
+        if (started) {
+          handle(event);
+          return;
+        }
+        // Broadcasts never belong to a request's stream: don't hold them while the request is pending.
+        if (BROADCAST_STREAM_NAMES.has(event.stream)) return;
+        if (early.length >= MAX_EARLY_EVENTS) {
+          abandoned = true;
+          finish();
+          this.bridge.cancel(id);
+          subscriber.error(
+            new ApiError({
+              code: 'INTERNAL',
+              message: `More than ${MAX_EARLY_EVENTS} events arrived before the response of ${method}`,
+            }),
+          );
+          return;
+        }
+        early.push(event);
       });
 
       this.send(id, method, params).then(
         (result) => {
+          responded = true;
           const sid = streamIdOf(result);
-          if (unsubscribed) {
+          if (abandoned) {
             // Cancelled while pending, but the response was already on its way: stop the stream too.
-            if (sid !== undefined) this.bridge.cancel(sid);
+            if (typeof sid === 'string') this.bridge.cancel(sid);
             return;
           }
           if (sid === undefined) {
@@ -134,23 +179,42 @@ export class ApiService {
             );
             return;
           }
-          streamId = sid;
+          if (sid !== null) streamId = sid;
+          try {
+            options.onStart?.(result as ResultOf<M>);
+          } catch (error) {
+            if (finished) return;
+            finish();
+            if (streamId !== undefined) this.bridge.cancel(streamId);
+            subscriber.error(error);
+            return;
+          }
+          if (finished) return; // onStart unsubscribed
+          if (sid === null) {
+            // Nothing to stream, e.g. the user cancelled the save dialog of io.export.
+            finish();
+            subscriber.complete();
+            return;
+          }
+          started = true;
           const buffered = early;
           early = [];
           for (const event of buffered) handle(event);
         },
         (error: unknown) => {
-          if (unsubscribed) return;
+          responded = true;
+          if (abandoned) return;
           finish();
           subscriber.error(ApiError.from(error));
         },
       );
 
       return () => {
-        unsubscribed = true;
+        abandoned = true;
         if (finished) return;
         finish();
-        this.bridge.cancel(streamId ?? id);
+        if (streamId !== undefined) this.bridge.cancel(streamId);
+        else if (!responded) this.bridge.cancel(id);
       };
     });
   }
@@ -174,14 +238,22 @@ export class ApiService {
 
   /** Sends the request; resolves with the result, rejects with an `ApiError`. */
   private async send(id: string, method: string, params: unknown): Promise<unknown> {
-    let response;
+    let response: unknown;
     try {
       response = await this.bridge.request({ id, method, params });
     } catch (error) {
       throw ApiError.from(error);
     }
-    if (response.ok) return response.result;
-    throw ApiError.from(response.error);
+    if (typeof response !== 'object' || response === null || !('ok' in response)) {
+      throw new ApiError({
+        code: 'INTERNAL',
+        message: `Malformed response from the bridge for ${method}`,
+        detail: response,
+      });
+    }
+    const { ok, result, error } = response as { ok: unknown; result?: unknown; error?: unknown };
+    if (ok === true) return result;
+    throw ApiError.from(error);
   }
 }
 
@@ -189,9 +261,11 @@ function cancelledError(): ApiError {
   return new ApiError({ code: 'CANCELLED', message: 'Cancelled' });
 }
 
-function streamIdOf(result: unknown): string | undefined {
+/** The `streamId` of a stream method's result: `null` means "nothing to stream", `undefined` malformed. */
+function streamIdOf(result: unknown): string | null | undefined {
   if (typeof result !== 'object' || result === null) return undefined;
   const { streamId } = result as Record<string, unknown>;
+  if (streamId === null) return null;
   return typeof streamId === 'string' && streamId.length > 0 ? streamId : undefined;
 }
 

@@ -4,7 +4,7 @@ import { firstValueFrom, toArray } from 'rxjs';
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import { ApiError } from './api-error';
-import { ApiService } from './api.service';
+import { ApiService, MAX_EARLY_EVENTS } from './api.service';
 import { FakeThicketBridge, provideFakeThicket } from './testing';
 import { THICKET_BRIDGE, type ThicketBridge } from './thicket-bridge';
 
@@ -495,6 +495,156 @@ describe('ApiService', () => {
       fake.end(requestId);
       fake.end('s1');
       expect(await all).toEqual([]);
+    });
+  });
+
+  describe('stream start result', () => {
+    const EXPORT = {
+      profileId: 'p1',
+      db: 'd',
+      coll: 'c',
+      source: { kind: 'find', filter: '{}' },
+      format: 'jsonl',
+    } as const;
+    const progress = { processed: 1, failed: 0, errors: [] };
+
+    it('completes without emitting when io.export answers streamId null (dialog cancelled)', async () => {
+      fake.respond('io.export', { streamId: null, path: null });
+      const starts: ResultOf<'io.export'>[] = [];
+      const all = firstValueFrom(
+        api
+          .stream('io.export', EXPORT, { onStart: (result) => starts.push(result) })
+          .pipe(toArray()),
+      );
+
+      expect(await all).toEqual([]);
+      expect(starts).toEqual([{ streamId: null, path: null }]);
+      expect(fake.cancels).toEqual([]);
+      expect(fake.listenerCount).toBe(0);
+    });
+
+    it('calls onStart once with the result before the first data, also for buffered data', async () => {
+      const log: unknown[] = [];
+      fake.handle('io.export', () => {
+        fake.data('io.export', 'e1', progress);
+        return { streamId: 'e1', path: '/tmp/out.jsonl' };
+      });
+      const done = firstValueFrom(
+        api
+          .stream('io.export', EXPORT, {
+            onStart: (result) => {
+              expectTypeOf(result).toEqualTypeOf<ResultOf<'io.export'>>();
+              log.push(['start', result.path]);
+            },
+          })
+          .pipe(toArray()),
+      );
+      await flush();
+      log.push('after response');
+      fake.data('io.export', 'e1', progress);
+      fake.end('e1');
+
+      const data = await done;
+      expect(data).toEqual([progress, progress]);
+      expect(log).toEqual([['start', '/tmp/out.jsonl'], 'after response']);
+    });
+
+    it('does not call onStart when the request fails or was unsubscribed', async () => {
+      const onStart = vi.fn();
+      fake.fail('io.export', { code: 'NOT_CONNECTED', message: 'not connected' });
+      await expect(
+        firstValueFrom(api.stream('io.export', EXPORT, { onStart })),
+      ).rejects.toMatchObject({ code: 'NOT_CONNECTED' });
+
+      fake.respond('io.export', { streamId: 'e2', path: '/x' });
+      api.stream('io.export', EXPORT, { onStart }).subscribe().unsubscribe();
+      await flush();
+
+      expect(onStart).not.toHaveBeenCalled();
+      expect(fake.cancels).toEqual([fake.requests[1]?.id, 'e2']);
+    });
+
+    it('errors and cancels the stream when onStart throws', async () => {
+      fake.respond('io.export', { streamId: 'e1', path: '/x' });
+      const boom = new Error('boom');
+      const error = await firstValueFrom(
+        api.stream('io.export', EXPORT, {
+          onStart: () => {
+            throw boom;
+          },
+        }),
+      ).catch((thrown: unknown) => thrown);
+
+      expect(error).toBe(boom);
+      expect(fake.cancels).toEqual(['e1']);
+      expect(fake.listenerCount).toBe(0);
+    });
+
+    it('cancels the stream, not the request, when unsubscribed from inside onStart', async () => {
+      fake.respond('io.export', { streamId: 'e1', path: '/x' });
+      const stream = api.stream('io.export', EXPORT, {
+        onStart: () => subscription.unsubscribe(),
+      });
+      const subscription = stream.subscribe();
+      await flush();
+
+      expect(fake.cancels).toEqual(['e1']);
+      expect(fake.listenerCount).toBe(0);
+    });
+  });
+
+  describe('early event buffer', () => {
+    const FIND = { profileId: 'p1', db: 'd', coll: 'c', filter: '{}' };
+
+    it('does not buffer broadcast events while the request is pending', async () => {
+      let answer: (value: { streamId: string }) => void = () => undefined;
+      fake.handle('docs.find', () => new Promise((resolve) => (answer = resolve)));
+      const errors: unknown[] = [];
+      const received: DocsBatch[] = [];
+      api.stream('docs.find', FIND).subscribe({
+        next: (b) => received.push(b),
+        error: (e: unknown) => errors.push(e),
+      });
+      await flush();
+      for (let i = 0; i <= MAX_EARLY_EVENTS; i++) {
+        fake.emit({
+          stream: BROADCAST_STREAMS.connStatus,
+          kind: 'data',
+          payload: { profileId: 'p1', state: 'connected' },
+        });
+      }
+      fake.emit({ stream: BROADCAST_STREAMS.theme, kind: 'end', payload: { delivered: 0 } });
+      answer({ streamId: 's1' });
+      await flush();
+      fake.data('docs.find', 's1', batch('{"a":1}'));
+
+      expect(errors).toEqual([]);
+      expect(received).toEqual([batch('{"a":1}')]);
+      expect(fake.cancels).toEqual([]);
+    });
+
+    it('fails with INTERNAL and cancels when too many events arrive before the response', async () => {
+      let answer: (value: { streamId: string }) => void = () => undefined;
+      fake.handle('docs.find', () => new Promise((resolve) => (answer = resolve)));
+      const errors: unknown[] = [];
+      api.stream('docs.find', FIND).subscribe({ error: (e: unknown) => errors.push(e) });
+      await flush();
+      for (let i = 0; i < MAX_EARLY_EVENTS; i++) {
+        fake.data('docs.find', 'other', batch('{}'));
+      }
+      expect(errors).toEqual([]);
+
+      fake.data('docs.find', 'other', batch('{}'));
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toBeInstanceOf(ApiError);
+      expect(errors[0]).toMatchObject({ code: 'INTERNAL' });
+      expect(fake.cancels).toEqual([fake.requests[0]?.id]);
+      expect(fake.listenerCount).toBe(0);
+
+      answer({ streamId: 's1' });
+      await flush();
+      expect(fake.cancels).toEqual([fake.requests[0]?.id, 's1']);
+      expect(errors).toHaveLength(1);
     });
   });
 

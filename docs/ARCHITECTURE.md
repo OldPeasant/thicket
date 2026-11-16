@@ -113,8 +113,10 @@ Contract layout (`packages/contract/src/`):
   `window.thicket` (`request(Request): Promise<Response>`, `cancel(id)`, `on(listener) → off`; the
   renderer picks request ids). Components use `ApiService`: `request(method, params, { signal })`
   resolves with `ResultOf<M>` or rejects with `ApiError` (`code`, `message`, `detail`,
-  `explanation`); `stream(method, params)` is an Observable of `StreamDataOf<M>` that cancels on
-  unsubscribe; `broadcasts(BROADCAST_STREAMS.x)` / `events(name)` for pushed events.
+  `explanation`); `stream(method, params, { onStart })` is a cold Observable of `StreamDataOf<M>`
+  (one request per subscription, cancelled on unsubscribe; `share()` to share it). `onStart` gets
+  the request's result (e.g. `path` of `io.export`) before any data; `streamId: null` (cancelled
+  dialog) completes without data. `broadcasts(BROADCAST_STREAMS.x)` / `events(name)` for pushed events.
   `ERROR_MESSAGES` / `describeError()` give readable texts per error code. Specs use
   `FakeThicketBridge` + `provideFakeThicket()` from `app/api/testing`.
 - Adding a method: add it to its group file, add a valid/invalid sample to `SAMPLES` in
