@@ -1,0 +1,103 @@
+/* Main window grid. Colors only from the theme tokens (app/theme/tokens.css). */
+:host {
+  display: grid;
+  grid-template-columns: var(--sidebar-width, 260px) 5px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'sidebar splitter work'
+    'status status status';
+  height: 100%;
+  min-height: 0;
+}
+
+.sidebar {
+  grid-area: sidebar;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: auto;
+  background: var(--bg-panel);
+}
+
+.sidebar-title {
+  margin: 0;
+  padding: 0.625rem 0.875rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: var(--heading-tracking);
+  text-transform: var(--heading-transform);
+}
+
+.sidebar-empty {
+  padding: 0.25rem 0.875rem;
+  font-size: 0.85em;
+  color: var(--text-faint);
+}
+
+.sidebar-empty p {
+  margin: 0 0 0.375rem;
+}
+
+.sidebar-empty a {
+  color: var(--accent);
+}
+
+/* The splitter is a 5px hit area with a 1px rule; it shows the accent while hovered or dragged. */
+.splitter {
+  grid-area: splitter;
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+  background: var(--bg-panel);
+}
+
+.splitter::before {
+  content: '';
+  position: absolute;
+  inset: 0 2px 0 auto;
+  width: 1px;
+  background: var(--border);
+}
+
+.splitter:hover::before,
+.splitter:active::before,
+.splitter:focus-visible::before {
+  inset: 0 1px 0 auto;
+  width: 3px;
+  background: var(--accent);
+  box-shadow: var(--glow);
+}
+
+.splitter:focus-visible {
+  outline: none;
+}
+
+.work {
+  grid-area: work;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.content {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pane {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+}
+
+.pane[hidden] {
+  display: none;
+}
+
+.status {
+  grid-area: status;
+}

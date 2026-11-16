@@ -6,13 +6,16 @@ import { App } from './app';
 import { appConfig } from './app.config';
 
 describe('App', () => {
-  it('creates the root component and renders the start page', async () => {
+  it('creates the root component and renders the start page in the layout', async () => {
     TestBed.configureTestingModule({ providers: appConfig.providers });
     const harness = await RouterTestingHarness.create('/');
 
     const page = harness.routeNativeElement as HTMLElement;
-    expect(page.querySelector('h1')?.textContent).toBe('Thicket');
-    expect(page.querySelector('main.shell p')?.textContent).toBe('A desktop client for MongoDB.');
+    expect(page.tagName.toLowerCase()).toBe('app-shell');
+    expect(page.querySelector('app-welcome h1')?.textContent).toBe('Thicket');
+    expect(page.querySelector('app-welcome .lede')?.textContent).toBe(
+      'A desktop client for MongoDB.',
+    );
   });
 
   it('hosts the routed page in a router outlet', async () => {

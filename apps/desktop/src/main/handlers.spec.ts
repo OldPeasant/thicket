@@ -326,6 +326,7 @@ describe('app.settings handlers', () => {
     dateDisplay: 'local',
     checkForUpdates: true,
     schemaSampleSize: 1000,
+    sidebarWidth: 260,
   };
 
   function fakeStore() {

@@ -60,6 +60,7 @@ const SETTINGS = {
   dateDisplay: 'utc' as const,
   checkForUpdates: false,
   schemaSampleSize: 1000,
+  sidebarWidth: 260,
 };
 const INDEX = {
   name: 'status_1',

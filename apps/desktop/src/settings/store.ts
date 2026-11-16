@@ -1,4 +1,4 @@
-import { settings as settingsSchema, type Settings } from '@thicket/contract';
+import { SIDEBAR_WIDTH, settings as settingsSchema, type Settings } from '@thicket/contract';
 import * as nodeFs from 'node:fs/promises';
 
 /** Version of the `settings.json` layout; bump it and add a step to `migrate` when it changes. */
@@ -14,6 +14,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   dateDisplay: 'local',
   checkForUpdates: true,
   schemaSampleSize: 1000,
+  sidebarWidth: SIDEBAR_WIDTH.default,
 });
 
 /** The file operations the store needs; injectable so tests can simulate failures and crashes. */

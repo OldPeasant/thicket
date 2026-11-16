@@ -6,6 +6,8 @@ import { defineMethods } from './define';
 export const STYLES = ['business', 'tron'] as const;
 export const THEME_MODES = ['light', 'dark', 'system'] as const;
 export const PAGE_SIZES = [20, 50, 100, 500] as const;
+/** Range and default of the main window's sidebar width in CSS pixels. */
+export const SIDEBAR_WIDTH = { min: 180, max: 560, default: 260 } as const;
 
 /** User settings (`settings.json`). */
 export const settings = z.strictObject({
@@ -20,6 +22,8 @@ export const settings = z.strictObject({
   dateDisplay: z.enum(['local', 'utc']),
   checkForUpdates: z.boolean(),
   schemaSampleSize: z.number().int().positive(),
+  /** Width of the main window's sidebar in CSS pixels. */
+  sidebarWidth: z.number().int().min(SIDEBAR_WIDTH.min).max(SIDEBAR_WIDTH.max),
 });
 
 export type Settings = z.infer<typeof settings>;

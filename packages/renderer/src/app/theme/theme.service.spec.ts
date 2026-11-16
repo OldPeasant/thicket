@@ -19,6 +19,7 @@ const SETTINGS: Settings = {
   dateDisplay: 'local',
   checkForUpdates: true,
   schemaSampleSize: 1000,
+  sidebarWidth: 260,
 };
 
 /** A controllable `prefers-color-scheme: dark` media query. */

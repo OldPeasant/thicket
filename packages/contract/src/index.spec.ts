@@ -632,6 +632,7 @@ describe('envelope', () => {
       dateDisplay: 'utc',
       checkForUpdates: false,
       schemaSampleSize: 1000,
+      sidebarWidth: 260,
     };
     expect(settingsChanged.safeParse({ settings: full }).success).toBe(true);
     expect(settingsChanged.safeParse({ settings: { style: 'tron' } }).success).toBe(false);
