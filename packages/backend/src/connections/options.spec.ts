@@ -271,7 +271,7 @@ describe('clientConfig', () => {
         }),
         {},
       );
-      expect(options.auth).toEqual({ username: 'CN=alice,O=Example' });
+      expect(options.auth).toEqual({ username: 'CN=alice,O=Example', password: '' });
       expect(options.authSource).toBe('$external');
     });
 

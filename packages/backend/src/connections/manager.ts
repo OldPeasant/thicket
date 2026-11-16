@@ -100,7 +100,7 @@ export class ConnectionManager {
       this.log(`${label}: ok (${server.version}, ${server.topology})`, secrets);
       return { latencyMS, server };
     } catch (error) {
-      const failure = toConnectError(error, Object.values(secrets).filter(isString));
+      const failure = toConnectError(error, Object.values(secrets).filter(isString), true);
       this.log(`${label}: ${failure.code} ${failure.message}`, secrets);
       throw failure;
     } finally {
@@ -200,7 +200,7 @@ export class ConnectionManager {
       const failure =
         this.entries.get(profileId) !== entry
           ? closedWhileConnecting()
-          : toConnectError(error, Object.values(secrets).filter(isString));
+          : toConnectError(error, Object.values(secrets).filter(isString), true);
       if (entry.client) await closeQuietly(entry.client);
       delete entry.client;
       if (this.entries.get(profileId) === entry) {

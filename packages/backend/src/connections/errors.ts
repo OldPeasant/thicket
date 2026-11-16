@@ -43,6 +43,11 @@ const NETWORK_CODES = new Set([
 const TIMEOUT_CODES = new Set(['ETIMEDOUT', 'ETIMEOUT', 'ESOCKETTIMEDOUT']);
 /** MongoDB `AuthenticationFailed`, `MechanismUnavailable`. */
 const AUTH_SERVER_CODES = new Set([18, 334]);
+/**
+ * MongoDB `UserNotFound`: while connecting it is the answer to an X.509 certificate whose subject
+ * has no user; later (e.g. `dropUser`) it is an ordinary server error.
+ */
+const USER_NOT_FOUND = 11;
 
 const AUTH_NAMES = new Set(['MongoMissingCredentialsError']);
 const TIMEOUT_NAMES = new Set([
@@ -92,15 +97,20 @@ function causes(error: unknown): Cause[] {
 function isTls(c: Cause): boolean {
   if (
     typeof c.code === 'string' &&
-    (TLS_CODES.has(c.code) || c.code.startsWith('ERR_SSL_') || c.code.startsWith('ERR_TLS_'))
+    (TLS_CODES.has(c.code) ||
+      c.code.startsWith('ERR_SSL_') ||
+      c.code.startsWith('ERR_TLS_') ||
+      // OpenSSL failures, e.g. ERR_OSSL_BAD_DECRYPT for a wrong client key passphrase.
+      c.code.startsWith('ERR_OSSL_'))
   ) {
     return true;
   }
   return /certificate|\bSSL\b|\bTLS\b|handshake/i.test(c.message);
 }
 
-function isAuth(c: Cause): boolean {
+function isAuth(c: Cause, connecting: boolean): boolean {
   if (AUTH_NAMES.has(c.name)) return true;
+  if (connecting && (c.code === USER_NOT_FOUND || c.codeName === 'UserNotFound')) return true;
   if (typeof c.code === 'number' && AUTH_SERVER_CODES.has(c.code)) return true;
   if (c.codeName === 'AuthenticationFailed') return true;
   return /authentication failed/i.test(c.message);
@@ -135,12 +145,13 @@ const PREFIX: Partial<Record<ErrorCode, string>> = {
 /**
  * Which contract error code a driver error stands for. The most specific cause wins: an
  * authentication failure, then TLS, DNS, refused/unreachable, and a timeout (e.g. server
- * selection that found no answer) last.
+ * selection that found no answer) last. `connecting`: the error ended a connect (handshake and
+ * authentication), where a server's `UserNotFound` means the credentials name no user.
  */
-export function classifyCode(error: unknown): ErrorCode {
+export function classifyCode(error: unknown, connecting = false): ErrorCode {
   if (error instanceof RpcError) return error.code;
   const all = causes(error);
-  if (all.some(isAuth)) return 'AUTH_FAILED';
+  if (all.some((c) => isAuth(c, connecting))) return 'AUTH_FAILED';
   if (all.some(isTls)) return 'TLS_ERROR';
   if (all.some(isDns)) return 'DNS_ERROR';
   if (all.some(isNetwork)) return 'NETWORK_ERROR';
@@ -155,11 +166,16 @@ export function classifyCode(error: unknown): ErrorCode {
 /**
  * Turns a driver error into the `RpcError` a handler answers with: a classified code and a
  * readable message with every connection string masked (and the given secret values removed).
- * `SERVER_ERROR`s keep the server's code and code name as `detail`.
+ * `SERVER_ERROR`s keep the server's code and code name as `detail`. `connecting`: see
+ * `classifyCode`.
  */
-export function toConnectError(error: unknown, secrets: readonly string[] = []): RpcError {
+export function toConnectError(
+  error: unknown,
+  secrets: readonly string[] = [],
+  connecting = false,
+): RpcError {
   if (error instanceof RpcError) return error;
-  const code = classifyCode(error);
+  const code = classifyCode(error, connecting);
   const raw = error instanceof Error ? error.message : String(error);
   const text = redact(raw, secrets);
   const prefix = PREFIX[code] ?? 'Connection failed';

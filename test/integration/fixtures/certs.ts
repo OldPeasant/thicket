@@ -12,7 +12,7 @@ export interface TestCertificates {
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** RSA key pair from Node's native crypto (fast), converted to node-forge objects. */
-function rsaKeyPair(): {
+export function rsaKeyPair(): {
   privateKey: forge.pki.rsa.PrivateKey;
   publicKey: forge.pki.rsa.PublicKey;
 } {
@@ -27,7 +27,7 @@ function rsaKeyPair(): {
   };
 }
 
-function newCertificate(
+export function newCertificate(
   publicKey: forge.pki.rsa.PublicKey,
   validDays: number,
 ): forge.pki.Certificate {
@@ -41,11 +41,26 @@ function newCertificate(
   return cert;
 }
 
+/** A CA that can sign more certificates (client certificates for X.509, see `x509.ts`). */
+export interface TestIssuer {
+  cert: forge.pki.Certificate;
+  privateKey: forge.pki.rsa.PrivateKey;
+  name: forge.pki.CertificateField[];
+}
+
 /**
  * Creates a CA and a server certificate for `hosts` (DNS names or IPv4/IPv6 literals, used as
  * subjectAltName). The CA's key is discarded: nothing else can be signed with it.
  */
 export function generateTestCertificates(hosts: readonly string[]): TestCertificates {
+  return generateTestPki(hosts).certs;
+}
+
+/** Like `generateTestCertificates`, but also returns the CA to sign further certificates with. */
+export function generateTestPki(hosts: readonly string[]): {
+  certs: TestCertificates;
+  issuer: TestIssuer;
+} {
   const ca = rsaKeyPair();
   const caCert = newCertificate(ca.publicKey, 2);
   const caName = [{ name: 'commonName', value: 'Thicket Test CA' }];
@@ -76,9 +91,12 @@ export function generateTestCertificates(hosts: readonly string[]): TestCertific
   serverCert.sign(ca.privateKey, forge.md.sha256.create());
 
   return {
-    caCert: forge.pki.certificateToPem(caCert),
-    serverCertKey:
-      forge.pki.certificateToPem(serverCert) + forge.pki.privateKeyToPem(server.privateKey),
+    certs: {
+      caCert: forge.pki.certificateToPem(caCert),
+      serverCertKey:
+        forge.pki.certificateToPem(serverCert) + forge.pki.privateKeyToPem(server.privateKey),
+    },
+    issuer: { cert: caCert, privateKey: ca.privateKey, name: caName },
   };
 }
 

@@ -98,7 +98,8 @@ export function clientConfig(profile: ProfileDraft, secrets: ConnectSecrets): Cl
     // X.509 users live in `$external`; another authSource only makes the driver refuse.
     options.authSource = '$external';
     // The server takes the user from the certificate's subject when no name is given.
-    if (auth.username !== undefined) options.auth = { username: auth.username };
+    // The driver wants both keys; an empty password means "none" for MONGODB-X509.
+    if (auth.username !== undefined) options.auth = { username: auth.username, password: '' };
   }
 
   const proxy = profile.proxy;
