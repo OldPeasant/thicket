@@ -28,4 +28,5 @@ Third-party components bundled in the built application:
   - RxJS (Apache License 2.0)
   - Ajv and ajv-formats (MIT License)
   - Orbitron and Share Tech Mono webfonts (SIL Open Font License 1.1),
-    in packages/renderer/src/assets/fonts
+    in packages/renderer/src/assets/fonts; licence text and copyright
+    notices in packages/renderer/src/assets/fonts/OFL.txt

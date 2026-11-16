@@ -38,7 +38,11 @@ Spec files may use Vitest globals or import from `vitest`. `typecheck` runs `ngc
 - `npm run build -w packages/renderer`: production build into `packages/renderer/dist/`
   (`index.html` at the top, `<base href="./">`, relative asset URLs) for Electron's `loadFile`.
 - `npm run dev -w packages/renderer`: `ng serve` on http://localhost:4200.
-- No network resources: fonts come from npm packages bundled into `dist/`, never a CDN;
+- No network resources: the Tron fonts (Orbitron, Share Tech Mono) are committed woff2 files in
+  `packages/renderer/src/assets/fonts/`, referenced by relative `url()` in `src/styles.css` and
+  bundled by the build into `dist/media/`, never loaded from a CDN. Their SIL OFL 1.1 text with
+  the copyright lines (`src/assets/fonts/OFL.txt`) is copied next to them into `dist/media/OFL.txt`
+  (`assets` in `angular.json`);
   `src/no-network.spec.ts` fails on remote `src`/`href`/`url()`/`@import` in `src/`. The CSP
   meta tag in `src/index.html` is `default-src 'self'; script-src 'self'` (+ inline styles, which
   Angular's component styles need).
