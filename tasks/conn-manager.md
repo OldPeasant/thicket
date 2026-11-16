@@ -11,7 +11,8 @@ lease_until: 2026-11-16T20:17:37Z
 Backend conn.test/open/close/status/serverInfo; builds MongoClient options from profile + secrets (SCRAM-SHA-1/256, TLS with CA file, allow-invalid flags, SRV, directConnection); classifies errors (DNS, TLS, AUTH_FAILED, TIMEOUT); a guard every write handler uses: READ_ONLY on read-only profiles, confirmation required on production profiles.
 
 ## Acceptance criteria
-- [ ] Integration tests (`npm run test:int`): SCRAM ok/wrong password → AUTH_FAILED, TLS without CA → TLS_ERROR, unknown host → DNS_ERROR, replica set and standalone fixtures
+- [x] Integration tests (`npm run test:int`): SCRAM ok/wrong password → AUTH_FAILED, TLS without CA → TLS_ERROR, unknown host → DNS_ERROR, replica set and standalone fixtures
+  - verified (2026-11-16 20:59+0100 by dell26/agent-2): npm run test:int -- conn-manager (Podman fixtures mongo8/mongo7 standalone, replica set, mongo8tls/mongo7tls) -> 23 passed: SCRAM-SHA-1/256 ok, wrong password AUTH_FAILED, TLS without CA TLS_ERROR, unresolvable host and SRV DNS_ERROR, replicaSet topology
 - [ ] Guard unit tests: read-only refuses every write method listed by the contract; production without `confirmed: true` refuses
 - [ ] Logs mask passwords (test captures log output)
 - [ ] Several connections open at once and close independently (int test)
