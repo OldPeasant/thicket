@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "task": "docs-write-backend",
+  "reviewed_revision": "984c6cc463b58ac9f22c6a220e9944689ec6a169",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/docs-write-backend/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/docs-write-backend/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/docs-write-backend/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "TW-1",
+      "source": "test-writer",
+      "severity": "Low",
+      "disposition": "fixed",
+      "note": "updateMany pipeline stages that are BSON values are refused with INVALID_PARAMS"
+    },
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "round 1: expectedCount check documented as best effort, not atomic"
+    },
+    {
+      "id": "CR-2",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "round 1: write concern error message says the write was applied but not acknowledged"
+    },
+    {
+      "id": "CR-3",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "round 1: contract comments document bulk CONFLICT without detail"
+    },
+    {
+      "id": "CR-4",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "round 1: test-writer added startBackend guard tests for all six write methods (backend.spec.ts)"
+    },
+    {
+      "id": "CR-1 (round 2)",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "accepted",
+      "note": "a write concern error on a single-document write that matched nothing reports SERVER_ERROR instead of CONFLICT; rare, no data risk, a retry answers CONFLICT correctly"
+    }
+  ],
+  "validation": [
+    { "command": "npm run check", "result": "pass" },
+    {
+      "command": "npx vitest run --config test/integration/vitest.config.ts docs-write",
+      "result": "pass"
+    }
+  ]
+}
