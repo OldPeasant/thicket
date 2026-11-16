@@ -232,6 +232,124 @@ describe('SettingsStore corrupt file', () => {
     expect(await readJson(file)).toMatchObject({ settings: { mode: 'dark' } });
   });
 
+  const corruptBackups = async () => (await fs.readdir(dir)).filter((n) => n.includes('.corrupt-'));
+
+  it('a pending corrupt file stays in place after a no-op or invalid set; a real change moves it', async () => {
+    await fs.writeFile(file, 'garbage');
+    const stuck = stuckCorruptFs();
+    const store = await SettingsStore.open(file, { fs: stuck, now });
+    stuck.failMoveAside = false;
+
+    await store.set({ style: DEFAULT_SETTINGS.style }); // same as the defaults: no write
+    await expect(store.set({ pageSize: 30 } as never)).rejects.toThrow(); // refused by the schema
+    expect(await fs.readFile(file, 'utf8')).toBe('garbage');
+    expect(await corruptBackups()).toEqual([]);
+
+    await store.set({ style: 'tron' });
+    expect(await fs.readFile(backup(), 'utf8')).toBe('garbage');
+    expect(await readJson(file)).toMatchObject({ settings: { style: 'tron' } });
+  });
+
+  it('concurrent sets on a pending corrupt file make one backup and end with the last change', async () => {
+    await fs.writeFile(file, 'garbage');
+    const stuck = stuckCorruptFs();
+    const store = await SettingsStore.open(file, { fs: stuck, now });
+    stuck.failMoveAside = false;
+    const listener = vi.fn();
+    store.onChange(listener);
+
+    await Promise.all([
+      store.set({ pageSize: 20 }),
+      store.set({ pageSize: 100 }),
+      store.set({ mode: 'dark' }),
+    ]);
+    expect(await corruptBackups()).toEqual([path.basename(backup())]);
+    expect(await fs.readFile(backup(), 'utf8')).toBe('garbage');
+    expect(await readJson(file)).toMatchObject({ settings: { pageSize: 100, mode: 'dark' } });
+    expect(listener).toHaveBeenCalledTimes(3);
+  });
+
+  it('a failed move at set time, queued with a second set, lets the second set retry and succeed', async () => {
+    await fs.writeFile(file, 'garbage');
+    const stuck = stuckCorruptFs(); // fails at load
+    const store = await SettingsStore.open(file, { fs: stuck, now });
+    // The move fails once more (in the first set), then works.
+    const failingRename = stuck.rename;
+    stuck.rename = () => {
+      stuck.rename = failingRename;
+      stuck.failMoveAside = false;
+      return Promise.reject(Object.assign(new Error('EBUSY: locked'), { code: 'EBUSY' }));
+    };
+
+    const first = store.set({ mode: 'dark' });
+    const second = store.set({ mode: 'light' });
+    await expect(first).rejects.toThrow('EBUSY');
+    await expect(second).resolves.toMatchObject({ mode: 'light' });
+    expect(store.get().mode).toBe('light');
+    expect(await fs.readFile(backup(), 'utf8')).toBe('garbage');
+    expect(await readJson(file)).toMatchObject({ settings: { mode: 'light' } });
+  });
+
+  it('a crash between write and rename after the corrupt file was moved aside keeps the backup; restart uses defaults', async () => {
+    await fs.writeFile(file, 'garbage');
+    let failMoveAside = true;
+    let crash = true;
+    const flaky: SettingsFs = {
+      readFile: (p, e) => fs.readFile(p, e),
+      writeFile: (p, d, o) => fs.writeFile(p, d, o),
+      unlink: (p) => fs.unlink(p),
+      rename: (from, to) => {
+        if (failMoveAside && to.includes('.corrupt-'))
+          return Promise.reject(Object.assign(new Error('EBUSY'), { code: 'EBUSY' }));
+        if (crash && from.endsWith('.tmp')) return Promise.reject(new Error('process died'));
+        return fs.rename(from, to);
+      },
+    };
+    const store = await SettingsStore.open(file, { fs: flaky, now });
+    failMoveAside = false;
+
+    await expect(store.set({ mode: 'dark' })).rejects.toThrow('process died');
+    expect(store.get()).toEqual(DEFAULT_SETTINGS);
+    expect(await fs.readFile(backup(), 'utf8')).toBe('garbage');
+    await expect(fs.access(file)).rejects.toThrow(); // moved aside, not yet replaced
+
+    // Restart: no settings.json, so the defaults; the backup is still there, nothing new is backed up.
+    const restarted = await SettingsStore.open(file, { now });
+    expect(restarted.get()).toEqual(DEFAULT_SETTINGS);
+    expect(await corruptBackups()).toEqual([path.basename(backup())]);
+    expect(await fs.readFile(backup(), 'utf8')).toBe('garbage');
+    await expect(fs.access(`${file}.tmp`)).rejects.toThrow(); // stale temp cleaned up at start
+
+    // The original store's retry writes without trying a second backup.
+    crash = false;
+    await store.set({ mode: 'dark' });
+    expect(await corruptBackups()).toEqual([path.basename(backup())]);
+    expect(await readJson(file)).toMatchObject({ settings: { mode: 'dark' } });
+  });
+
+  it('a load-time move failure without an error code is retried before the first set', async () => {
+    await fs.writeFile(file, 'garbage');
+    let failMoveAside = true;
+    const odd: SettingsFs = {
+      readFile: (p, e) => fs.readFile(p, e),
+      writeFile: (p, d, o) => fs.writeFile(p, d, o),
+      unlink: (p) => fs.unlink(p),
+      rename: (from, to) =>
+        failMoveAside && to.includes('.corrupt-')
+          ? Promise.reject(new Error('device gone'))
+          : fs.rename(from, to),
+    };
+    const log = vi.fn();
+    const store = await SettingsStore.open(file, { fs: odd, log, now });
+    expect(await fs.readFile(file, 'utf8')).toBe('garbage');
+    failMoveAside = false;
+
+    await store.set({ mode: 'light' });
+    expect(await fs.readFile(backup(), 'utf8')).toBe('garbage');
+    expect(await readJson(file)).toMatchObject({ settings: { mode: 'light' } });
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('moved the corrupt'));
+  });
+
   it('without an injected clock the backup is named after the current time', async () => {
     await fs.writeFile(file, 'garbage');
     const before = Date.now();
