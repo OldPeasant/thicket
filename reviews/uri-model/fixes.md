@@ -216,6 +216,54 @@ Lint/type-check/build:
 Remaining unresolved findings:
 0
 
+## Round 4
+
+Date: 2026-11-16
+
+Scope: finding TW-7 (`reviews/uri-model/tests.md`) = CR-8 (`reviews/uri-model/review.md`) on revision `41a3d02`; only the `maskText()` scanner in `packages/core/src/uri/mask.ts` and its tests.
+
+### Fixed findings
+
+#### TW-7 / CR-8 — `maskText()` leaks a secret option that follows a raw space in a non-secret option value
+
+Files changed:
+- `packages/core/src/uri/mask.ts`
+- `packages/core/src/uri/mask.spec.ts`
+
+Problem:
+`uriEnd` carried the token across whitespace only when the whitespace fell inside a secret option value. A raw space in a non-secret value (`appName=my app&proxyPassword=x`, `authMechanismProperties=SERVICE_NAME:a b,AWS_SESSION_TOKEN:tok`) ended the token, so the later secret option was never passed to `mask()` and stayed visible. The driver parses these URIs as valid. Confirmed: the 3 TW-7 rows failed on `41a3d02`.
+
+Fix:
+Used the reviewer's simpler option. When whitespace ends a run and the text before it is in the query part (after `?`, with no `#` after it; new helper `endsInQuery`), the token continues one word at a time up to the end of the line (never across a line break). After a `#` it stops at the next whitespace as before. Each later word is still checked for an embedded scheme, and that scheme starts a new connection string unless it lies in a secret value. This keeps the TW-4 and joined-string behavior. This replaces the secret-only jump to the next `&`/`#`/line break, so the unused `valueEnd` regex was removed. The extra masking (prose after a query becomes part of the token) is acceptable under SPEC §6. Because `mask()` leaves non-secret option text unchanged, the visible output usually does not change (e.g. the test `does not run a non-secret option value on past whitespace` passes unchanged).
+
+Test expectation changes (over-masking, not weakening):
+- `keeps a scheme inside the value of an option key that cannot be decoded` and `keeps a scheme inside an authMechanismProperties value that cannot be decoded` used to expect the trailing prose ` y` after the masked value. Round 3 deliberately stopped undecodable values at whitespace. Under the new query rule, ` y` becomes part of the value that `mask()` hides completely, so the expected output is now `x mongodb://h/?%ZZ=****` and `x mongodb://h/?authMechanismProperties=****`. These tests check that the scheme inside the value is not split off and that the secret does not leak, and both still hold (`expectNoLeak` is unchanged). Letting undecodable values run on too is the safer choice: such text may still carry a later secret in a log line.
+- Added the regression test `still splits off a later connection string after prose that follows a query`, which checks that a second connection string on the same line is still split off and its password masked.
+
+Validation:
+- `npx vitest run --root packages/core` — Pass (3 TW-7 rows pass)
+
+### Not fixed
+
+None.
+
+### Validation summary (Round 4)
+
+Focused tests:
+- `npx vitest run --root packages/core` (repo root) — Pass: 3 files, 293 tests passed (was 3 failed | 289 passed)
+
+Full test suite:
+- `npm run check` (repo root: eslint `--max-warnings 0`, prettier, typecheck, root `vitest run` 7 files / 891 tests, renderer 5 files / 181 tests) — Pass
+
+Lint/type-check/build:
+- Included in `npm run check` — Pass
+
+`.taskcheck`:
+- Runs `npm run check` (result above) — Pass; `.taskcheck` itself was not run directly by the fixer, and `tasks.py done` was not run
+
+Remaining unresolved findings:
+0
+
 ## Final status
 
 All validated findings fixed and validation passed.

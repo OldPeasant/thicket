@@ -320,8 +320,10 @@ describe('maskText scanner boundaries', () => {
   });
 
   it('keeps a scheme inside the value of an option key that cannot be decoded', () => {
+    // Whitespace in the query doesn't end the token (TW-7), so the trailing prose is swallowed
+    // into the hidden value: over-masking, no leak.
     expect(maskText('x mongodb://h/?%ZZ=v-mongodb://undecTailSecret y')).toBe(
-      `x mongodb://h/?%ZZ=${MASK} y`,
+      `x mongodb://h/?%ZZ=${MASK}`,
     );
   });
 
@@ -330,7 +332,8 @@ describe('maskText scanner boundaries', () => {
       'x mongodb://h/?authMechanismProperties=AWS_SESSION_TOKEN:%ZZ-mongodb://awsUndecSecret y',
     );
     expectNoLeak(masked, ['awsUndecSecret']);
-    expect(masked).toBe(`x mongodb://h/?authMechanismProperties=${MASK} y`);
+    // The trailing prose is swallowed into the hidden value (TW-7 query rule): over-masking.
+    expect(masked).toBe(`x mongodb://h/?authMechanismProperties=${MASK}`);
   });
 
   it('keeps a scheme inside a secret option value given in any case', () => {
@@ -458,6 +461,12 @@ describe('maskText secret option values across whitespace', () => {
     expect(() => parseConnectionString(uri)).not.toThrow();
     expectNoLeak(mask(uri), [secret]);
     expectNoLeak(maskText(`log: ${uri} failed`), [secret]);
+  });
+
+  it('still splits off a later connection string after prose that follows a query', () => {
+    expect(maskText('x mongodb://h/?tls=true failed, retry mongodb://u:laterSecret@h2 y')).toBe(
+      `x mongodb://h/?tls=true failed, retry mongodb://u:${MASK}@h2 y`,
+    );
   });
 });
 
