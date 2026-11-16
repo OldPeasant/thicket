@@ -207,6 +207,13 @@ describe('startBackend: connections', () => {
       readOnly: true,
       production: true,
     },
+    prod: {
+      id: 'prod',
+      name: 'Production, writable',
+      connectionString: 'mongodb://db.example.test:27017',
+      readOnly: false,
+      production: true,
+    },
   };
 
   /** A backend whose privileged port reaches a fake main serving profiles.forConnect/secrets.get. */
@@ -292,6 +299,70 @@ describe('startBackend: connections', () => {
       ok: false,
       error: { code: 'INTERNAL', message: expect.stringMatching(/no link to main/) },
     });
+  });
+
+  it('serves the db.* and coll.* browse handlers', () => {
+    const parentPort: ParentPortLike = { on: () => undefined };
+    const handlers = startBackend({ parentPort, pid: 1 });
+    expect(Object.keys(handlers)).toEqual(
+      expect.arrayContaining([
+        'db.listDatabases',
+        'db.create',
+        'db.drop',
+        'db.stats',
+        'coll.list',
+        'coll.create',
+        'coll.drop',
+        'coll.rename',
+        'coll.stats',
+      ]),
+    );
+  });
+
+  const browseWrites: [string, Record<string, unknown>][] = [
+    ['db.create', { db: 'shop', firstCollection: 'orders' }],
+    ['db.drop', { db: 'shop' }],
+    ['coll.create', { db: 'shop', coll: 'orders' }],
+    ['coll.drop', { db: 'shop', coll: 'orders' }],
+    ['coll.rename', { db: 'shop', coll: 'orders', newName: 'orders_old' }],
+  ];
+
+  it.each(browseWrites)(
+    '%s is guarded: READ_ONLY on a read-only profile, CONFIRMATION_REQUIRED on production',
+    async (method, params) => {
+      const m = withMain();
+      m.renderer.send({
+        id: 'ro',
+        method,
+        params: { profileId: 'ssh', confirmed: true, ...params },
+      });
+      m.renderer.send({ id: 'prod', method, params: { profileId: 'prod', ...params } });
+      // Allowed by the guard: reaches the handler, which finds no open connection.
+      m.renderer.send({
+        id: 'ok',
+        method,
+        params: { profileId: 'prod', confirmed: true, ...params },
+      });
+      expect(await m.answer('ro')).toMatchObject({ ok: false, error: { code: 'READ_ONLY' } });
+      expect(await m.answer('prod')).toMatchObject({
+        ok: false,
+        error: { code: 'CONFIRMATION_REQUIRED' },
+      });
+      expect(await m.answer('ok')).toMatchObject({ ok: false, error: { code: 'NOT_CONNECTED' } });
+    },
+  );
+
+  it('browse reads are not guarded on a read-only profile (NOT_CONNECTED, not READ_ONLY)', async () => {
+    const m = withMain();
+    m.renderer.send({ id: 'l', method: 'db.listDatabases', params: { profileId: 'ssh' } });
+    m.renderer.send({
+      id: 's',
+      method: 'coll.stats',
+      params: { profileId: 'ssh', db: 'shop', coll: 'o' },
+    });
+    expect(await m.answer('l')).toMatchObject({ ok: false, error: { code: 'NOT_CONNECTED' } });
+    expect(await m.answer('s')).toMatchObject({ ok: false, error: { code: 'NOT_CONNECTED' } });
+    expect(m.forConnect).not.toHaveBeenCalled();
   });
 
   it('logs connection events with a prefix and without the password', async () => {

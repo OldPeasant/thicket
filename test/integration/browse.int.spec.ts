@@ -446,6 +446,56 @@ describe('a user with only `read` on one database (server with access control)',
     expect(dbStats.objects).toBe(3); // two items + the view definition
   });
 
+  it('db.listDatabases adds an authorized database that holds no data yet', async () => {
+    // The server's authorizedDatabases listing leaves out databases without data; the privileges
+    // from connectionStatus add them, so a user granted `read` on a new database still sees it.
+    const password = randomBytes(18).toString('base64url');
+    const root = new MongoClient(fixture.info.uri, {
+      auth: ROOT,
+      authSource: 'admin',
+      serverSelectionTimeoutMS: 30_000,
+    });
+    try {
+      await root.db('admin').command({
+        createUser: 'fresh_reader',
+        pwd: password,
+        roles: [
+          { role: 'read', db: 'allowed' },
+          { role: 'read', db: 'fresh_empty' },
+        ],
+      });
+    } finally {
+      await root.close();
+    }
+    const freshProfile: Profile = {
+      id: 'fresh',
+      name: 'fresh',
+      connectionString: fixture.info.uri,
+      auth: {
+        mechanism: 'SCRAM-SHA-256',
+        username: 'fresh_reader',
+        authSource: 'admin',
+        secretMode: 'saved',
+      },
+      readOnly: false,
+      production: false,
+      serverSelectionTimeoutMS: 10_000,
+    };
+    const fresh = backendFor([freshProfile], { fresh: { password } });
+    try {
+      await fresh.manager.open('fresh', undefined);
+      const { databases } = await fresh.call('db.listDatabases', { profileId: 'fresh' });
+      expect(databases.map((d) => d.name)).toEqual(['allowed', 'fresh_empty']);
+      const { collections } = await fresh.call('coll.list', {
+        profileId: 'fresh',
+        db: 'fresh_empty',
+      });
+      expect(collections).toEqual([]);
+    } finally {
+      await fresh.close();
+    }
+  });
+
   it('the server refuses other databases (SERVER_ERROR Unauthorized)', async () => {
     const error = await failure(auth.call('coll.list', { profileId: 'reader', db: 'hidden' }));
     expect(error.code).toBe('SERVER_ERROR');
