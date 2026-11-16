@@ -1,11 +1,11 @@
 ---
 title: M3: Code export (shell, Node, Python, Java)
-status: in_progress
+status: done
 owner: dell26/agent-3
 deps: [shell-syntax]
 touches: [packages/core/src/codegen]
 prio: 2
-lease_until: 2026-11-16T19:58:56Z
+lease_until: 
 ---
 ## Goal
 Generate code for a find query or an aggregation pipeline in mongosh syntax, Node driver, PyMongo and Java driver, with correct BSON type constructors per language.
@@ -22,3 +22,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 20:22+0100 by dell26/agent-3): Types without a faithful target: Python writes BSON undefined as None and Symbol as str (PyMongo has neither); Node writes dbPointer as DBRef and dates outside the JS Date range as new Date(NaN) with a comment; Java/Node/Python keep the last of duplicate keys except Python, which uses SON. Java throws CodegenError for unknown collation options (FindIterable.collation needs a Collation builder).
 - ASSUMPTION (2026-11-16 20:22+0100 by dell26/agent-3): Integration test runs Python (python:3.13-slim + pip pymongo) and Java (eclipse-temurin:21-jdk + mongodb-driver-sync 5.14.0 jars from Maven Central) in containers with host networking, so it needs network access to PyPI/Maven and a Linux container host (Docker Desktop's host networking differs).
 - ASSUMPTION (2026-11-16 20:36+0100 by dell26/agent-3): Correction to the earlier types assumption: Python (dict literal), Node and Java all keep only the last value of a duplicate key (no SON). Node also sends BSON undefined as null (driver default ignoreUndefined=false writes null), like Python's None; Node's DBRef splits 'db.coll' refs into $db/$ref while Python keeps $ref as given — deprecated types are best effort.
+- done by dell26/agent-3: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 21s on 81054d652; criteria verified 2/2
