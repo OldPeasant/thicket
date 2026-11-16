@@ -17,3 +17,4 @@ Pure functions for paging state: page size, page index, range paging on an index
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 19:31+0100 by felix/agent-2): Range paging applies when the sort keys include all fields of a plain unique index (_id implied); callers pass only non-sparse, non-partial unique indexes. Range bounds use $gt/$lt, so they assume one BSON type per sort key (type bracketing); null bounds handled specially ($ne null / $type minKey).
+- ASSUMPTION (2026-11-16 19:31+0100 by felix/agent-2): Jump to a non-adjacent page in range mode reads that page once with skip/limit, then next/previous continue by range. Last page uses the reversed sort with limit = remainder of an exact count, or a full page with an estimated count (page index then approximate). Changing page size or filter also resets to page 1.
