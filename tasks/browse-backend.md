@@ -17,3 +17,4 @@ listDatabases, list collections/views/time series, stats on demand, create/drop/
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 21:32+0100 by felix/agent-2): coll.validator.get/set are left to the validator task (its touches name browse/validator); this task implements db.listDatabases/create/drop/stats and coll.list/create/drop/rename/stats.
