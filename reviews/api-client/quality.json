@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "task": "api-client",
+  "reviewed_revision": "975252b9f5d6fffa5346b63e36918c1b83941ad8",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/api-client/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/api-client/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/api-client/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "TW-1",
+      "source": "test-writer",
+      "severity": "Low",
+      "disposition": "fixed",
+      "note": "send() rejected with a raw TypeError for an undefined/null bridge response; now INTERNAL ApiError"
+    },
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "streamId: null (io.export dialog cancelled) completes without error; onStart option exposes the start result (path)"
+    },
+    {
+      "id": "CR-2",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "broadcast events are not buffered while a stream request is pending; buffer capped at MAX_EARLY_EVENTS, overflow fails and cancels"
+    },
+    {
+      "id": "CR-3",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "doc comment: each subscription sends its own request; use share() to share"
+    }
+  ],
+  "validation": [
+    { "command": "npm run test -w packages/renderer", "result": "pass" },
+    { "command": "npm run typecheck -w packages/renderer", "result": "pass" },
+    { "command": "sh .taskcheck (npm run check)", "result": "pass" }
+  ]
+}

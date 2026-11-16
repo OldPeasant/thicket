@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 Task: api-client - M0: Renderer API client over window.thicket
 
-Scope: second review pass on the final revision. `git diff b93d0f2..1a78a24 -- packages docs` (task commits 6c069c2, 563e443, 1a78a24). Reviewed in full: packages/renderer/src/app/api/api.service.ts and api.service.spec.ts (incl. the new "stream start result" and "early event buffer" suites); the other task files (api-error.ts, thicket-bridge.ts, index.ts, testing/fake-thicket-bridge.ts, testing/index.ts) are unchanged in production code since the first pass (only spec additions), which was confirmed with `git diff 6c069c2 1a78a24 --stat`. Context: packages/contract/src/envelope.ts (BROADCAST_STREAMS, cancel routing), io.ts (`io.export` result with nullable `streamId`), common.ts, reviews/api-client/fixes.md, reviews/api-client/tests.md.
+Scope: review of the final revision 975252b9f5d6fffa5346b63e36918c1b83941ad8. `git diff b93d0f2..975252b -- packages docs` (task commits 6c069c2, 563e443, 1a78a24, 975252b). Production code was reviewed in full at 1a78a24 (second pass); `git diff 1a78a24 975252b -- packages docs` confirms the only change since then is packages/renderer/src/app/api/api.service.spec.ts (+194 lines, 14 tests from the test-writer's second pass), which was reviewed against api.service.ts. The other task files (api-error.ts, thicket-bridge.ts, index.ts, testing/fake-thicket-bridge.ts, testing/index.ts) have no production changes since the first pass. Context: packages/contract/src/envelope.ts (BROADCAST_STREAMS, cancel routing), io.ts (`io.export` result with nullable `streamId`), common.ts, reviews/api-client/fixes.md, reviews/api-client/tests.md.
 
 Requirements:
 - tasks/api-client.md acceptance criteria and recorded assumptions (ThicketBridge shape; no zod validation of results in the renderer; missing window.thicket answers INTERNAL)
@@ -14,12 +14,12 @@ Requirements:
 
 Git range:
 - Branch: main
-- HEAD: 1a78a24
+- HEAD: 975252b9f5d6fffa5346b63e36918c1b83941ad8
 - Base/start: b93d0f27ec0c9375109365a71c4c820b97163e18
-- Commits reviewed: 3 (6c069c2, 563e443, 1a78a24); no uncommitted changes
+- Commits reviewed: 4 (6c069c2, 563e443, 1a78a24, 975252b); no uncommitted changes
 
-Commands run:
-- `npm run test -w packages/renderer` -> 5 test files, 167 tests passed
+Commands run (at 975252b):
+- `npm run test -w packages/renderer` -> 5 test files, 181 tests passed (167 at 1a78a24 + 14 new)
 - `npm run typecheck -w packages/renderer` (ngc app + tsc spec) -> no errors
 
 Acceptance criteria:
@@ -27,13 +27,13 @@ Acceptance criteria:
 2. Every contract error code has a message (test enumerates the codes): met. `ERROR_MESSAGES: Record<ErrorCode, string>` plus `it.each(ERROR_CODES)` and a no-extra-keys check in api-error.spec.ts.
 3. Fake exported for other renderer tests: met. `app/api/testing/index.ts` exports `FakeThicketBridge` and `provideFakeThicket`, not re-exported from the production barrel.
 
-Status of earlier findings:
-- CR-1 (P2, `io.export` null streamId / lost `path`): fixed. `streamIdOf()` returns `null` for an explicit null and `undefined` only for a missing/invalid field (api.service.ts:265-270). `stream()` takes `options.onStart` (api.service.ts:25-28, 183-191), called once with the typed `ResultOf<M>` before buffered or live data; a null streamId then completes without emitting and without a cancel (193-198). Verified paths: onStart throwing cancels the streamId and errors the stream; unsubscribing inside onStart cancels the streamId, not the finished request (teardown at 212-218 plus the `finished` check at 192); onStart is not called after failure or unsubscribe (`abandoned` check at 166). Tests in "stream start result" cover each case. ARCHITECTURE.md documents the behaviour.
-- CR-2 (P3, unbounded pre-response buffer): fixed. Broadcast events are skipped (146), the buffer is capped at `MAX_EARLY_EVENTS` (147-158); overflow sets `abandoned`, finishes (listener removed), cancels the pending request id and errors with INTERNAL; a late streamId is then cancelled (166-169), a late rejection ignored (206). Covered by the "early event buffer" tests. The overflow fails the stream loudly instead of dropping events, which is a deliberate and documented trade-off.
-- CR-3 (P3, misleading class doc): fixed. Class doc (46-51) and method doc (89-98) describe cold, one-request-per-subscription semantics and `share()`.
-- TW-1 (test-writer, raw TypeError on a non-object response): fixed. `send()` (240-257) rejects with an INTERNAL `ApiError` for a non-object or `ok`-less response and treats anything but `ok === true` as an error; the test-writer's tests pass.
+Spec changes in 975252b: the 14 tests cover malformed bridge responses (a string, an object without `ok`, `ok: 'yes'`, `undefined` for a stream); `io.export` null streamId edge cases (no options, buffered events dropped, null answer after unsubscribe cancels only the request id, onStart throwing with a null result, onStart throwing after it unsubscribed, onStart unsubscribing with a null result, missing streamId field skipping onStart); and buffer edge cases (exactly `MAX_EARLY_EVENTS` own events delivered in order, late failure and later unsubscribe after overflow ignored, no limit once running). Each assertion was traced against api.service.ts and matches its behaviour (e.g. `responded`/`abandoned` in the teardown give exactly one request-id cancel and no streamId cancel for a late null answer; the `finished` check after onStart suppresses the error after an onStart unsubscribe). The tests assert observable behaviour (emissions, errors, `fake.cancels`, `fake.listenerCount`) and no existing test was removed or weakened.
 
-Teardown logic checked: `responded` prevents cancelling the request id after the response has arrived (only possible for a null streamId or an error, both of which already finished); `abandoned` is set on every teardown and on overflow, so a response arriving afterwards cancels its streamId exactly once and never reaches the subscriber; the teardown is idempotent through `finished`; replay of buffered events stops when a consumer unsubscribes inside `next`.
+Status of earlier findings:
+- CR-1 (P2, `io.export` null streamId / lost `path`): fixed in 1a78a24, unchanged in 975252b. `streamIdOf()` separates an explicit `null` from a missing/invalid field; `options.onStart` receives the typed result before any data; a null streamId completes without emitting and without a cancel. Covered by the "stream start result" suites.
+- CR-2 (P3, unbounded pre-response buffer): fixed. Broadcast events are not buffered; the buffer is capped at `MAX_EARLY_EVENTS`, overflow cancels the pending request (and a late streamId) and errors with INTERNAL. Failing loudly instead of dropping events is a deliberate, documented trade-off.
+- CR-3 (P3, misleading class doc): fixed. The docs describe cold, one-request-per-subscription semantics and `share()`.
+- TW-1 (test-writer, raw TypeError on a non-object response): fixed. `send()` rejects with an INTERNAL `ApiError` for malformed responses; now also covered for strings, `ok`-less objects, non-`true` `ok` and streams.
 
 Summary: 0 P0, 0 P1, 0 P2, 0 P3
 
@@ -55,4 +55,4 @@ None.
 
 ## Review conclusion
 
-No material issues found. All three acceptance criteria are met, CR-1..CR-3 and TW-1 are resolved in revision 1a78a24, and the renderer tests (167 passed) and type check pass.
+No material issues found. Reviewed revision 975252b9f5d6fffa5346b63e36918c1b83941ad8: all three acceptance criteria are met, CR-1..CR-3 and TW-1 are resolved, the 14 added tests are correct and meaningful, and the renderer tests (181 passed) and type check pass.
