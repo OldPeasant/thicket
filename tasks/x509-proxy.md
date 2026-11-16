@@ -17,3 +17,4 @@ Client certificate (cert+key or PEM bundle with passphrase) and MONGODB-X509 aut
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-17 00:14+0100 by felix/agent-2): Contract: profile gains proxy {host, port, username?} (password = new secret kind proxyPassword, only from stored secrets), readPreferenceTags as arrays of {name,value} pairs (the contract test forbids free-form records), writeConcern {w, journal, wtimeoutMS} and tls.keyFile for separate cert/key files. Renderer form fields come with conn-ui-m2.
