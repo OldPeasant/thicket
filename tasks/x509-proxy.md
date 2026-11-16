@@ -1,11 +1,11 @@
 ---
 title: M2: X.509, SOCKS5 proxy, read preference and write concern
-status: in_progress
+status: done
 owner: felix/agent-2
 deps: [conn-manager]
 touches: [packages/backend/src/connections/options,test/integration/fixtures/x509]
 prio: 2
-lease_until: 2026-11-16T23:51:56Z
+lease_until: 
 ---
 ## Goal
 Client certificate (cert+key or PEM bundle with passphrase) and MONGODB-X509 auth; SOCKS5 proxy options; read preference/tags and write concern from the profile.
@@ -26,3 +26,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 00:14+0100 by felix/agent-2): Server UserNotFound (code 11) maps to AUTH_FAILED only for connect errors (X.509 subject without a user); browse keeps it SERVER_ERROR. ERR_OSSL_* (wrong key passphrase) is TLS_ERROR. A client certificate from a foreign CA is answered by mongod with a closed socket, so it surfaces as TIMEOUT/NETWORK_ERROR, not as a TLS code.
 - ASSUMPTION (2026-11-17 00:14+0100 by felix/agent-2): AC3 is met at driver level (client read preference: driver find/hello with client.readPreference go to the secondary). The backend's raw db.command reads/writes ignore client read preference/write concern; follow-up task raw-cmd-read-pref created instead of widening this task into docs/browse.
 - ASSUMPTION (2026-11-17 00:14+0100 by felix/agent-2): SOCKS5 int fixture uses docker.io/serjs/go-socks5-proxy:latest (small, user/password auth via env) on a private network with a 2-member replica set whose names resolve only behind the proxy.
+- done by felix/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 51s on e2333ff9c; criteria verified 3/3
