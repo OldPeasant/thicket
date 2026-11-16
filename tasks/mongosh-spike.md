@@ -21,3 +21,4 @@ Find out how to host the real mongosh runtime in the utilityProcess (packages, v
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 20:12+0100 by felix/agent-1): Spike ran on Node 24.22.1, not inside Electron's utilityProcess (running the Electron binary needed an approval the agent lacked); N-API native modules and plain Node APIs are assumed to work there, first shell task should confirm with test:electron
+- ASSUMPTION (2026-11-16 20:13+0100 by felix/agent-1): Recommended one worker_thread + own MongoClient per shell session (interrupt closes the client; sync loops need worker.terminate); not prototyped, a design choice humans may revisit
