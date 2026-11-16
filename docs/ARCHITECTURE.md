@@ -89,12 +89,12 @@ See SPEC.md section 4. `packages/contract` is the single source of truth; render
 import it. Every new method gets: types, zod schema, a backend handler, a contract test.
 
 ## Install (development)
-All OSes: Node 24 LTS with npm, git, Python 3 (for TFP and native module builds). Then `npm ci` in
-the repo root.
+All OSes: Node 24 LTS, 24.15.0 or newer (Angular 22 and jsdom require it), with npm, git, Python 3
+(for TFP and native module builds). Then `npm ci` in the repo root.
 
 | | Linux | macOS | Windows |
 |---|---|---|---|
-| Node 24 | distro package, nvm or fnm | `brew install node@24` or nvm | installer from nodejs.org or `winget install OpenJS.NodeJS.LTS` |
+| Node 24.15+ | distro package, nvm or fnm | `brew install node@24` or nvm | installer from nodejs.org or `winget install OpenJS.NodeJS.LTS` |
 | Native build tools (only if a prebuilt binary is missing) | `gcc-c++ make` / `build-essential` | `xcode-select --install` | Visual Studio Build Tools (C++ workload) |
 | Containers for `test:int` | Docker, or Podman with the socket enabled (`systemctl --user enable --now podman.socket`, `DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock`, `TESTCONTAINERS_RYUK_DISABLED=true`) | Docker Desktop or Podman Desktop | Docker Desktop or Podman Desktop |
 | Keychain for running the app | GNOME Keyring or KWallet (libsecret) | built in | built in |

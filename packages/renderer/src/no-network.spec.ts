@@ -13,8 +13,11 @@ function files(dir: string, pattern: RegExp): string[] {
   });
 }
 
-// Remote or protocol-relative URLs in places the browser would fetch them.
-const REMOTE = /(?:\b(?:src|href)\s*=\s*["']?|url\(\s*["']?|@import\s+["']?)(?:https?:)?\/\//i;
+// Remote or protocol-relative URLs in places the browser would fetch them. Attributes may be
+// Angular bindings (`[src]="'https://...'"`, a string literal inside the bound expression), and
+// `srcset` may name the remote URL in any of its comma-separated candidates.
+const REMOTE =
+  /(?:\b(?:src|href)\]?\s*=\s*["']?'?|\bsrcset\]?\s*=\s*["']?'?(?:[^"'>]*?,\s*)?|url\(\s*["']?|@import\s+["']?)(?:https?:)?\/\//i;
 
 describe('no external network resources', () => {
   // Templates and inline styles of components live in .ts files too.
@@ -53,6 +56,11 @@ describe('no external network resources', () => {
     ['@import protocol-relative', "@import '//cdn.example.test/reset.css';"],
     ['@import url()', '@import url(//cdn.example.test/reset.css);'],
     ['inline template in a .ts file', 'template: `<img src="https://img.example.test/a.png">`'],
+    ['Angular [src] binding to a literal', `<img [src]="'https://cdn.example.test/a.png'">`],
+    ['Angular [attr.href] binding', `<link [attr.href]="'//cdn.example.test/x.css'">`],
+    ['srcset', '<img srcset="https://img.example.test/a.png 2x">'],
+    ['srcset second candidate', '<img srcset="a.png 1x, https://img.example.test/b.png 2x">'],
+    ['Angular [srcset] binding', `<img [srcset]="'https://img.example.test/a.png 2x'">`],
   ])('REMOTE flags %s', (_name, text) => {
     expect(text).toMatch(REMOTE);
   });
@@ -66,6 +74,9 @@ describe('no external network resources', () => {
     ['local @import', "@import './theme.css';"],
     ['URL in a comment', '// See https://angular.dev/guide/zoneless'],
     ['CSP text', "default-src 'self'; script-src 'self'"],
+    ['Angular [src] binding to a field', '<img [src]="logoUrl">'],
+    ['Angular [src] binding to a local literal', `<img [src]="'./media/logo.png'">`],
+    ['local srcset', '<img srcset="logo.png 1x, logo@2x.png 2x">'],
   ])('REMOTE leaves %s alone', (_name, text) => {
     expect(text).not.toMatch(REMOTE);
   });
