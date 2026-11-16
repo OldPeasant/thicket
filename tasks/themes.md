@@ -1,11 +1,11 @@
 ---
 title: M0: Business and Tron styles, each light and dark
-status: in_progress
+status: done
 owner: dell26/agent-1
 deps: [explorer-copy,app-settings]
 touches: [packages/renderer/src/app/theme,packages/renderer/src/styles.css,packages/renderer/src/assets/fonts]
 prio: 1
-lease_until: 2026-11-16T20:07:56Z
+lease_until: 
 ---
 ## Goal
 Token sets for Business (default) and Tron, each light and dark, selected by `data-style` and `data-theme` on the root; mode follows the OS when set to system; persisted via app settings. Use the frontend-design skill for the visual direction; respect the Business and Tron tokens (no hard-coded colors).
@@ -29,3 +29,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 20:19+0100 by dell26/agent-1): Renderer resolves 'system' itself via matchMedia(prefers-color-scheme) instead of the app.theme method/stream (not implemented in main yet); main's nativeTheme.themeSource is not set by this task.
 - ASSUMPTION (2026-11-16 20:19+0100 by dell26/agent-1): Business palette: cool neutral greys + muted ink-blue accent (#2c5a85 light / #8cb4dd dark), system-ui 13px; AA tested for text/muted/faint/accent/danger/production/readonly/all BSON colors on page/elevated/panel/input backgrounds. Style/mode switcher (ThemeSwitcher) shown on the dev explorer page until a settings page exists.
 - ASSUMPTION (2026-11-16 20:19+0100 by dell26/agent-1): 4 Electron tests (app.electron thicket://app URL and dev.electron URL checks expect no '#/') fail on main 64cb776 without this task's changes as well; left for their owners, not in this task's scope.
+- done by dell26/agent-1: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 20s on 1102a227e; criteria verified 5/5
