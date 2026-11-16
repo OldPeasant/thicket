@@ -203,6 +203,10 @@ export class CollectionView {
     });
     // Documents are not edited here yet (doc-edit-save): the explorer shows them read-only.
     inject(EditModeService).setReadOnly(true);
+    // The table view shows one row per document: the root table (path '') starts horizontal
+    // (the explorer's default is one row per field). The user can still flip it.
+    const orientation = inject(TableOrientationService);
+    if (orientation.read('') === 'v') orientation.toggle('');
   }
 
   protected edit(field: QueryField, event: Event): void {

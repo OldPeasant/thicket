@@ -336,6 +336,29 @@ Contract layout (`packages/contract/src/`):
 - The profile's `color` draws the connection's dot and the guide line down its subtree (user data,
   the only color not from the tokens). e2e: `test/e2e/sidebar.e2e.ts` (mongo fixture).
 
+## Collection tab (`packages/renderer/src/app/collection`)
+- `CollectionView` is the `collection` tab view (`provideTabView` in `app.config.ts`). It provides
+  its own `CollectionResults` and its own instances of the explorer services, so search, collapse
+  and columns are per tab; the explorer is read-only here (`EditModeService.setReadOnly`) until
+  doc-edit-save, and its root table is horizontal (one row per document).
+- Query bar: set as the mongosh call (`db.<coll>.find(filter, projection).sort().collation()
+  .limit()`). `parseQuery()` (`query.util.ts`) parses every field with core's shell-syntax parser;
+  any error is shown under the bar (`aria-invalid`/`aria-describedby`) and nothing is sent.
+  Parsed parts go out as canonical EJSON. `limit` (0 = none) caps the whole result: pages end at
+  it, the count is clipped and the last page is read with skip.
+- `CollectionResults` drives paging-core (`@thicket/core/paging`): it sends the paging sort
+  (`{_id: 1}` when none) for every page, `after`/`before` bounds from the edge rows' sort-key
+  values (from the canonical EJSON text, so bounds are canonical EJSON too), `skip` for jumps and
+  `fromEnd` for the last page. A page replaces the shown one only once it arrived completely;
+  Cancel unsubscribes the stream (the backend kills the operation) and aborts a count.
+- Counts: an empty filter gets `docs.estimatedCount` (`~N`); with a filter there is no count until
+  "Count exactly" (`docs.count`). A last page read without a count has no known number: the pager
+  says "Last N" (or "N pages before the last") and, once counted exactly, reads that page again
+  aligned to the page boundaries.
+- Views: table (explorer, `tables` layout), document list (one `app-json-form` per document), raw
+  (shell syntax via `printShellSyntax`, or the canonical EJSON as received). e2e:
+  `test/e2e/collection.e2e.ts` (10 000 documents).
+
 ## Write safety in the renderer (`packages/renderer/src/app/safety`)
 - Every write UI sends writes through `WriteGuard.run(method, params, options)` (or `approve()`,
   which returns the params to send, e.g. for `agg.run` with `$out` over `ApiService.stream`).

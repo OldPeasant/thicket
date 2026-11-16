@@ -97,7 +97,10 @@ describe('CollectionView', () => {
     expect(fake.requestsFor('docs.estimatedCount')).toHaveLength(1);
     expect(q('pager-rows')?.textContent).toMatch(/1–50\s+of ~10,000 documents \(estimated\)/);
     expect(q('pager-pages')?.textContent).toContain('of ~200');
-    expect(el().querySelectorAll('app-json-explorer tbody tr').length).toBeGreaterThan(0);
+    // One row per document (the explorer's root table is horizontal here).
+    expect(
+      el().querySelectorAll('app-json-explorer .json-output > app-json-table > .tw tbody > tr'),
+    ).toHaveLength(50);
   });
 
   it('shows the parse error of an invalid filter and does not run the query', async () => {
@@ -213,10 +216,13 @@ describe('CollectionView', () => {
     // Without a count the page's number is unknown: the pager says so instead of guessing.
     expect(q<HTMLInputElement>('pager-page')?.value).toBe('');
     expect(q('pager-rows')?.textContent).toContain('Last 50');
+    answer = () => docs(9951, 40);
     click('pager-count');
     await settle();
+    // Counted 9 990: the last page is read again with its real size, 40 rows.
+    expect(lastFind()).toMatchObject({ fromEnd: true, limit: 40 });
     expect(q<HTMLInputElement>('pager-page')?.value).toBe('200');
-    expect(q('pager-rows')?.textContent).toContain('9,951–10,000');
+    expect(q('pager-rows')?.textContent).toContain('9,951–9,990');
   });
 
   it('counts pages paged back from an unknown last page from the end', async () => {
@@ -235,7 +241,9 @@ describe('CollectionView', () => {
     expect(q('pager-rows')?.textContent).toContain('50, 1 page before the last');
     click('pager-count');
     await settle();
+    expect(lastFind()).toMatchObject({ skip: 9900, limit: 50 });
     expect(q<HTMLInputElement>('pager-page')?.value).toBe('199');
+    expect(q('pager-rows')?.textContent).toContain('9,901–9,950');
   });
 
   it('changes the page size and goes back to page 1', async () => {

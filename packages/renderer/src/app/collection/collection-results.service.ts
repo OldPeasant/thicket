@@ -229,8 +229,16 @@ export class CollectionResults implements OnDestroy {
     // A page counted from the end before the count was known now gets its real index.
     const fromEnd = this.fromEndState();
     if (fromEnd !== null && pages !== null) {
-      state = { ...state, pageIndex: Math.max(0, pages - 1 - fromEnd) };
-      if (exact) this.fromEndState.set(null);
+      const index = Math.max(0, pages - 1 - fromEnd);
+      if (exact) {
+        // The page was counted from the end, so it doesn't line up with the page boundaries
+        // (the last page holds a full page, not the remainder): read the page with this index.
+        this.fromEndState.set(null);
+        this.pagingState.set(state);
+        this.load(jumpToPage(state, index));
+        return;
+      }
+      state = { ...state, pageIndex: index };
     }
     this.pagingState.set(state);
     this.updateFirstRow();
