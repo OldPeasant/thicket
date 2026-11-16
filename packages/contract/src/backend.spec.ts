@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  BROADCAST_STREAMS,
+  MAX_SLEEP_MS,
   backendRestarted,
   isMethodName,
   parseParams,
@@ -30,6 +32,19 @@ describe('wiring diagnostics', () => {
     expect(parseParams('backend.sleep', { ms: 0 }).ok).toBe(false);
     expect(parseParams('backend.sleep', { ms: 1.5 }).ok).toBe(false);
     expect(parseParams('backend.sleep', {}).ok).toBe(false);
+  });
+
+  it('backend.sleep accepts 1 ms and exactly MAX_SLEEP_MS, nothing longer or extra', () => {
+    expect(parseParams('backend.sleep', { ms: 1 }).ok).toBe(true);
+    expect(parseParams('backend.sleep', { ms: MAX_SLEEP_MS }).ok).toBe(true);
+    expect(parseParams('backend.sleep', { ms: MAX_SLEEP_MS + 1 }).ok).toBe(false);
+    expect(parseParams('backend.sleep', { ms: 10, extra: true }).ok).toBe(false);
+    expect(parseParams('backend.sleep', { ms: '10' }).ok).toBe(false);
+  });
+
+  it('backend.restarted is a broadcast stream, not a callable method', () => {
+    expect(BROADCAST_STREAMS.backendRestarted).toBe('backend.restarted');
+    expect(route('backend.restarted')).toBeUndefined();
   });
 
   it('backend.restarted payload', () => {

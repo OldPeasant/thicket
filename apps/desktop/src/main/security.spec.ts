@@ -95,6 +95,46 @@ describe('window.open and navigation', () => {
     expect(event.preventDefault).not.toHaveBeenCalled();
   });
 
+  it('blocks a navigation that only changes the query, path or origin of the page', () => {
+    const current = 'thicket://app/index.html';
+    for (const url of [
+      'thicket://app/index.html?x=1',
+      'thicket://app/other.html',
+      'thicket://evil/index.html',
+      'file:///etc/passwd',
+      'javascript:alert(1)',
+      'http://localhost:4200/index.html',
+    ]) {
+      const event = { preventDefault: vi.fn() };
+      expect(blockNavigation(event, url, current)).toBe(true);
+      expect(event.preventDefault).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('blocks navigation when only one of the URLs is known or the current page is unparsable', () => {
+    const a = { preventDefault: vi.fn() };
+    expect(blockNavigation(a, 'thicket://app/index.html')).toBe(true);
+    expect(a.preventDefault).toHaveBeenCalled();
+    const b = { preventDefault: vi.fn() };
+    expect(blockNavigation(b, 'thicket://app/index.html', '')).toBe(true);
+    expect(b.preventDefault).toHaveBeenCalled();
+  });
+
+  it('lets a hash change on the dev server through as well', () => {
+    const event = { preventDefault: vi.fn() };
+    expect(blockNavigation(event, 'http://localhost:4200/#/a', 'http://localhost:4200/#/b')).toBe(
+      false,
+    );
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it('denies window.open regardless of the requested URL', () => {
+    // Electron passes the details object; the handler ignores it and always denies.
+    const handler = denyWindowOpen as (details?: unknown) => { action: string };
+    expect(handler({ url: 'thicket://app/index.html' })).toEqual({ action: 'deny' });
+    expect(handler({ url: 'https://evil.test/' })).toEqual({ action: 'deny' });
+  });
+
   it('blocks webviews and refuses all permissions', () => {
     const event = { preventDefault: vi.fn() };
     blockWebview(event);
@@ -123,6 +163,56 @@ describe('resolveAppFile', () => {
     expect(resolveAppFile('thicket://app/%E0%A4%A.txt', root, join)).toBeUndefined();
     expect(resolveAppFile('::nope', root, join)).toBeUndefined();
   });
+
+  it('refuses null bytes and dot segments in any position', () => {
+    expect(resolveAppFile('thicket://app/a%00.js', root, join)).toBeUndefined();
+    expect(resolveAppFile('thicket://app/media%2F%2E%2E%2Fx.js', root, join)).toBeUndefined();
+    expect(resolveAppFile('thicket://app/media%2F.%2Fx.js', root, join)).toBeUndefined();
+    expect(resolveAppFile('thicket://app/..%5C..%5Cwin.ini', root, join)).toBeUndefined();
+  });
+
+  it('never resolves outside the root (URL parsing folds literal dot segments first)', () => {
+    expect(resolveAppFile('thicket://app/../../etc/passwd', root, join)).toBe('/r/index.html');
+    expect(resolveAppFile('thicket://app/%2e%2e/%2e%2e/etc/x.txt', root, join)).toBe(
+      '/r/etc/x.txt',
+    );
+    expect(resolveAppFile('thicket://app/a/../../b.js', root, join)).toBe('/r/b.js');
+    expect(resolveAppFile('thicket://app//etc/passwd.txt', root, join)).toBe('/r/etc/passwd.txt');
+    expect(resolveAppFile('thicket://app/media/%2e/x.js', root, join)).toBe('/r/media/x.js');
+  });
+
+  it('ignores the query and fragment of a file URL', () => {
+    expect(resolveAppFile('thicket://app/main.js?v=1#x', root, join)).toBe('/r/main.js');
+  });
+});
+
+describe('contentSecurityPolicy (more)', () => {
+  it('forbids framing, plugins and form posts', () => {
+    const directives = contentSecurityPolicy().split('; ');
+    expect(directives).toEqual(
+      expect.arrayContaining([
+        "frame-ancestors 'none'",
+        "frame-src 'none'",
+        "form-action 'none'",
+        "base-uri 'self'",
+      ]),
+    );
+  });
+
+  it('dev mode only widens connect-src, not scripts', () => {
+    const prod = contentSecurityPolicy().split('; ');
+    const dev = contentSecurityPolicy('http://127.0.0.1:4200/some/path').split('; ');
+    const differ = dev.filter((d) => !prod.includes(d));
+    expect(differ).toEqual(["connect-src 'self' ws://127.0.0.1:4200 wss://127.0.0.1:4200"]);
+  });
+});
+
+describe('withCspHeader (more)', () => {
+  it('normalises single string values to arrays and replaces an upper-case CSP header', () => {
+    expect(
+      withCspHeader({ 'CONTENT-SECURITY-POLICY': 'default-src *', 'X-A': 'b' }, 'csp'),
+    ).toEqual({ 'X-A': ['b'], 'Content-Security-Policy': ['csp'] });
+  });
 });
 
 describe('mimeType', () => {
@@ -131,5 +221,7 @@ describe('mimeType', () => {
     expect(mimeType('/r/main-X.JS')).toBe('text/javascript; charset=utf-8');
     expect(mimeType('/r/a.woff2')).toBe('font/woff2');
     expect(mimeType('/r/blob')).toBe('application/octet-stream');
+    expect(mimeType('/r/styles.css')).toBe('text/css; charset=utf-8');
+    expect(mimeType('/r/a.exe')).toBe('application/octet-stream');
   });
 });

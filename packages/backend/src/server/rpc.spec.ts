@@ -115,6 +115,76 @@ describe('serve', () => {
     expect(onError).toHaveBeenCalledTimes(3);
   });
 
+  it('a cancel sent right behind its request (same tick) still answers CANCELLED once', async () => {
+    const { client, answer, responses } = setup(handlers);
+    client.send({ id: 'r', method: 'backend.sleep', params: { ms: 60_000 } });
+    client.send({ cancel: 'r' });
+    expect(await answer('r')).toMatchObject({ ok: false, error: { code: 'CANCELLED' } });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(responses.filter((r) => r.id === 'r')).toHaveLength(1);
+  });
+
+  it('drops the late result of a handler that ignores the abort signal', async () => {
+    let finish: (value: unknown) => void = () => undefined;
+    const signals: AbortSignal[] = [];
+    const { client, answer, responses } = setup({
+      'backend.sleep': (_p, ctx) => {
+        signals.push(ctx.signal);
+        return new Promise((resolve) => (finish = resolve));
+      },
+    });
+    client.send({ id: 'i', method: 'backend.sleep', params: { ms: 5 } });
+    await vi.waitFor(() => expect(signals).toHaveLength(1));
+    client.send({ cancel: 'i' });
+    expect(await answer('i')).toMatchObject({ error: { code: 'CANCELLED' } });
+    expect(signals[0]?.aborted).toBe(true);
+    finish({ sleptMs: 5 });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(responses.filter((r) => r.id === 'i')).toEqual([
+      { id: 'i', ok: false, error: { code: 'CANCELLED', message: 'The operation was cancelled' } },
+    ]);
+  });
+
+  it('a cancel only aborts its own request', async () => {
+    const { client, answer } = setup(handlers);
+    client.send({ id: 'a', method: 'backend.sleep', params: { ms: 20 } });
+    client.send({ id: 'b', method: 'backend.sleep', params: { ms: 60_000 } });
+    client.send({ cancel: 'b' });
+    expect(await answer('b')).toMatchObject({ error: { code: 'CANCELLED' } });
+    expect(await answer('a')).toEqual({ id: 'a', ok: true, result: { sleptMs: 20 } });
+  });
+
+  it('an id can be reused after its request was cancelled', async () => {
+    const { client, answer, responses } = setup(handlers);
+    client.send({ id: 'r', method: 'backend.sleep', params: { ms: 60_000 } });
+    client.send({ cancel: 'r' });
+    await answer('r');
+    client.send({ id: 'r', method: 'backend.ping', params: {} });
+    await vi.waitFor(() => expect(responses.filter((x) => x.id === 'r')).toHaveLength(2));
+    expect(responses.filter((x) => x.id === 'r')[1]).toMatchObject({ ok: true });
+  });
+
+  it('refuses inherited object keys as method names', async () => {
+    const { client, answer } = setup({ ...handlers, toString: () => 'x' });
+    client.send({ id: 't', method: 'toString', params: {} });
+    client.send({ id: 'p', method: '__proto__', params: {} });
+    expect(await answer('t')).toMatchObject({ ok: false, error: { code: 'UNKNOWN_METHOD' } });
+    expect(await answer('p')).toMatchObject({ ok: false, error: { code: 'UNKNOWN_METHOD' } });
+  });
+
+  it('maps a thrown non-Error value to INTERNAL', async () => {
+    const { client, answer } = setup({
+      'backend.ping': () => {
+        throw 'plain string';
+      },
+    });
+    client.send({ id: '1', method: 'backend.ping', params: {} });
+    expect(await answer('1')).toMatchObject({
+      ok: false,
+      error: { code: 'INTERNAL', message: 'Unexpected error: plain string' },
+    });
+  });
+
   it('stop() aborts running requests and stops answering', async () => {
     const seen: AbortSignal[] = [];
     const { client, stop, responses } = setup({
@@ -155,6 +225,30 @@ describe('RpcClient', () => {
       code: 'TIMEOUT',
     });
     expect(port.sent).toContainEqual({ cancel: 'b1' });
+  });
+
+  it('ignores a late answer after a timeout and unrelated messages', async () => {
+    const [a, b] = portPair();
+    const client = new RpcClient(a, 'b');
+    const late = client.call('main.ping', {}, { timeoutMs: 5 });
+    await expect(late).rejects.toMatchObject({ code: 'TIMEOUT' });
+    b.send({ id: 'b1', ok: true, result: { process: 'main' } }); // too late
+    b.send({ id: 'zzz', ok: true, result: {} }); // unknown id
+    b.send('garbage');
+    b.send({ stream: 's', kind: 'data', payload: 1 });
+    await new Promise((r) => setTimeout(r, 10));
+    const next = client.call('main.ping', {}, { timeoutMs: 1000 });
+    b.send({ id: 'b2', ok: true, result: { process: 'main' } });
+    await expect(next).resolves.toEqual({ process: 'main' });
+  });
+
+  it('a call answered before its timeout does not send a cancel', async () => {
+    const { client, port } = privileged({ 'main.ping': () => ({ process: 'main' }) });
+    await expect(client.call('main.ping', {}, { timeoutMs: 20 })).resolves.toEqual({
+      process: 'main',
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(port.sent).toEqual([{ id: 'b1', method: 'main.ping', params: {} }]);
   });
 
   it('close() rejects pending calls', async () => {

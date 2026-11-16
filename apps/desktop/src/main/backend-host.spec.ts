@@ -157,6 +157,103 @@ describe('BackendHost', () => {
     expect(processes).toHaveLength(2);
   });
 
+  it('closes main end of the privileged port when the backend dies and on stop()', () => {
+    const { host, processes, privileged } = setup();
+    host.start();
+    const first = privileged.mock.calls[0]?.[0];
+    expect(first?.closed).toBe(false);
+    processes[0]?.exit(1);
+    expect(first?.closed).toBe(true);
+    const second = privileged.mock.calls[1]?.[0];
+    const stopSecond = privileged.mock.results[1]?.value as () => void;
+    expect(second?.closed).toBe(false);
+    host.stop();
+    expect(second?.closed).toBe(true);
+    expect(stopSecond).toHaveBeenCalledTimes(1);
+  });
+
+  it('every restart sends the new backend a new privileged port, never a renderer one', () => {
+    const { host, processes } = setup();
+    host.connectRenderer(() => undefined);
+    host.start();
+    processes[0]?.exit(1);
+    const second = processes[1]?.messages ?? [];
+    expect(second[0]?.message).toEqual({ type: 'privileged' });
+    const ports = processes.flatMap((p) => p.messages.flatMap((m) => m.ports.map((x) => x.name)));
+    expect(new Set(ports).size).toBe(ports.length); // no port is handed out twice
+  });
+
+  it('a renderer that connects during a back-off wait gets its port with the restart', () => {
+    const { host, processes, timers } = setup();
+    host.start();
+    processes[0]?.exit(1);
+    processes[1]?.exit(2); // now waiting
+    expect(host.pid).toBeUndefined();
+    const deliveries: [string, BackendRestarted | undefined][] = [];
+    host.connectRenderer((port, restarted) => deliveries.push([port.name, restarted]));
+    expect(deliveries).toEqual([]);
+    timers[0]?.fn();
+    expect(deliveries).toHaveLength(1);
+    expect(deliveries[0]?.[1]).toEqual({
+      restarts: 2,
+      reason: 'backend process exited with code 2',
+    });
+  });
+
+  it('a renderer that disconnects during a back-off wait gets nothing afterwards', () => {
+    const { host, processes, timers } = setup();
+    host.start();
+    const received: string[] = [];
+    const disconnect = host.connectRenderer((port) => received.push(port.name));
+    processes[0]?.exit(1);
+    processes[1]?.exit(1);
+    disconnect();
+    disconnect(); // idempotent
+    timers[0]?.fn();
+    expect(processes).toHaveLength(3);
+    expect(received).toHaveLength(2); // initial + first restart only
+  });
+
+  it('serves several renderers after a restart, each with the same restart info', () => {
+    const { host, processes } = setup();
+    host.start();
+    const a: (BackendRestarted | undefined)[] = [];
+    const b: (BackendRestarted | undefined)[] = [];
+    host.connectRenderer((_p, r) => a.push(r));
+    host.connectRenderer((_p, r) => b.push(r));
+    processes[0]?.exit(137);
+    const info = { restarts: 1, reason: 'backend process exited with code 137' };
+    expect(a).toEqual([undefined, info]);
+    expect(b).toEqual([undefined, info]);
+  });
+
+  it('logs start, exit and restart', () => {
+    const log = vi.fn();
+    const processes: FakeProcess[] = [];
+    const host = new BackendHost<FakePort>({
+      fork: () => {
+        const p = new FakeProcess(1);
+        processes.push(p);
+        return p;
+      },
+      createChannel: () => ({
+        port1: { name: 'a', closed: false },
+        port2: { name: 'b', closed: false },
+      }),
+      servePrivileged: () => () => undefined,
+      closePort: () => undefined,
+      log,
+      now: () => 0,
+    });
+    host.start();
+    processes[0]?.exit(3);
+    expect(log.mock.calls.map((c) => c[0])).toEqual([
+      'backend started',
+      'backend process exited with code 3; restarting in 0 ms',
+      'backend restarted (1)',
+    ]);
+  });
+
   it('a stop() during a back-off wait cancels the restart', () => {
     const { host, processes, timers } = setup();
     host.start();
