@@ -14,7 +14,8 @@ hold:
 Move the vendored JSON Canopy source from `vendor/json-canopy/` (see its README; Apache-2.0, keep NOTICE attribution) into the renderer: `src/app/json-explorer` → `packages/renderer/src/app/explorer`, `src/app/schema` → `packages/renderer/src/app/schema`, the Tron tokens and inlined fonts from `src/styles.css` → `packages/renderer/src/styles.css`. Remove the IDE host bridge (`services/host-bridge.service.ts` and its uses). A dev route shows `canopy-demo.json` (move it to `packages/renderer/src/assets/samples/`) in tables and form layouts with search, collapse, column hiding and editing. Delete `vendor/` at the end, together with its `vendor/**` entries in eslint.config.mjs and .prettierignore.
 
 ## Acceptance criteria
-- [ ] All copied specs pass in `npm run check`
+- [x] All copied specs pass in `npm run check`
+  - verified (2026-11-16 20:06+0100 by felix/agent-1): npm run check (sh .taskcheck) at aa8d214 -> lint+typecheck pass, root vitest 1530 passed, renderer ng test 27 files / 437 passed (includes all copied explorer/schema specs)
 - [ ] Dev route renders the demo document; tables/form toggle, search (strict/context), collapse and an edit work (Playwright e2e or component test)
 - [ ] Root NOTICE file lists JSON Canopy (Apache-2.0, Sonensei.ch) as origin of the explorer code
 - [ ] `vendor/` is deleted and no path or import refers to it or to ../json-master-plugin (grep shows none outside tasks/ and reviews/)
