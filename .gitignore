@@ -3,6 +3,9 @@ node_modules/
 dist/
 out/
 coverage/
+# Playwright e2e artifacts (failure screenshots, app output)
+test-results/
+playwright-report/
 .angular/
 *.log
 board.html

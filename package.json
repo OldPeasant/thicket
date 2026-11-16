@@ -22,6 +22,7 @@
     "typecheck": "tsc -p tsconfig.json && npm run typecheck --workspaces --if-present",
     "test": "vitest run && npm run test -w packages/renderer",
     "test:int": "vitest run --config test/integration/vitest.config.ts",
+    "test:e2e": "npm run build -w packages/renderer && npm run build -w apps/desktop && playwright test",
     "test:electron": "npm run build -w packages/renderer && npm run test:electron -w apps/desktop",
     "dev": "npm run dev -w apps/desktop",
     "start": "npm run build -w packages/renderer && npm run start -w apps/desktop",
@@ -29,6 +30,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.65.1",
     "@types/node": "^24.19.2",
     "@types/node-forge": "^1.3.14",
     "@vitest/coverage-v8": "^5.1.0",

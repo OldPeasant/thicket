@@ -263,6 +263,20 @@ Windows: run `.taskcheck` and npm scripts from Git for Windows' bash (TFP runs t
   the container runtime's host is local. A remote `DOCKER_HOST` would need that host added to the SANs.
 - Tests use their own database/collection names so files can share a fixture.
 
+## End-to-end tests
+- `npm run test:e2e` builds the renderer and the Electron bundles, then runs Playwright Test
+  (`@playwright/test`, `playwright.config.ts`) on `test/e2e/**/*.e2e.ts`, one worker. On Linux run it
+  under `xvfb-run -a`; without a display the harness passes `--ozone-platform=headless`
+  (`THICKET_TEST_HEADLESS=1` forces that). Not part of `npm run check` (type-checked and linted by it).
+- Import `test`/`expect` from `test/e2e/harness`. Fixtures: `userDataDir` (a fresh temp folder per
+  test, passed as `THICKET_USER_DATA`, deleted afterwards), `appEnv` (option), `electronApp`, `window`
+  (first window), `appOutput`, and `mongo` (the int-harness fixture named by the worker option
+  `mongoFixture`, default `mongo8`, started once per worker; tests using it are skipped when no
+  Docker/Podman answers). After every test `electronApp` checks that the real `userData` folder
+  (`realUserDataDir()`, Electron's `appData` + app name) is unchanged.
+- On failure the harness saves a PNG of every window (`failure-window-<n>.png`) and the app output to
+  the test's folder under `test-results/` (git-ignored).
+
 ## Coverage
 - Tool: Vitest with `@vitest/coverage-v8`, reporters `text-summary`, `json-summary`, `lcov`.
 - Reports: `coverage/` in each workspace (git-ignored).
