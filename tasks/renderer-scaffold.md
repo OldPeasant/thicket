@@ -18,3 +18,4 @@ Angular 22 app in packages/renderer (standalone components, signals, zoneless if
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 18:44+0100 by dell26/agent-1): Renderer specs run with the Angular CLI (ng test, @angular/build:unit-test, Vitest runner, jsdom) instead of a root Vitest project, so copied Canopy specs with templateUrl/styleUrl compile (AOT); root 'test' = 'vitest run && npm run test -w packages/renderer'. Alternative would be @analogjs/vite-plugin-angular in the root projects.
