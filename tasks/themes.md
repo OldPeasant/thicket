@@ -5,7 +5,7 @@ owner: dell26/agent-1
 deps: [explorer-copy,app-settings]
 touches: [packages/renderer/src/app/theme,packages/renderer/src/styles.css,packages/renderer/src/assets/fonts]
 prio: 1
-lease_until: 2026-11-16T19:52:47Z
+lease_until: 2026-11-16T19:57:49Z
 ---
 ## Goal
 Token sets for Business (default) and Tron, each light and dark, selected by `data-style` and `data-theme` on the root; mode follows the OS when set to system; persisted via app settings. Use the frontend-design skill for the visual direction; respect the Business and Tron tokens (no hard-coded colors).
