@@ -19,3 +19,4 @@ Implement SPEC.md section 4 in packages/contract: envelope types, stable error c
 ## Notes
 Exact method signatures are decided here; record notable choices with `assume`.
 - ASSUMPTION (2026-11-16 18:54+0100 by dell26/agent-2): zod 4 (4.6.7) chosen; params schemas are strictObject so unknown keys (e.g. a misspelt 'confirm') fail with INVALID_PARAMS; results are non-strict for forward compatibility
+- ASSUMPTION (2026-11-16 18:54+0100 by dell26/agent-2): One open connection per profile, keyed by profileId (conn.open/close take profileId; no separate connection id)
