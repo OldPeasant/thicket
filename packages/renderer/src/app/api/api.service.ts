@@ -1,0 +1,204 @@
+import { inject, Injectable } from '@angular/core';
+import {
+  BROADCAST_STREAMS,
+  type ConnStatus,
+  type Event,
+  type MethodName,
+  type ParamsOf,
+  type ResultOf,
+  type StreamDataOf,
+  type StreamMethodName,
+  type ThemeInfo,
+} from '@thicket/contract';
+import { filter, map, Observable } from 'rxjs';
+
+import { ApiError } from './api-error';
+import { THICKET_BRIDGE } from './thicket-bridge';
+
+/** Options of `ApiService.request`. */
+export interface RequestOptions {
+  /** Aborting cancels the request (`thicket.cancel(id)`) and rejects it with `CANCELLED`. */
+  signal?: AbortSignal;
+}
+
+/** Payload types of the broadcast streams (events not tied to a request). */
+export interface BroadcastPayloads {
+  [BROADCAST_STREAMS.connStatus]: ConnStatus;
+  [BROADCAST_STREAMS.theme]: ThemeInfo;
+}
+
+export type BroadcastStream = keyof BroadcastPayloads;
+
+/**
+ * Typed access to `window.thicket`. Requests are typed by the contract (`ParamsOf`/`ResultOf`),
+ * failures reject with `ApiError`; streaming methods are Observables that cancel the server-side
+ * operation when the last subscriber unsubscribes before the stream ended.
+ */
+@Injectable({ providedIn: 'root' })
+export class ApiService {
+  private readonly bridge = inject(THICKET_BRIDGE);
+
+  /** Calls `method`; resolves with its result or rejects with an `ApiError`. */
+  request<M extends MethodName>(
+    method: M,
+    params: ParamsOf<M>,
+    options: RequestOptions = {},
+  ): Promise<ResultOf<M>> {
+    const { signal } = options;
+    if (signal?.aborted) return Promise.reject(cancelledError());
+
+    const id = newRequestId();
+    const sent = this.send(id, method, params) as Promise<ResultOf<M>>;
+    if (!signal) return sent;
+    return new Promise<ResultOf<M>>((resolve, reject) => {
+      const onAbort = (): void => {
+        this.bridge.cancel(id);
+        reject(cancelledError());
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+      // Remove the listener before settling, so an abort right after the caller resumes is a no-op.
+      // After an abort, the settled promise ignores the late resolve/reject.
+      sent.then(
+        (result) => {
+          signal.removeEventListener('abort', onAbort);
+          resolve(result);
+        },
+        (error: unknown) => {
+          signal.removeEventListener('abort', onAbort);
+          reject(error);
+        },
+      );
+    });
+  }
+
+  /**
+   * Starts a streaming method and emits the payloads of its `data` events. Completes on `end`,
+   * errors with an `ApiError` on an `error` event or a failed request. Unsubscribing before that
+   * cancels the request (still pending) or the stream (`streamId` known). The request is sent
+   * once per subscription.
+   */
+  stream<M extends StreamMethodName>(method: M, params: ParamsOf<M>): Observable<StreamDataOf<M>> {
+    return new Observable<StreamDataOf<M>>((subscriber) => {
+      const id = newRequestId();
+      let streamId: string | undefined;
+      let finished = false;
+      let unsubscribed = false;
+      /** Events that arrive before the response tells us the `streamId`. */
+      let early: Event[] = [];
+
+      const finish = (): void => {
+        finished = true;
+        early = [];
+        off();
+      };
+
+      const handle = (event: Event): void => {
+        if (finished || event.stream !== streamId) return;
+        switch (event.kind) {
+          case 'data':
+            subscriber.next(event.payload as StreamDataOf<M>);
+            break;
+          case 'end':
+            finish();
+            subscriber.complete();
+            break;
+          case 'error':
+            finish();
+            subscriber.error(ApiError.from(event.payload));
+            break;
+        }
+      };
+
+      const off = this.bridge.on((event) => {
+        if (finished) return;
+        if (streamId === undefined) early.push(event);
+        else handle(event);
+      });
+
+      this.send(id, method, params).then(
+        (result) => {
+          const sid = streamIdOf(result);
+          if (unsubscribed) {
+            // Cancelled while pending, but the response was already on its way: stop the stream too.
+            if (sid !== undefined) this.bridge.cancel(sid);
+            return;
+          }
+          if (sid === undefined) {
+            finish();
+            subscriber.error(
+              new ApiError({
+                code: 'INTERNAL',
+                message: `${method} did not return a streamId`,
+                detail: result,
+              }),
+            );
+            return;
+          }
+          streamId = sid;
+          const buffered = early;
+          early = [];
+          for (const event of buffered) handle(event);
+        },
+        (error: unknown) => {
+          if (unsubscribed) return;
+          finish();
+          subscriber.error(ApiError.from(error));
+        },
+      );
+
+      return () => {
+        unsubscribed = true;
+        if (finished) return;
+        finish();
+        this.bridge.cancel(streamId ?? id);
+      };
+    });
+  }
+
+  /** Payloads of a broadcast stream (`BROADCAST_STREAMS`), e.g. connection status changes. */
+  broadcasts<S extends BroadcastStream>(stream: S): Observable<BroadcastPayloads[S]> {
+    return this.events(stream).pipe(
+      filter((event) => event.kind === 'data'),
+      map((event) => event.payload as BroadcastPayloads[S]),
+    );
+  }
+
+  /** Every event of the stream with name `stream` (all kinds), e.g. `backend.restarted`. */
+  events(stream: string): Observable<Event> {
+    return new Observable<Event>((subscriber) =>
+      this.bridge.on((event) => {
+        if (event.stream === stream) subscriber.next(event);
+      }),
+    );
+  }
+
+  /** Sends the request; resolves with the result, rejects with an `ApiError`. */
+  private async send(id: string, method: string, params: unknown): Promise<unknown> {
+    let response;
+    try {
+      response = await this.bridge.request({ id, method, params });
+    } catch (error) {
+      throw ApiError.from(error);
+    }
+    if (response.ok) return response.result;
+    throw ApiError.from(response.error);
+  }
+}
+
+function cancelledError(): ApiError {
+  return new ApiError({ code: 'CANCELLED', message: 'Cancelled' });
+}
+
+function streamIdOf(result: unknown): string | undefined {
+  if (typeof result !== 'object' || result === null) return undefined;
+  const { streamId } = result as Record<string, unknown>;
+  return typeof streamId === 'string' && streamId.length > 0 ? streamId : undefined;
+}
+
+let fallbackCounter = 0;
+
+/** Unique per port; random so ids from several windows sharing a backend never collide in logs. */
+function newRequestId(): string {
+  const random = globalThis.crypto?.randomUUID?.();
+  return random ?? `r-${Date.now().toString(36)}-${(fallbackCounter++).toString(36)}`;
+}

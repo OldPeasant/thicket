@@ -109,6 +109,14 @@ Contract layout (`packages/contract/src/`):
 - File paths: the renderer never sends paths for `io.*` (opaque tokens from native dialogs). The
   exception is the profile's TLS/SSH file paths, which are stored in the profile; the renderer
   gets them from `profiles.chooseFile` (native dialog in `main`).
+- Renderer side (`packages/renderer/src/app/api/`): `ThicketBridge` is the shape of
+  `window.thicket` (`request(Request): Promise<Response>`, `cancel(id)`, `on(listener) → off`; the
+  renderer picks request ids). Components use `ApiService`: `request(method, params, { signal })`
+  resolves with `ResultOf<M>` or rejects with `ApiError` (`code`, `message`, `detail`,
+  `explanation`); `stream(method, params)` is an Observable of `StreamDataOf<M>` that cancels on
+  unsubscribe; `broadcasts(BROADCAST_STREAMS.x)` / `events(name)` for pushed events.
+  `ERROR_MESSAGES` / `describeError()` give readable texts per error code. Specs use
+  `FakeThicketBridge` + `provideFakeThicket()` from `app/api/testing`.
 - Adding a method: add it to its group file, add a valid/invalid sample to `SAMPLES` in
   `index.spec.ts` (the test fails otherwise), and to `EXPECTED_WRITES` if it writes.
 
