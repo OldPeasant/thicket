@@ -13,7 +13,8 @@ Typed inputs per BSON type (ObjectId with validation/generate, date-time picker,
 ## Acceptance criteria
 - [x] Component tests: editing an Int64 keeps Int64; overflow shows an error; invalid ObjectId rejected
   - verified (2026-11-16 23:38+0100 by felix/agent-2): cd packages/renderer && npx ng test --include bson-inputs.spec.ts, bson-input.component.spec.ts, editable-value.component.spec.ts, bson-input.util.spec.ts -> 4 files, 171 passed; 'typed inputs' tests: Int64 stays Int64 exactly, Int64/Int32 overflow shows error and keeps value, invalid ObjectId rejected
-- [ ] Type dropdown conversions follow the bson-model table; impossible conversions disabled (test)
+- [x] Type dropdown conversions follow the bson-model table; impossible conversions disabled (test)
+  - verified (2026-11-16 23:38+0100 by felix/agent-2): same run -> 171 passed; bson-inputs.spec.ts 'type dropdown': enabled options = bson-model convert() table for Int32, lossy number conversions and invalid string->ObjectId disabled, deprecated types not offered; editable-value spec: disabled option emits nothing
 - [ ] New numeric value defaults per setting (Int32/Double) (test); fields can be moved (test)
 
 ## Notes
