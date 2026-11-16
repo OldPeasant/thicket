@@ -15,7 +15,8 @@ Playwright `_electron` launches the built app with an isolated userData dir; hel
   - verified (2026-11-16 20:32+0100 by felix/agent-2): npm run test:e2e on Fedora Linux at 493a462 (builds renderer + apps/desktop bundles, then playwright test) -> 17 passed; smoke.e2e.ts asserts toHaveTitle('Thicket'). Ran with the session's Wayland display (app log shows ozone/platform/wayland), NOT under xvfb-run: xvfb-run is not installed here
 - [x] Each test gets a fresh temporary userData directory (assert no writes to the real one)
   - verified (2026-11-16 20:32+0100 by felix/agent-2): npm run test:e2e -> smoke.e2e.ts: app.getPath('userData') equals the fixture's fresh mkdtemp dir, settings.json is written there, two consecutive tests get different empty dirs; electronApp fixture teardown snapshots Electron's default userData (appData+name, cross-checked against the running app) before launch and asserts it unchanged after close (passes for every app test); harness-helpers.e2e.ts covers snapshotDir change detection -> 17 passed
-- [ ] Screenshot on failure saved under test-results/ (git-ignored)
+- [x] Screenshot on failure saved under test-results/ (git-ignored)
+  - verified (2026-11-16 20:32+0100 by felix/agent-2): Deliberately failing spec (toHaveTitle('Not Thicket')) via npx playwright test -> test-results/<test>/failure-window-0.png + attachments PNG and app output written; git check-ignore -v test-results/x.png -> .gitignore:7 test-results/; automated in harness-helpers.e2e.ts nested failure-fixture run (failing test gets PNG, passing test none) -> passed in npm run test:e2e (17 passed)
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
