@@ -16,7 +16,8 @@ Move the vendored JSON Canopy source from `vendor/json-canopy/` (see its README;
 ## Acceptance criteria
 - [x] All copied specs pass in `npm run check`
   - verified (2026-11-16 20:06+0100 by felix/agent-1): npm run check (sh .taskcheck) at aa8d214 -> lint+typecheck pass, root vitest 1530 passed, renderer ng test 27 files / 437 passed (includes all copied explorer/schema specs)
-- [ ] Dev route renders the demo document; tables/form toggle, search (strict/context), collapse and an edit work (Playwright e2e or component test)
+- [x] Dev route renders the demo document; tables/form toggle, search (strict/context), collapse and an edit work (Playwright e2e or component test)
+  - verified (2026-11-16 20:06+0100 by felix/agent-1): npm --prefix packages/renderer run test -- --include=src/app/dev/explorer-demo.spec.ts (router-driven component test of #/dev/explorer with canopy-demo.json, jsdom) -> 6 passed: renders in tables, tables/form toggle, search strict+context, collapse/expand, hide column, edit a value
 - [ ] Root NOTICE file lists JSON Canopy (Apache-2.0, Sonensei.ch) as origin of the explorer code
 - [ ] `vendor/` is deleted and no path or import refers to it or to ../json-master-plugin (grep shows none outside tasks/ and reviews/)
 
