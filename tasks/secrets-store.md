@@ -15,7 +15,8 @@ secrets.bin encrypted with safeStorage, keyed by profile id; detection of Linux 
   - verified (2026-11-16 19:59+0100 by dell26/agent-2): npx vitest run --project desktop --project contract -> 865 passed; apps/desktop/src/secrets/store.spec.ts (FakeSafeStorage: set/get/delete, overwrite, persistence without plain text, 0600 + atomic temp/rename, concurrency, corrupt files of 15+ kinds moved aside to secrets.bin.corrupt-<time> and store keeps working, weak-backend v11 lock vs v10/garbage moved aside); store.ts coverage 145/146 stmts, 124/124 lines
 - [x] On `basic_text` the status API reports `weak` and profiles default to not saving passwords (test)
   - verified (2026-11-16 19:59+0100 by dell26/agent-2): store.spec.ts 'Linux basic_text is weak: profiles default to not saving passwords' + handlers.spec.ts profiles.secretStorage -> {level:'weak', backend:'basic_text', defaultSecretMode:'ask'} pass; real Electron 45: npm run test:electron (secrets.electron.spec.ts with --password-store=basic, temp --user-data-dir) -> 17 passed, status weak/basic_text/ask, setSecret -> secureStorage:false
-- [ ] Renderer cannot request a secret: contract test shows no renderer-routable method returns a secret
+- [x] Renderer cannot request a secret: contract test shows no renderer-routable method returns a secret
+  - verified (2026-11-16 19:59+0100 by dell26/agent-2): packages/contract/src/no-secrets.spec.ts walks every renderer-routable method's result/stream schema and all broadcast payloads -> no text field named like a secret (self-test finds secrets.get, which is privileged-only and unroutable); apps/desktop/src/secrets/no-secrets-to-renderer.spec.ts serves main's renderer port with a stored secret -> secrets.get/main.ping UNKNOWN_METHOD, no response contains the value; npm run test:electron -> renderer secrets.get refused UNKNOWN_METHOD; all pass
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
