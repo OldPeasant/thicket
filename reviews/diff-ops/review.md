@@ -4,21 +4,22 @@ Date: 2026-11-16
 
 Task: diff-ops - Core: edit diff → update operations and conflict filter
 
-Scope: `git diff 47ace47..HEAD` (committed changes only). The parent named commits d8fc1f2 and a697f60; in the current history the same changes are 92d15dc ("Add edit diff to update operations and conflict filter") and 3599312 ("Add diff-ops unit and integration tests"), plus four `assume:` commits that touch only `tasks/diff-ops.md`.
+Scope: Re-review of the whole task diff on the final code at HEAD 27c090b (`git merge-base HEAD origin/main`..27c090b): `packages/core/src/diff/*` (diff.ts, equals.ts, fixtures.ts, diff.spec.ts, index.ts), `packages/core/src/index.ts`, `test/integration/diff-ops.int.spec.ts`. Includes checking the fixes for CR-1 and CR-2 (earlier review) and TW-2 (reviews/diff-ops/tests.md), described in reviews/diff-ops/fixes.md. Shell/git access was denied in this session, so the files were read directly from the working tree, which was clean at 27c090b at session start. A test-writer may be editing test files at the same time. Production code (diff.ts, equals.ts, index.ts files) is the authoritative subject.
 
 Requirements:
-- tasks/diff-ops.md acceptance criteria and recorded assumptions (#1-#4)
-- SPEC.md "Documents" (minimal `$set`/`$unset`, `$push` for pure appends, filter = `_id` + original values of changed top-level fields)
-- packages/contract/src/docs.ts `docs.update` (`update` + `expected`) and `docs.replace` (`expected` optional)
-- docs/ARCHITECTURE.md conventions (core is pure TS, no Node APIs, no `any`), AGENTS.md
+- tasks/diff-ops.md acceptance criteria and the recorded assumptions #1-#5 (Notes section)
+- SPEC.md "Documents" (Save = one `updateOne` with minimal `$set`/`$unset`, `$push` for pure appends; conflict filter = `_id` + original values of every changed top-level field)
+- packages/contract/src/docs.ts `docs.update` (`update` + `expected`, ANDed to the `_id` filter) and `docs.replace` (`doc` + optional `expected`)
+- docs/ARCHITECTURE.md conventions, AGENTS.md
+- reviews/diff-ops/fixes.md, reviews/diff-ops/review.md (previous revision)
 
 Git range:
 - Branch: main
-- HEAD: 3599312440001055ef1c4e8bee56b58b8dbbfe65
-- Base/start: 47ace471e394cdd872f6045a03d410b73abf14e8
-- Commits reviewed: 6 (2 code commits, 4 task-file-only assumption commits); no uncommitted changes
+- HEAD: 27c090b
+- Base/start: `git merge-base HEAD origin/main` (could not be resolved here because git commands were denied; the previous review used 47ace47 before a rebase)
+- Commits reviewed: 4 code/test commits (ca0dc56, 3a14f33, f9cd936, 27c090b) plus `assume:` commits that touch only `tasks/diff-ops.md` (e.g. 5fd2f44). No uncommitted changes at session start.
 
-Summary: 0 P0, 0 P1, 2 P2, 0 P3
+Summary: 0 P0, 0 P1, 0 P2, 0 P3
 
 ## P0 Critical
 
@@ -30,26 +31,26 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | Conflict filter misses a concurrent removal of a field whose original value was null**
-    - File: `packages/core/src/diff/diff.ts:187`
-    - Category: Correctness
-    - Problem: For an addressable changed top-level field the filter is `{field: {$eq: <original>}}`. When the original value is BSON `null`, MongoDB query semantics make `{field: {$eq: null}}` match documents where the field is null **or missing**. If another user `$unset`s that field after the editor loaded the document, the filter still matches, so the save is applied without a CONFLICT. (The `$expr`/`$getField` branch does not have this problem: in aggregation `$eq` missing is distinct from null.) Assumption #3 records the array-containment and cross-numeric-type limits of `$eq`, but not the null/missing case. Neither `DIFF_CASES` nor the integration test exercises it: `concurrentChange` in `test/integration/diff-ops.int.spec.ts:27` only ever sets a string value, never removes the field.
-    - Why it matters: AC 3 ("not [matching] one where a changed field was modified") and SPEC "Conflict detection" — a concurrent removal is a modification that goes undetected, so the user's save silently overwrites another user's change (lost update). Null is a common value in real documents.
-    - Suggested fix: For a null original, add `$exists: true` (or `$type: "null"`) to the condition, e.g. `{field: {$eq: null, $exists: true}}`, or use the `$expr`/`$getField` exact check for such values. Add a fixture with a changed top-level field whose original is `null`, and extend the conflict-filter integration test with a "field removed on the server" variant.
-
-- [ ] **CR-2 | Conflict filter with an original BSON `undefined` value is rejected by the server**
-    - File: `packages/core/src/diff/diff.ts:187`
-    - Category: Correctness
-    - Problem: The model supports the deprecated `undefined` type (`packages/core/src/bson/model.ts:41`), and `diffDocuments` emits `{field: {$eq: {"$undefined": true}}}` when such a top-level field is changed. MongoDB's query parser rejects comparisons to undefined ("cannot compare to undefined", BadValue), so `updateOne`/`replaceOne` with this filter fails instead of saving. Legacy documents with `undefined` values are exactly the case where a user would open the editor to fix the value, and the save would then always fail with a server error. No fixture covers it.
-    - Why it matters: Saving such a document is impossible through the produced update; the backend would surface it as SERVER_ERROR rather than a working save or a CONFLICT.
-    - Suggested fix: For an `undefined` original, use `{field: {$type: "undefined"}}` (or the `$expr`/`$getField` check with `$literal`, which aggregation accepts), and add a fixture plus an integration case for it.
+None.
 
 ## P3 Low
 
 None.
 
+## Verification of earlier findings
+
+- **CR-1 (null original misses a concurrent removal): fixed.** `queryFieldCheck` (`packages/core/src/diff/diff.ts:218-224`) now emits `{field: {$type: "null"}}` for a null original, so a field removed on the server no longer matches. The `$expr` branch (`exprFieldCheck`, `diff.ts:231-248`) compares `$type` of `$getField` with `"null"`, and aggregation `$type` returns `"missing"` for an absent field, so that branch is also exact. A null nested inside a changed document still uses `$eq` with exact document equality, which is correct because document `$eq` does not treat missing as null (unit test at `diff.spec.ts:176`). Coverage: fixtures `null → value (top-level)` and `null → value for a top-level key with a dot` (`fixtures.ts:259-274`) run through the unit test and all three integration tests, including the new "conflict filter detects a concurrent removal" test (`diff-ops.int.spec.ts:101-117`), which removes each changed field that existed in the original.
+- **CR-2 (BSON undefined original rejected by the server): fixed.** Both branches now use a `$type` check with `"undefined"`, which is a valid (deprecated) `$type` query alias and a valid aggregation `$type` result. The unit test at `diff.spec.ts:154` covers both branches. No integration test covers this because the driver turns EJSON `undefined` into null on insert. That limitation is stated in fixes.md and is acceptable.
+- **TW-2 (replace with a top-level `$` key cannot be written): fixed as decided by the parent.** `diffDocuments` throws `BsonModelError` on the replace path when the edited document has top-level `$`-prefixed keys (`diff.ts:89-96`). The update path is unaffected, and an unchanged `$k` still produces an update (`diff.spec.ts:128`). A removed `$k` still produces a valid replace, because the replacement has no `$` key (fixture `fixtures.ts:362-369`). The module and type doc comments match the behavior, and assumption #5 records the decision. The unsaveable fixture was correctly removed from the shared `DIFF_CASES`, since it has no server result, and replaced by unit tests (`diff.spec.ts:110-126`).
+
+## Whole-diff re-check
+
+- AC 1: every case the criterion names is in the table-driven `DIFF_CASES`: nested set, unset, rename = unset+set, type changes, array append → `$push` with `$each`, array item change → whole-array `$set`, and field reorder only → `$set` of the parent (or `replace` at top level). `diff.spec.ts:13-35` asserts the update, `expected` and `filter` for each case.
+- AC 2 and AC 3: `diff-ops.int.spec.ts` applies every changing case against mongo 8 and 7. It checks the stored document (with the documented field order for new fields, assumption #1), shows that the filter matches the unchanged document and a document with an unrelated concurrent change, and shows that it matches nothing after a concurrent modification or removal of any changed top-level field. A separate stale-save test runs a real `updateOne` and checks `matchedCount` 0. This review did not re-run the integration suite. The parent must record that run with `tasks.py verify`; fixes.md reports `npm run test:int -- diff-ops` with 284 passed on both servers.
+- Contract: `expected` contains only the per-field checks and `filter` is `{_id, ...expected}`, which matches `docs.update`'s "ANDed to the `_id` filter". The `replace` result returns `replacement` together with the same `expected` for `docs.replace`.
+- Architecture: core stays pure TypeScript with no Node APIs and no `any`. The new exports go through `diff/index.ts` → `core/src/index.ts` and do not collide with existing names.
+- Known `$eq`/`$type` query limits: a scalar original also matches a server array that contains it, and numbers match across numeric types. Assumption #3 records these limits, and they are not defects of this task.
+
 ## Review conclusion
 
-Material issues found; fix before completing the task.
-
-The core diff logic itself checks out: nested set/unset, rename as unset+set, type changes, `$push` with `$each` for pure appends, whole-array `$set` otherwise, parent replacement for reorders and unaddressable keys, top-level `replace`, `_id` protection, and the update/filter shapes match `docs.update` (`update` + `expected`). All acceptance-criteria cases are in the table-driven `DIFF_CASES`, which both the unit tests and the integration test (against mongo 8 and 7) use. The two findings are narrow value cases in the conflict filter (null and undefined originals). Both fall under AC 3 and SPEC conflict detection, and neither is covered by the recorded assumptions.
+No material issues found.

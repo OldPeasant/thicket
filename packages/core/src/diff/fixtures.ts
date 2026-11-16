@@ -369,6 +369,38 @@ export const DIFF_CASES: DiffCase[] = [
   },
   // A replace whose edited document keeps a top-level `$` key throws (MongoDB rejects such a
   // replacement); that is unit-tested in diff.spec.ts, not here, since it has no server result.
+  // --- Cases added by the test-writer for the fixes (null by $type, top-level `$` keys) ---------
+  {
+    name: 'null field removed → unset, $type check',
+    original: `{"_id":${ID},"a":null,"b":1}`,
+    edited: `{"_id":${ID},"b":1}`,
+    update: '{"$unset":{"a":""}}',
+    expected: '{"a":{"$type":"null"}}',
+  },
+  {
+    name: 'null dotted key changed and a new dotted key → replace, $and of $type checks',
+    original: `{"_id":${ID},"a.b":null,"c":1}`,
+    edited: `{"_id":${ID},"a.b":true,"c":1,"x.y":null}`,
+    update: 'replace',
+    expected:
+      '{"$expr":{"$and":[' +
+      '{"$eq":[{"$type":{"$getField":{"field":{"$literal":"a.b"},"input":"$$ROOT"}}},"null"]},' +
+      '{"$eq":[{"$type":{"$getField":{"field":{"$literal":"x.y"},"input":"$$ROOT"}}},"missing"]}]}}',
+  },
+  {
+    name: 'update of a document that keeps an unchanged top-level $-prefixed key',
+    original: `{"_id":${ID},"$k":1,"a":1}`,
+    edited: `{"_id":${ID},"$k":1,"a":2}`,
+    update: '{"$set":{"a":2}}',
+    expected: '{"a":{"$eq":1}}',
+  },
+  {
+    name: 'top-level reorder in a document with a nested $-prefixed key → replace',
+    original: `{"_id":${ID},"a":{"$x":1},"b":2}`,
+    edited: `{"_id":${ID},"b":2,"a":{"$x":1}}`,
+    update: 'replace',
+    expected: '{"a":{"$eq":{"$x":1}},"b":{"$eq":2}}',
+  },
   {
     name: 'no change',
     original: `{"_id":${ID},"a":{"b":[1,{"c":2}]}}`,

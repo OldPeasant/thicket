@@ -125,6 +125,63 @@ describe('diffDocuments', () => {
     ).toThrow(new BsonModelError('Top-level field names starting with $ cannot be saved: $k, $m'));
   });
 
+  it('throws for a changed top-level $ key and for any replace that keeps one', () => {
+    expect(() =>
+      diffDocuments(
+        parseEJsonDocument('{"_id":1,"$k":1,"a":1}'),
+        parseEJsonDocument('{"_id":1,"$k":2,"a":1}'),
+      ),
+    ).toThrow(new BsonModelError('Top-level field names starting with $ cannot be saved: $k'));
+    // A different unaddressable change (dotted key) forces a replace; a kept `$` key then throws.
+    expect(() =>
+      diffDocuments(
+        parseEJsonDocument('{"_id":1,"$k":1,"a.b":1}'),
+        parseEJsonDocument('{"_id":1,"$k":1,"a.b":2}'),
+      ),
+    ).toThrow(BsonModelError);
+  });
+
+  it('names a repeated top-level $ key only once in the error', () => {
+    const fields = (v: number) => [
+      { key: '_id', value: int32(1) },
+      { key: '$k', value: int32(1) },
+      { key: '$k', value: int32(v) },
+    ];
+    expect(() => diffDocuments(doc(fields(2)), doc(fields(3)))).toThrow(
+      new BsonModelError('Top-level field names starting with $ cannot be saved: $k'),
+    );
+  });
+
+  it('does not throw for a replace whose $ keys are only nested', () => {
+    const diff = diffDocuments(
+      parseEJsonDocument('{"_id":1,"a":{"$x":1},"b":2}'),
+      parseEJsonDocument('{"_id":1,"b":2,"a":{"$x":1}}'),
+    );
+    expect(diff.kind).toBe('replace');
+  });
+
+  it('checks a null original that was removed by $type in the update path', () => {
+    const diff = diffDocuments(
+      parseEJsonDocument('{"_id":1,"a":null,"b":1}'),
+      parseEJsonDocument('{"_id":1,"b":1}'),
+    );
+    expect(diff.kind).toBe('update');
+    if (diff.kind === 'update') {
+      expect(diff.ops).toEqual([{ op: 'unset', path: 'a' }]);
+      expect(stringifyEJson(diff.filter)).toBe(canonical('{"_id":1,"a":{"$type":"null"}}'));
+    }
+  });
+
+  it('keeps $eq for an original array containing null', () => {
+    const diff = diffDocuments(
+      parseEJsonDocument('{"_id":1,"a":[null]}'),
+      parseEJsonDocument('{"_id":1,"a":[1]}'),
+    );
+    expect(diff.kind).toBe('update');
+    if (diff.kind === 'update')
+      expect(stringifyEJson(diff.expected)).toBe(canonical('{"a":{"$eq":[null]}}'));
+  });
+
   it('still updates a document with an unchanged top-level $ key', () => {
     const diff = diffDocuments(
       parseEJsonDocument('{"_id":1,"$k":1,"a":1}'),
