@@ -13,7 +13,8 @@ Typed Angular service wrapping `window.thicket`: `request<M>()` typed by the con
 ## Acceptance criteria
 - [x] Unit tests with the fake: typed request/response, stream data/end/error, unsubscribe sends cancel
   - verified (2026-11-16 19:25+0100 by felix/agent-2): npm run test -w packages/renderer (ng test, Vitest+jsdom) -> 181 passed; api.service.spec.ts uses FakeThicketBridge: typed request/response (expectTypeOf ResultOf), stream data/end/error, unsubscribe sends cancel with request id (pending) or streamId (running)
-- [ ] Every contract error code has a message (test enumerates the codes)
+- [x] Every contract error code has a message (test enumerates the codes)
+  - verified (2026-11-16 19:25+0100 by felix/agent-2): api-error.spec.ts it.each(ERROR_CODES) over ERROR_MESSAGES (Record<ErrorCode,string>) plus exact key-set test; npm run test -w packages/renderer -> passed for all 17 codes
 - [ ] Fake is exported for other renderer tests to use
 
 ## Notes
