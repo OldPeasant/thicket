@@ -17,3 +17,4 @@ Parse mongosh-style literals (`ObjectId("…")`, `ISODate`, `NumberLong`, `Numbe
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 19:50+0100 by dell26/agent-3): Own recursive-descent parser in packages/core/src/shellsyntax instead of ejson-shell-parser (named in ARCHITECTURE): that library goes through JS objects (loses repeated keys, reorders integer-like keys, loses Int64 precision) and its acorn errors don't map to our model; ours yields the BsonValue model directly with line/column errors
