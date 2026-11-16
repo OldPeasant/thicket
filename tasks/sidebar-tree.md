@@ -5,7 +5,7 @@ owner: felix/agent-1
 deps: [app-layout,api-client,browse-backend,safety-ui]
 touches: [packages/renderer/src/app/sidebar]
 prio: 1
-lease_until: 2026-11-16T21:56:31Z
+lease_until: 2026-11-16T22:01:35Z
 ---
 ## Goal
 Tree: connections → databases → collections/views/time series with lazy loading, counts/sizes on demand, context menus for create/drop/rename (drop asks to type the name), open collection in a tab.
