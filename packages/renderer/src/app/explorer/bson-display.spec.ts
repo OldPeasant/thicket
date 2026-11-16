@@ -8,6 +8,7 @@ import { toExplorerValue } from './bson-value.util';
 import { JsonExplorerComponent } from './json-explorer.component';
 import type { Layout } from './layout.util';
 import { BsonDisplayService } from './services/bson-display.service';
+import { EditModeService } from './services/edit-mode.service';
 import { FilterService } from './services/filter.service';
 
 // The badge each field of the bson-model all-types fixture must show.
@@ -199,6 +200,91 @@ describe('Explorer with BSON values', () => {
     filter.set('22:13:20');
     await fixture.whenStable();
     expect(shownKeys()).toEqual(['date']);
+  });
+
+  const goToEditMode = async () => {
+    el().querySelector<HTMLButtonElement>('.mode-toggle')?.click();
+    await fixture.whenStable();
+    expect(TestBed.inject(EditModeService).enabled()).toBe(true);
+  };
+
+  it('keeps BSON values read-only in edit mode and locks deprecated types', async () => {
+    await render(ALL_TYPES_EJSON, 'form');
+    await goToEditMode();
+    // Plain JSON values become editable...
+    expect(field('string')?.querySelector('input, textarea')).not.toBeNull();
+    // ...BSON leaves keep their badge and exact text, with no editor.
+    for (const key of ['int64', 'decimalMax', 'date', 'uuid', '_id', 'symbol', 'codeWithScope']) {
+      const ev = field(key)?.querySelector('app-editable-value');
+      expect(ev?.querySelector('input, textarea, select'), key).toBeNull();
+      expect(ev?.querySelector('.badge')?.textContent?.trim(), key).toBe(EXPECTED_BADGES[key]);
+    }
+    expect(valueOf('int64')).toBe('9007199254740993');
+    for (const key of ['undefined', 'symbol', 'dbPointer', 'codeWithScope']) {
+      expect(field(key)?.querySelector('app-editable-value .lock'), key).not.toBeNull();
+    }
+    for (const key of ['int64', 'date', 'uuid', 'minKey']) {
+      expect(field(key)?.querySelector('app-editable-value .lock'), key).toBeNull();
+    }
+  });
+
+  it('shows no lock for deprecated types outside edit mode', async () => {
+    await render(ALL_TYPES_EJSON, 'form');
+    expect(field('symbol')?.querySelector('app-editable-value .lock')).toBeNull();
+    expect(field('symbol')?.querySelector('.val.bson.deprecated')).not.toBeNull();
+  });
+
+  it('keeps deprecated values read-only in the tables layout too', async () => {
+    await render(
+      '{"s":{"$symbol":"sym"},"u":{"$undefined":true},"n":{"$numberLong":"7"},"t":"txt"}',
+      'tables',
+    );
+    await goToEditMode();
+    const badges = [...el().querySelectorAll<HTMLElement>('.badge')];
+    expect(badges.map((b) => b.textContent?.trim())).toEqual(['Symbol', 'Undefined', 'Int64']);
+    expect(badges.map((b) => b.classList.contains('deprecated'))).toEqual([true, true, false]);
+    expect(el().querySelectorAll('app-editable-value .lock').length).toBe(2);
+    const bsonVals = [...el().querySelectorAll('.val.bson')].map((v) => v.textContent?.trim());
+    expect(bsonVals).toEqual(['sym', 'undefined', '7']);
+  });
+
+  it('shows no badge for the document root', async () => {
+    await render('{"a":{"$numberInt":"1"}}', 'form');
+    const badges = [...el().querySelectorAll('.badge')].map((b) => b.textContent?.trim());
+    expect(badges).toEqual(['Int32']);
+  });
+
+  it('renders a date at the upper JS date limit in local time', async () => {
+    // Valid BSON and JS date; in Zurich (+02:00) its wall clock lies past the JS range.
+    await render('{"d":{"$date":{"$numberLong":"8640000000000000"}},"x":"after"}', 'form');
+    expect(valueOf('d')).toContain('275760');
+    expect(field('x')).not.toBeNull();
+  });
+
+  it('marks the UTC button pressed while dates show in UTC', async () => {
+    await render('{"d":{"$date":{"$numberLong":"0"}}}', 'form');
+    const button = el().querySelector<HTMLButtonElement>('.date-zone');
+    expect(button?.getAttribute('aria-pressed')).toBe('false');
+    expect(valueOf('d')).toBe('1970-01-01T01:00:00.000+01:00 Europe/Zurich');
+    button?.click();
+    await fixture.whenStable();
+    expect(button?.getAttribute('aria-pressed')).toBe('true');
+    expect(valueOf('d')).toBe('1970-01-01T00:00:00.000Z');
+    button?.click();
+    await fixture.whenStable();
+    expect(valueOf('d')).toBe('1970-01-01T01:00:00.000+01:00 Europe/Zurich');
+  });
+
+  it('finds BSON values in context mode and is case-insensitive', async () => {
+    await render(ALL_TYPES_EJSON, 'form');
+    const filter = TestBed.inject(FilterService);
+    filter.setMode('context');
+    filter.set('MAXKEY');
+    await fixture.whenStable();
+    expect(field('maxKey')?.querySelector('.val mark')?.textContent).toBe('MaxKey');
+    expect(field('minKey')?.querySelector('.val mark')).toBeNull();
+    // Context mode keeps the siblings visible.
+    expect(shownKeys()).toContain('minKey');
   });
 
   it('finds values nested in documents and arrays', async () => {
