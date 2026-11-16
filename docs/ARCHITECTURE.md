@@ -136,6 +136,8 @@ Windows: run `.taskcheck` and npm scripts from Git for Windows' bash (TFP runs t
   (SERVER-121912).
 - The CA and server certificate are generated per run (`fixtures/certs.ts`, node-forge with keys from
   `node:crypto`) into a temp dir that teardown deletes. Never commit certificates or keys.
+- The TLS server certificate's SANs are `localhost`, `127.0.0.1` and `::1`, so the TLS fixtures assume
+  the container runtime's host is local. A remote `DOCKER_HOST` would need that host added to the SANs.
 - Tests use their own database/collection names so files can share a fixture.
 
 ## Coverage

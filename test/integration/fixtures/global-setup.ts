@@ -9,7 +9,6 @@ import {
   startFixture,
   type FixtureInfo,
   type FixtureName,
-  type StartedFixture,
 } from './mongo.ts';
 
 declare module 'vitest' {
@@ -26,18 +25,38 @@ declare module 'vitest' {
  * them with every test file. Containers are stopped in the returned teardown (Ryuk may be off).
  */
 export default async function setup(project: TestProject): Promise<() => Promise<void>> {
-  const certDir = await mkdtemp(join(tmpdir(), 'thicket-int-'));
+  // SANs assume the container runtime host (started.getHost()) is local. A remote DOCKER_HOST
+  // (tcp://<host>) would need that host added here, or the TLS fixtures fail the hostname check.
   const certs = generateTestCertificates(['localhost', '127.0.0.1', '::1']);
+  const certDir = await mkdtemp(join(tmpdir(), 'thicket-int-'));
   const tlsCaFile = join(certDir, 'ca.pem');
-  await writeFile(tlsCaFile, certs.caCert, { mode: 0o600 });
+  try {
+    await writeFile(tlsCaFile, certs.caCert, { mode: 0o600 });
+  } catch (err) {
+    await rm(certDir, { recursive: true, force: true });
+    throw err;
+  }
 
   const results = await Promise.allSettled(
     FIXTURE_NAMES.map((name) => startFixture(FIXTURE_SPECS[name], certs)),
   );
-  const started = results.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []));
+  const started = results.flatMap((r, i) =>
+    r.status === 'fulfilled' ? [{ name: FIXTURE_NAMES[i], fixture: r.value }] : [],
+  );
 
   const teardown = async (): Promise<void> => {
-    await Promise.allSettled(started.map((f) => f.container.stop()));
+    await Promise.all(
+      started.map(async ({ name, fixture }) => {
+        try {
+          await fixture.container.stop();
+        } catch (err) {
+          // Ryuk may be off (Podman), so nothing else removes the container: make the leak visible.
+          console.warn(
+            `MongoDB fixture ${name} (container ${fixture.container.getId()}) failed to stop: ${String(err)}`,
+          );
+        }
+      }),
+    );
     await rm(certDir, { recursive: true, force: true });
   };
 
@@ -50,7 +69,7 @@ export default async function setup(project: TestProject): Promise<() => Promise
   }
 
   const mongo = Object.fromEntries(
-    FIXTURE_NAMES.map((name, i) => [name, (started[i] as StartedFixture).info]),
+    started.map(({ name, fixture }) => [name, fixture.info]),
   ) as Record<FixtureName, FixtureInfo>;
   project.provide('mongo', mongo);
   project.provide('tlsCaFile', tlsCaFile);
