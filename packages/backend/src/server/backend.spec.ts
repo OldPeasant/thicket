@@ -319,6 +319,33 @@ describe('startBackend: connections', () => {
     );
   });
 
+  it('serves the docs.* query handlers, unguarded on a read-only profile', async () => {
+    const parentPort: ParentPortLike = { on: () => undefined };
+    expect(Object.keys(startBackend({ parentPort, pid: 1 }))).toEqual(
+      expect.arrayContaining([
+        'docs.find',
+        'docs.count',
+        'docs.estimatedCount',
+        'docs.get',
+        'docs.getSlice',
+      ]),
+    );
+    const m = withMain();
+    const target = { profileId: 'ssh', db: 'shop', coll: 'orders' };
+    m.renderer.send({ id: 'f', method: 'docs.find', params: { ...target, filter: '{}' } });
+    m.renderer.send({ id: 'c', method: 'docs.count', params: { ...target, filter: '{}' } });
+    m.renderer.send({ id: 'e', method: 'docs.estimatedCount', params: target });
+    m.renderer.send({ id: 'g', method: 'docs.get', params: { ...target, id: '"a"' } });
+    m.renderer.send({
+      id: 's',
+      method: 'docs.getSlice',
+      params: { ...target, id: '"a"', path: 'items', skip: 0, limit: 5 },
+    });
+    for (const id of ['f', 'c', 'e', 'g', 's']) {
+      expect(await m.answer(id)).toMatchObject({ ok: false, error: { code: 'NOT_CONNECTED' } });
+    }
+  });
+
   const browseWrites: [string, Record<string, unknown>][] = [
     ['db.create', { db: 'shop', firstCollection: 'orders' }],
     ['db.drop', { db: 'shop' }],
