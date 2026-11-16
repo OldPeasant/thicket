@@ -17,3 +17,4 @@ docs.insert/update/replace/delete; update takes the diff and expected values and
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 23:44+0100 by felix/agent-2): docs.delete with expected on an already deleted document answers deleted:false (goal reached) instead of CONFLICT; a doc that exists but no longer matches expected gives CONFLICT with the server version
