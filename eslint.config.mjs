@@ -32,6 +32,7 @@ export default tseslint.config(
       '**/*.config.ts',
       '**/*.mjs',
       'vitest.shared.ts',
+      'test/integration/**/*.ts',
     ],
     languageOptions: {
       globals: { ...globals.node },

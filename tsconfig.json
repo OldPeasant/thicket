@@ -1,8 +1,8 @@
 {
-  "//": "Type checks the root config files; each workspace has its own tsconfig.json.",
+  "//": "Type checks the root config files and test/integration; each workspace has its own tsconfig.json.",
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "types": ["node"]
   },
-  "include": ["vitest.config.ts", "vitest.shared.ts"]
+  "include": ["vitest.config.ts", "vitest.shared.ts", "test/integration/**/*.ts"]
 }

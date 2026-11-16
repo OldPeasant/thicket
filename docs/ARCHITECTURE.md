@@ -96,9 +96,20 @@ All OSes: Node 24 LTS, 24.15.0 or newer (Angular 22 and jsdom require it), with 
 |---|---|---|---|
 | Node 24.15+ | distro package, nvm or fnm | `brew install node@24` or nvm | installer from nodejs.org or `winget install OpenJS.NodeJS.LTS` |
 | Native build tools (only if a prebuilt binary is missing) | `gcc-c++ make` / `build-essential` | `xcode-select --install` | Visual Studio Build Tools (C++ workload) |
-| Containers for `test:int` | Docker, or Podman with the socket enabled (`systemctl --user enable --now podman.socket`, `DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock`, `TESTCONTAINERS_RYUK_DISABLED=true`) | Docker Desktop or Podman Desktop | Docker Desktop or Podman Desktop |
+| Containers for `test:int` | Docker, or Podman with the socket enabled (see below) | Docker Desktop or Podman Desktop | Docker Desktop or Podman Desktop |
 | Keychain for running the app | GNOME Keyring or KWallet (libsecret) | built in | built in |
 | Packaging extras | `rpm` (`rpmbuild`) for `.rpm` | — | — |
+
+Podman on Linux (rootless; this is what `test:int` is verified with, Fedora, Podman 5.8):
+```sh
+systemctl --user enable --now podman.socket
+export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock   # e.g. unix:///run/user/1000/podman/podman.sock
+export TESTCONTAINERS_RYUK_DISABLED=true   # Ryuk can't start on rootless Podman
+npm run test:int
+```
+`test/integration/vitest.config.ts` sets `TESTCONTAINERS_RYUK_DISABLED=true` itself when `DOCKER_HOST`
+contains `podman`, so `DOCKER_HOST` alone is enough; the global setup's teardown stops the
+containers. With Docker no variables are needed.
 
 Windows: run `.taskcheck` and npm scripts from Git for Windows' bash (TFP runs the check in `sh`).
 
@@ -111,6 +122,21 @@ Windows: run `.taskcheck` and npm scripts from Git for Windows' bash (TFP runs t
 | `npm run test:e2e` | Playwright against the built Electron app | slow, own tasks |
 | `npm run dev` | renderer dev server + Electron with reload | |
 | `npm run dist` | installers for the current OS into `dist/` | |
+
+## Integration tests
+- `npm run test:int` runs `test/integration/**/*.int.spec.ts` (config `test/integration/vitest.config.ts`,
+  type-checked and linted by the root `npm run check`, but not run by it).
+- `test/integration/fixtures/global-setup.ts` (Vitest `globalSetup`) starts all MongoDB fixtures in
+  parallel once per run and shares them with every test file via `inject('mongo')` (a record of
+  `FixtureInfo`: `uri`, `host`, `port`, `version`, `replicaSet?`, `tls`) and `inject('tlsCaFile')`.
+- Fixtures (`fixtures/mongo.ts`): `mongo8` (8.x standalone), `mongo8rs` (8.x single-node replica set
+  `rs0`, URI has `directConnection=true`), `mongo7` (7.0 standalone), `mongo8tls` and `mongo7tls`
+  (`requireTLS`, clients without a certificate allowed; connect with `{ tls: true, tlsCAFile }`).
+- 8.x is `mongo:8.2`: `mongo:8.0` images refuse to start on Linux kernels 6.19.0-7.0.13
+  (SERVER-121912).
+- The CA and server certificate are generated per run (`fixtures/certs.ts`, node-forge with keys from
+  `node:crypto`) into a temp dir that teardown deletes. Never commit certificates or keys.
+- Tests use their own database/collection names so files can share a fixture.
 
 ## Coverage
 - Tool: Vitest with `@vitest/coverage-v8`, reporters `text-summary`, `json-summary`, `lcov`.
