@@ -290,8 +290,11 @@ Contract layout (`packages/contract/src/`):
 - `ProfileSafetyService`: the connection UI registers each profile's flags (`set({ id, name,
   readOnly, production })`); `readOnly(id)` / `production(id)` are signals. Write controls use
   `[appWriteControl]="profileId"` (+ `disabledWhen`), which disables them on read-only profiles.
-- `ConfirmService.confirm(request) → Promise<boolean>`; `ConfirmDialog` (in `AppShell`) shows one
-  request at a time. Production accent: `.tab.production`, `AppShell` host class `production`
+- `ConfirmService.confirm(request, signal?) → Promise<boolean>`; `ConfirmDialog` (in `AppShell`)
+  shows one request at a time. Pass the caller's abort signal (as `WriteGuard` does): aborting it
+  withdraws the request (its dialog closes or never opens, the promise resolves `false`). While a
+  request is shown, `AppShell` makes the rest of the window `inert` and ignores the tab shortcuts.
+  Production accent: `.tab.production`, `AppShell` host class `production`
   (red sidebar edge; active tab's `production`, else the status bar's connection) and the status
   bar's `production` class. Dev page `#/dev/safety`; screenshots in `test/e2e/safety.e2e.ts`.
 

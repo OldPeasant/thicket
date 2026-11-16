@@ -4,7 +4,9 @@ Date: 2026-11-16
 
 Task: safety-ui - M1: Safety UI: production accent, read-only state, confirm dialog service
 
-Scope: current task; findings CR-1 to CR-6 from `reviews/safety-ui/review.md` (all approved for fixing by the parent worker)
+Scope: current task. Round 1: findings CR-1 to CR-6 of the first review round (all approved for fixing by the parent worker). Round 2: findings CR-1 and CR-2 of the second review round in `reviews/safety-ui/review.md` (reviewed revision 24cd7c4, now rebased as e894462).
+
+# Round 1 (first review, CR-1 to CR-6)
 
 ## Fixed findings
 
@@ -129,6 +131,55 @@ Lint/type-check/build:
 
 `.taskcheck`:
 - Pass (`sh .taskcheck`, which runs `npm run check`)
+
+Remaining unresolved findings:
+0
+
+### Round 1 status
+
+All validated findings fixed and validation passed.
+
+# Round 2 (second review, CR-1 and CR-2)
+
+## Fixed findings
+
+### CR-2 (round 2, P3) — ARCHITECTURE.md documents the old `ConfirmService.confirm` signature
+
+Files changed:
+- `docs/ARCHITECTURE.md`
+
+Problem:
+The "Write safety in the renderer" section still said `ConfirmService.confirm(request) → Promise<boolean>` and did not mention withdrawal on abort or the inert background.
+
+Fix:
+The line now reads `ConfirmService.confirm(request, signal?) → Promise<boolean>`. It tells callers to pass their abort signal (as `WriteGuard` does): aborting it withdraws the request, so the dialog closes or never opens and the promise resolves `false`. It also says that while a request is shown, `AppShell` makes the rest of the window `inert` and ignores the tab shortcuts. Checked against the code: `confirm.service.ts` (`confirm(request, signal?)`, `withdraw()`, already aborted signal resolves `false`) and `app-shell.ts` (`modal` computed from `ConfirmService.current()`, `[attr.inert]` on sidebar, splitter, `.work` and status bar, and shortcuts that skip the tab action while `modal()`).
+
+Validation:
+- `npm run check` (includes prettier) — Pass
+
+## Not fixed
+
+### CR-1 (round 2, P2) — Dialog regression tests not in the reviewed revision
+
+Status:
+Invalid (no code change needed; resolved by commit b1f5b98)
+
+Reason:
+The finding is about the review snapshot, where the tests were only in the working tree. Commit b1f5b98 ("safety-ui: final test-writer tests for the review fixes, reports") adds 118 lines to `packages/renderer/src/app/safety/confirm-dialog.spec.ts`. These are the accessible description test (no `aria-label` on the operation text) and the "modal keyboard handling" tests: backdrop click keeps focus so Escape still cancels, backdrop click leaves focus on the inner control, Escape and Tab from `<body>`, other keys and Ctrl+Tab on `<body>` left alone, no handling without a dialog, Ctrl/Meta/Alt+Tab not trapped, and Escape cancelling only the shown request. `git status` showed a clean tree before this fix, so nothing is left uncommitted. These tests pass (see below).
+
+## Validation summary
+
+Focused tests:
+- `cd packages/renderer && npx ng test --include='src/app/safety/**/*.spec.ts' --include='src/app/layout/**/*.spec.ts' --watch=false` — Pass (12 files, 237 tests)
+
+Full test suite:
+- `npm run check` (repo root: lint, prettier, type check, root vitest 44 files / 2684 tests, renderer ng test 44 files / 831 tests) — Pass
+
+Lint/type-check/build:
+- Covered by `npm run check` — Pass
+
+`.taskcheck`:
+- Pass (`.taskcheck` runs `npm run check`, which passed above)
 
 Remaining unresolved findings:
 0
