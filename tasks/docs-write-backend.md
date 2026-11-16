@@ -1,11 +1,11 @@
 ---
 title: M1: Document writes with conflict detection
-status: in_progress
+status: done
 owner: felix/agent-2
 deps: [conn-manager,diff-ops]
 touches: [packages/backend/src/docs/write]
 prio: 1
-lease_until: 2026-11-16T23:16:36Z
+lease_until: 
 ---
 ## Goal
 docs.insert/update/replace/delete; update takes the diff and expected values and returns CONFLICT plus the current server document when nothing matched; updateMany/deleteMany with a `preview` step (count + sample) and an execute step; all through the write guard.
@@ -23,3 +23,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 23:44+0100 by felix/agent-2): docs.delete with expected on an already deleted document answers deleted:false (goal reached) instead of CONFLICT; a doc that exists but no longer matches expected gives CONFLICT with the server version
 - ASSUMPTION (2026-11-16 23:44+0100 by felix/agent-2): updateMany/deleteMany expectedCount: refused with CONFLICT (no detail) only when MORE documents match now than the preview showed; fewer is allowed (nothing unconfirmed is touched)
 - ASSUMPTION (2026-11-16 23:44+0100 by felix/agent-2): docs.update refuses update docs with non-operator keys and docs.replace refuses $-keys (INVALID_PARAMS) so an update can never silently replace; insert generates ObjectId _ids so every insertedId is returned; write errors -> SERVER_ERROR with serverCode/codeName
+- done by felix/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 52s on f3fc9932d; criteria verified 3/3
