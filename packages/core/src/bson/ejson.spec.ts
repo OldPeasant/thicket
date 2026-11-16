@@ -1,8 +1,16 @@
-import { EJSON } from 'bson';
+import { Double, EJSON } from 'bson';
 import { describe, expect, it } from 'vitest';
 
-import { parseEJson, parseEJsonDocument, stringifyEJson } from './ejson';
-import type { BsonDocument, BsonValue } from './model';
+import {
+  base64ToBytes,
+  base64ToHex,
+  bytesToBase64,
+  hexToBase64,
+  parseEJson,
+  parseEJsonDocument,
+  stringifyEJson,
+} from './ejson';
+import { BsonModelError, type BsonDocument, type BsonValue } from './model';
 
 /** One field per BSON type and edge case, in canonical EJSON v2 as `bson` writes it. */
 const FIELDS: readonly (readonly [string, string])[] = [
@@ -208,6 +216,147 @@ describe('invalid input', () => {
 
   it('rejects a non-document where a document is required', () => {
     expect(() => parseEJsonDocument('[]')).toThrow('Expected a document');
+  });
+});
+
+describe('EJSON round trip edge cases', () => {
+  it('writes doubles exactly as bson canonical EJSON does', () => {
+    const doubles = [
+      0.1,
+      -1.5e-300,
+      1e-7,
+      123456789.125,
+      2 ** 53,
+      2 ** 53 + 2,
+      1e21,
+      1.7976931348623157e308,
+      -5e-324,
+    ];
+    for (const d of doubles) {
+      const viaBson = EJSON.stringify({ v: new Double(d) }, { relaxed: false });
+      expect(`{"v":${stringifyEJson({ type: 'double', value: d })}}`, String(d)).toBe(viaBson);
+      const back = parseEJson(stringifyEJson({ type: 'double', value: d }));
+      expect(back, String(d)).toEqual({ type: 'double', value: d });
+    }
+  });
+
+  it('round-trips Int64 values around 2^53 without precision loss', () => {
+    for (const n of [2n ** 53n - 1n, 2n ** 53n, 2n ** 53n + 1n, -(2n ** 53n) - 1n]) {
+      const text = `{"$numberLong":"${n}"}`;
+      expect(parseEJson(text)).toEqual({ type: 'long', value: n });
+      expect(stringifyEJson(parseEJson(text))).toBe(text);
+    }
+  });
+
+  it('round-trips keys and strings that need escaping, including the empty key', () => {
+    const text =
+      '{"":"empty","a\\"b":"q","line\\nbreak":"\\u0000","☃":"snow","\\ud83d\\ude00":"emoji"}';
+    const model = parseEJsonDocument(text);
+    expect(model.fields.map((f) => f.key)).toEqual(['', 'a"b', 'line\nbreak', '☃', '😀']);
+    expect(parseEJsonDocument(stringifyEJson(model))).toEqual(model);
+    // bson writes non-ASCII characters literally, so canonical text uses them unescaped
+    const canonical = '{"":"empty","a\\"b":"q","line\\nbreak":"\\u0000","☃":"snow","😀":"emoji"}';
+    expect(stringifyEJson(model)).toBe(canonical);
+  });
+
+  it('keeps nested wrappers inside arrays and code-with-scope scopes', () => {
+    const text =
+      '{"a":[{"$numberLong":"1"},[{"$date":{"$numberLong":"0"}}],{"$code":"y","$scope":{"z":{"$minKey":1}}}]}';
+    expect(stringifyEJson(parseEJson(text))).toBe(text);
+  });
+
+  it('round-trips through indented output', () => {
+    const text =
+      '{"a":{"b":[{"$numberInt":"1"},{"$binary":{"base64":"AQ==","subType":"04"}}]},"c":[]}';
+    const pretty = stringifyEJson(parseEJson(text), 4);
+    expect(pretty).toContain('\n    "a": {');
+    expect(stringifyEJson(parseEJson(pretty))).toBe(text);
+  });
+
+  it('clamps the indent to 0..10 like JSON.stringify', () => {
+    const v = parseEJson('{"a":1}');
+    expect(stringifyEJson(v, -3)).toBe('{"a":{"$numberInt":"1"}}');
+    expect(stringifyEJson(v, 50)).toBe(`{\n${' '.repeat(10)}"a": {"$numberInt":"1"}\n}`);
+  });
+
+  it('normalizes accepted non-canonical wrapper forms to canonical text', () => {
+    const cases: readonly (readonly [string, string])[] = [
+      ['{"$numberInt":"-0"}', '{"$numberInt":"0"}'],
+      ['{"$numberDouble":"-0"}', '{"$numberDouble":"-0.0"}'],
+      ['{"$numberDouble":"1e5"}', '{"$numberDouble":"100000.0"}'],
+      ['{"$numberDecimal":"1.0E+3"}', '{"$numberDecimal":"1.0E+3"}'],
+      ['{"$numberDecimal":"12000E-1"}', '{"$numberDecimal":"1200.0"}'],
+      ['{"$oid":"5F1D7A3E9C1B2A0012345678"}', '{"$oid":"5f1d7a3e9c1b2a0012345678"}'],
+      [
+        '{"$binary":{"base64":"AQ==","subType":"8A"}}',
+        '{"$binary":{"base64":"AQ==","subType":"8a"}}',
+      ],
+      ['{"$timestamp":{"i":2,"t":1}}', '{"$timestamp":{"t":1,"i":2}}'],
+      ['{"$scope":{},"$code":"c"}', '{"$code":"c","$scope":{}}'],
+      [
+        '{"$dbPointer":{"$id":{"$oid":"5f1d7a3e9c1b2a0012345678"},"$ref":"c"}}',
+        '{"$dbPointer":{"$ref":"c","$id":{"$oid":"5f1d7a3e9c1b2a0012345678"}}}',
+      ],
+      ['{"$date":"1970-01-01T00:00:00.001+00:00"}', '{"$date":{"$numberLong":"1"}}'],
+      ['{"$date":-1}', '{"$date":{"$numberLong":"-1"}}'],
+      [
+        '{"$uuid":"0F8FAD5BD9CB469FA16570867728950E"}',
+        '{"$binary":{"base64":"D4+tW9nLRp+hZXCGdyiVDg==","subType":"04"}}',
+      ],
+    ];
+    for (const [input, canonical] of cases) {
+      expect(stringifyEJson(parseEJson(input)), input).toBe(canonical);
+    }
+  });
+
+  it('keeps an Int32-sized plain number boundary exact', () => {
+    expect(parseEJson('2147483647')).toEqual({ type: 'int', value: 2147483647 });
+    expect(parseEJson('2147483648')).toEqual({ type: 'long', value: 2147483648n });
+    expect(parseEJson('-2147483649')).toEqual({ type: 'long', value: -2147483649n });
+    expect(parseEJson('9223372036854775808')).toEqual({ type: 'double', value: 2 ** 63 });
+    expect(parseEJson('1.0')).toEqual({ type: 'double', value: 1 });
+  });
+
+  it.each([
+    ['{"$numberLong":5}', 'expected a string'],
+    ['{"$numberInt":"+1"}', 'Invalid $numberInt'],
+    ['{"$numberInt":""}', 'Invalid $numberInt'],
+    ['{"$numberDouble":"inf"}', 'Invalid $numberDouble'],
+    ['{"$binary":"AQID"}', 'expected base64 and subType'],
+    ['{"$binary":{"base64":"AQID","subType":"00","x":1}}', 'expected base64 and subType'],
+    ['{"$binary":{"base64":"AQ=","subType":"00"}}', 'invalid base64'],
+    ['{"$timestamp":{"t":4294967296,"i":0}}', 'unsigned 32-bit'],
+    ['{"$timestamp":{"t":0,"i":"1"}}', 'expected an integer'],
+    ['{"$date":{"$numberLong":"9223372036854775808"}}', 'out of the 64-bit range'],
+    ['{"$date":1.5}', 'Invalid $date'],
+    ['{"$date":"2024-01-01T00:00:00"}', 'Invalid $date'],
+    ['{"$regularExpression":{"pattern":1,"options":""}}', 'expected a string'],
+    ['{"$dbPointer":{"$ref":"a","$id":{"$oid":"short"}}}', 'not 24 hex characters'],
+    ['{"$minKey":true}', 'Invalid $minKey'],
+    ['{"$undefined":1}', 'Invalid $undefined'],
+    ['{"$code":1,"$scope":{}}', 'expected a string'],
+  ])('rejects %s (%s)', (text, message) => {
+    expect(() => parseEJson(text)).toThrow(BsonModelError);
+    expect(() => parseEJson(text)).toThrow(message);
+  });
+});
+
+describe('base64 helpers', () => {
+  it('round-trip byte arrays of every padding length', () => {
+    for (let n = 0; n <= 7; n++) {
+      const bytes = Uint8Array.from({ length: n }, (_, i) => (i * 97 + 251) & 0xff);
+      const b64 = bytesToBase64(bytes);
+      expect(b64.length % 4).toBe(0);
+      expect(base64ToBytes(b64)).toEqual(bytes);
+    }
+  });
+
+  it('convert between hex and base64', () => {
+    expect(hexToBase64('')).toBe('');
+    expect(hexToBase64('0f8fad5bd9cb469fa16570867728950e')).toBe('D4+tW9nLRp+hZXCGdyiVDg==');
+    expect(base64ToHex('D4+tW9nLRp+hZXCGdyiVDg==')).toBe('0f8fad5bd9cb469fa16570867728950e');
+    expect(base64ToHex('')).toBe('');
+    expect(bytesToBase64(Uint8Array.of(0xfb, 0xff))).toBe('+/8=');
   });
 });
 

@@ -212,6 +212,92 @@ describe('convert: every target', () => {
   });
 });
 
+describe('convert: edge cases', () => {
+  it('String → ObjectId does not trim and rejects empty text', () => {
+    fails(s(''), 'objectId', 'not 24 hex characters');
+    fails(s(' 5f1d7a3e9c1b2a0012345678'), 'objectId', 'not 24 hex characters');
+  });
+
+  it('Int32 → Int64 → Int32 round-trips the Int32 boundaries', () => {
+    for (const n of [-2147483648, -1, 0, 2147483647]) {
+      expect(convert(convert(i32(n), 'long'), 'int')).toEqual(i32(n));
+    }
+  });
+
+  it('Int64 → Int32 overflow at the Int64 extremes', () => {
+    fails(i64(2n ** 63n - 1n), 'int', 'overflows Int32');
+    fails(i64(-(2n ** 63n)), 'int', 'overflows Int32');
+  });
+
+  it('Double → Int32 accepts -0 and rejects infinities', () => {
+    expect(convert(dbl(-0), 'int')).toEqual(i32(0));
+    fails(dbl(Infinity), 'int', 'not an integer');
+  });
+
+  it('Double → Decimal128 → Double keeps the value', () => {
+    for (const d of [0.1, -2.5, 1e-7, 123456789.125, 2 ** 53, -0]) {
+      const back = convert(convert(dbl(d), 'decimal'), 'double');
+      expect(Object.is((back as { value: number }).value, d), String(d)).toBe(true);
+    }
+    expect(convert(dbl(Infinity), 'decimal')).toEqual(dec('Infinity'));
+    expect(convert(dbl(1.7976931348623157e308), 'decimal')).toEqual(dec('1.7976931348623157E+308'));
+  });
+
+  it('Decimal128 with an exact integral value converts to Int32 and Int64', () => {
+    // The model stores bson's canonical Decimal128 string; "1200.0" is the canonical form of
+    // 12000E-1 (accepted above) and has the exact integer value 1200.
+    expect(convert(dec('1200.0'), 'int')).toEqual(i32(1200));
+    expect(convert(dec('-7.00'), 'long')).toEqual(i64(-7n));
+    fails(dec('7.50'), 'int', 'not an integer');
+  });
+
+  it('Decimal128 integers beyond Int64 overflow; specials are not integers', () => {
+    fails(dec('1E+19'), 'long', 'overflows Int64');
+    fails(dec('NaN'), 'int', 'not an integer');
+    fails(dec('Infinity'), 'long', 'not an integer');
+  });
+
+  it('String → Int64 accepts a leading plus and the Int64 minimum', () => {
+    expect(convert(s('+5'), 'long')).toEqual(i64(5n));
+    expect(convert(s('-9223372036854775808'), 'long')).toEqual(i64(-(2n ** 63n)));
+    fails(s('-9223372036854775809'), 'long', 'overflows Int64');
+    fails(s(''), 'long', 'not an integer');
+  });
+
+  it('Date → String → Date round-trips within the ISO year range 0000-9999', () => {
+    for (const ms of [0n, -1n, 1714566600123n, -62135596800000n, 253402300799999n]) {
+      expect(convert(convert(date(ms), 'string'), 'date'), String(ms)).toEqual(date(ms));
+    }
+  });
+
+  it('String → Date accepts the documented forms and rejects zone-less date-times', () => {
+    expect(convert(s('1970-01-01T00:00:00-01:30'), 'date')).toEqual(date(5400000n));
+    fails(s('2024-05-01T12:30:00'), 'date', 'not an ISO-8601 date');
+    fails(s(''), 'date', 'not an ISO-8601 date');
+  });
+
+  it('Binary(4) → String → UUID round-trips and normalizes case', () => {
+    const upper = s(UUID.toUpperCase());
+    const asUuid = convert(upper, 'uuid');
+    expect(asUuid).toEqual(bin(4, UUID_B64));
+    expect(convert(asUuid, 'string')).toEqual(s(UUID));
+    expect(convert(s(` ${UUID} `), 'uuid')).toEqual(bin(4, UUID_B64));
+    fails(s(UUID.slice(0, -1)), 'uuid', 'is not a UUID');
+    fails(bin(5, UUID_B64.slice(0, -4)), 'uuid', '16 bytes');
+  });
+
+  it('never creates deprecated types from deprecated sources either', () => {
+    fails({ type: 'symbol', value: 'x' }, 'undefined', 'deprecated types cannot be created');
+  });
+
+  it('does not modify its input', () => {
+    const source = { type: 'array', items: [s('a')] } as const;
+    const snapshot = JSON.stringify(source);
+    convert(source, 'object');
+    expect(JSON.stringify(source)).toBe(snapshot);
+  });
+});
+
 describe('uuidOf', () => {
   it('formats subtype 4 binaries and returns null otherwise', () => {
     expect(uuidOf(bin(4, UUID_B64))).toBe(UUID);

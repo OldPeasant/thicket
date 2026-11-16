@@ -140,6 +140,104 @@ describe('renameAt', () => {
   });
 });
 
+describe('path API with $-prefixed and repeated keys', () => {
+  const DUP = parseEJson('{"$set":"a","k":"1","$id":"b","k":"2","__proto__":"p"}');
+  const keys = (v: BsonValue): string[] => (v.type === 'object' ? v.fields.map((f) => f.key) : []);
+
+  it('addresses $-prefixed and __proto__ fields like any other field', () => {
+    expect(getAt(DUP, ['$set'])).toEqual(str('a'));
+    expect(getAt(DUP, ['__proto__'])).toEqual(str('p'));
+    expect(keys(setAt(DUP, ['__proto__'], int(1)))).toEqual(['$set', 'k', '$id', 'k', '__proto__']);
+  });
+
+  it('set/remove/move/rename act on the first of repeated keys and keep the rest', () => {
+    expect(text(setAt(DUP, ['k'], str('x')))).toBe(
+      '{"$set":"a","k":"x","$id":"b","k":"2","__proto__":"p"}',
+    );
+    expect(text(removeAt(DUP, ['k']))).toBe('{"$set":"a","$id":"b","k":"2","__proto__":"p"}');
+    expect(text(moveAt(DUP, ['k'], 4))).toBe(
+      '{"$set":"a","$id":"b","k":"2","__proto__":"p","k":"1"}',
+    );
+    expect(text(renameAt(DUP, ['k'], 'k2'))).toBe(
+      '{"$set":"a","k2":"1","$id":"b","k":"2","__proto__":"p"}',
+    );
+    expect(() => insertAt(DUP, ['k'], int(1))).toThrow('field already exists');
+  });
+
+  it('moving a $-prefixed field keeps the result a document, not a type wrapper', () => {
+    const d = parseEJson('{"a":1,"$oid":"5f1d7a3e9c1b2a0012345678"}');
+    const moved = moveAt(d, ['$oid'], 0);
+    expect(moved.type).toBe('object');
+    expect(keys(moved)).toEqual(['$oid', 'a']);
+  });
+});
+
+describe('path API edge cases', () => {
+  it('leaves the input untouched for every write operation', () => {
+    const before = text(ROOT);
+    insertAt(ROOT, ['a', 'b', 1], int(5));
+    removeAt(ROOT, ['a', 'b', 1, 'c']);
+    moveAt(ROOT, ['a', 'b', 1], 0);
+    renameAt(ROOT, ['a', 'b', 1, 'c'], 'cc');
+    expect(text(ROOT)).toBe(before);
+  });
+
+  it('shares untouched siblings with the input', () => {
+    const next = removeAt(ROOT, ['d']);
+    expect(getAt(next, ['a'])).toBe(getAt(ROOT, ['a']));
+  });
+
+  it('getAt on a scalar root returns the root for [] and undefined below it', () => {
+    expect(getAt(int(1), [])).toEqual(int(1));
+    expect(getAt(int(1), ['x'])).toBeUndefined();
+  });
+
+  it('inserts into an empty document and an empty array', () => {
+    const empty = parseEJson('{"o":{},"l":[]}');
+    expect(text(insertAt(empty, ['o', 'x'], int(1), 0))).toBe(
+      '{"o":{"x":{"$numberInt":"1"}},"l":[]}',
+    );
+    expect(text(insertAt(empty, ['l', 0], int(1)))).toBe('{"o":{},"l":[{"$numberInt":"1"}]}');
+    expect(() => insertAt(empty, ['l', 1], int(1))).toThrow('index out of range');
+  });
+
+  it('inserts at the end of an array (index = length)', () => {
+    expect(text(getAt(insertAt(ROOT, ['a', 'b', 2], int(9)), ['a', 'b']) as BsonValue)).toBe(
+      '[{"$numberInt":"10"},{"c":"x"},{"$numberInt":"9"}]',
+    );
+  });
+
+  it('rejects non-integer insert and move positions', () => {
+    expect(() => insertAt(ROOT, ['n'], int(1), 1.5)).toThrow('position 1.5 out of range');
+    expect(() => moveAt(ROOT, ['a'], 0.5)).toThrow('position 0.5 out of range');
+    expect(() => moveAt(ROOT, ['a', 'b', 0], 2)).toThrow('position 2 out of range');
+  });
+
+  it('moving to the same position is a no-op', () => {
+    expect(text(moveAt(ROOT, ['d'], 1))).toBe(text(ROOT));
+  });
+
+  it('root-level structural operations need a parent', () => {
+    expect(() => removeAt(ROOT, [])).toThrow('The root has no parent');
+    expect(() => moveAt(ROOT, [], 0)).toThrow('The root has no parent');
+    expect(() => renameAt(ROOT, [], 'x')).toThrow('The root has no parent');
+  });
+
+  it('works on an array root', () => {
+    const root = parseEJson('["a","b","c"]');
+    expect(text(moveAt(root, [2], 0))).toBe('["c","a","b"]');
+    expect(text(removeAt(root, [1]))).toBe('["a","c"]');
+    expect(text(setAt(root, [3], str('d')))).toBe('["a","b","c","d"]');
+  });
+
+  it('names the failing prefix in errors for deep paths', () => {
+    expect(() => removeAt(ROOT, ['a', 'zz', 'y'])).toThrow('a.zz: does not exist');
+    expect(() => setAt(ROOT, ['a', 'b', 0, 'x'], int(1))).toThrow(
+      'a.b.0: is a int, not a document or array',
+    );
+  });
+});
+
 describe('formatPath', () => {
   it('dots segments and names the root', () => {
     expect(formatPath([])).toBe('(root)');
