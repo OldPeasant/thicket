@@ -5,7 +5,7 @@ owner: dell26/agent-2
 deps: [electron-shell]
 touches: [apps/desktop/src/secrets]
 prio: 1
-lease_until: 2026-11-16T18:56:56Z
+lease_until: 2026-11-16T19:01:56Z
 ---
 ## Goal
 secrets.bin encrypted with safeStorage, keyed by profile id; detection of Linux `basic_text` backend; served to the backend over the privileged port only.
