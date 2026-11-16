@@ -19,3 +19,4 @@ Testcontainers fixtures for MongoDB Community 8.x (replica set and standalone) a
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 18:51+0100 by dell26/agent-3): 8.x fixtures use mongo:8.2, not 8.0: mongo:8.0 images exit at startup on Linux kernels 6.19.0-7.0.13 (SERVER-121912, this machine runs 6.19.10)
+- ASSUMPTION (2026-11-16 18:51+0100 by dell26/agent-3): Test certs are generated with node-forge (new root devDependency; keys from node:crypto) instead of shelling out to openssl, so test:int needs no openssl binary on any OS
