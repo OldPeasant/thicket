@@ -17,3 +17,4 @@ Tree: connections → databases → collections/views/time series with lazy load
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 22:23+0100 by felix/agent-1): Sidebar loads profiles itself (profiles.list) and registers their flags in ProfileSafetyService; SidebarTreeService.reloadProfiles() is the hook connection-ui calls after save/delete (there is no profiles-changed broadcast); a refresh button reloads too.
