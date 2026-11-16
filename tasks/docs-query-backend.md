@@ -5,7 +5,7 @@ owner: felix/agent-2
 deps: [conn-manager,paging-core]
 touches: [packages/backend/src/docs/query]
 prio: 1
-lease_until: 2026-11-16T22:01:08Z
+lease_until: 2026-11-16T22:06:11Z
 ---
 ## Goal
 docs.find (filter, projection, sort, collation, limit) streaming pages as EJSON, using paging-core; count/estimatedCount; cancel kills the cursor; docs.get and docs.getSlice (`$slice` projection for a path of a large document).
