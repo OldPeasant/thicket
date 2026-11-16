@@ -1,10 +1,11 @@
 ---
 title: M2: X.509, SOCKS5 proxy, read preference and write concern
-status: todo
-owner:
+status: in_progress
+owner: felix/agent-2
 deps: [conn-manager]
 touches: [packages/backend/src/connections/options,test/integration/fixtures/x509]
 prio: 2
+lease_until: 2026-11-16T23:21:02Z
 ---
 ## Goal
 Client certificate (cert+key or PEM bundle with passphrase) and MONGODB-X509 auth; SOCKS5 proxy options; read preference/tags and write concern from the profile.
