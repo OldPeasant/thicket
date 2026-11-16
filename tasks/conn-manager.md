@@ -13,7 +13,8 @@ Backend conn.test/open/close/status/serverInfo; builds MongoClient options from 
 ## Acceptance criteria
 - [x] Integration tests (`npm run test:int`): SCRAM ok/wrong password → AUTH_FAILED, TLS without CA → TLS_ERROR, unknown host → DNS_ERROR, replica set and standalone fixtures
   - verified (2026-11-16 20:59+0100 by dell26/agent-2): npm run test:int -- conn-manager (Podman fixtures mongo8/mongo7 standalone, replica set, mongo8tls/mongo7tls) -> 23 passed: SCRAM-SHA-1/256 ok, wrong password AUTH_FAILED, TLS without CA TLS_ERROR, unresolvable host and SRV DNS_ERROR, replicaSet topology
-- [ ] Guard unit tests: read-only refuses every write method listed by the contract; production without `confirmed: true` refuses
+- [x] Guard unit tests: read-only refuses every write method listed by the contract; production without `confirmed: true` refuses
+  - verified (2026-11-16 20:59+0100 by dell26/agent-2): npx vitest run src/guard src/connections in packages/backend -> 208 passed; guard.spec.ts it.each(WRITE_METHODS): read-only refuses every write method (READ_ONLY, also when confirmed), production without confirmed:true -> CONFIRMATION_REQUIRED
 - [ ] Logs mask passwords (test captures log output)
 - [ ] Several connections open at once and close independently (int test)
 
