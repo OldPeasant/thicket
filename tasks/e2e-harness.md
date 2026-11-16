@@ -17,3 +17,4 @@ Playwright `_electron` launches the built app with an isolated userData dir; hel
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 20:20+0100 by felix/agent-2): Use @playwright/test 1.65.1 (same version as playwright-core) as the e2e runner, not Vitest: the task names playwright.config.ts and test-results/ screenshots, which are Playwright Test conventions; e2e specs are test/e2e/**/*.e2e.ts so the Vitest projects never pick them up
