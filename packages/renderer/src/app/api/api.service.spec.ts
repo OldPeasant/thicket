@@ -303,6 +303,31 @@ describe('ApiService', () => {
       expect(error).toMatchObject({ code: 'INTERNAL' });
     });
 
+    it.each([
+      ['a string', 'oops'],
+      ['an object without ok', { id: 'x', result: {} }],
+    ])(
+      'rejects with a malformed-response INTERNAL error when the bridge resolves %s',
+      async (_what, response) => {
+        fake.request = () => Promise.resolve(response as never);
+        const error = await api.request('conn.close', PROFILE).catch((thrown: unknown) => thrown);
+        expect(error).toBeInstanceOf(ApiError);
+        expect(error).toMatchObject({
+          code: 'INTERNAL',
+          message: 'Malformed response from the bridge for conn.close',
+          detail: response,
+        });
+      },
+    );
+
+    it('does not resolve when ok is truthy but not true', async () => {
+      fake.request = (request) =>
+        Promise.resolve({ id: request.id, ok: 'yes', result: { connections: [] } } as never);
+      const error = await api.request('conn.status', PROFILE).catch((thrown: unknown) => thrown);
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error).toMatchObject({ code: 'INTERNAL' });
+    });
+
     it('falls back to unique generated ids without crypto.randomUUID', async () => {
       vi.stubGlobal('crypto', {});
       try {
@@ -408,6 +433,16 @@ describe('ApiService', () => {
         message: 'port closed',
       });
       expect(fake.listenerCount).toBe(0);
+    });
+
+    it('errors with a malformed-response INTERNAL error when the bridge resolves undefined', async () => {
+      fake.request = () => Promise.resolve(undefined as never);
+      await expect(firstValueFrom(api.stream('docs.find', FIND))).rejects.toMatchObject({
+        code: 'INTERNAL',
+        message: 'Malformed response from the bridge for docs.find',
+      });
+      expect(fake.listenerCount).toBe(0);
+      expect(fake.cancels).toEqual([]);
     });
 
     it('removes its listener at once when unsubscribed before the response', () => {
@@ -593,6 +628,104 @@ describe('ApiService', () => {
     });
   });
 
+  describe('stream start result edge cases', () => {
+    const EXPORT = {
+      profileId: 'p1',
+      db: 'd',
+      coll: 'c',
+      source: { kind: 'find', filter: '{}' },
+      format: 'jsonl',
+    } as const;
+    const progress = { processed: 1, failed: 0, errors: [] };
+
+    it('completes on streamId null without options', async () => {
+      fake.respond('io.export', { streamId: null, path: null });
+      expect(await firstValueFrom(api.stream('io.export', EXPORT).pipe(toArray()))).toEqual([]);
+      expect(fake.cancels).toEqual([]);
+      expect(fake.listenerCount).toBe(0);
+    });
+
+    it('drops events buffered before a streamId null response', async () => {
+      fake.handle('io.export', () => {
+        fake.data('io.export', 'e1', progress);
+        fake.end('e1');
+        return { streamId: null, path: null };
+      });
+      expect(await firstValueFrom(api.stream('io.export', EXPORT).pipe(toArray()))).toEqual([]);
+      expect(fake.cancels).toEqual([]);
+    });
+
+    it('sends only the request cancel when a streamId null response arrives after unsubscribe', async () => {
+      let answer: (value: ResultOf<'io.export'>) => void = () => undefined;
+      fake.handle('io.export', () => new Promise((resolve) => (answer = resolve)));
+      const onStart = vi.fn();
+      const subscription = api.stream('io.export', EXPORT, { onStart }).subscribe();
+      await flush();
+      subscription.unsubscribe();
+      answer({ streamId: null, path: null });
+      await flush();
+
+      expect(onStart).not.toHaveBeenCalled();
+      expect(fake.cancels).toEqual([fake.requests[0]?.id]);
+    });
+
+    it('errors without a cancel when onStart throws for a streamId null result', async () => {
+      fake.respond('io.export', { streamId: null, path: null });
+      const boom = new Error('boom');
+      const error = await firstValueFrom(
+        api.stream('io.export', EXPORT, {
+          onStart: () => {
+            throw boom;
+          },
+        }),
+      ).catch((thrown: unknown) => thrown);
+
+      expect(error).toBe(boom);
+      expect(fake.cancels).toEqual([]);
+      expect(fake.listenerCount).toBe(0);
+    });
+
+    it('does not surface an onStart error after onStart unsubscribed', async () => {
+      fake.respond('io.export', { streamId: 'e1', path: '/x' });
+      const errors: unknown[] = [];
+      const stream = api.stream('io.export', EXPORT, {
+        onStart: () => {
+          subscription.unsubscribe();
+          throw new Error('after unsubscribe');
+        },
+      });
+      const subscription = stream.subscribe({ error: (e: unknown) => errors.push(e) });
+      await flush();
+
+      expect(errors).toEqual([]);
+      expect(fake.cancels).toEqual(['e1']);
+      expect(fake.listenerCount).toBe(0);
+    });
+
+    it('sends no cancel and does not complete when onStart unsubscribes for a streamId null result', async () => {
+      fake.respond('io.export', { streamId: null, path: null });
+      let completed = false;
+      const stream = api.stream('io.export', EXPORT, {
+        onStart: () => subscription.unsubscribe(),
+      });
+      const subscription = stream.subscribe({ complete: () => (completed = true) });
+      await flush();
+
+      expect(completed).toBe(false);
+      expect(fake.cancels).toEqual([]);
+      expect(fake.listenerCount).toBe(0);
+    });
+
+    it('does not call onStart when the result has no streamId field', async () => {
+      fake.handle('io.export', () => ({ path: '/x' }) as never);
+      const onStart = vi.fn();
+      await expect(
+        firstValueFrom(api.stream('io.export', EXPORT, { onStart })),
+      ).rejects.toMatchObject({ code: 'INTERNAL', message: 'io.export did not return a streamId' });
+      expect(onStart).not.toHaveBeenCalled();
+    });
+  });
+
   describe('early event buffer', () => {
     const FIND = { profileId: 'p1', db: 'd', coll: 'c', filter: '{}' };
 
@@ -645,6 +778,67 @@ describe('ApiService', () => {
       await flush();
       expect(fake.cancels).toEqual([fake.requests[0]?.id, 's1']);
       expect(errors).toHaveLength(1);
+    });
+  });
+
+  describe('early event buffer edge cases', () => {
+    const FIND = { profileId: 'p1', db: 'd', coll: 'c', filter: '{}' };
+
+    it('delivers MAX_EARLY_EVENTS buffered events of its own stream in order', async () => {
+      let answer: (value: { streamId: string }) => void = () => undefined;
+      fake.handle('docs.find', () => new Promise((resolve) => (answer = resolve)));
+      const all = firstValueFrom(api.stream('docs.find', FIND).pipe(toArray()));
+      await flush();
+      // MAX_EARLY_EVENTS - 1 data events plus the end event fill the buffer exactly.
+      for (let i = 0; i < MAX_EARLY_EVENTS - 1; i++) {
+        fake.data('docs.find', 's1', batch(String(i)));
+      }
+      fake.end('s1', { delivered: MAX_EARLY_EVENTS - 1 });
+      answer({ streamId: 's1' });
+
+      const received = await all;
+      expect(received).toHaveLength(MAX_EARLY_EVENTS - 1);
+      expect(received[0]).toEqual(batch('0'));
+      expect(received.at(-1)).toEqual(batch(String(MAX_EARLY_EVENTS - 2)));
+      expect(fake.cancels).toEqual([]);
+      expect(fake.listenerCount).toBe(0);
+    });
+
+    it('ignores a failed late response and a later unsubscribe after an overflow', async () => {
+      let fail: (reason: unknown) => void = () => undefined;
+      fake.handle('docs.find', () => new Promise((_resolve, reject) => (fail = reject)));
+      const errors: unknown[] = [];
+      const subscription = api
+        .stream('docs.find', FIND)
+        .subscribe({ error: (e: unknown) => errors.push(e) });
+      await flush();
+      for (let i = 0; i <= MAX_EARLY_EVENTS; i++) fake.data('docs.find', 'other', batch('{}'));
+      expect(errors).toHaveLength(1);
+
+      fail(new ApiError({ code: 'NOT_CONNECTED', message: 'late' }));
+      await flush();
+      subscription.unsubscribe();
+
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toMatchObject({ code: 'INTERNAL' });
+      expect(fake.cancels).toEqual([fake.requests[0]?.id]);
+    });
+
+    it('does not count events against the limit once the stream is running', async () => {
+      fake.respond('docs.find', { streamId: 's1' });
+      const errors: unknown[] = [];
+      let received = 0;
+      api.stream('docs.find', FIND).subscribe({
+        next: () => received++,
+        error: (e: unknown) => errors.push(e),
+      });
+      await flush();
+      for (let i = 0; i <= MAX_EARLY_EVENTS; i++) fake.data('docs.find', 'other', batch('{}'));
+      fake.data('docs.find', 's1', batch('{}'));
+
+      expect(errors).toEqual([]);
+      expect(received).toBe(1);
+      expect(fake.cancels).toEqual([]);
     });
   });
 

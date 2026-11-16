@@ -4,33 +4,38 @@ Date: 2026-11-16
 
 Task: api-client - M0: Renderer API client over window.thicket
 
-Scope: `git diff acc64cf..22bf57a` (one task commit). Reviewed: packages/renderer/src/app/api/ (api.service.ts, api-error.ts, thicket-bridge.ts, index.ts, testing/fake-thicket-bridge.ts, testing/index.ts, all specs), packages/renderer/package.json, package-lock.json, docs/ARCHITECTURE.md note. Context read: packages/contract/src (envelope.ts, errors.ts, index.ts, io.ts, docs.ts, agg.ts, shell.ts, admin.ts).
+Scope: second review pass on the final revision. `git diff b93d0f2..1a78a24 -- packages docs` (task commits 6c069c2, 563e443, 1a78a24). Reviewed in full: packages/renderer/src/app/api/api.service.ts and api.service.spec.ts (incl. the new "stream start result" and "early event buffer" suites); the other task files (api-error.ts, thicket-bridge.ts, index.ts, testing/fake-thicket-bridge.ts, testing/index.ts) are unchanged in production code since the first pass (only spec additions), which was confirmed with `git diff 6c069c2 1a78a24 --stat`. Context: packages/contract/src/envelope.ts (BROADCAST_STREAMS, cancel routing), io.ts (`io.export` result with nullable `streamId`), common.ts, reviews/api-client/fixes.md, reviews/api-client/tests.md.
 
 Requirements:
 - tasks/api-client.md acceptance criteria and recorded assumptions (ThicketBridge shape; no zod validation of results in the renderer; missing window.thicket answers INTERNAL)
 - SPEC.md section 4 (API contract)
-- docs/ARCHITECTURE.md ("API between parts", cancel routing in packages/contract/src/envelope.ts)
+- docs/ARCHITECTURE.md ("API between parts", renderer-side paragraph added by this task)
 - AGENTS.md, docs/QUALITY.md
 
 Git range:
 - Branch: main
-- HEAD: 22bf57a727107b6675339e84a4fde12fa6934bfb
-- Base/start: acc64cfde7488407c552414451dba03fa5701ae7
-- Commits reviewed: 1 (22bf57a "Add renderer API client over window.thicket with fake bridge"); no uncommitted changes
+- HEAD: 1a78a24
+- Base/start: b93d0f27ec0c9375109365a71c4c820b97163e18
+- Commits reviewed: 3 (6c069c2, 563e443, 1a78a24); no uncommitted changes
 
 Commands run:
-- `npm run test -w packages/renderer` -> 5 files, 105 tests passed
+- `npm run test -w packages/renderer` -> 5 test files, 167 tests passed
 - `npm run typecheck -w packages/renderer` (ngc app + tsc spec) -> no errors
-- Lint was not run by this reviewer (command not permitted in this session); `.taskcheck` covers it.
 
 Acceptance criteria:
-1. Unit tests with the fake (typed request/response, stream data/end/error, unsubscribe sends cancel): met. api.service.spec.ts covers typed results (`expectTypeOf`), data/end, error event, failed request, missing streamId, cancel by streamId, cancel by request id before the response plus the late streamId, no cancel after end, abort signal handling, listener cleanup (`listenerCount`).
-2. Every contract error code has a message (test enumerates codes): met. `ERROR_MESSAGES` is `Record<ErrorCode, string>` (compile-time completeness), api-error.spec.ts runs `it.each(ERROR_CODES)` and checks there are no extra keys.
-3. Fake exported for other renderer tests: met. `app/api/testing/index.ts` exports `FakeThicketBridge` and `provideFakeThicket`; asserted in fake-thicket-bridge.spec.ts; not re-exported from the production `app/api/index.ts`.
+1. Unit tests with the fake (typed request/response, stream data/end/error, unsubscribe sends cancel): met. Covered in api.service.spec.ts (typed results via `expectTypeOf`, data/end, error events, failed request, cancel by streamId, cancel by request id before the response and of the late streamId, no cancel after end/error, abort signal, listener cleanup).
+2. Every contract error code has a message (test enumerates the codes): met. `ERROR_MESSAGES: Record<ErrorCode, string>` plus `it.each(ERROR_CODES)` and a no-extra-keys check in api-error.spec.ts.
+3. Fake exported for other renderer tests: met. `app/api/testing/index.ts` exports `FakeThicketBridge` and `provideFakeThicket`, not re-exported from the production barrel.
 
-Correctness checks done without findings: abort listener is removed on settle and the late backend CANCELLED rejection is consumed (no unhandled rejection); stream teardown is idempotent (`finished` guard), a synchronous unsubscribe from inside `next` (e.g. `take(1)`) while replaying buffered events stops the replay; `end`/`error` events release the bridge listener; unsubscribing while the request is pending cancels the request id and later the returned streamId; bridge rejections and malformed error payloads become `INTERNAL` `ApiError`s; no secrets or paths are handled in the renderer code.
+Status of earlier findings:
+- CR-1 (P2, `io.export` null streamId / lost `path`): fixed. `streamIdOf()` returns `null` for an explicit null and `undefined` only for a missing/invalid field (api.service.ts:265-270). `stream()` takes `options.onStart` (api.service.ts:25-28, 183-191), called once with the typed `ResultOf<M>` before buffered or live data; a null streamId then completes without emitting and without a cancel (193-198). Verified paths: onStart throwing cancels the streamId and errors the stream; unsubscribing inside onStart cancels the streamId, not the finished request (teardown at 212-218 plus the `finished` check at 192); onStart is not called after failure or unsubscribe (`abandoned` check at 166). Tests in "stream start result" cover each case. ARCHITECTURE.md documents the behaviour.
+- CR-2 (P3, unbounded pre-response buffer): fixed. Broadcast events are skipped (146), the buffer is capped at `MAX_EARLY_EVENTS` (147-158); overflow sets `abandoned`, finishes (listener removed), cancels the pending request id and errors with INTERNAL; a late streamId is then cancelled (166-169), a late rejection ignored (206). Covered by the "early event buffer" tests. The overflow fails the stream loudly instead of dropping events, which is a deliberate and documented trade-off.
+- CR-3 (P3, misleading class doc): fixed. Class doc (46-51) and method doc (89-98) describe cold, one-request-per-subscription semantics and `share()`.
+- TW-1 (test-writer, raw TypeError on a non-object response): fixed. `send()` (240-257) rejects with an INTERNAL `ApiError` for a non-object or `ok`-less response and treats anything but `ok === true` as an error; the test-writer's tests pass.
 
-Summary: 0 P0, 0 P1, 1 P2, 2 P3
+Teardown logic checked: `responded` prevents cancelling the request id after the response has arrived (only possible for a null streamId or an error, both of which already finished); `abandoned` is set on every teardown and on overflow, so a response arriving afterwards cancels its streamId exactly once and never reaches the subscriber; the teardown is idempotent through `finished`; replay of buffered events stops when a consumer unsubscribes inside `next`.
+
+Summary: 0 P0, 0 P1, 0 P2, 0 P3
 
 ## P0 Critical
 
@@ -42,29 +47,12 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | `stream('io.export')` turns a cancelled save dialog into an INTERNAL error and drops `path`**
-    - File: `packages/renderer/src/app/api/api.service.ts:125`
-    - Category: Integration
-    - Problem: `io.export` is a `StreamMethodName` (it has a `stream` schema), so `stream()` accepts it with full typing. Its contract result is `{ streamId: string | null, path: string | null }` where `streamId: null` means "the user cancelled the save dialog" (packages/contract/src/io.ts:57-58). `streamIdOf()` returns `undefined` for `null`, and `stream()` then errors with `ApiError({ code: 'INTERNAL', message: 'io.export did not return a streamId' })`, which `describeError` renders as "Something went wrong inside Thicket." A normal user action becomes a reported bug. In addition, `stream()` discards the request result, so a caller has no way to get the chosen `path`; the alternative (`request()` + `events(streamId)`) loses events that arrive before the response and has no cancel-on-unsubscribe.
-    - Why it matters: the service claims to type every streaming contract method, but one of them cannot be used correctly through it; the io export task will either show a false internal error on dialog cancel or have to reimplement the early-event buffering and cancel logic.
-    - Suggested fix: handle a `null` streamId as a valid "nothing to stream" outcome (e.g. complete immediately without emitting, keeping INTERNAL only for a missing/invalid field), and/or expose the start result (e.g. an option/overload returning `{ result, events$ }`, or a callback with the result) so `path` is available. Add a spec for `io.export` answering `{ streamId: null, path: null }`.
+None.
 
 ## P3 Low
 
-- [ ] **CR-2 | Pre-response buffer collects every bridge event without a bound**
-    - File: `packages/renderer/src/app/api/api.service.ts:114`
-    - Category: Correctness
-    - Problem: until the response arrives, each stream subscription pushes every event from `bridge.on` into `early`, including broadcasts and data of all other running streams; only after the streamId is known are the unrelated ones discarded. For `io.export`, the response waits for the native save dialog, which the user may leave open for minutes while e.g. `admin.watch`, shell output or a large find stream keeps emitting.
-    - Why it matters: memory grows with the traffic of unrelated streams for the duration of a pending stream request; with several pending stream requests each holds its own copy.
-    - Suggested fix: skip events whose stream is a known broadcast name (`BROADCAST_STREAMS` values) and cap the buffer (or keep only events of streams not already owned by another active subscription); alternatively document that main delivers the response before the first event of its stream and drop the buffer.
-
-- [ ] **CR-3 | Class doc describes shared/last-subscriber semantics that do not exist**
-    - File: `packages/renderer/src/app/api/api.service.ts:35`
-    - Category: Quality
-    - Problem: the `ApiService` doc says streams "cancel the server-side operation when the last subscriber unsubscribes", but `stream()` is cold: every subscription sends its own request and cancels it on its own unsubscribe (as the method doc and the "sends one request per subscription" spec state).
-    - Why it matters: a caller may share one Observable among several subscribers expecting one server operation and get N queries.
-    - Suggested fix: reword to "when the subscriber unsubscribes before the stream ended; each subscription starts its own request".
+None.
 
 ## Review conclusion
 
-Material issues found; fix before completing the task. No P0/P1 findings: all three acceptance criteria are met and the tests and type check pass. CR-1 (P2) is a contract integration gap. Fix it now or defer it with a named follow-up task. CR-2 and CR-3 are minor.
+No material issues found. All three acceptance criteria are met, CR-1..CR-3 and TW-1 are resolved in revision 1a78a24, and the renderer tests (167 passed) and type check pass.
