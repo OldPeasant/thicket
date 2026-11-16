@@ -1,10 +1,11 @@
 ---
 title: M1: Connection profiles store (connections.json)
-status: todo
-owner:
+status: in_progress
+owner: dell26/agent-2
 deps: [secrets-store,contract]
 touches: [apps/desktop/src/profiles]
 prio: 1
+lease_until: 2026-11-16T19:21:08Z
 ---
 ## Goal
 profiles.* in main: list/get/save/delete/duplicate, folders, color, read-only and production flags, 'ask for password each time'; versioned schema with migrations; no secrets in the file.
