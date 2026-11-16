@@ -1,0 +1,73 @@
+{
+  "schema": 1,
+  "task": "electron-shell",
+  "reviewed_revision": "a9562d7eea98c5c5a006e6b655f330359bffd9ba",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/electron-shell/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/electron-shell/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/electron-shell/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "CR-1 (pass 1)",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "npm run dev path untested; dev.electron.spec.ts added (ng serve + THICKET_DEV_SERVER)"
+    },
+    {
+      "id": "CR-2 (pass 1)",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "dev.mjs stops ng serve on startup timeout; build.mjs comment corrected"
+    },
+    {
+      "id": "CR-3 (pass 1)",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "protocol.ts window comment corrected"
+    },
+    {
+      "id": "CR-4 (pass 1)",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "ARCHITECTURE cancel routing now says the preload keeps the stream owner map"
+    },
+    {
+      "id": "CR-5 (pass 1)",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "will-frame-navigate registered; subframe navigations blocked; covered by an Electron test"
+    },
+    {
+      "id": "TW-note-2",
+      "source": "test-writer",
+      "severity": "Low",
+      "disposition": "fixed",
+      "note": "buffering semantics with on(listener) documented in ThicketApi.on JSDoc (behaviour unchanged)"
+    },
+    {
+      "id": "CR-1 (final)",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "accepted",
+      "note": "dev-mode CSP-violation console check attaches after first load; CSP header and pings are still asserted; test robustness only, not blocking"
+    },
+    {
+      "id": "CR-2 (final)",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "accepted",
+      "note": "main-frame case of the will-frame-navigate test uses a same-document URL; subframe blocking is pinned, test robustness only"
+    }
+  ],
+  "validation": [
+    { "command": "npm run check", "result": "pass" },
+    { "command": "npm run test:electron -w apps/desktop", "result": "pass" }
+  ]
+}
