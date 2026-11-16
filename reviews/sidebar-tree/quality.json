@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "task": "sidebar-tree",
+  "reviewed_revision": "07f6bfcd49ffda347ab0aedc7dc654adef39179f",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/sidebar-tree/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/sidebar-tree/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/sidebar-tree/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "R1-TW-1", "source": "test-writer", "severity": "Medium", "disposition": "fixed",
+     "note": "round 1: prompt opened from the context menu did not get focus (round1/tests.md, round1/fixes.md)"},
+    {"id": "R1-CR-1", "source": "code-reviewer", "severity": "P1", "disposition": "fixed",
+     "note": "round 1: test/e2e/sidebar.e2e.ts not Prettier-formatted"},
+    {"id": "R1-CR-2", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "round 1: expanded databases hung on Loading collections after reconnect"},
+    {"id": "R1-CR-3", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "round 1: out-of-order guard for lazy loads untested"},
+    {"id": "R1-CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "round 1: forgetting a profile did not invalidate in-flight loads"},
+    {"id": "R1-CR-5", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "round 1: context menu not kept inside the viewport"},
+    {"id": "R1-CR-6", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "round 1: status rows with buttons owned by the tree"},
+    {"id": "R1-CR-7", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "round 1: prompt aria-modal but shell shortcuts acted behind it"},
+    {"id": "R1-CR-8", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "round 1: no-op click(document.body) in read-only spec"},
+    {"id": "R2-CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "round 2: cancelled create prompt on a never-loaded list left a permanent Loading line (round2/fixes.md)"},
+    {"id": "R3-CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "round 3: stale conn.open answer overwrote state after Disconnect/reconnect (fixes.md)"}
+  ],
+  "validation": [
+    {"command": "cd packages/renderer && npx ng test --include='src/app/sidebar/*.spec.ts'", "result": "pass"},
+    {"command": "npm run test:e2e -- test/e2e/sidebar.e2e.ts", "result": "pass"},
+    {"command": "sh -c \"$(head -1 .taskcheck)\"", "result": "pass"}
+  ]
+}
