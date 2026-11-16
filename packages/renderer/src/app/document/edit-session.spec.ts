@@ -181,6 +181,88 @@ describe('DocumentEdits', () => {
     expect(edits.canRedo()).toBe(false);
   });
 
+  it('rebases onto the saved version: no longer modified when nothing changed since', () => {
+    const loaded = order(1);
+    edits.edit(loaded, order(1, 15));
+    edits.edit(order(2), order(2, 25));
+    const saved = edits.get('{"$numberInt":"1"}')?.current as BsonDocument;
+    edits.rebase('{"$numberInt":"1"}', saved);
+    expect(edits.isModified('{"$numberInt":"1"}')).toBe(false);
+    expect(edits.documents().map((d) => d.key)).toEqual(['{"$numberInt":"2"}']);
+    // Only document 2's step is left to undo.
+    edits.undo();
+    expect(edits.modified()).toBe(false);
+    expect(edits.canUndo()).toBe(false);
+  });
+
+  it('rebases onto the saved version and keeps edits made after it as unsaved', () => {
+    const loaded = order(1);
+    edits.edit(loaded, order(1, 15));
+    const saved = order(1, 15);
+    edits.edit(loaded, order(1, 15, 4)); // made while the save was running
+    edits.undo(); // a redo step for this document
+    edits.redo();
+    edits.rebase('{"$numberInt":"1"}', saved);
+    const entry = edits.get('{"$numberInt":"1"}');
+    expect(entry?.original).toBe(saved);
+    expect(ejson(entry?.current as BsonDocument)).toBe(ejson(order(1, 15, 4)));
+    expect(edits.changeCount()).toBe(1);
+    expect(edits.pending().get('{"$numberInt":"1"}')).toMatchObject({ ok: true, changes: 1 });
+    // The document's history goes: undo can't go back past the saved version.
+    expect(edits.canUndo()).toBe(false);
+    expect(edits.canRedo()).toBe(false);
+  });
+
+  it('rebasing a key without edits changes nothing', () => {
+    edits.edit(order(1), order(1, 15));
+    edits.rebase('{"$numberInt":"9"}', order(9));
+    expect(edits.documents().map((d) => d.key)).toEqual(['{"$numberInt":"1"}']);
+    expect(edits.canUndo()).toBe(true);
+  });
+
+  describe('partial (edited under a projection)', () => {
+    const key = '{"$numberInt":"1"}';
+
+    it('is false by default', () => {
+      edits.edit(order(1), order(1, 15));
+      expect(edits.get(key)?.partial).toBe(false);
+    });
+
+    it('sticks to the document once set, also when a later edit is not partial', () => {
+      const loaded = order(1);
+      edits.edit(loaded, order(1, 15), true);
+      edits.edit(loaded, order(1, 15, 4));
+      expect(edits.get(key)?.partial).toBe(true);
+    });
+
+    it('is set by a later partial edit of a document first edited without one', () => {
+      const loaded = order(1);
+      edits.edit(loaded, order(1, 15));
+      edits.edit(loaded, order(1, 15, 4), true);
+      expect(edits.get(key)?.partial).toBe(true);
+    });
+
+    it('is kept by undo, redo and rebase', () => {
+      const loaded = order(1);
+      edits.edit(loaded, order(1, 15), true);
+      edits.edit(loaded, order(1, 15, 4), true);
+      edits.undo();
+      expect(edits.get(key)?.partial).toBe(true);
+      edits.redo();
+      expect(edits.get(key)?.partial).toBe(true);
+      edits.rebase(key, order(1, 15));
+      expect(edits.get(key)?.partial).toBe(true);
+    });
+
+    it('goes with the entry when the document is reverted, and a fresh edit starts unflagged', () => {
+      const loaded = order(1);
+      edits.edit(loaded, order(1, 15), true);
+      edits.discard(key);
+      edits.edit(loaded, order(1, 16));
+      expect(edits.get(key)?.partial).toBe(false);
+    });
+  });
+
   it('reports a document whose _id was edited as not savable', () => {
     edits.edit(order(1), order(7, 10, 1));
     const pending = edits.pending().get('{"$numberInt":"1"}');

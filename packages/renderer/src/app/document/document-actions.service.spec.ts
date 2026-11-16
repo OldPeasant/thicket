@@ -292,6 +292,26 @@ describe('DocumentActions', () => {
       expect(await actions.save(keyOf(1))).toBe(false);
     });
 
+    it('keeps refusing a later replace after a partial document was saved and the projection cleared', async () => {
+      const answer = deferred<{ modified: boolean }>();
+      fake.handle('docs.update', () => answer.promise);
+      edits.edit(loaded, withFields('"a":"z","b":"y","addr":{"city":"Bonn"},"tags":["p"]'), true);
+      const saving = actions.save(keyOf(1));
+      await Promise.resolve();
+      // While the scalar $set runs, the user reorders the top-level fields (a replace).
+      edits.edit(loaded, withFields('"b":"y","a":"z","addr":{"city":"Bonn"},"tags":["p"]'), true);
+      answer.resolve({ modified: true });
+      expect(await saving).toBe(true);
+      expect(params('docs.update')[0]?.['update']).toBe('{"$set":{"a":"z"}}');
+      // The saved (projected) version is the new baseline; it is still partial.
+      expect(edits.get(keyOf(1))?.partial).toBe(true);
+      projection = undefined;
+      expect(await actions.save(keyOf(1))).toBe(false);
+      expect(params('docs.replace')).toHaveLength(0);
+      expect(actions.message()?.text).toBe(PROJECTION_REFUSED);
+      expect(edits.isModified(keyOf(1))).toBe(true);
+    });
+
     it('still sends docs.replace without a projection', async () => {
       projection = undefined;
       edits.edit(loaded, withFields('"b":"y","a":"x","addr":{"city":"Bonn"},"tags":["p"]'));

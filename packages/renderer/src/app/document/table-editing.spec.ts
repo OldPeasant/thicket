@@ -194,6 +194,64 @@ describe('Editing documents in the table view', () => {
     expect(actions().drafts()).toHaveLength(0);
   });
 
+  describe('with a query projection', () => {
+    const el = () => fixture.nativeElement as HTMLElement;
+    const runWithProjection = async (projection: string) => {
+      const input = el().querySelector<HTMLInputElement>('[data-testid="query-projection"]');
+      if (input === null) throw new Error('no projection input');
+      input.value = projection;
+      input.dispatchEvent(new Event('input'));
+      el().querySelector<HTMLButtonElement>('[data-testid="query-run"]')?.click();
+      await settle();
+    };
+    /** Row 2 with its top-level fields reordered: Save would send a whole-document replace. */
+    const reordered = () =>
+      tree('{"_id":{"$numberInt":"2"},"qty":{"$numberInt":"2"},"total":{"$numberInt":"20"}}');
+
+    it('marks a document edited while a projection is active as partial', async () => {
+      await runWithProjection('{ total: 1, qty: 1 }');
+      expect(fake.requestsFor('docs.find').at(-1)?.params).toMatchObject({
+        projection: '{"total":{"$numberInt":"1"},"qty":{"$numberInt":"1"}}',
+      });
+      const [a, , c] = rows();
+      await emit([a, tree(orderText(2, 77)), c]);
+      expect(edits().get('{"$numberInt":"2"}')?.partial).toBe(true);
+    });
+
+    it('does not mark a document edited without a projection', async () => {
+      const [a, , c] = rows();
+      await emit([a, tree(orderText(2, 77)), c]);
+      expect(edits().get('{"$numberInt":"2"}')?.partial).toBe(false);
+    });
+
+    it('refuses to save a replace edited under a projection, also after it was cleared', async () => {
+      await runWithProjection('{ total: 1, qty: 1 }');
+      const [a, , c] = rows();
+      await emit([a, reordered(), c]);
+      // The projection is cleared and the query run again; the unsaved edit survives.
+      await runWithProjection('');
+      expect(edits().isModified('{"$numberInt":"2"}')).toBe(true);
+      el().querySelector<HTMLButtonElement>('[data-testid="edit-save"]')?.click();
+      await settle();
+      expect(fake.requestsFor('docs.replace')).toHaveLength(0);
+      expect(fake.requestsFor('docs.update')).toHaveLength(0);
+      expect(el().querySelector('[data-testid="edit-message"]')?.textContent).toContain(
+        'this edit would replace data the projection hides',
+      );
+      expect(edits().isModified('{"$numberInt":"2"}')).toBe(true);
+    });
+
+    it('saves the same replace when no projection was ever active', async () => {
+      fake.respond('docs.replace', { modified: true });
+      const [a, , c] = rows();
+      await emit([a, reordered(), c]);
+      el().querySelector<HTMLButtonElement>('[data-testid="edit-save"]')?.click();
+      await settle();
+      expect(fake.requestsFor('docs.replace')).toHaveLength(1);
+      expect(edits().modified()).toBe(false);
+    });
+  });
+
   it('ignores values that are not a row list, and several rows added at once', async () => {
     await emit({ not: 'an array' });
     const shown = rows();
