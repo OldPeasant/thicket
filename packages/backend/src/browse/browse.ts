@@ -2,20 +2,24 @@ import type { CollectionInfo, DatabaseInfo, ResultOf } from '@thicket/contract';
 
 import { BSON, type Document, type RunCommandOptions } from 'mongodb';
 
-import { toConnectError } from '../connections/errors';
+import { redact, toConnectError } from '../connections/errors';
 import type { ClientLike } from '../connections/manager';
 import { RpcError } from '../server/rpc';
 
 /**
  * Databases and collections (`db.*`, `coll.*`) as plain server commands on an open client.
- * Commands read their answers without promoting BSON values, so the `raw` documents the renderer
- * sees are lossless canonical EJSON (Int64 stays Int64); sizes and counts are read as numbers.
+ * Commands read Int64 values without converting them to JS numbers, so the `raw` documents the
+ * renderer sees keep Int64 lossless in canonical EJSON; sizes and counts are read as numbers.
  */
 
-/** Read answers as they are on the wire: no Long → number, no Int32/Double unwrapping. */
+/**
+ * Keep Int64 as `Long` (lossless in `raw`, cursor ids stay Long for getMore) and regular
+ * expressions as BSON. Int32/Double are still promoted to JS numbers: `promoteValues: false`
+ * would also apply to the driver's error documents and turn `MongoServerError.code` into an
+ * Int32 object, which breaks the driver's own numeric error handling.
+ */
 const RAW: RunCommandOptions = {
   promoteLongs: false,
-  promoteValues: false,
   promoteBuffers: false,
   bsonRegExp: true,
 };
@@ -24,22 +28,61 @@ const RAW: RunCommandOptions = {
 const NAMESPACE_NOT_FOUND = 26;
 const UNAUTHORIZED = 13;
 
-/** A driver error as the `RpcError` a browse handler answers with (`NOT_FOUND` for missing namespaces). */
+/** The numeric server code and code name of an error answered by the server, if it is one. */
+function serverCodes(error: unknown): { code?: number; codeName?: string } | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const e = error as { code?: unknown; codeName?: unknown; name?: unknown };
+  const code = toNumber(e.code);
+  const codeName = typeof e.codeName === 'string' ? e.codeName : undefined;
+  const isServer =
+    e.name === 'MongoServerError' ||
+    codeName !== undefined ||
+    (code !== undefined && Number.isInteger(code));
+  if (!isServer) return undefined;
+  return {
+    ...(code !== undefined && Number.isInteger(code) ? { code } : {}),
+    ...(codeName !== undefined ? { codeName } : {}),
+  };
+}
+
+function messageOf(error: unknown): string {
+  if (typeof error !== 'object' || error === null) return redact(String(error ?? ''));
+  const message = (error as { message?: unknown }).message;
+  return typeof message === 'string' ? redact(message) : '';
+}
+
+/**
+ * A driver error as the `RpcError` a browse handler answers with. Errors the server answered
+ * (a server code or code name) are `NOT_FOUND` for a missing namespace and `SERVER_ERROR`
+ * otherwise, whatever their text says; only errors without a server answer (network, timeout,
+ * server selection) are classified like connection failures.
+ */
 export function toBrowseError(error: unknown): RpcError {
   if (error instanceof RpcError) return error;
-  const e = error as { code?: unknown; codeName?: unknown; message?: unknown };
-  if (e.code === NAMESPACE_NOT_FOUND || e.codeName === 'NamespaceNotFound') {
-    return new RpcError(
-      'NOT_FOUND',
-      typeof e.message === 'string' && e.message.length > 0 ? e.message : 'Namespace not found',
-    );
+  const server = serverCodes(error);
+  if (server) {
+    const text = messageOf(error);
+    if (server.code === NAMESPACE_NOT_FOUND || server.codeName === 'NamespaceNotFound') {
+      return new RpcError('NOT_FOUND', text.length > 0 ? text : 'Namespace not found');
+    }
+    const prefix = 'The server refused the command';
+    const detail: { serverCode?: number; codeName?: string } = {};
+    if (server.code !== undefined) detail.serverCode = server.code;
+    if (server.codeName !== undefined) detail.codeName = server.codeName;
+    return new RpcError('SERVER_ERROR', text.length > 0 ? `${prefix}: ${text}` : prefix, detail);
   }
-  return toConnectError(error);
+  const mapped = toConnectError(error);
+  if (mapped.code === 'INTERNAL') {
+    const text = messageOf(error);
+    const prefix = 'Unexpected error while browsing';
+    return new RpcError('INTERNAL', text.length > 0 ? `${prefix}: ${text}` : prefix);
+  }
+  return mapped;
 }
 
 function isUnauthorized(error: unknown): boolean {
   const e = error as { code?: unknown; codeName?: unknown };
-  return e.code === UNAUTHORIZED || e.codeName === 'Unauthorized';
+  return toNumber(e.code) === UNAUTHORIZED || e.codeName === 'Unauthorized';
 }
 
 /** A number from a promoted or unpromoted BSON numeric (Int32, Double, Long, Decimal128); `undefined` otherwise. */
@@ -123,6 +166,7 @@ export async function listDatabases(
   withSizes: boolean,
 ): Promise<ResultOf<'db.listDatabases'>> {
   let listed: DatabaseInfo[];
+  let refused: unknown;
   try {
     const answer = await client
       .db('admin')
@@ -138,6 +182,7 @@ export async function listDatabases(
     });
   } catch (error) {
     if (!isUnauthorized(error)) throw toBrowseError(error);
+    refused = error;
     listed = [];
   }
   const known = new Set(listed.map((d) => d.name));
@@ -145,7 +190,9 @@ export async function listDatabases(
   try {
     extra = (await privilegedDatabases(client)).filter((name) => !known.has(name));
   } catch {
-    // connectionStatus is a best-effort addition; the listing itself already answered.
+    // connectionStatus is a best-effort addition when the listing answered; when listDatabases
+    // was refused it is the whole list, so answer the refusal rather than an empty list.
+    if (refused !== undefined) throw toBrowseError(refused);
   }
   const databases = [...listed, ...extra.map((name) => ({ name }))];
   databases.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
@@ -238,7 +285,14 @@ export function parseCreateOptions(text: string | undefined): Document {
       `options is not valid EJSON: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+  // Only a plain document: EJSON reads value wrappers such as {"$date":...} or {"$oid":...} as
+  // a Date, ObjectId, Int32, ... object, which is not a document of create options.
+  if (
+    typeof parsed !== 'object' ||
+    parsed === null ||
+    Object.getPrototypeOf(parsed) !== Object.prototype ||
+    '_bsontype' in parsed
+  ) {
     throw new RpcError('INVALID_PARAMS', 'options must be an EJSON document');
   }
   return parsed as Document;

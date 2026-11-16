@@ -230,7 +230,7 @@ describe('coll.* on the 8.x replica set', () => {
       }),
     );
     expect(error.code).toBe('SERVER_ERROR');
-    expect(error.detail).toMatchObject({ codeName: 'NamespaceExists' });
+    expect(error.detail).toEqual({ serverCode: 48, codeName: 'NamespaceExists' });
   });
 
   it('coll.create refuses options that are not EJSON (INVALID_PARAMS)', async () => {
@@ -499,6 +499,6 @@ describe('a user with only `read` on one database (server with access control)',
   it('the server refuses other databases (SERVER_ERROR Unauthorized)', async () => {
     const error = await failure(auth.call('coll.list', { profileId: 'reader', db: 'hidden' }));
     expect(error.code).toBe('SERVER_ERROR');
-    expect(error.detail).toMatchObject({ codeName: 'Unauthorized' });
+    expect(error.detail).toEqual({ serverCode: 13, codeName: 'Unauthorized' });
   });
 });

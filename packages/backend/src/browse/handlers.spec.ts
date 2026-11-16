@@ -157,6 +157,57 @@ describe('browseHandlers', () => {
     release();
   });
 
+  it.each([
+    ['db.create', 'create', { db: 'shop', firstCollection: 'orders' }],
+    ['db.drop', 'dropDatabase', { db: 'shop' }],
+    ['coll.create', 'create', { db: 'shop', coll: 'orders' }],
+    ['coll.drop', 'drop', { db: 'shop', coll: 'orders' }],
+    ['coll.rename', 'renameCollection', { db: 'shop', coll: 'orders', newName: 'orders2' }],
+  ])(
+    '%s is not cancellable once sent: a cancel waits for the server answer',
+    async (method, commandName, params) => {
+      let release!: () => void;
+      const { call } = await setup((db, command) =>
+        commandName in command
+          ? new Promise<Document>((resolve) => {
+              release = () => resolve({ ok: 1 });
+            })
+          : defaultAnswer(db, command),
+      );
+      const controller = new AbortController();
+      let settled = false;
+      const pending = call(method, { profileId: 'p1', ...params }, controller.signal).finally(
+        () => {
+          settled = true;
+        },
+      );
+      controller.abort();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(settled).toBe(false);
+      release();
+      await expect(pending).resolves.toEqual({});
+    },
+  );
+
+  it('a cancelled write answers the server error when the write fails', async () => {
+    const { call } = await setup((db, command) =>
+      'drop' in command
+        ? Promise.reject(
+            Object.assign(new Error('ns not found'), {
+              name: 'MongoServerError',
+              code: 26,
+              codeName: 'NamespaceNotFound',
+            }),
+          )
+        : defaultAnswer(db, command),
+    );
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      call('coll.drop', { profileId: 'p1', db: 'shop', coll: 'ghost' }, controller.signal),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
   it('a request already cancelled answers CANCELLED', async () => {
     const { call } = await setup();
     const controller = new AbortController();

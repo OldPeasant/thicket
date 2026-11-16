@@ -96,6 +96,65 @@ describe('toBrowseError', () => {
     expect(toBrowseError(original)).toBe(original);
   });
 
+  it.each([
+    [48, 'NamespaceExists', 'Collection shop.certificates already exists with different options'],
+    [13, 'Unauthorized', 'not authorized on TLS to execute command { create: "x" }'],
+    [50, 'MaxTimeMSExpired', 'operation timed out on the server'],
+    [8000, 'AtlasError', 'SSL handshake rejected for user authentication failed'],
+  ])(
+    'a server error %i (%s) is SERVER_ERROR whatever its message says',
+    (code, codeName, errmsg) => {
+      const error = toBrowseError(serverError(code, codeName, errmsg));
+      expect(error.code).toBe('SERVER_ERROR');
+      expect(error.detail).toEqual({ serverCode: code, codeName });
+      expect(error.message).toBe(`The server refused the command: ${errmsg}`);
+    },
+  );
+
+  it('reads a server code given as a BSON Int32 or Long', () => {
+    expect(
+      toBrowseError({ name: 'MongoServerError', code: new BSON.Int32(26), message: 'gone' }).code,
+    ).toBe('NOT_FOUND');
+    expect(
+      toBrowseError({ code: BSON.Long.fromNumber(48), codeName: 'NamespaceExists', message: 'x' })
+        .detail,
+    ).toEqual({ serverCode: 48, codeName: 'NamespaceExists' });
+  });
+
+  it('a server error with only a code name has no serverCode', () => {
+    const error = toBrowseError({ codeName: 'SomethingNew', message: 'odd' });
+    expect(error.code).toBe('SERVER_ERROR');
+    expect(error.detail).toEqual({ codeName: 'SomethingNew' });
+  });
+
+  it('masks connection strings in server and NOT_FOUND messages', () => {
+    const uri = 'mongodb://alice:s3cret@db.example.test:27017';
+    for (const [code, codeName] of [
+      [48, 'NamespaceExists'],
+      [26, 'NamespaceNotFound'],
+    ] as const) {
+      const error = toBrowseError(serverError(code, codeName, `failed for ${uri}`));
+      expect(error.message).not.toContain('s3cret');
+    }
+  });
+
+  it('unexpected errors are INTERNAL with a browse prefix, not a connect prefix', () => {
+    const error = toBrowseError(
+      new TypeError("Cannot read properties of undefined (reading 'id')"),
+    );
+    expect(error.code).toBe('INTERNAL');
+    expect(error.message).toMatch(/^Unexpected error while browsing: Cannot read/);
+    expect(error.message).not.toMatch(/connecting/);
+    expect(toBrowseError('plain').message).toBe('Unexpected error while browsing: plain');
+  });
+
+  it('driver errors without a server answer keep their connection classification', () => {
+    const timeout = Object.assign(new Error('Server selection timed out after 30000 ms'), {
+      name: 'MongoServerSelectionError',
+    });
+    expect(toBrowseError(timeout).code).toBe('TIMEOUT');
+  });
+
   it('classifies network errors like the connection code does', () => {
     const network = Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
     expect(toBrowseError(network).code).toBe('NETWORK_ERROR');
@@ -189,8 +248,10 @@ describe('listDatabases', () => {
     expect(client.sent[0]).toMatchObject({
       db: 'admin',
       command: { listDatabases: 1, nameOnly: true },
-      options: { promoteLongs: false, promoteValues: false },
+      options: { promoteLongs: false, bsonRegExp: true },
     });
+    // promoteValues: false would turn MongoServerError.code into an Int32 object (CR-2).
+    expect(client.sent[0]?.options?.promoteValues).not.toBe(false);
     expect(client.sent[1]).toMatchObject({
       db: 'admin',
       command: { connectionStatus: 1, showPrivileges: true },
@@ -280,6 +341,18 @@ describe('listDatabases', () => {
     expect(error.code).toBe('SERVER_ERROR');
     expect(error.detail).toMatchObject({ serverCode: 8000, codeName: 'AtlasError' });
     expect(client.sent).toHaveLength(1);
+  });
+
+  it('when listDatabases is Unauthorized and connectionStatus fails too, the refusal is answered', async () => {
+    const client = fakeClient((_db, command) => {
+      if ('listDatabases' in command)
+        throw serverError(13, 'Unauthorized', 'not authorized on admin');
+      throw serverError(8000, 'AtlasError', 'no connectionStatus');
+    });
+    const error = await rejection(listDatabases(client, false));
+    expect(error.code).toBe('SERVER_ERROR');
+    expect(error.detail).toEqual({ serverCode: 13, codeName: 'Unauthorized' });
+    expect(error.message).toMatch(/not authorized on admin/);
   });
 
   it('a failing connectionStatus does not fail the listing', async () => {
@@ -408,7 +481,7 @@ describe('listCollections', () => {
     expect(client.sent[0]).toMatchObject({
       db: 'shop',
       command: { listCollections: 1, cursor: {} },
-      options: { promoteValues: false },
+      options: { promoteLongs: false },
     });
     const raw = JSON.parse(collections[0]?.raw ?? '{}') as Document;
     expect(raw).toMatchObject({ name: 'metrics', options: { timeseries: { timeField: 't' } } });
