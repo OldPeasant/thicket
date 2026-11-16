@@ -4,48 +4,46 @@ Date: 2026-11-16
 
 Task: shell-syntax - Core: shell syntax ⇄ EJSON (safe parser and printer)
 
-Scope: `git diff 7f8c117..b748d7a` (committed changes only; the working tree was clean at review time)
+Scope: second review after fixes, final revision `c2317675cedd6e3ee39cdf138d2748967cf9f02b`. Diff `git diff fdbae87..c231767 -- packages docs` (base = `origin/main` = merge-base; committed changes only, working tree clean per the session's git status).
 
 Requirements:
-- `tasks/shell-syntax.md` acceptance criteria and recorded assumptions
-- `SPEC.md` raw editor requirement (shell syntax, "parsing never evaluates code") and security section ("Shell-syntax parsing ... uses a parser, never `eval`")
-- `docs/ARCHITECTURE.md` (tech table, new "Shell syntax" section, Conventions)
+- `tasks/shell-syntax.md` acceptance criteria and the three recorded assumptions
+- `SPEC.md` raw editor / security requirements (parser, never `eval`)
+- `docs/ARCHITECTURE.md` (tech table, "Shell syntax" section, Conventions)
 - `AGENTS.md`
+- Earlier reports: `reviews/shell-syntax/review.md` (first revision, CR-1, CR-2), `reviews/shell-syntax/tests.md` (TW-1, TW-2), `reviews/shell-syntax/fixes.md`
 
 Git range:
 - Branch: main
-- HEAD: b748d7ac9924d7e6d8a6a4fb75ceab94d05e3928
-- Base/start: 7f8c1178a032046ea84f563dc1e2487ecd45e5c6
-- Commits reviewed: 1 (b748d7a "Add safe shell-syntax parser and printer for the BSON model")
+- HEAD: c2317675cedd6e3ee39cdf138d2748967cf9f02b
+- Base/start: fdbae874c0f21a3fc38222b69419db3d440b1004 (`origin/main`)
+- Commits reviewed: 3 (`458eacc` "Add safe shell-syntax parser and printer for the BSON model", `289b214` "Add shell-syntax edge-case tests and review reports", `c231767` "Fix shell-syntax review findings: JS-compilable regex literals, document error position, Infinity/NaN args")
 
-Files reviewed in full: `packages/core/src/shellsyntax/{errors,index,syntax,value,print}.ts`,
-`packages/core/src/shellsyntax/shellsyntax.spec.ts`, `packages/core/src/index.ts`, the
-`docs/ARCHITECTURE.md` diff, plus the helpers they use (`bson/model.ts`, `bson/iso-date.ts`,
-`bson/ejson.ts` base64/hex helpers and regex option set).
+Files reviewed in full at the final revision: `packages/core/src/shellsyntax/{index,print,syntax,value}.ts`, `packages/core/src/shellsyntax/shellsyntax.edge.spec.ts`, the value/round-trip tables of `packages/core/src/shellsyntax/shellsyntax.spec.ts`, and `docs/ARCHITECTURE.md` (the "Shell syntax" section does not describe the regex print rule, so the CR-1 fix leaves it accurate).
 
-Summary: 0 P0, 0 P1, 0 P2, 2 P3
+Summary: 0 P0, 0 P1, 0 P2, 0 P3
 
 ## Commands and results
 
-- `npx vitest run --project core packages/core/src/shellsyntax` -> 1 file, 136 tests passed
-- `npm run check` (what `.taskcheck` runs: lint, type check, unit tests) -> passed; 25 files / 1505 tests (workspaces) and 5 files / 181 tests (renderer)
-- `node -e` with `new RegExp(p, f)` for `(?i)a`, `a++`, `(?>a)` and `\-` with flag `u` -> all throw `SyntaxError` in JS (evidence for CR-1)
-- `node -e` checks of `BigInt("+5")`, `String(1e21)` and `Date#toISOString` for extended years -> as the parser/printer expect (no finding)
-- `python tasks.py verify shell-syntax` (read-only listing) -> all 3 criteria still unverified; the parent worker records evidence before `done`
-- Ad-hoc probe scripts (bundling a TS script with esbuild and running it) were not permitted in this environment, so the edge cases below were verified by reading the code paths and by the existing spec.
+- Shell access (Bash) was denied to this reviewer in this session, so no command could be run. The git range was resolved from `.git/HEAD`, `.git/refs/heads/main` and `.git/packed-refs` (`refs/remotes/origin/main` = `fdbae87`, the parent commit of `458eacc` in the session's git log). Every statement below comes from reading the final code.
+- Test results are taken from `reviews/shell-syntax/fixes.md` and were not re-run by this reviewer: `cd packages/core && npx vitest run src/shellsyntax` -> 2 files, 356 tests passed; `npm run check` -> passed (workspaces 26 files / 1725 tests, renderer 5 files / 181 tests). The parent worker must re-run `.taskcheck` before `done`. The earlier review also showed with `node -e` that `new RegExp` throws for `(?i)a`, `a++`, `(?>a)` and `\-` with `u`. That is the behavior the CR-1 fix relies on.
 
-## Acceptance criteria assessment
+## Status of earlier findings
 
-1. Parser rejects code with a position: met. `function`, `this`, `eval`, `async`, `new`, etc. are refused in `parseCallee` (`syntax.ts:302`); bare names, shorthand properties, methods, computed keys, spread, template literals, parentheses/arrows, operators and property access/calls on values are refused in the parser; unknown calls (`alert`, `process.exit`, `Function`, `ObjectId.prototype.constructor`) are refused in `value.ts:63-69` via a `Map` allow-list (no prototype lookup). Tested with line/column in `shellsyntax.spec.ts` ("refuses code with a position", 25 cases).
-2. print(parse(x)) round-trips for 30+ inputs: met. `CANONICAL` has 34 entries asserted to print back exactly and to re-parse equal with `indent: 2`; 9 normalizing variants are checked for a fixpoint; an "every BSON type" EJSON fixture round-trips.
-3. Errors carry line/column: met. `ShellSyntaxError` has `offset`, 1-based `line`/`column`, `reason`; message ends with "(line L, column C)"; every error path goes through it (syntax via `fail` in `syntax.ts`, value errors via node `pos` in `value.ts`).
+- **CR-1 (P3, regex literals mongosh cannot parse): resolved.** `print.ts:140-162` now also requires `compilesInJs(pattern, options)` (`new RegExp` inside `try`/`catch`; compiling never runs the pattern on input, and there is no `eval`) before it chooses `/…/flags`. Otherwise it prints `BSONRegExp("…", "…")`. I checked for regressions. The existing conditions are unchanged: flags within `imsu`, a non-empty pattern, no leading `*`, and the scanner must end at the closing `/`, which also rejects line terminators. A literal and `new RegExp` share JS's pattern grammar (Annex B without `u`, strict with `u`), so the compile check matches what mongosh accepts for a literal. Patterns that already printed as literals still do when they are valid JS (`/[\]/]/`, `/\//`, `/x/imsu`, `/a*/`, `/a\-/`). The corpus entries `/^ab+c$/mi` and `/a\/b[/]/` are valid JS, so they are unaffected. The new edge rows (`(?i)a`, `a++`, `(?>a)` with `i`, `a\-` with `u` -> `BSONRegExp`; `a\-` without `u` -> literal) each go through `expectRoundTrip`. The parser accepts `BSONRegExp` with the same options, so the round trip still holds.
+- **CR-2 / TW-2 (P3, document error at a leading comment): resolved.** `index.ts:20-27` now throws "Expected a document ({ … })" at `root.pos`, the start of the parsed root node after trivia (comments included), instead of using `trimStart()`. For signed numbers `pos` is the sign, which is correct. The test `parseShellSyntaxDocument points at the value after a leading comment (TW-2)` expects line 2, column 2 for `// filter\n [1]`. The BOM/blank-CRLF test (line 3, column 3) also still applies: `SPACE` includes `﻿`.
+- **TW-1 (Double/NumberDecimal with bare Infinity/NaN): resolved.** `value.ts:213-218` `nonFiniteWord` accepts only `word` nodes named `Infinity`/`NaN`. `doubleCtor` maps them with `Number(word)`, and `decimal` passes the word to `Decimal128.fromString`, which accepts `Infinity`/`NaN`. Integer constructors (`NumberLong`, `NumberInt`, `Date`, `Timestamp`, binary subtype) still go through `integerArg`, which refuses `word` nodes at the argument's position. The tests check this (`NumberLong(Infinity)` -> column 12, `NumberInt(NaN)` -> column 11). Other words (`true`, `null`, `MinKey`) are still refused by `Double(…)`/`NumberDecimal(…)` as before.
+
+## Acceptance criteria re-check (final revision)
+
+1. **Parser rejects code (`function`, calls other than the known constructors, `this`) with a position (tests): met.** Unchanged by the fixes. `CODE_WORDS` are refused in `parseCallee` (`syntax.ts:302`). Unknown calls are refused through the `CONSTRUCTORS` `Map` (`value.ts:63-69`), with no prototype lookup. Bare names, operators, property access, spread, template literals, parentheses and methods are refused in the parser. Tests with line and column: "refuses code with a position" in `shellsyntax.spec.ts` and the 32-case "refusal of code constructs" table plus the side-effect test in `shellsyntax.edge.spec.ts`.
+2. **print(parse(x)) round-trips for a corpus of 30+ queries/documents (test): met.** The 34-entry canonical corpus in `shellsyntax.spec.ts` is unchanged. The printer change only moves JS-invalid patterns to `BSONRegExp`, which round-trips, and the new edge rows check that through `expectRoundTrip`.
+3. **Errors carry line/column for the raw editor and query bar: met.** All errors are `ShellSyntaxError` with `offset`, `line`, `column` and `reason`. The one known wrong position (CR-2/TW-2) is fixed and tested.
 
 ## Safety review
 
-- No `eval`, `Function`, `new RegExp(userInput)` or dynamic property access on user-controlled names anywhere in the scope; constructor lookup is a `Map`.
-- User regex patterns are never compiled or executed (only scanned by `scanRegexBody`, linear), so no ReDoS from input.
-- The parser's own regexes (`NUMBER`, `IDENT`, `SPACE`) are linear; comments use `indexOf`; nesting is capped at 500 (`MAX_DEPTH`, tested with 600 `[`), and arguments of constructor calls count toward depth.
-- Losslessness checked by code reading for each model type: integral doubles in Int32 range print as `Double(n)`, `-0` as `-0`, other doubles via `String(v)` (shortest round-trip, exponent form accepted by `NUMBER`); Int64 outside the safe range is quoted; dates outside the JS range use `new Date(<exact ms>)`; regex falls back to `BSONRegExp` for `l`/`x` options, empty patterns, leading `*`, and patterns the literal scanner would end early; lone surrogates survive via `JSON.stringify`'s `\uXXXX` escapes; 16-byte subtype-4 binary prints as `UUID`; duplicate keys and key order are preserved (array of entries, not a JS object).
+- The only new dynamic construct is `new RegExp(pattern, options)` in the printer. It compiles a stored pattern and never runs it against input, so it cannot cause ReDoS, and it is not `eval`/`new Function` (ARCHITECTURE Conventions). `packages/core` still uses no Node or Electron API: `RegExp` is a language built-in.
+- Nothing else in the fixes widens what the parser accepts: `nonFiniteWord` matches exactly two names and only for two constructors.
 
 ## P0 Critical
 
@@ -61,22 +59,8 @@ None.
 
 ## P3 Low
 
-- [ ] **CR-1 | Regex literals printed for patterns mongosh cannot parse**
-    - File: `packages/core/src/shellsyntax/print.ts:142`
-    - Category: Integration
-    - Problem: `fitsLiteral` only checks the flag set and that the literal scanner ends at the right `/`. MongoDB patterns are PCRE, so stored patterns such as `(?i)abc` (inline flags), `a++` (possessive), `(?>a)` (atomic), or any pattern with the `u` option that uses an escape JS's unicode mode rejects (`\-`, `\_`) are printed as `/(?i)abc/`, `/a\-/u`, etc. These texts round-trip through our own parser (which does not validate patterns, by the recorded assumption), but they are a `SyntaxError` in mongosh/JS (verified with `new RegExp(...)` in Node). The ARCHITECTURE section and task goal describe the output as mongosh shell syntax, and the product embeds a mongosh console, so copying the raw editor text there fails for these documents.
-    - Why it matters: the printed text is not portable to mongosh for common PCRE-only queries; the in-app round trip is unaffected.
-    - Suggested fix: additionally require `new RegExp(pattern, options)` to compile (in a `try`; compiling does not run the pattern on input) before choosing the literal form, otherwise print `BSONRegExp("…", "…")`; add a corpus entry such as `BSONRegExp("(?i)a", "")`.
-    - Disposition suggestion: fix in this task (small, local) or record as an accepted limitation.
-
-- [ ] **CR-2 | `parseShellSyntaxDocument` error points at a leading comment instead of the value**
-    - File: `packages/core/src/shellsyntax/index.ts:23`
-    - Category: Correctness
-    - Problem: the "Expected a document" position is computed with `text.trimStart()`, which skips whitespace but not comments, while the parser accepts leading comments. For `// filter\n[1]` the error is reported at line 1, column 1 (the comment) instead of line 2, column 1 (the array).
-    - Why it matters: the query bar and raw editor mark the wrong place for a slightly malformed input that the rest of the parser handles correctly.
-    - Suggested fix: use the root node's `pos` (e.g. have `parseSyntax` return the root node and check `node.kind !== 'object'` before `toBsonValue`, failing at `node.pos`), and add a test with a leading comment.
-    - Disposition suggestion: fix in this task or defer; cosmetic.
+None. CR-1 and CR-2 from the first review are resolved (see "Status of earlier findings").
 
 ## Review conclusion
 
-No material issues found. The implementation meets all three acceptance criteria, uses no `eval` or input-driven regex compilation, bounds nesting, and is lossless for every BSON model type under its own parser. The two P3 findings are optional improvements (mongosh portability of printed regexes, error position after a leading comment). Acceptance-criteria evidence still has to be recorded with `tasks.py verify` by the parent worker.
+No material issues found. The fixes for CR-1, CR-2/TW-2 and TW-1 are correct and small, and I found no regressions from reading the code. All three acceptance criteria are met at revision `c2317675cedd6e3ee39cdf138d2748967cf9f02b`. This reviewer could not run commands in this session. The parent worker must confirm the focused tests and `.taskcheck` on this revision, and record per-criterion evidence with `tasks.py verify` before `done`.

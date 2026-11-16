@@ -272,6 +272,43 @@ describe('number literals', () => {
     expect(parseError('NumberLong(Infinity)').column).toBe(12);
     expect(parseError('NumberInt(NaN)').column).toBe(11);
   });
+
+  it('accepts bare Infinity and NaN with new, inside documents and around comments', () => {
+    expect(ejson('new Double(NaN)')).toBe('{"$numberDouble":"NaN"}');
+    expect(ejson('new NumberDecimal(Infinity)')).toBe('{"$numberDecimal":"Infinity"}');
+    expect(ejson('Double( /* x */ Infinity // y\n)')).toBe('{"$numberDouble":"Infinity"}');
+    expect(ejson('{ a: [Double(Infinity), NumberDecimal(NaN)] }')).toBe(
+      '{"a":[{"$numberDouble":"Infinity"},{"$numberDecimal":"NaN"}]}',
+    );
+  });
+
+  it('round-trips the values read from Double(Infinity) and NumberDecimal(NaN)', () => {
+    expect(expectRoundTrip(parseShellSyntax('Double(Infinity)'))).toBe('Infinity');
+    expect(expectRoundTrip(parseShellSyntax('Double(NaN)'))).toBe('NaN');
+    expect(expectRoundTrip(parseShellSyntax('NumberDecimal(NaN)'))).toBe('NumberDecimal("NaN")');
+  });
+
+  it.each([
+    ['Double(true)', 8, 'Expected a number as a string'],
+    ['Double(undefined)', 8, 'Expected a number as a string'],
+    ['Double(MinKey)', 8, 'Expected a number as a string'],
+    ['NumberDecimal(null)', 15, 'Expected a decimal as a string'],
+    ['NumberDecimal(false)', 15, 'Expected a decimal as a string'],
+  ])('refuses the other word %s as a Double or Decimal argument', (text, column, reason) => {
+    const e = parseError(text);
+    expect(e.reason).toBe(reason);
+    expect(e.column).toBe(column);
+  });
+
+  it.each([
+    ['new Date(Infinity)', 10],
+    ['new Date(NaN)', 10],
+    ['Timestamp(Infinity, 1)', 11],
+    ['Timestamp(1, NaN)', 14],
+    ['BinData(NaN, "")', 9],
+  ])('still refuses %s, which needs an integer', (text, column) => {
+    expect(parseError(text).column).toBe(column);
+  });
 });
 
 describe('regex literals', () => {
@@ -354,6 +391,31 @@ describe('printShellSyntax: regex literal or BSONRegExp', () => {
     ['a\\-', '', '/a\\-/'],
   ])('pattern %j options %j -> %s', (pattern, options, printed) => {
     expect(expectRoundTrip({ type: 'regex', pattern, options })).toBe(printed);
+  });
+
+  it.each([
+    // Valid in JS, so the literal form stays.
+    ['\\p{L}+', 'u', '/\\p{L}+/u'],
+    ['(?<y>\\d{4})-\\k<y>', '', '/(?<y>\\d{4})-\\k<y>/'],
+    ['(?<=a)b(?!c)', 'i', '/(?<=a)b(?!c)/i'],
+    ['.', 's', '/./s'],
+    ['(a+)+$', '', '/(a+)+$/'],
+    // Not valid in JS (PCRE-only or malformed), so BSONRegExp (CR-1).
+    ['\\p{NotAProperty}', 'u', 'BSONRegExp("\\\\p{NotAProperty}", "u")'],
+    ['a{2,1}', '', 'BSONRegExp("a{2,1}", "")'],
+    ['[z-a]', '', 'BSONRegExp("[z-a]", "")'],
+    ['(?#note)a', '', 'BSONRegExp("(?#note)a", "")'],
+    ['(', '', 'BSONRegExp("(", "")'],
+    ['\\Aa\\z', 'u', 'BSONRegExp("\\\\Aa\\\\z", "u")'],
+  ])('pattern %j options %j -> %s (JS compile check)', (pattern, options, printed) => {
+    expect(expectRoundTrip({ type: 'regex', pattern, options })).toBe(printed);
+  });
+
+  it('prints a parsed PCRE-only regex literal as BSONRegExp, also inside a document', () => {
+    expect(printShellSyntax(parseShellSyntax('/a++/'))).toBe('BSONRegExp("a++", "")');
+    expect(printShellSyntax(parseShellSyntax('{ name: /(?i)ann/, ok: /ann/i }'))).toBe(
+      '{ name: BSONRegExp("(?i)ann", ""), ok: /ann/i }',
+    );
   });
 });
 
@@ -459,6 +521,38 @@ describe('line and column', () => {
   it('parseShellSyntaxDocument points at the value after a leading comment (TW-2)', () => {
     const e = errorOf(() => parseShellSyntaxDocument('// filter\n [1]'));
     expect(e).toMatchObject({ line: 2, column: 2 });
+  });
+
+  it.each([
+    ['a block comment', '/* filter */ "x"', 1, 14],
+    ['several line comments on CRLF lines', '// a\r\n  // b\r\n  5', 3, 3],
+    ['a BOM and a block comment', '﻿/* c */\n  true', 2, 3],
+    ['a signed number', '// n\n-5', 2, 1],
+    ['a constructor with new', '/* d */ new Date(0)', 1, 9],
+    ['a regex literal', '// r\n/x/i', 2, 1],
+    ['a comment that looks like a document', '/* { a: 1 } */ null', 1, 16],
+  ])('parseShellSyntaxDocument points at the value after %s', (_name, text, line, column) => {
+    const e = errorOf(() => parseShellSyntaxDocument(text));
+    expect(e.reason).toBe('Expected a document ({ … })');
+    expect(e).toMatchObject({ line, column });
+  });
+
+  it('parseShellSyntaxDocument accepts a document surrounded by comments', () => {
+    expect(parseShellSyntaxDocument('// active users\n{ a: 1 } /* end */')).toEqual(
+      parseShellSyntax('{ a: 1 }'),
+    );
+  });
+
+  it('parseShellSyntaxDocument reports a value error before the not-a-document error', () => {
+    const e = errorOf(() => parseShellSyntaxDocument('// c\nNumberLong("x")'));
+    expect(e.reason).not.toBe('Expected a document ({ … })');
+    expect(e).toMatchObject({ line: 2, column: 12 });
+  });
+
+  it('parseShellSyntaxDocument still refuses code after a leading comment with its position', () => {
+    const e = errorOf(() => parseShellSyntaxDocument('// c\n{ a: this }'));
+    expect(e.reason).toBe('"this" is code, which is not allowed here');
+    expect(e).toMatchObject({ line: 2, column: 6 });
   });
 });
 
