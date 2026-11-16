@@ -13,7 +13,8 @@ Edit session per document: modified marker and change count, undo/redo within un
 ## Acceptance criteria
 - [x] Component tests: change count, undo/redo, revert
   - verified (2026-11-17 00:43+0100 by felix/agent-1): cd packages/renderer && npx ng test --include='src/app/document/**/*.spec.ts' --include='src/app/collection/**/*.spec.ts' -> 8 files, 218 passed (change count, undo/redo, revert in document-editing/edit-session/document-actions specs)
-- [ ] e2e: edit two fields and save; server document matches (verified by a driver query in the test)
+- [x] e2e: edit two fields and save; server document matches (verified by a driver query in the test)
+  - verified (2026-11-17 00:43+0100 by felix/agent-1): npm run test:e2e -- test/e2e/document-edit.e2e.ts (Electron app + MongoDB container fixture) -> 'edit two fields and save: the server document matches' passed (MongoClient findOne asserts stored doc); 3 passed
 - [ ] e2e: production profile shows the confirm dialog with the `$set` operation before saving
 - [ ] Read-only profile: edit controls disabled (test)
 
