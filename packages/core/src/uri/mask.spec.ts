@@ -470,6 +470,106 @@ describe('maskText secret option values across whitespace', () => {
   });
 });
 
+describe('maskText query part across whitespace', () => {
+  it.each([
+    ['a tab', 'my\tapp&proxyPassword=tab1Secret'],
+    ['two spaces', 'my  app&proxyPassword=dbl2Secret'],
+    ['a line separator', 'my app&proxyPassword=ls3Secret'],
+    ['an upper-case secret key', 'a b&PROXYPASSWORD=upper4Secret'],
+    ['a percent-encoded secret key', 'a b&proxy%50assword=enc5Secret'],
+  ])('masks a secret option after a non-secret value with %s', (_name, query) => {
+    const masked = maskText(`x mongodb://h/?appName=${query} y`);
+    expectNoLeak(masked, [/(\w+Secret)/.exec(query)?.[1] ?? '']);
+    expect(masked).toContain(MASK);
+  });
+
+  it('masks a secret option after a raw space when the URI has no path', () => {
+    expect(maskText('x mongodb://h?appName=a b&proxyPassword=noPath6Secret y')).toBe(
+      `x mongodb://h?appName=a b&proxyPassword=${MASK}`,
+    );
+  });
+
+  it('masks a secret option after a raw space at the very start of the text', () => {
+    expect(maskText('mongodb://h/?appName=a b&proxyPassword=start7Secret')).toBe(
+      `mongodb://h/?appName=a b&proxyPassword=${MASK}`,
+    );
+  });
+
+  it('masks a percent-encoded AWS session token after a raw space', () => {
+    const masked = maskText(
+      'x mongodb://h/?appName=a b&authMechanismProperties=AWS_SESSION_TOKEN%3Aenc8Tok y',
+    );
+    expectNoLeak(masked, ['enc8Tok']);
+  });
+
+  it('masks both connection strings when each query has a raw space before a secret', () => {
+    const masked = maskText(
+      'x mongodb://h/db?appName=a b&tlsCertificateKeyFilePassword=first9Secret&w=1 then ' +
+        'mongodb://h2/?appName=c d&proxyPassword=second10Secret z',
+    );
+    expectNoLeak(masked, ['first9Secret', 'second10Secret']);
+    expect(masked).toBe(
+      `x mongodb://h/db?appName=a b&tlsCertificateKeyFilePassword=${MASK}&w=1 then ` +
+        `mongodb://h2/?appName=c d&proxyPassword=${MASK}`,
+    );
+  });
+
+  it('splits off an SRV connection string after prose that follows a query', () => {
+    expect(maskText('x mongodb://h/?tls=true failed, retry mongodb+srv://u:srv11Secret@h2 y')).toBe(
+      `x mongodb://h/?tls=true failed, retry mongodb+srv://u:${MASK}@h2 y`,
+    );
+  });
+
+  it('splits off a later connection string whose own query has a raw space before a secret', () => {
+    const masked = maskText(
+      'x mongodb://h/?appName=a b mongodb://u:user12Secret@h2/?appName=c d&proxyPassword=opt13Secret z',
+    );
+    expectNoLeak(masked, ['user12Secret', 'opt13Secret']);
+    expect(masked).toBe(
+      `x mongodb://h/?appName=a b mongodb://u:${MASK}@h2/?appName=c d&proxyPassword=${MASK}`,
+    );
+  });
+
+  it('ends the connection string at the first whitespace after a fragment', () => {
+    expect(maskText('x mongodb://h/?proxyPassword=a b#c d mongodb://u:frag14Secret@h3 z')).toBe(
+      `x mongodb://h/?proxyPassword=${MASK} d mongodb://u:${MASK}@h3 z`,
+    );
+  });
+
+  it('keeps text on the next line out of the connection string', () => {
+    expect(maskText('x mongodb://h/?tls=true failed\nmongodb://u:next15Secret@h2 y')).toBe(
+      `x mongodb://h/?tls=true failed\nmongodb://u:${MASK}@h2 y`,
+    );
+  });
+
+  it('does not run a URI without a query on past whitespace', () => {
+    expect(maskText('x mongodb://u:pw16Secret@h/db failed? retry')).toBe(
+      `x mongodb://u:${MASK}@h/db failed? retry`,
+    );
+  });
+
+  // A connection string with a query, followed by a long line of prose (e.g. an error message
+  // that embeds a large serialized document), must be masked in roughly linear time. SPEC §1
+  // "documents up to the 16 MB limit stay responsive"; maskText runs synchronously on log lines.
+  it('masks a long line of prose after a query in linear time', () => {
+    const time = (words: number): number => {
+      const text = `err mongodb://u:long17Secret@h/?tls=true ${'word '.repeat(words)}`;
+      const started = performance.now();
+      const masked = maskText(text);
+      const elapsed = performance.now() - started;
+      expectNoLeak(masked, ['long17Secret']);
+      return elapsed;
+    };
+    time(1_000); // warm-up
+    const small = time(25_000);
+    const large = time(100_000); // 4x the input (about 500 kB)
+    // Linear: a few ms for 500 kB, about 4x the small run. Quadratic: seconds, about 16x.
+    expect(large < 200 || large < 8 * small, `25k words ${small} ms, 100k words ${large} ms`).toBe(
+      true,
+    );
+  });
+});
+
 describe('maskText port detection', () => {
   it.each([',', '/', '?', '#', ' ', '"', "'", '`', ')', ']', '}', '>'])(
     'splits at a scheme after a port followed by %j',
