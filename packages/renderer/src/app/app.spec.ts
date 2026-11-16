@@ -17,5 +17,11 @@ describe('App', () => {
     const root = fixture.nativeElement as HTMLElement;
     expect(fixture.componentInstance).toBeInstanceOf(App);
     expect(root.querySelector('h1')?.textContent).toBe('Thicket');
+    expect(root.querySelector('main.shell p')?.textContent).toBe('A desktop client for MongoDB.');
+  });
+
+  it('runs zoneless: zone.js is not loaded', () => {
+    // provideZonelessChangeDetection() in appConfig; nothing may pull in zone.js as a polyfill.
+    expect(globalThis).not.toHaveProperty('Zone');
   });
 });

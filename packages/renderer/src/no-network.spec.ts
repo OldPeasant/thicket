@@ -33,9 +33,54 @@ describe('no external network resources', () => {
     },
   );
 
+  // The guard is only as good as REMOTE: check that it flags the usual ways a CDN sneaks in,
+  // and that it leaves local references alone (otherwise the per-file test would be noise).
+  it.each([
+    [
+      'Google Fonts <link>',
+      '<link href="https://fonts.googleapis.com/css2?family=Orbitron" rel="stylesheet">',
+    ],
+    ['preconnect <link>', "<link rel='preconnect' href='https://fonts.gstatic.com'>"],
+    ['CDN <script>', '<script src="https://cdn.example.test/lib.js"></script>'],
+    ['unquoted attribute', '<img src=https://img.example.test/logo.png>'],
+    ['plain http', '<img src="http://img.example.test/logo.png">'],
+    ['protocol-relative src', '<script src="//cdn.example.test/lib.js"></script>'],
+    ['spaces around =', '<a href = "https://example.test/">x</a>'],
+    ['upper-case attribute', '<IMG SRC="HTTPS://img.example.test/x.png">'],
+    ['url() unquoted', '@font-face { src: url(https://fonts.example.test/x.woff2); }'],
+    ['url() quoted', 'body { background: url( "https://img.example.test/bg.png" ); }'],
+    ['@import string', '@import "https://fonts.googleapis.com/css2?family=Share+Tech+Mono";'],
+    ['@import protocol-relative', "@import '//cdn.example.test/reset.css';"],
+    ['@import url()', '@import url(//cdn.example.test/reset.css);'],
+    ['inline template in a .ts file', 'template: `<img src="https://img.example.test/a.png">`'],
+  ])('REMOTE flags %s', (_name, text) => {
+    expect(text).toMatch(REMOTE);
+  });
+
+  it.each([
+    ['relative src', '<script src="main.js" type="module"></script>'],
+    ['relative href', '<link rel="stylesheet" href="./styles.css">'],
+    ['base href', '<base href="./" />'],
+    ['bundled font url()', "@font-face { src: url('./media/orbitron.woff2'); }"],
+    ['data: url()', 'body { background: url(data:image/png;base64,AAAA); }'],
+    ['local @import', "@import './theme.css';"],
+    ['URL in a comment', '// See https://angular.dev/guide/zoneless'],
+    ['CSP text', "default-src 'self'; script-src 'self'"],
+  ])('REMOTE leaves %s alone', (_name, text) => {
+    expect(text).not.toMatch(REMOTE);
+  });
+
   it('the CSP only allows the app itself', () => {
     const html = readFileSync(join(SRC, 'index.html'), 'utf8');
     expect(html).toMatch(/<base href="\.\/"/);
     expect(html).toMatch(/default-src 'self'; script-src 'self';/);
+  });
+
+  it('the CSP names no remote source and keeps fonts local', () => {
+    const html = readFileSync(join(SRC, 'index.html'), 'utf8');
+    const csp = /http-equiv="Content-Security-Policy"\s+content="([^"]*)"/.exec(html)?.[1];
+    expect(csp).toBeDefined();
+    expect(csp).toMatch(/font-src 'self'(;|$)/);
+    expect(csp).not.toMatch(/https?:|\/\/|\*/);
   });
 });
