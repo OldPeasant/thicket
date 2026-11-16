@@ -18,3 +18,4 @@ Edit session per document: modified marker and change count, undo/redo within un
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-17 00:12+0100 by felix/agent-1): Undo/redo is one history per collection tab across its documents (Ctrl+Z/Ctrl+Shift+Z/Ctrl+Y outside text fields); Save/Revert of a document drops that document's steps from the history. Unsaved edits are keyed by _id and survive paging and new queries until saved or reverted.
