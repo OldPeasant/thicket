@@ -3,7 +3,7 @@ title: conn.close kills the server ops of the profile's running streams
 status: todo
 owner:
 deps: [docs-query-backend]
-touches: [packages/backend/src/connections,packages/backend/src/docs/query]
+touches: [packages/backend/src/connections/manager.ts,packages/backend/src/connections/handlers.ts,packages/backend/src/docs/query]
 prio: 2
 ---
 ## Goal
