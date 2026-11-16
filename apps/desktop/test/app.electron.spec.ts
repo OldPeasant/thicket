@@ -74,6 +74,15 @@ describe('Electron shell', () => {
     }
   });
 
+  it('profiles.secretStorage reports the real safeStorage backend', async () => {
+    const answer = await call({ id: 's1', method: 'profiles.secretStorage', params: {} });
+    expect(answer).toMatchObject({ id: 's1', ok: true });
+    const status = (answer as { result: { level: string; defaultSecretMode: string } }).result;
+    expect(['secure', 'weak', 'unavailable']).toContain(status.level);
+    expect(status.defaultSecretMode).toBe(status.level === 'secure' ? 'saved' : 'ask');
+    expect(output.join('')).toContain(`secret storage: ${status.level}`);
+  });
+
   it('cancels a long backend request with CANCELLED', async () => {
     const started = Date.now();
     const answer = await page.evaluate(async () => {

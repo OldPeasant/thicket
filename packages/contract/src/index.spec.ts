@@ -69,6 +69,7 @@ const SAMPLES: { [M in MethodName]: { valid: ParamsOf<M>; invalid: unknown } } =
     invalid: { profileId: P, kind: 'pin', value: 'x' },
   },
   'profiles.clearSecret': { valid: { profileId: P }, invalid: { profileId: P, kind: 'pin' } },
+  'profiles.secretStorage': { valid: {}, invalid: { refresh: true } },
 
   'conn.test': {
     valid: { profile: PROFILE, password: 'pw' },

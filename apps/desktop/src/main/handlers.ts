@@ -1,6 +1,8 @@
 import type { Handler } from '@thicket/backend';
 import type { ParsedParamsOf, ResultOf, Settings } from '@thicket/contract';
 
+import { secretsGetHandler, secretsHandlers, type SecretsStore } from '../secrets';
+
 /** What the settings handlers need from the `SettingsStore`. */
 export interface SettingsAccess {
   get(): Settings;
@@ -9,6 +11,7 @@ export interface SettingsAccess {
 
 export interface MainHandlerDeps {
   version: string;
+  secrets: SecretsStore;
   /** Serves `app.settings.get/set` when given. */
   settings?: SettingsAccess;
 }
@@ -17,6 +20,7 @@ export interface MainHandlerDeps {
 export function mainHandlers(deps: MainHandlerDeps): Record<string, Handler> {
   const handlers: Record<string, Handler> = {
     'app.ping': (): ResultOf<'app.ping'> => ({ process: 'main', version: deps.version }),
+    ...secretsHandlers(deps.secrets),
   };
   const store = deps.settings;
   if (store) {
@@ -30,13 +34,10 @@ export function mainHandlers(deps: MainHandlerDeps): Record<string, Handler> {
   return handlers;
 }
 
-/**
- * Handlers of the privileged main ↔ backend port. `secrets.get` is a stub until the secrets
- * store exists: no profile has stored secrets yet.
- */
-export function privilegedHandlers(): Record<string, Handler> {
+/** Handlers of the privileged main ↔ backend port (never served to a renderer). */
+export function privilegedHandlers(deps: { secrets: SecretsStore }): Record<string, Handler> {
   return {
     'main.ping': () => ({ process: 'main' }),
-    'secrets.get': () => ({ secrets: null }),
+    'secrets.get': secretsGetHandler(deps.secrets),
   };
 }

@@ -5,7 +5,7 @@ owner: felix/agent-1
 deps: [renderer-scaffold]
 touches: [packages/renderer/src/app/explorer,packages/renderer/src/app/schema,packages/renderer/src/styles.css,vendor]
 prio: 1
-lease_until: 2026-11-16T19:04:29Z
+lease_until: 2026-11-16T19:19:38Z
 releases: 0
 extended: 
 hold: 
@@ -29,3 +29,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 19:26+0100 by felix/agent-1): Demo JSON is imported as a module (import demo from assets/samples/canopy-demo.json) rather than fetched at runtime: no asset config or fetch needed, works under file:// and the CSP.
 - ASSUMPTION (2026-11-16 19:26+0100 by felix/agent-1): Schema support (ajv) was copied as-is but is not wired to anything yet. Ajv compiles validators with new Function, which the renderer CSP (script-src 'self', no unsafe-eval) will block; whoever enables schema validation must use ajv standalone code or relax the CSP.
 - ASSUMPTION (2026-11-16 19:26+0100 by felix/agent-1): Edited BRIEF.md and the AGENTS.md project note to drop the ../json-master-plugin and vendor/ paths, because acceptance criterion 4 requires grep to find no references outside tasks/ and reviews/. Added @typescript-eslint/no-extraneous-class allowWithDecorator for renderer files (Angular's empty decorated classes).
+- ASSUMPTION (2026-11-16 20:02+0100 by felix/agent-1): Review P3 findings CR-1 (OFL licence text not shipped with the extracted fonts) and CR-2 (docs/ARCHITECTURE.md:41 says fonts come from npm) deferred to new task font-license, to avoid another full review round for docs/licence files. CR-3 (AC4 grep hits notice.spec.ts:59, a negative assertion that NOTICE does not mention vendor/ or json-master-plugin) accepted: it is not a reference to the path.

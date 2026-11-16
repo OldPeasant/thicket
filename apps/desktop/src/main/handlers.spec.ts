@@ -15,31 +15,43 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
+import { SecretsStore } from '../secrets';
+import { FakeSafeStorage } from '../secrets/testing';
 import { DEFAULT_SETTINGS, SettingsStore } from '../settings/store';
 import { Broadcaster } from './broadcast';
 import { mainHandlers, privilegedHandlers } from './handlers';
 
 const ctx = { signal: new AbortController().signal, requestId: '1' };
 
+/** A store whose file never exists: reads find nothing, these tests write nothing. */
+function emptyStore() {
+  return new SecretsStore({
+    file: '/nonexistent/thicket-test/secrets.bin',
+    safeStorage: new FakeSafeStorage(),
+    platform: 'linux',
+  });
+}
+const deps = (version: string) => ({ version, secrets: emptyStore() });
+
 describe('main handlers', () => {
   it('app.ping answers with the process and version', () => {
-    const result: unknown = mainHandlers({ version: '1.2.3' })['app.ping']?.({} as never, ctx);
+    const result: unknown = mainHandlers(deps('1.2.3'))['app.ping']?.({} as never, ctx);
     expect(result).toEqual({ process: 'main', version: '1.2.3' });
     expect(parseResult('app.ping', result).ok).toBe(true);
   });
 
-  it('the privileged handlers answer within their contract (secrets stub: none stored)', () => {
-    const handlers = privilegedHandlers();
+  it('the privileged handlers answer within their contract (nothing stored)', async () => {
+    const handlers = privilegedHandlers({ secrets: emptyStore() });
     const ping: unknown = handlers['main.ping']?.({} as never, ctx);
-    const secrets: unknown = handlers['secrets.get']?.({ profileId: 'p' } as never, ctx);
+    const secrets: unknown = await handlers['secrets.get']?.({ profileId: 'p' } as never, ctx);
     expect(parseResultIn(privilegedMethods, 'main.ping', ping).ok).toBe(true);
     expect(secrets).toEqual({ secrets: null });
     expect(parseResultIn(privilegedMethods, 'secrets.get', secrets).ok).toBe(true);
   });
 
   it('main handlers and privileged handlers do not share a method name', () => {
-    const main = Object.keys(mainHandlers({ version: '0' }));
-    const privileged = Object.keys(privilegedHandlers());
+    const main = Object.keys(mainHandlers(deps('0')));
+    const privileged = Object.keys(privilegedHandlers({ secrets: emptyStore() }));
     expect(main.filter((name) => privileged.includes(name))).toEqual([]);
   });
 });
@@ -72,8 +84,8 @@ describe("a window's main port (served with the renderer contract)", () => {
       table: methods,
       route: 'main',
       handlers: {
-        ...mainHandlers({ version: '9.9.9' }),
-        ...privilegedHandlers(),
+        ...mainHandlers(deps('9.9.9')),
+        ...privilegedHandlers({ secrets: emptyStore() }),
         'secrets.get': secretsGet,
       },
     });
@@ -94,7 +106,7 @@ describe("a window's main port (served with the renderer contract)", () => {
 
   it('refuses backend methods sent to main and inherited object keys as method names', async () => {
     const port = fakePort();
-    serve(port, { table: methods, route: 'main', handlers: mainHandlers({ version: '1' }) });
+    serve(port, { table: methods, route: 'main', handlers: mainHandlers(deps('1')) });
     port.push({ id: 'b', method: 'backend.sleep', params: { ms: 10 } });
     port.push({ id: 'p', method: '__proto__', params: {} });
     port.push({ id: 'c', method: 'constructor', params: {} });
@@ -110,9 +122,10 @@ describe("a window's main port (served with the renderer contract)", () => {
 });
 
 describe('the privileged port (main side)', () => {
-  it('serves main.ping and the secrets stub, and validates secrets.get params', async () => {
+  it('serves main.ping and secrets.get, and validates secrets.get params', async () => {
     const port = fakePort();
-    serve(port, { table: privilegedMethods, route: 'main', handlers: privilegedHandlers() });
+    const handlers = privilegedHandlers({ secrets: emptyStore() });
+    serve(port, { table: privilegedMethods, route: 'main', handlers });
     port.push({ id: 'b1', method: 'main.ping', params: {} });
     port.push({ id: 'b2', method: 'secrets.get', params: { profileId: 'p1' } });
     port.push({ id: 'b3', method: 'secrets.get', params: {} });
@@ -151,8 +164,8 @@ describe('app.settings handlers', () => {
   }
 
   it('are only served when a settings store is given', () => {
-    expect(mainHandlers({ version: '1' })['app.settings.get']).toBeUndefined();
-    expect(mainHandlers({ version: '1', settings: fakeStore() })['app.settings.get']).toBeDefined();
+    expect(mainHandlers(deps('1'))['app.settings.get']).toBeUndefined();
+    expect(mainHandlers({ ...deps('1'), settings: fakeStore() })['app.settings.get']).toBeDefined();
   });
 
   it('get and set go to the store over the renderer contract; invalid values are refused', async () => {
@@ -161,7 +174,7 @@ describe('app.settings handlers', () => {
     serve(port, {
       table: methods,
       route: 'main',
-      handlers: mainHandlers({ version: '1', settings: store }),
+      handlers: mainHandlers({ ...deps('1'), settings: store }),
     });
     port.push({ id: 'g', method: 'app.settings.get', params: {} });
     port.push({ id: 's', method: 'app.settings.set', params: { settings: { style: 'tron' } } });
@@ -189,7 +202,7 @@ describe('app.settings handlers', () => {
     serve(port, {
       table: methods,
       route: 'main',
-      handlers: mainHandlers({ version: '1', settings: store }),
+      handlers: mainHandlers({ ...deps('1'), settings: store }),
       onError,
     });
     port.push({ id: 'f', method: 'app.settings.set', params: { settings: { mode: 'dark' } } });
@@ -215,7 +228,7 @@ describe('app.settings with the real store and broadcaster (as wired in index.ts
       serve(port, {
         table: methods,
         route: 'main',
-        handlers: mainHandlers({ version: '1', settings: store }),
+        handlers: mainHandlers({ ...deps('1'), settings: store }),
       });
 
       port.push({ id: 's', method: 'app.settings.set', params: { settings: { mode: 'dark' } } });
