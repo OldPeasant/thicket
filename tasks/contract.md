@@ -13,7 +13,8 @@ Implement SPEC.md section 4 in packages/contract: envelope types, stable error c
 ## Acceptance criteria
 - [x] Unit tests: every method has a schema; valid sample params parse, invalid ones fail with a readable message
   - verified (2026-11-16 19:07+0100 by dell26/agent-2): cd packages/contract && npx vitest run --reporter=verbose -> 596 passed; 66/66 methods 'has params and result schemas and a sample', 66 'accepts its valid sample', 66 'rejects its invalid sample with a readable message' (INVALID_PARAMS, 'Invalid params for <method>:' + zod prettifyError with field path)
-- [ ] Documents are typed as canonical EJSON strings in every params/result type (test asserts no `object` doc fields)
+- [x] Documents are typed as canonical EJSON strings in every params/result type (test asserts no `object` doc fields)
+  - verified (2026-11-16 19:07+0100 by dell26/agent-2): cd packages/contract && npx vitest run --reporter=verbose -> 66/66 '<method> has no object or free-form document fields' pass (schema walker over params/result/stream rejects z.object/unknown/record for document fields; walker self-test catches a plain object doc field)
 - [ ] Writes (`docs.insert/update/replace/delete/updateMany/deleteMany`, `idx.create/drop`, `db/coll.drop` …) carry `profileId` and optional `confirmed: boolean`; a test lists all write methods and checks this
 - [ ] `npm run check` passes; no `any` in the package (lint rule on)
 
