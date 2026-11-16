@@ -11,7 +11,8 @@ lease_until: 2026-11-16T19:49:51Z
 Playwright `_electron` launches the built app with an isolated userData dir; helpers to start a MongoDB fixture from int-harness when available; `npm run test:e2e`.
 
 ## Acceptance criteria
-- [ ] `npm run test:e2e` builds the app and a smoke test sees the main window title (xvfb-run on Linux)
+- [x] `npm run test:e2e` builds the app and a smoke test sees the main window title (xvfb-run on Linux)
+  - verified (2026-11-16 20:32+0100 by felix/agent-2): npm run test:e2e on Fedora Linux at 493a462 (builds renderer + apps/desktop bundles, then playwright test) -> 17 passed; smoke.e2e.ts asserts toHaveTitle('Thicket'). Ran with the session's Wayland display (app log shows ozone/platform/wayland), NOT under xvfb-run: xvfb-run is not installed here
 - [ ] Each test gets a fresh temporary userData directory (assert no writes to the real one)
 - [ ] Screenshot on failure saved under test-results/ (git-ignored)
 
