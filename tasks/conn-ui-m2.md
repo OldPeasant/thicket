@@ -15,3 +15,7 @@ Extend the connection editor with SSH tab, certificate fields, proxy and read pr
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+From x509-proxy review (CR-2, CR-3): the form must not allow `tls.keyFile` without
+`tls.certificateKeyFile` (the backend ignores such a key file) nor `readPreferenceTags` with
+`readPreference` `primary` or unset (the driver ignores the tags). Proxy password = secret kind
+`proxyPassword`; tag sets are `{ name, value }` pairs.
