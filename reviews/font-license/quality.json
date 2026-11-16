@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "task": "font-license",
+  "reviewed_revision": "45adc25d0f3b73ca511e678e3ca404b06a881257",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/font-license/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/font-license/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/font-license/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "TW-1",
+      "source": "test-writer",
+      "severity": "Low",
+      "disposition": "fixed",
+      "note": "Share Tech Mono copyright line in OFL.txt had a trailing period not present in the font's embedded notice; removed, copyright test now matches whole lines"
+    }
+  ],
+  "validation": [
+    { "command": "npm run build -w packages/renderer && cmp packages/renderer/dist/media/OFL.txt packages/renderer/src/assets/fonts/OFL.txt", "result": "pass" },
+    { "command": "npm run check (.taskcheck)", "result": "pass" }
+  ]
+}
