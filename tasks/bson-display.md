@@ -5,7 +5,7 @@ owner: felix/agent-2
 deps: [explorer-copy,bson-model,themes]
 touches: [packages/renderer/src/app/explorer]
 prio: 1
-lease_until: 2026-11-16T20:35:20Z
+lease_until: 2026-11-16T20:40:22Z
 ---
 ## Goal
 Adapt the explorer to the BSON model: type badges and colors per type, Date in local time with timezone and UTC toggle, Int64/Decimal128 exact display, Binary/UUID display, deprecated types read-only.
