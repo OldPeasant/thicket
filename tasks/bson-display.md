@@ -15,7 +15,8 @@ Adapt the explorer to the BSON model: type badges and colors per type, Date in l
   - verified (2026-11-16 21:23+0100 by felix/agent-2): cd packages/renderer && npx ng test --include='src/app/explorer/bson-*.spec.ts' -> 58 passed; bson-display.spec.ts 'shows the correct badge for every value of the all-types fixture' renders @thicket/core/testing ALL_TYPES_EJSON (49 fields, all 21 types) in JsonExplorerComponent and asserts each field's badge (ObjectId, Double, Binary 0xNN, UUID, Int64, Decimal128, Code w/ scope, deprecated ...); plus tables layout and color-token tests
 - [x] Numbers never lose precision on display (Int64 9007199254740993, Decimal128 with 34 digits) (test)
   - verified (2026-11-16 21:23+0100 by felix/agent-2): same run -> 'never loses precision on Int64 and Decimal128' shows 9007199254740993, 1234567890123456789012345678901234 and 0.1234567890123456789012345678901234 exactly; 'fixture extremes' shows int64 min/max and 9.999999999999999999999999999999999E+6144 exactly
-- [ ] Search still works across BSON values (test)
+- [x] Search still works across BSON values (test)
+  - verified (2026-11-16 21:23+0100 by felix/agent-2): same run -> 'finds BSON values by their exact text' (Int64, Decimal128, ObjectId, UUID, Date local then after UTC toggle), 'finds BSON values in context mode and is case-insensitive', 'finds values nested in documents and arrays' pass; full npx ng test 571 passed
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
