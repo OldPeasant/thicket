@@ -17,3 +17,4 @@ docs.find (filter, projection, sort, collation, limit) streaming pages as EJSON,
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 22:16+0100 by felix/agent-2): docs.find gets an optional fromEnd flag (last page with the reversed sort): paging-core's lastPage needs it and the contract had no way to express it; the backend reverses rows read backwards (before/fromEnd) so batches always arrive in display order
