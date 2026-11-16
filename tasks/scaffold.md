@@ -11,7 +11,8 @@ lease_until: 2026-11-16T17:40:57Z
 Create the npm-workspaces monorepo described in docs/ARCHITECTURE.md (apps/desktop, packages/contract, packages/core, packages/backend, packages/renderer as empty but buildable workspaces) with TypeScript strict, ESLint, Prettier, Vitest and V8 coverage.
 
 ## Acceptance criteria
-- [ ] `npm ci && npm run check` on a clean clone runs lint + type check + unit tests of every workspace and passes (each workspace has at least one trivial spec); time it, must be < 2 min
+- [x] `npm ci && npm run check` on a clean clone runs lint + type check + unit tests of every workspace and passes (each workspace has at least one trivial spec); time it, must be < 2 min
+  - verified (2026-11-16 18:21+0100 by dell26/agent-1): fresh git clone of ef8b880 into out/clean-clone, Node v24.21.0 npm 11.19.0: npm ci -> 24.1 s; npm run check (eslint+prettier, tsc root + 5 workspaces, vitest 5 projects) -> 5 files/5 tests passed in 3.5 s; total ~28 s < 2 min
 - [ ] `npm run coverage` writes `coverage/coverage-summary.json` and lcov per workspace; the task-scoped command in docs/ARCHITECTURE.md "Coverage" works as written (run it on one file)
 - [ ] `sh .taskcheck` passes (it switches to `npm run check` now that package.json exists)
 - [ ] Node version pinned (`engines` + `.nvmrc` = 24); README.md has a 5-line dev quick start
