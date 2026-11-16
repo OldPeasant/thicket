@@ -13,7 +13,8 @@ docs.insert/update/replace/delete; update takes the diff and expected values and
 ## Acceptance criteria
 - [x] Integration tests: update succeeds; concurrent change → CONFLICT with server doc; delete; insert returns _id
   - verified (2026-11-16 23:59+0100 by felix/agent-2): npx vitest run --config test/integration/vitest.config.ts docs-write (Podman, mongo 8.x replica set fixture, handlers behind guardWrites + contract validation) -> 20 passed; covers update ok, concurrent change -> CONFLICT with current server doc (and null when deleted), delete by _id, insert returns _ids (generated ObjectId + given)
-- [ ] updateMany/deleteMany preview count equals the affected count of the execute step (int test)
+- [x] updateMany/deleteMany preview count equals the affected count of the execute step (int test)
+  - verified (2026-11-16 23:59+0100 by felix/agent-2): same int run -> 'updateMany: the preview count equals the matched and modified count', 'deleteMany: the preview count equals the deleted count', pipeline+collation variant: passed
 - [ ] Read-only and unconfirmed-production writes refused (int test)
 
 ## Notes
