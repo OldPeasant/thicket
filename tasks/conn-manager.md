@@ -1,10 +1,11 @@
 ---
 title: M1: Connection manager: SCRAM, TLS, SRV, test, errors, write guard
-status: todo
-owner:
+status: in_progress
+owner: dell26/agent-2
 deps: [profiles-store,int-harness,uri-model]
 touches: [packages/backend/src/connections,packages/backend/src/guard]
 prio: 1
+lease_until: 2026-11-16T19:46:25Z
 ---
 ## Goal
 Backend conn.test/open/close/status/serverInfo; builds MongoClient options from profile + secrets (SCRAM-SHA-1/256, TLS with CA file, allow-invalid flags, SRV, directConnection); classifies errors (DNS, TLS, AUTH_FAILED, TIMEOUT); a guard every write handler uses: READ_ONLY on read-only profiles, confirmation required on production profiles.
