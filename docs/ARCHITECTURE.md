@@ -1,6 +1,7 @@
 # Architecture
 
-Status: **planned** — nothing is built yet. The M0 tasks create what this file describes. Keep this
+Status: **M0 in progress** — the workspace scaffold exists (empty workspaces with one spec each);
+the other M0 tasks create the rest of what this file describes. Keep this
 file current when the structure changes: agents read it before every task.
 
 ## Stack
@@ -17,6 +18,15 @@ file current when the structure changes: agents read it before every task.
 | Contract validation | `zod` |
 | Tests | Vitest (+ `@vitest/coverage-v8`), Testcontainers, Playwright (`_electron`) |
 | Lint/format | ESLint (typescript-eslint, angular-eslint), Prettier |
+
+Versions installed by the scaffold (root `devDependencies`): TypeScript `~6.0.3` (Angular 22 and
+typescript-eslint 8 both require `<6.1`, so not TypeScript 7), Vitest + `@vitest/coverage-v8` 5.1,
+ESLint 10 flat config (`eslint.config.mjs`) with typescript-eslint 8.72 `strict` + `stylistic`
+(not type-aware, to keep the check fast), `eslint-config-prettier`, Prettier 3.10, `@types/node` 24.
+Vitest uses `test.projects` in the root `vitest.config.ts` (`vitest.workspace.ts` is deprecated);
+each workspace's `vitest.config.ts` calls `workspaceConfig()` from `vitest.shared.ts`.
+Workspace packages are named `@thicket/<folder>` and export their TypeScript source
+(`"exports": "./src/index.ts"`) until a build task needs compiled output.
 
 Library choices other than Electron, Angular and the MongoDB driver may be changed by the M0 stack
 task if it finds a better fit; record the change here and with `tasks.py assume`.
@@ -92,8 +102,12 @@ Windows: run `.taskcheck` and npm scripts from Git for Windows' bash (TFP runs t
 - Reports: `coverage/` in each workspace (git-ignored).
 - Task-scoped coverage for the test-writer:
   `npx vitest run --coverage --coverage.include='<changed file>' --coverage.include='<…>'`
-  in the workspace of the changed files; get the list with
+  in the workspace of the changed files (`cd packages/core`, paths relative to that workspace, e.g.
+  `--coverage.include='src/index.ts'`); get the list with
   `git diff --name-only $(git merge-base HEAD origin/main) -- '*.ts'`.
+- Not part of any workspace, lint, Prettier or Vitest: `dashboard/` (TFP's own Angular app), the TFP
+  Python files, `tasks/`, `reviews/`, `.claude/` and Markdown docs (see `.prettierignore`, the
+  `ignores` in `eslint.config.mjs`, the explicit `workspaces` list and `test.projects`).
 - No repository-wide percentage is enforced.
 
 ## Conventions

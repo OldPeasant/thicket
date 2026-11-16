@@ -1,0 +1,16 @@
+{
+  "name": "@thicket/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pure TS shared by renderer and backend (no Node or Electron APIs)",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage"
+  }
+}

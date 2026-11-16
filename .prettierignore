@@ -1,0 +1,17 @@
+# TFP tooling and task board: not part of Thicket
+dashboard/
+tasks/
+.claude/
+reviews/
+BOARD.md
+board.html
+*.py
+# Human-written docs keep their own formatting
+*.md
+# Generated
+package-lock.json
+node_modules/
+dist/
+out/
+coverage/
+.angular/

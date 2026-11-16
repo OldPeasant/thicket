@@ -1,0 +1,16 @@
+{
+  "name": "@thicket/renderer",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Angular renderer (replaced by the renderer-scaffold task)",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage"
+  }
+}
