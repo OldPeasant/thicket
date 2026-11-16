@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "task": "secrets-store",
+  "reviewed_revision": "f4b5bd2a015581ed583967c052140bf7ea4f669e",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/secrets-store/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/secrets-store/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/secrets-store/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "CR-1 (pass 1)",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "delete()/profiles.clearSecret refuse with UNSUPPORTED while encryption is unavailable and secrets.bin exists (fixer, commit e5b36ac)"
+    },
+    {
+      "id": "CR-2 (pass 1)",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "on a weak backend an undecryptable keyring file is kept and the store locked for the session instead of moved aside (fixer, commit e5b36ac)"
+    },
+    {
+      "id": "CR-1 (pass 2)",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "pass-1 CR-2 fix locked on any decrypt failure; now only v11 (keyring) ciphertext locks, v10/garbage/plain files are moved aside; real basic_text v10 asserted in secrets.electron.spec.ts (parent worker, commit 4ca6a19; reviewed in pass 3, no findings)"
+    }
+  ],
+  "validation": [
+    { "command": "npm run check", "result": "pass (vitest 1530, renderer 181)" },
+    { "command": "npx vitest run --project desktop --project contract", "result": "pass (865)" },
+    { "command": "npm run test:electron", "result": "pass (17)" }
+  ]
+}
