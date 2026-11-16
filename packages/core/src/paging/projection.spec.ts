@@ -85,4 +85,28 @@ describe('projectionWithSortKeys', () => {
     const neutral = { s: { $meta: 'textScore' } };
     expect(projectionWithSortKeys(neutral, DEFAULT_SORT)).toEqual(neutral);
   });
+
+  // --- Added by the test-writer (final revision). ---
+
+  it('literal values (arrays, null) make an inclusion projection, so sort fields are added', () => {
+    const sort: SortSpec = [asc('name'), asc('_id')];
+    expect(projectionWithSortKeys({ copy: [1, 2] }, sort)).toEqual({ copy: [1, 2], name: 1 });
+    expect(projectionWithSortKeys({ flag: null }, sort)).toEqual({ flag: null, name: 1 });
+  });
+
+  it('a field sharing only a name prefix with a sort field is not treated as related', () => {
+    const sort: SortSpec = [asc('name'), asc('_id')];
+    // Exclusion: `nameFull` is neither `name`, nor a parent or child path of it.
+    expect(projectionWithSortKeys({ nameFull: 0 }, sort)).toEqual({ nameFull: 0 });
+    // Inclusion: `nameFull: 1` does not cover `name`, so `name` is still added.
+    expect(projectionWithSortKeys({ nameFull: 1 }, sort)).toEqual({ nameFull: 1, name: 1 });
+  });
+
+  it('inclusion: a sibling path under _id does not cover another _id path sort key', () => {
+    expect(projectionWithSortKeys({ '_id.a': 1, name: 1 }, [asc('_id.b')])).toEqual({
+      '_id.a': 1,
+      name: 1,
+      '_id.b': 1,
+    });
+  });
 });

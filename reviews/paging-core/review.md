@@ -4,28 +4,36 @@ Date: 2026-11-16
 
 Task: paging-core - Core: collection paging strategy
 
-Scope: committed changes of task `paging-core`, `git diff cd1dd9a..48dbb37 -- packages/core` (new `packages/core/src/paging/{sort,range,state,index}.ts`, `range.spec.ts`, `state.spec.ts`, re-export in `packages/core/src/index.ts`). Uncommitted test files added concurrently by the test-writer were ignored.
+Scope: re-review of the final revision of task `paging-core`, `git diff cd1dd9a..364355d -- packages/core` (`packages/core/src/paging/{sort,range,state,projection,index}.ts` and their specs, re-export in `packages/core/src/index.ts`). Focus: resolution of CR-1..CR-5 from the first review and the new code (null-inclusive lower bounds in `range.ts`, `projection.ts`, the collation flag, `canNext`). Current HEAD `6673d52` is a rebase of the same commits; `git diff 364355d 6673d52 -- packages/core` is empty. Uncommitted spec changes added concurrently by the test-writer (`projection.spec.ts`, `state.spec.ts`) were not reviewed.
 
 Requirements:
-- `tasks/paging-core.md` acceptance criteria and the three recorded assumptions (`python tasks.py assumptions`)
-- `SPEC.md` "Paging" (line 90-92), "Collection view" query bar (line 88: filter, projection, sort, collation, limit)
-- `docs/ARCHITECTURE.md` (`packages/core` is pure TS paging math, no Node/Electron APIs, strict, no `any`)
-- `packages/contract/src/docs.ts` (`docs.find` with `skip`/`limit`/`after`/`before`)
-- `docs/QUALITY.md` (report contract)
+- `tasks/paging-core.md` acceptance criteria and the four recorded assumptions (`python tasks.py assumptions`)
+- `SPEC.md` "Paging" (line 90-92: first/previous/next/last/jump, range paging, estimated count by default) and the query bar (projection, collation)
+- `docs/ARCHITECTURE.md` (`packages/core` is pure TS, strict, no Node/Electron APIs)
+- `reviews/paging-core/fixes.md` (claimed fixes)
+- MongoDB query semantics: type bracketing of `$gt`/`$lt`, `$eq: null` matching null and missing, null/missing sorting below other types, projection inclusion/exclusion rules (4.4+)
 
 Git range:
 - Branch: main
-- HEAD: 861507151e86b1ff2d5f27169e6c459f4bdc7ec8 (48dbb37 is the code commit; later commits touch only `tasks/`)
+- HEAD: 364355d773c8c43163f4d8f15c120a1145b1c37c (reviewed revision; rebased as 6673d526ac91328c02d83e4fad45b716b76a3f41 with identical code)
 - Base/start: cd1dd9a41a0767be0d4846e95bdd61763eecbcfa
-- Commits reviewed: 1 (48dbb37376281e0f7b5b19eeb867a6877572ae88; the `assume:` commits change only `tasks/paging-core.md`)
+- Commits reviewed: 3 (a96845b implementation, 0f020c1 tests and reports, 364355d fixes)
 
 Commands run (read-only):
-- `git log --oneline cd1dd9a..HEAD`, `git diff --stat cd1dd9a..48dbb37`, `git show 48dbb37:<spec files>`
-- `python tasks.py assumptions`
-- Reading `SPEC.md`, `docs/ARCHITECTURE.md`, `docs/QUALITY.md`, `packages/contract/src/docs.ts`, all changed sources
-- Running `npx vitest run src/paging/...` and `tsc --noEmit` was attempted but denied by the sandbox; findings below are from static analysis and hand-traced examples.
+- `git log --oneline cd1dd9a..364355d`, `git diff --stat cd1dd9a..364355d`, `git diff 364355d HEAD --stat -- packages/core` (empty)
+- `git diff a96845b 364355d -- packages/core/src/paging/range.ts packages/core/src/paging/state.ts`
+- Reading all of `range.ts`, `state.ts`, `projection.ts`, `sort.ts`, `index.ts` and the spec files (including the fake server in `state.spec.ts`)
+- `cd packages/core && npx vitest run src/paging` -> 4 files, 100 tests passed (working tree, including the test-writer's uncommitted spec additions)
 
-Summary: 0 P0, 1 P1, 2 P2, 2 P3
+Summary: 0 P0, 0 P1, 0 P2, 1 P3
+
+## Disposition of the earlier findings
+
+- **CR-1 (P1, null/missing sort keys dropped by range bounds): resolved.** `rangeFilter` (`range.ts:78-87`) now adds an `{...prefix, k: {$eq: null}}` clause wherever a key must be "lower" than a non-null bound, and the top-level first-key bound is only `$gte` on the "greater" side (`range.ts:93-95`). Traced by hand for `after`/`before` on ascending and descending, single and compound keys, and for null bounds (`$ne: null, $not: {$type: 'minKey'}` / `$type: 'minKey'`): every clause matches exactly the rows strictly beyond the bound in MongoDB order for null/missing plus one non-null type per key. Mixed non-null BSON types remain out of scope by recorded assumption and are documented in the JSDoc. Covered by `range.spec.ts` and the fake-server walks in `state.spec.ts` "documents missing a sort key" (descending forward, ascending backward, ascending forward from the null rows).
+- **CR-2 (P2, canNext false after a short `before` page): resolved** for the reported case: `canNext` (`state.ts:162-166`) relies on `page.isLast` and the exact count only; `pageLoaded` never sets `isLast` for a `before` read. Tested in `state.spec.ts:557-575` and `:610-628`. A remaining edge of the empty-`before` case is CR-1 below.
+- **CR-3 (P2, sort keys projected away): resolved** as an explicit caller contract: `projectionWithSortKeys` (`projection.ts`) plus JSDoc on `rangeFilter` and `pageLoaded`, and a recorded assumption. Checked against MongoDB rules: `$slice`/`$meta` alone are neutral (exclusion-style), literals/expressions/`$elemMatch` make an inclusion projection, `_id` is returned by default unless excluded, overlapping child paths are replaced to avoid path collisions, exclusions of the field/parent/child are removed in exclusion mode. Tested in `projection.spec.ts` and a projected fake-server walk.
+- **CR-4 (P3, collation ignored): resolved.** `PagingOptions.collation` / `PagingState.collation` force skip mode (`state.ts:96-98`), `setSort` carries the flag, `setPageSize`/`resetPaging` keep it via spread. Tested.
+- **CR-5 (P3, lastPage for opaque sort without count; dead empty-sort branch): resolved.** Behaviour documented in the `lastPage` JSDoc; the empty-sort branch is now reachable (skip mode with a collation and no sort) and tested.
 
 ## P0 Critical
 
@@ -33,47 +41,23 @@ None.
 
 ## P1 High
 
-- [ ] **CR-1 | Range paging silently drops rows whose sort key is null/missing (descending sorts) or of another BSON type**
-    - File: `packages/core/src/paging/range.ts:130-137` and `:171-174`; mode choice in `packages/core/src/paging/sort.ts:78-89`
-    - Category: Correctness
-    - Problem: `strictBeyond` only special-cases a *null bound*. For a non-null bound it emits a plain `$gt`/`$lt`, which in MongoDB only matches values of the same BSON type (type bracketing). In a descending sort, null/missing values sort *after* all strings/numbers, so they can never be reached. Example: sort `{lastName: -1, _id: 1}` (range pageable because `_id` is included) on a collection where some documents lack `lastName`. Bound from the last row of a string page `{lastName: "Adams", _id: X}` gives `{lastName: {$lte: "Adams"}, $or: [{lastName: {$lt: "Adams"}}, {lastName: {$eq: "Adams"}, _id: {$gt: X}}]}`: no clause matches `lastName: null`/missing, so after the last string page the result comes back short, `pageLoaded` marks it `isLast`, and every document without `lastName` is never shown. The same happens for `before` in ascending sorts (going back from strings into the leading null region, e.g. after a far jump) and for any real mixed-type field (numbers and strings, ObjectId and string `_id`). `isRangePageable` selects range mode for any sort containing `_id` without any way to know the key types, so the "one BSON type per sort key" assumption cannot be upheld by callers. Missing optional fields are the normal case in MongoDB, so this is reachable in ordinary use of the collection view.
-    - Why it matters: AC 2 requires range bounds to be built correctly for descending and compound sorts; a database explorer that silently omits documents (and reports the shortened page as the last page) is a data-visibility defect the user cannot detect.
-    - Suggested fix: at minimum, add the null region in the direction where it lies beyond the bound: for "later" in descending order (`after` on a `-1` key, `before` on a `1` key) include `{field: {$eq: null}}` (and MinKey where applicable) as an extra disjunct, and drop the top-level `$gte`/`$lte` prefix narrowing in that case or widen it. For full type safety, either add disjuncts for the BSON types that sort beyond the bound's type (`$type` lists in canonical type order), or restrict range mode to sorts on `_id` only / fall back to skip mode for secondary keys. Add `walk` tests whose fixture contains documents with a missing secondary sort key, in ascending and descending order (the in-memory server in `state.spec.ts` already models type bracketing, so such a test would fail today).
+None.
 
 ## P2 Medium
 
-- [ ] **CR-2 | A short `before` page becomes page 1 but disables Next and can leave an empty page 1**
-    - File: `packages/core/src/paging/state.ts:240-243` together with `:134-140`
-    - Category: Correctness
-    - Problem: when a `before` request returns fewer rows than `limit`, `pageLoaded` sets `pageIndex = 0` and `isLast = false`, but `canNext` then returns `false` because of the "short page means the end" rule (`state.page.rows >= state.pageSize`). Rows still follow (the page the user came from). Concrete flows: estimated count of 120 with 70 real rows (or no count): Last reads rows 20-69 at index 2 (or 1), Previous returns 20 rows, the state says page 1 and Next is disabled. With a filter and the (collection-wide) estimated count, Last reads the few matching rows at a large index; Previous issues `before` from the first row, gets 0 rows, and the view shows an empty page 1 with `first/last = null` and Next disabled, recoverable only via First. The committed test `a short "before" page means the start was reached` asserts the index and `canPrevious` but not `canNext` or the row content of page 1.
-    - Why it matters: SPEC requires first/previous/next/last/jump paging; the state machine reaches a state where valid navigation is blocked and page 1 shows the wrong (or no) rows. Estimated counts are the SPEC default, so approximate indexes are common.
-    - Suggested fix: when a `before` read is short, don't present it as page 1; either have the caller re-read `firstPage` (e.g. return a state flag / follow-up request), or record that the start was reached separately from `isLast` and make `canNext` ignore the short-page heuristic for `before` results. Add tests for `canNext` after a short `before` and for an empty `before` result.
-
-- [ ] **CR-3 | Sort keys excluded by the user's projection become `null` bounds, breaking range paging**
-    - File: `packages/core/src/paging/state.ts:237-239`, `packages/core/src/paging/range.ts:111-120`
-    - Category: Integration
-    - Problem: `pageLoaded` derives `first`/`last` with `sortKeyValues` from the displayed documents, and `valueAtPath` maps an absent field to `null`. SPEC line 88 makes projection a Must in the query bar; with a projection such as `{_id: 0, name: 1}` on the default `{_id: 1}` sort, every bound is `{_id: null}`, so Next sends `{_id: {$ne: null, $not: {$type: "minKey"}}}` and re-reads page 1 forever; with a projection excluding a secondary key, bounds are silently wrong. `PagingOptions` has no projection input and nothing documents that the caller must keep the sort keys in the projection, so the backend/renderer task that integrates this module has no signal.
-    - Why it matters: wrong pages (repeated page 1 or skipped rows) for a normal query-bar combination, with no error.
-    - Suggested fix: either accept the projection (or a "sort keys available" flag) and fall back to skip mode when any sort key may be projected away, or make `pageLoaded`/`sortKeyValues` distinguish an absent key from a null value and fall back to skip for the next request; at least document the requirement on `pageLoaded` and add a test.
+None.
 
 ## P3 Low
 
-- [ ] **CR-4 | Range mode ignores collation**
-    - File: `packages/core/src/paging/sort.ts:78-89`, `packages/core/src/paging/state.ts:66-73`
+- [ ] **CR-1 | After an empty `before` result, Next skips page 1's rows**
+    - File: `packages/core/src/paging/state.ts:174-186` (`nextPage`), `:275-280` (`pageLoaded`), `:162-166` (`canNext`)
     - Category: Correctness
-    - Problem: the query bar supports a collation (SPEC line 88). With a non-simple collation (e.g. strength 2), distinct string `_id`s or unique-index values (`"A"` and `"a"`) compare equal, so the sort-key tuple is no longer unique and `$gt "a"` skips `"A"`. `isRangePageable`/`createPaging` have no collation input.
-    - Why it matters: niche, but silently skips documents in range mode.
-    - Suggested fix: add a collation (or `simpleCollation: boolean`) option and use skip mode when a non-simple collation is set and any range key may hold strings; or record it as an assumption for the integrating task.
-
-- [ ] **CR-5 | `lastPage` without a count for an opaque sort is just "next page"**
-    - File: `packages/core/src/paging/state.ts:185-191`
-    - Category: Quality
-    - Problem: with `sort === null` and `count === null`, `lastPage` returns `skipRequest(state, pageIndex + 1)`, i.e. the next page, and `pageLoaded` does not mark it last unless it happens to be short. The docstring only describes the reversed-sort case. Also, the `sort.length === 0` branch is unreachable through `createPaging`/`setSort` (an empty sort always becomes range mode with `DEFAULT_SORT`), so recorded assumption #3 ("natural order in skip mode") describes dead code.
-    - Why it matters: a caller wiring a "Last" button gets surprising behaviour for `$meta` sorts before a count is known.
-    - Suggested fix: expose a `canLast(state)` (false for an opaque sort without a count) or document the behaviour; drop or test the empty-sort branch.
+    - Problem: an empty `before` read becomes page index 0 with `rows: 0`, `first`/`last` `null` and `isLast: false`. Since the CR-2 fix, `canNext` is true there, and `nextPage` has no `last` bound, so it falls back to `skipRequest(state, 1)` (`skip = pageSize`). Reachable with the SPEC-default estimated count and a filter (the estimate is collection-wide): e.g. 100 matching rows, page size 50, estimate far higher; Last reads rows 50-99 at a high index, Previous reads rows 0-49 (full page, index not 0), Previous again returns 0 rows and shows an empty page 1; Next then shows rows 50-99 as page 2, so rows 0-49 never appear on page 1 until the user clicks First. The test `an empty "before" result becomes page 1 and is not the last page` (`state.spec.ts:610-621`) asserts `canNext` true but not what Next reads (it would read `_id` 5-9 and skip 0-4). The recorded assumption says the UI layer should reload `firstPage` in this case, but the module's API (JSDoc of `pageLoaded`/`nextPage`, no flag on the state) gives the integrating caller no signal; the fixer flagged this as a residual observation.
+    - Why it matters: confusing navigation (an empty page 1 followed by page 2) in a reachable flow; no data is lost and First recovers, hence low priority.
+    - Suggested fix: smallest options: in range mode make `nextPage` return `firstPage(state)` (or a request without skip) when the current page is empty at index 0, or have `pageLoaded` mark the state so the caller reloads `firstPage` (and state this in the `pageLoaded` JSDoc); add a test asserting the rows Next reads after an empty `before` result.
 
 ## Review conclusion
 
-Material issues found; fix before completing the task.
+No material issues found.
 
-Acceptance criterion 1 (next/previous/jump/last in range and skip mode, sort switch resets to page 1) has matching unit tests in `state.spec.ts` (`walk`, `last page`, `jump to page`, `resets`), but I could not execute them here (test run denied by the sandbox), so their passing state is unverified by this review. Acceptance criterion 2 is not fully met: compound/descending bounds are correct for single-type, non-null data, but CR-1 shows descending (and ascending `before`) bounds lose null/missing and other-type rows, and no test covers such data.
+All five earlier findings are resolved in the final code, and both acceptance criteria are met: criterion 1 (next/previous/jump/last in range and skip mode, sort switch resets to page 1) and criterion 2 (range bounds for compound and descending sorts, now including null/missing keys) have matching unit tests, which pass (`npx vitest run src/paging` -> 100 passed). The only new finding (CR-1, P3) is an edge case of the estimated-count misalignment that the recorded assumption already hands to the UI layer; the parent may fix it or accept it with that assumption.

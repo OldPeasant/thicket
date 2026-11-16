@@ -691,3 +691,48 @@ describe('last page in natural order or with an opaque sort (CR-5)', () => {
     expect(lastPage(s)).toMatchObject({ pageIndex: 1, skip: 5, fromEnd: false });
   });
 });
+
+// --- Added by the test-writer for the final paging-core revision. ---
+
+describe('range mode: previous after a far jump and on page 1', () => {
+  it('previous after a skip jump continues by range with a "before" bound', () => {
+    const sort = parseSort({ group: -1, _id: 1 }) ?? [];
+    let s = setCount(createPaging({ sort, pageSize: 4 }), DOCS.length, true);
+    s = load(DOCS, s, firstPage(s)).state;
+    let r = load(DOCS, s, jumpToPage(s, 4));
+    s = r.state;
+    expect(ids(r.rows)).toEqual(expected(sort, 4, 4));
+    const prev = previousPage(s);
+    expect(prev.skip).toBeUndefined();
+    expect(prev.before).toEqual(sortKeyValues(r.rows[0], sort));
+    r = load(DOCS, s, prev);
+    expect(r.state.pageIndex).toBe(3);
+    expect(ids(r.rows)).toEqual(expected(sort, 3, 4));
+  });
+
+  it('previous on page 1 stays on page 1 without a bound', () => {
+    let s = createPaging({ pageSize: 5 });
+    s = load(DOCS, s, firstPage(s)).state;
+    expect(canPrevious(s)).toBe(false);
+    expect(previousPage(s)).toEqual(firstPage(s));
+  });
+});
+
+describe('switching sort from the last page', () => {
+  it('returns to page 1 with next available again', () => {
+    let s = setCount(createPaging({ pageSize: 5 }), DOCS.length, true);
+    s = load(DOCS, s, lastPage(s)).state;
+    expect(s).toMatchObject({ pageIndex: 4, page: { isLast: true } });
+    expect(canNext(s)).toBe(false);
+
+    const sorted = setSort(s, parseSort({ group: 1, _id: -1 }));
+    expect(sorted).toMatchObject({ pageIndex: 0, page: null, mode: 'range' });
+    expect(canNext(sorted)).toBe(true);
+    expect(canPrevious(sorted)).toBe(false);
+    const r = load(DOCS, sorted, firstPage(sorted));
+    expect(ids(r.rows)).toEqual(expected(sorted.sort ?? [], 0, 5));
+    expect(ids(load(DOCS, r.state, nextPage(r.state)).rows)).toEqual(
+      expected(sorted.sort ?? [], 1, 5),
+    );
+  });
+});
