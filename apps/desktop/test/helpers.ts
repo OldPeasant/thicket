@@ -25,14 +25,18 @@ export function headlessArgs(): string[] {
   return process.platform === 'linux' && (noDisplay || wanted) ? ['--ozone-platform=headless'] : [];
 }
 
-/** Starts the built app (`dist/`) with Playwright's Electron driver; output goes to `output`. */
+/**
+ * Starts the built app (`dist/`) with Playwright's Electron driver; output goes to `output`.
+ * `switches` are Chromium/Electron command-line switches (placed before the app path).
+ */
 export async function launchApp(
   output: string[],
   env: Record<string, string> = {},
+  switches: string[] = [],
 ): Promise<ElectronApplication> {
   const app = await _electron.launch({
     executablePath: electronPath,
-    args: [...headlessArgs(), appDir],
+    args: [...headlessArgs(), ...switches, appDir],
     env: { ...process.env, ELECTRON_ENABLE_LOGGING: '1', ...env } as Record<string, string>,
   });
   app.process().stdout?.on('data', (chunk: Buffer) => output.push(chunk.toString()));

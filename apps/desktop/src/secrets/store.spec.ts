@@ -308,3 +308,143 @@ describe('SecretsStore status', () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('SecretsStore edge cases', () => {
+  /**
+   * Like Electron on Linux without a keyring: a `basic_text` file only decrypts once the
+   * plain-text key is switched on, otherwise decryption fails like a key mismatch.
+   */
+  class StrictBasicText extends FakeSafeStorage {
+    constructor() {
+      super({ backend: 'basic_text' });
+    }
+    override decryptStringAsync(encrypted: Buffer) {
+      if (!this.plainText) return Promise.reject(new Error('plain-text key not enabled'));
+      return super.decryptStringAsync(encrypted);
+    }
+  }
+
+  it('basic_text: a fresh store switches the plain-text key on before the first read', async () => {
+    const { store } = makeStore(new StrictBasicText());
+    await store.set('p', 'password', 'weak-but-saved');
+    // A new process: get() is the first call, status() was never asked for explicitly.
+    const { store: reopened } = makeStore(new StrictBasicText());
+    expect(await reopened.get('p')).toEqual({ password: 'weak-but-saved' });
+    expect(await readdir(dir)).toEqual(['secrets.bin']);
+  });
+
+  it.each([
+    ['a missing version', '{"profiles":{}}'],
+    ['profiles null', '{"version":1,"profiles":null}'],
+    ['a profile entry that is not an object', '{"version":1,"profiles":{"p":"pw"}}'],
+    ['a profile entry that is an array', '{"version":1,"profiles":{"p":["pw"]}}'],
+    ['JSON null', 'null'],
+  ])('%s is treated as corrupt and moved aside', async (_name, text) => {
+    await writeFile(file, await new FakeSafeStorage().encryptStringAsync(text));
+    const { store } = makeStore();
+    expect(await store.kinds('p')).toEqual([]);
+    expect(await readdir(dir)).toEqual(['secrets.bin.corrupt-2026-11-16T10-20-30-456Z']);
+  });
+
+  it('a valid file with an empty profile entry loads (the empty entry is dropped)', async () => {
+    await writeFile(
+      file,
+      await new FakeSafeStorage().encryptStringAsync(
+        '{"version":1,"profiles":{"empty":{},"p":{"password":"pw"}}}',
+      ),
+    );
+    const { store } = makeStore();
+    expect(await store.get('empty')).toBeNull();
+    expect(await store.get('p')).toEqual({ password: 'pw' });
+    expect(await readdir(dir)).toEqual(['secrets.bin']);
+  });
+
+  it('a failed re-encryption is logged and the secrets are still served', async () => {
+    const { store } = makeStore();
+    await store.set('p1', 'password', 'pw');
+    const before = await readFile(file);
+    const rotating = new FakeSafeStorage({ shouldReEncrypt: true });
+    rotating.encryptStringAsync = () => Promise.reject(new Error('keyring write denied'));
+    const { store: reopened, log } = makeStore(rotating);
+    expect(await reopened.get('p1')).toEqual({ password: 'pw' });
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('keyring write denied'));
+    expect(await readFile(file)).toEqual(before);
+  });
+
+  it('a failed write rejects only that call; later operations still run', async () => {
+    const safeStorage = new FakeSafeStorage();
+    const { store } = makeStore(safeStorage);
+    await store.set('p', 'password', 'first');
+    const encrypt = safeStorage.encryptStringAsync.bind(safeStorage);
+    safeStorage.encryptStringAsync = () => Promise.reject(new Error('encrypt failed'));
+    const failing = store.set('p', 'password', 'lost');
+    const queued = store.get('p');
+    await expect(failing).rejects.toThrow('encrypt failed');
+    // The failed write did not change the in-memory state.
+    expect(await queued).toEqual({ password: 'first' });
+    safeStorage.encryptStringAsync = encrypt;
+    await store.set('p', 'password', 'second');
+    const { store: reopened } = makeStore();
+    expect(await reopened.get('p')).toEqual({ password: 'second' });
+  });
+
+  it('overlapping set/delete on one profile apply in call order', async () => {
+    const { store } = makeStore();
+    const ops = [
+      store.set('p', 'password', 'a'),
+      store.delete('p'),
+      store.set('p', 'sshPassword', 'b'),
+      store.set('p', 'password', 'c'),
+      store.delete('p', 'sshPassword'),
+    ];
+    await Promise.all(ops);
+    expect(await store.get('p')).toEqual({ password: 'c' });
+    const { store: reopened } = makeStore();
+    expect(await reopened.get('p')).toEqual({ password: 'c' });
+  });
+
+  it('while encryption is unavailable, delete leaves an existing file untouched', async () => {
+    const { store } = makeStore();
+    await store.set('p', 'password', 'pw');
+    const before = await readFile(file);
+    const { store: locked } = makeStore(new FakeSafeStorage({ available: false }));
+    await locked.delete('p');
+    await locked.delete('p', 'password');
+    expect(await readFile(file)).toEqual(before);
+    expect(await readdir(dir)).toEqual(['secrets.bin']);
+  });
+
+  it('a write into a missing folder rejects with the write error and stays consistent', async () => {
+    const store = new SecretsStore({
+      file: path.join(dir, 'missing-folder', 'secrets.bin'),
+      safeStorage: new FakeSafeStorage(),
+      platform: 'linux',
+    });
+    await expect(store.set('p', 'password', 'pw')).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await store.get('p')).toBeNull();
+    expect(await readdir(dir)).toEqual([]);
+  });
+
+  it('a failing temp-file cleanup does not hide the original write error', async () => {
+    const store = new SecretsStore({
+      file,
+      safeStorage: new FakeSafeStorage(),
+      platform: 'linux',
+      fs: {
+        readFile: () => Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' })),
+        writeFile: () => Promise.reject(new Error('ENOSPC')),
+        rename: () => Promise.resolve(),
+        rm: () => Promise.reject(new Error('EPERM on cleanup')),
+      },
+    });
+    await expect(store.set('p', 'password', 'pw')).rejects.toThrow('ENOSPC');
+  });
+
+  it('a secret value with quotes, newlines and non-ASCII round-trips', async () => {
+    const value = 'fictitious "pw"\n\\ünï©ødé key';
+    const { store } = makeStore();
+    await store.set('p', 'awsSecretAccessKey', value);
+    const { store: reopened } = makeStore();
+    expect(await reopened.get('p')).toEqual({ awsSecretAccessKey: value });
+  });
+});

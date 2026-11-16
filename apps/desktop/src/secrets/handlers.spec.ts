@@ -73,6 +73,29 @@ describe('secrets handlers', () => {
     expect((error as RpcError).code).toBe('UNSUPPORTED');
   });
 
+  it('profiles.setSecret passes other failures on unchanged (not as UNSUPPORTED)', async () => {
+    const safeStorage = new FakeSafeStorage();
+    safeStorage.encryptStringAsync = () => Promise.reject(new Error('encrypt failed'));
+    const { store, call } = setup(safeStorage);
+    const error: unknown = await call('profiles.setSecret', {
+      profileId: 'p',
+      kind: 'password',
+      value: 'fictitious-pw',
+    }).catch((e: unknown) => e);
+    expect(error).not.toBeInstanceOf(RpcError);
+    expect((error as Error).message).toBe('encrypt failed');
+    expect((error as Error).message).not.toContain('fictitious-pw');
+    expect(await store.get('p')).toBeNull();
+  });
+
+  it('profiles.clearSecret of nothing stored answers {}', async () => {
+    const { call } = setup();
+    expect(await call('profiles.clearSecret', { profileId: 'nobody' })).toEqual({});
+    expect(await call('profiles.clearSecret', { profileId: 'nobody', kind: 'oidcTokens' })).toEqual(
+      {},
+    );
+  });
+
   it('profiles.clearSecret removes one kind or all', async () => {
     const { store, call } = setup();
     await store.set('p', 'password', 'pw');
