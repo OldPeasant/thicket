@@ -19,3 +19,4 @@ which the OFL requires. `docs/ARCHITECTURE.md:41` still says fonts come from npm
 - [ ] docs/ARCHITECTURE.md describes where the fonts live (src/assets/fonts, bundled by the build)
 
 ## Notes
+- ASSUMPTION (2026-11-16 20:36+0100 by felix/agent-2): OFL.txt is copied to dist/media/ (where the build emits the hashed woff2 files) via an angular.json assets entry; angular.json is outside the task's touches list but is the only way to include it in the build output. Copyright lines taken verbatim from the fonts' name tables.
