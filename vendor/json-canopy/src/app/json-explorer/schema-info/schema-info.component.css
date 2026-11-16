@@ -1,0 +1,33 @@
+:host {
+  display: inline;
+}
+
+.info {
+  margin-left: 0.35rem;
+  color: var(--text-faint);
+  font-size: 0.75rem;
+  cursor: help;
+  /* The header may be struck through or dimmed; the icon should not be. */
+  text-decoration: none;
+}
+
+.info:hover,
+.info:focus {
+  color: var(--accent);
+  outline: none;
+}
+
+/* Fixed, so the table can neither clip nor stretch around it. */
+.pop {
+  position: fixed;
+  z-index: 50;
+  width: max-content;
+  max-width: 24rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  box-shadow: var(--shadow-pop);
+  color: var(--text);
+  cursor: default;
+}

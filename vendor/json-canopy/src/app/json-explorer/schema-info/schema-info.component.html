@@ -1,0 +1,19 @@
+@if (meta; as m) {
+  <span
+    class="info"
+    tabindex="0"
+    role="note"
+    aria-label="Schema information"
+    (mouseenter)="show($event)"
+    (mouseleave)="hide()"
+    (focus)="show($event)"
+    (blur)="hide()"
+    (click)="$event.stopPropagation()"
+    >ⓘ
+    @if (open) {
+      <span class="pop" [style.left.px]="x" [style.top.px]="y">
+        <app-schema-doc [meta]="m" />
+      </span>
+    }
+  </span>
+}
