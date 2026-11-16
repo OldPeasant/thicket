@@ -232,6 +232,23 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   aggregation + a `find` sample (default 20); `docs.updateMany` (operators or pipeline) /
   `docs.deleteMany` refuse with `CONFLICT` (no detail) when more documents match than the
   confirmed `expectedCount` (best effort: count, then write; not atomic). Write and write-concern errors in a reply → `SERVER_ERROR`.
+- Import/export (`packages/backend/src/io/`, `ioHandlers`; JSON and JSON Lines, CSV/BSON answer
+  `UNSUPPORTED` until io-advanced): routed to the backend, which asks main over the privileged port
+  for the native dialog (`dialog.saveFile` / `dialog.openFile`, `apps/desktop/src/dialogs`, parented
+  to the focused window; a cancelled dialog answers `streamId: null` / `null`). `io.export` reads
+  the find (filter, projection as given, sort, collation, hint, skip, limit) or aggregation cursor
+  in batches of 1 000 through `Operation` and writes each batch (with back pressure) before the
+  next `getMore`: JSON is one array, JSONL one document per line, relaxed EJSON unless `canonical`;
+  a failed or cancelled export removes the file. `io.previewImport` remembers the path under an
+  opaque `fileToken` (the last 100) and returns the first `sampleSize` (20) documents that parse.
+  `io.import` streams the file (`JsonScanner`: one array or documents one after another, split by
+  bracket depth, so a malformed document fails alone; `LineScanner` for JSONL), parses each value
+  with `EJSON.parse(relaxed: false)` and inserts raw `insert` commands of ≤ 1 000 docs / 8 MB.
+  `IoProgress.index` of an error is the 1-based line where the document starts; the first 100
+  errors are kept. `stopOnError` (default true) ends the stream with the first failure's error
+  after a last progress event (earlier lines stay inserted); otherwise failed documents are
+  skipped, and an ordered insert continues after the failed one. `end.delivered` is the number of
+  documents written (export) or inserted (import). `io.import` is behind the write guard.
 - Write guard (`packages/backend/src/guard/`): `startBackend` wraps every handler of a
   `WRITE_METHODS` method with `guardWrites()`, which loads the profile from main (fresh, per
   write) and throws `READ_ONLY` for read-only profiles (even when confirmed), and
@@ -287,8 +304,8 @@ Contract layout (`packages/contract/src/`):
 - Cancel routing: a request and its stream belong to the process that served the request
   (`route(method)`). The preload sends `cancel` to the owner of the target: by the request's
   method for a request id, and through a streamId → owner map (kept by the preload, filled from
-  responses with a `streamId`) for a stream id. Streams of main-routed `io.*` methods run in the
-  backend, so `main` forwards cancels of the streams it proxies to the backend (a later task).
+  responses with a `streamId`) for a stream id. `io.*` is routed to the backend (it asks main
+  for the native dialog), so its streams and cancels need no forwarding.
 - File paths: the renderer never sends paths for `io.*` (opaque tokens from native dialogs). The
   exception is the profile's TLS/SSH file paths, which are stored in the profile; the renderer
   gets them from `profiles.chooseFile` (native dialog in `main`).
