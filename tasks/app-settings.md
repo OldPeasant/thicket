@@ -13,7 +13,8 @@ Persist app settings (style, mode, page size, number default, update check on/of
 ## Acceptance criteria
 - [x] Unit tests: defaults, unknown keys dropped, corrupt file → defaults + backup of the bad file
   - verified (2026-11-16 20:04+0100 by dell26/agent-1): cd apps/desktop && npx vitest run src/settings/store.spec.ts -> 56 passed (defaults, unknown keys dropped incl. __proto__, corrupt layouts -> defaults + settings.json.corrupt-<time> backup with the original content, also when that rename fails at load: backup before first write)
-- [ ] Writes are atomic (temp file + rename) — test simulates a crash between write and rename
+- [x] Writes are atomic (temp file + rename) — test simulates a crash between write and rename
+  - verified (2026-11-16 20:04+0100 by dell26/agent-1): cd apps/desktop && npx vitest run src/settings/store.spec.ts -t 'atomic|crash' -> 10 passed: writes settings.json.tmp (flush) then renames; injected fs fails the rename (crash between write and rename) -> previous settings.json byte-identical, next start loads it and removes the stale temp file
 - [ ] Renderer gets `app.settings.changed` after a set (integration test from electron-shell's harness)
 
 ## Notes
