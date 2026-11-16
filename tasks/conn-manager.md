@@ -18,3 +18,4 @@ Backend conn.test/open/close/status/serverInfo; builds MongoClient options from 
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 20:33+0100 by dell26/agent-2): Added privileged method profiles.forConnect (contract backend.ts, served by main from ProfilesStore) so the backend can load a profile by id for conn.open/test and the write guard; the contract had no way for the backend to read profiles. Touches apps/desktop/src/main + profiles/handlers.ts beyond the task's touches.
