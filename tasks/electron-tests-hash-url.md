@@ -5,7 +5,7 @@ owner: felix/agent-2
 deps: []
 touches: [apps/desktop/test]
 prio: 2
-lease_until: 2026-11-16T20:10:03Z
+lease_until: 2026-11-16T20:15:13Z
 ---
 ## Goal
 `npm run test:electron` passes again. Since the renderer's hash router redirects to `#/`, the specs
