@@ -1,0 +1,13 @@
+/*
+ * Global styles. Only the system UI font: no web fonts from a CDN. Fonts that ship with the app
+ * (the Tron style) are bundled from npm packages by the themes task, never loaded over the network.
+ */
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  font-family: system-ui, sans-serif;
+}

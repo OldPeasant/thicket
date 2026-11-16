@@ -20,7 +20,7 @@
     "lint": "eslint . --max-warnings 0 && prettier --check .",
     "format": "prettier --write .",
     "typecheck": "tsc -p tsconfig.json && npm run typecheck --workspaces --if-present",
-    "test": "vitest run",
+    "test": "vitest run && npm run test -w packages/renderer",
     "coverage": "npm run coverage --workspaces --if-present"
   },
   "devDependencies": {

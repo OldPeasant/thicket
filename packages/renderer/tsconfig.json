@@ -1,4 +1,22 @@
 {
+  "//": "Base for the Angular app (tsconfig.app.json) and its specs (tsconfig.spec.json).",
   "extends": "../../tsconfig.base.json",
-  "include": ["src/**/*.ts", "vitest.config.ts"]
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "module": "preserve",
+    "experimentalDecorators": true,
+    "importHelpers": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "allowImportingTsExtensions": false
+  },
+  "angularCompilerOptions": {
+    "enableI18nLegacyMessageIdFormat": false,
+    "strictInjectionParameters": true,
+    "strictInputAccessModifiers": true,
+    "strictTemplates": true,
+    "typeCheckHostBindings": true
+  },
+  "files": [],
+  "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.spec.json" }]
 }
