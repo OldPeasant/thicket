@@ -1,11 +1,11 @@
 ---
 title: M1: Connection manager: SCRAM, TLS, SRV, test, errors, write guard
-status: in_progress
+status: done
 owner: dell26/agent-2
 deps: [profiles-store,int-harness,uri-model]
 touches: [packages/backend/src/connections,packages/backend/src/guard]
 prio: 1
-lease_until: 2026-11-16T20:17:37Z
+lease_until: 
 ---
 ## Goal
 Backend conn.test/open/close/status/serverInfo; builds MongoClient options from profile + secrets (SCRAM-SHA-1/256, TLS with CA file, allow-invalid flags, SRV, directConnection); classifies errors (DNS, TLS, AUTH_FAILED, TIMEOUT); a guard every write handler uses: READ_ONLY on read-only profiles, confirmation required on production profiles.
@@ -27,3 +27,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 20:34+0100 by dell26/agent-2): conn.close of a profile that is not open succeeds silently (idempotent); a failed conn.open keeps state 'error' with the classified error in conn.status until the next open/close; conn.open answers the error as an RpcError rather than a status with state 'error'.
 - ASSUMPTION (2026-11-16 20:34+0100 by dell26/agent-2): A saved/ask profile with a username but no password (none stored, none sent) answers AUTH_FAILED 'No password for user ...' before connecting; SSH and auth mechanisms other than NONE/SCRAM answer UNSUPPORTED until their tasks (ssh-tunnel, x509-proxy, ldap/oidc/aws-auth). Driver default timeouts are kept when the profile sets none.
 - ASSUMPTION (2026-11-16 20:34+0100 by dell26/agent-2): Connection state does not yet track losing an open connection (driver heartbeat failures); a connected entry stays 'connected' until closed. Operations on it then fail with classified errors.
+- done by dell26/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 22s on b8c31f4b3; criteria verified 4/4
