@@ -13,7 +13,8 @@ From original and edited documents compute the minimal update (`$set`/`$unset`, 
 ## Acceptance criteria
 - [x] Table-driven tests: nested set, unset, rename (= unset+set), type change, array append → $push, array item change → replace, field reorder only → replace of the parent object
   - verified (2026-11-16 20:13+0100 by felix/agent-2): npx vitest run --root packages/core src/diff -> 112 passed; table DIFF_CASES (packages/core/src/diff/fixtures.ts) covers nested set, unset, rename (unset+set), type changes, array append -> push with each, array item change -> set of whole array, field reorder only -> set of parent object
-- [ ] Applying the produced update to the original (mongodb-memory-free simulation or int test) yields the edited doc for every case — run against a real server in test/integration (`npm run test:int`)
+- [x] Applying the produced update to the original (mongodb-memory-free simulation or int test) yields the edited doc for every case — run against a real server in test/integration (`npm run test:int`)
+  - verified (2026-11-16 20:13+0100 by felix/agent-2): npm run test:int -- diff-ops (Podman, testcontainers mongo:8.2 and mongo:7.0 standalone) -> 308 passed; each case inserts the original, runs updateOne/replaceOne with the produced update and filter (matched 1, modified 1) and compares the stored doc (promoteValues false, canonical EJSON) with the edited doc
 - [ ] Conflict filter matches the unchanged server document and not one where a changed field was modified (int test)
 
 ## Notes
