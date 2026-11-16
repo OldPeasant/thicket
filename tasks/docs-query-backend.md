@@ -13,7 +13,8 @@ docs.find (filter, projection, sort, collation, limit) streaming pages as EJSON,
 ## Acceptance criteria
 - [x] Integration tests: 10 000-doc fixture paged forward/backward/last in range and skip mode give the same docs as a plain sorted find
   - verified (2026-11-16 22:48+0100 by felix/agent-2): npm run test:int -- test/integration/docs-query.int.spec.ts (MongoDB container via int-harness) at fd4b4de -> 35/35 passed; 'docs.find paging in range mode / skip mode (10 000 docs)': forward over every page, backward from the last page (3 sorts incl. compound with missing keys), and jump-to-middle next/previous all equal a plain sorted find
-- [ ] Cancelling a slow query (`$where` sleep or large sort) ends with CANCELLED and the server op is gone (currentOp check in the test)
+- [x] Cancelling a slow query (`$where` sleep or large sort) ends with CANCELLED and the server op is gone (currentOp check in the test)
+  - verified (2026-11-16 22:48+0100 by felix/agent-2): npm run test:int -- test/integration/docs-query.int.spec.ts (MongoDB container via int-harness) at fd4b4de -> 35/35 passed; 'cancel' suite: slow $where find stream ends CANCELLED and currentOp shows no op with the thicket comment; also immediate cancel after the docs.find response, cancel between batches (cursor killed), slow count cancel
 - [ ] getSlice returns items n..m of a 50 000-item array without sending the whole document (assert response size)
 
 ## Notes
