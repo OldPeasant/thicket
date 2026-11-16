@@ -5,7 +5,7 @@ owner: dell26/agent-1
 deps: [scaffold]
 touches: [packages/core/src/uri]
 prio: 1
-lease_until: 2026-11-16T18:56:58Z
+lease_until: 2026-11-16T19:02:04Z
 ---
 ## Goal
 Map a profile (hosts, SRV, replica set, auth mechanism and source, TLS options, read preference, app name, timeouts, proxy, extra options) to a connection string and back, using `mongodb-connection-string-url`; password masking for display and logs.
