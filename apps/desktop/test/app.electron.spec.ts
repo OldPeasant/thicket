@@ -93,10 +93,12 @@ describe('Electron shell', () => {
     // on a separate start (same machine, so the same backend).
     const userData = await mkdtemp(path.join(tmpdir(), 'thicket-electron-startup-'));
     try {
-      const startup = await startupOutput(/\[main\] secret storage: \S+/, {
+      // Wait for the whole line (`<level> (<backend>)`), so a chunk split inside the level word
+      // cannot end the wait early.
+      const startup = await startupOutput(/\[main\] secret storage: \S+ \([^)\n]*\)/, {
         THICKET_USER_DATA: userData,
       });
-      expect(startup).toContain(`[main] secret storage: ${status.level}`);
+      expect(startup).toContain(`[main] secret storage: ${status.level} (`);
     } finally {
       await rm(userData, { recursive: true, force: true });
     }
