@@ -15,7 +15,8 @@ docs.insert/update/replace/delete; update takes the diff and expected values and
   - verified (2026-11-16 23:59+0100 by felix/agent-2): npx vitest run --config test/integration/vitest.config.ts docs-write (Podman, mongo 8.x replica set fixture, handlers behind guardWrites + contract validation) -> 20 passed; covers update ok, concurrent change -> CONFLICT with current server doc (and null when deleted), delete by _id, insert returns _ids (generated ObjectId + given)
 - [x] updateMany/deleteMany preview count equals the affected count of the execute step (int test)
   - verified (2026-11-16 23:59+0100 by felix/agent-2): same int run -> 'updateMany: the preview count equals the matched and modified count', 'deleteMany: the preview count equals the deleted count', pipeline+collation variant: passed
-- [ ] Read-only and unconfirmed-production writes refused (int test)
+- [x] Read-only and unconfirmed-production writes refused (int test)
+  - verified (2026-11-16 23:59+0100 by felix/agent-2): same int run, 'write guard' suite -> read-only refuses all 6 writes with READ_ONLY even confirmed, production refuses unconfirmed insert/delete (CONFIRMATION_REQUIRED) and accepts confirmed, bulk needs confirmed everywhere: passed; plus backend.spec.ts via startBackend for all 6 methods (npm run check: 2920 + renderer 52 files passed)
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
