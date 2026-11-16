@@ -17,7 +17,8 @@ which the OFL requires. `docs/ARCHITECTURE.md:41` still says fonts come from npm
 ## Acceptance criteria
 - [x] The full SIL OFL 1.1 text with the Orbitron and Share Tech Mono copyright lines is in the repo next to the fonts and is included in the renderer build output
   - verified (2026-11-16 20:44+0100 by felix/agent-2): packages/renderer/src/assets/fonts/OFL.txt holds Orbitron + Share Tech Mono copyright lines (verbatim from the woff2 name tables, checked by font-license.spec.ts) and the full OFL 1.1 text; npm run build -w packages/renderer -> dist/media/OFL.txt next to orbitron-*.woff2/share-tech-mono-*.woff2, cmp identical to source; npm run check -> 2166 + 443 tests passed
-- [ ] docs/ARCHITECTURE.md describes where the fonts live (src/assets/fonts, bundled by the build)
+- [x] docs/ARCHITECTURE.md describes where the fonts live (src/assets/fonts, bundled by the build)
+  - verified (2026-11-16 20:44+0100 by felix/agent-2): docs/ARCHITECTURE.md:41-45 now says fonts are committed woff2 in packages/renderer/src/assets/fonts, referenced by relative url() in styles.css and bundled into dist/media with OFL.txt; checked against the npm run build -w packages/renderer output (dist/media listing)
 
 ## Notes
 - ASSUMPTION (2026-11-16 20:36+0100 by felix/agent-2): OFL.txt is copied to dist/media/ (where the build emits the hashed woff2 files) via an angular.json assets entry; angular.json is outside the task's touches list but is the only way to include it in the build output. Copyright lines taken verbatim from the fonts' name tables.
