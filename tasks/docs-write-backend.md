@@ -1,10 +1,11 @@
 ---
 title: M1: Document writes with conflict detection
-status: todo
-owner:
+status: in_progress
+owner: felix/agent-2
 deps: [conn-manager,diff-ops]
 touches: [packages/backend/src/docs/write]
 prio: 1
+lease_until: 2026-11-16T22:59:58Z
 ---
 ## Goal
 docs.insert/update/replace/delete; update takes the diff and expected values and returns CONFLICT plus the current server document when nothing matched; updateMany/deleteMany with a `preview` step (count + sample) and an execute step; all through the write guard.
