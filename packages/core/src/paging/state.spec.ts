@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { valueAtPath, type Filter } from './range';
+import { rangeFilter, sortKeyValues, valueAtPath, type Filter } from './range';
 import { parseSort, type SortSpec } from './sort';
 import {
   canNext,
@@ -400,5 +400,205 @@ describe('counts', () => {
     expect(canNext(s)).toBe(false);
     expect(pageCount(createPaging())).toBeNull();
     expect(pageCount(setCount(createPaging(), 0, true))).toBe(1);
+  });
+});
+
+// --- Added by the test-writer for paging-core. ---
+
+const asc = (field: string) => ({ field, direction: 1 as const });
+const desc = (field: string) => ({ field, direction: -1 as const });
+
+/** Pages forward from page 1 to the end and returns every row shown, in order. */
+function collectForward(docs: Doc[], start: PagingState): { rows: Doc[]; state: PagingState } {
+  let r = load(docs, start, firstPage(start));
+  const rows = [...r.rows];
+  for (let guard = 0; canNext(r.state) && guard < 100; guard++) {
+    r = load(docs, r.state, nextPage(r.state));
+    rows.push(...r.rows);
+  }
+  return { rows, state: r.state };
+}
+
+/** Pages backward from `start` to page 1 and returns every row shown, in display order. */
+function collectBackward(docs: Doc[], start: PagingState, startRows: Doc[]): Doc[] {
+  let s = start;
+  let rows = [...startRows];
+  for (let guard = 0; canPrevious(s) && guard < 100; guard++) {
+    const r = load(docs, s, previousPage(s));
+    s = r.state;
+    rows = [...r.rows, ...rows];
+  }
+  return rows;
+}
+
+/** 12 docs unique on (a, b), stored out of order; one value type per key. */
+const GRID: Doc[] = [3, 1, 2].flatMap((a, i) =>
+  ['y', 'x', 'z', 'w'].map((b, j) => ({ _id: 100 - (i * 4 + j), a, b, nested: { a } })),
+);
+
+describe('range bounds for compound and descending sorts (fake server)', () => {
+  const sorts: [string, SortSpec][] = [
+    ['b desc, a asc', [desc('b'), asc('a')]],
+    ['a asc, b asc', [asc('a'), asc('b')]],
+    ['a desc, b desc', [desc('a'), desc('b')]],
+    ['nested.a asc, b desc', [asc('nested.a'), desc('b')]],
+    ['a asc, b desc, _id asc', [asc('a'), desc('b'), asc('_id')]],
+    ['_id desc', [desc('_id')]],
+  ];
+
+  it.each(sorts)('%s: after/before each row select exactly the rows beyond it', (_, sort) => {
+    const ordered = sortDocs(GRID, sort);
+    ordered.forEach((doc, i) => {
+      const bound = sortKeyValues(doc, sort);
+      const after = GRID.filter((d) => matches(d, rangeFilter(sort, bound, 'after')));
+      const before = GRID.filter((d) => matches(d, rangeFilter(sort, bound, 'before')));
+      expect(ids(sortDocs(after, sort))).toEqual(ids(ordered.slice(i + 1)));
+      expect(ids(sortDocs(before, sort))).toEqual(ids(ordered.slice(0, i)));
+    });
+  });
+
+  it('pages a compound unique index (not _id) with a descending key in range mode', () => {
+    const sort = parseSort({ b: -1, a: 1 }) ?? [];
+    const start = setCount(
+      createPaging({ sort, uniqueIndexes: [['a', 'b']], pageSize: 5 }),
+      GRID.length,
+      true,
+    );
+    expect(start.mode).toBe('range');
+    const fwd = collectForward(GRID, start);
+    expect(ids(fwd.rows)).toEqual(ids(sortDocs(GRID, sort)));
+    expect(fwd.state.pageIndex).toBe(2);
+
+    const last = load(GRID, start, lastPage(start));
+    expect(last.state.pageIndex).toBe(2);
+    expect(ids(last.rows)).toEqual(ids(sortDocs(GRID, sort).slice(10)));
+    expect(ids(collectBackward(GRID, last.state, last.rows))).toEqual(ids(sortDocs(GRID, sort)));
+  });
+});
+
+describe('switching sort resets to page 1', () => {
+  function onPage3(sort: SortSpec = []): PagingState {
+    let s = createPaging({ sort, pageSize: 4 });
+    s = load(DOCS, s, firstPage(s)).state;
+    s = load(DOCS, s, nextPage(s)).state;
+    s = load(DOCS, s, nextPage(s)).state;
+    expect(s.pageIndex).toBe(2);
+    return s;
+  }
+
+  it('range -> range with the opposite direction reads the new first page without a bound', () => {
+    const s = setSort(onPage3(), parseSort({ _id: -1 }));
+    expect(s).toMatchObject({ pageIndex: 0, page: null, mode: 'range', pageSize: 4 });
+    const req = firstPage(s);
+    expect(req.after).toBeUndefined();
+    expect(req.before).toBeUndefined();
+    expect(req.skip).toBeUndefined();
+    expect(ids(load(DOCS, s, req).rows)).toEqual([22, 21, 20, 19]);
+  });
+
+  it('range -> opaque sort switches to skip mode on page 1', () => {
+    const s = setSort(onPage3(), null);
+    expect(s).toMatchObject({ pageIndex: 0, page: null, mode: 'skip', sort: null });
+    expect(findPlan(firstPage(s))).toEqual({
+      filter: {},
+      sort: null,
+      limit: 4,
+      reverseResults: false,
+    });
+  });
+
+  it('skip mode -> range mode on page 1', () => {
+    const next = parseSort({ group: 1, _id: -1 }) ?? [];
+    const s = setSort(onPage3(parseSort({ name: 1 }) ?? []), next);
+    expect(s).toMatchObject({ pageIndex: 0, page: null, mode: 'range' });
+    expect(ids(load(DOCS, s, firstPage(s)).rows)).toEqual(expected(next, 0, 4));
+  });
+
+  it('switching to the same sort also returns to page 1', () => {
+    expect(setSort(onPage3(), parseSort({ _id: 1 }))).toMatchObject({ pageIndex: 0, page: null });
+  });
+});
+
+describe('page requests: remaining paths', () => {
+  it('findPlan rejects a range bound without a sort', () => {
+    const base: PageRequest = { pageIndex: 1, sort: null, limit: 5, fromEnd: false };
+    expect(() => findPlan({ ...base, after: { _id: 1 } })).toThrow(/needs a sort/);
+    expect(() => findPlan({ ...base, sort: [], before: { _id: 1 } })).toThrow(/needs a sort/);
+  });
+
+  it('findPlan omits skip 0 and reads fromEnd without a sort in natural order', () => {
+    const req: PageRequest = { pageIndex: 0, sort: [], limit: 5, skip: 0, fromEnd: true };
+    expect(findPlan(req)).toEqual({ filter: {}, sort: [], limit: 5, reverseResults: false });
+  });
+
+  it('an opaque sort records no sort keys and keeps paging by skip', () => {
+    let s = createPaging({ sort: null, pageSize: 5 });
+    s = load(DOCS, s, firstPage(s)).state;
+    expect(s.page).toEqual({ rows: 5, first: null, last: null, isLast: false });
+    expect(nextPage(s)).toMatchObject({ pageIndex: 1, skip: 5 });
+    s = load(DOCS, s, nextPage(s)).state;
+    s = load(DOCS, s, nextPage(s)).state;
+    expect(previousPage(s)).toMatchObject({ pageIndex: 1, skip: 5 });
+  });
+
+  it('last page with an exact count that is a multiple of the page size reads a full page', () => {
+    const s = setCount(createPaging({ pageSize: 5 }), 20, true);
+    expect(lastPage(s)).toMatchObject({ pageIndex: 3, limit: 5, fromEnd: true });
+  });
+
+  it('jump past the estimated page count is not clamped', () => {
+    const s = setCount(createPaging({ pageSize: 5 }), 10, false);
+    expect(jumpToPage(s, 4)).toMatchObject({ pageIndex: 4, skip: 20 });
+  });
+});
+
+describe('paging state after the start was reached by "before"', () => {
+  it('next stays available after a short "before" page became page 1', () => {
+    // An estimated count that is too high puts the last page at index 5 instead of 4; walking
+    // back by range then reaches the start with a short page.
+    let s = setCount(createPaging({ pageSize: 5 }), 30, false);
+    const last = load(DOCS, s, lastPage(s));
+    expect(last.state.pageIndex).toBe(5);
+    s = last.state;
+    let rows = last.rows;
+    while (s.pageIndex > 0) {
+      const r = load(DOCS, s, previousPage(s));
+      s = r.state;
+      rows = r.rows;
+    }
+    expect(ids(rows)).toEqual([0, 1, 2]);
+    expect(s.page?.isLast).toBe(false);
+    // Rows 3..22 follow this page.
+    expect(canNext(s)).toBe(true);
+    expect(ids(load(DOCS, s, nextPage(s)).rows)).toEqual([3, 4, 5, 6, 7]);
+  });
+});
+
+describe('documents missing a sort key (sorted as null)', () => {
+  /** _id 0..9; `last` missing on the odd _ids 1..7 (four docs, more than one page of 3). */
+  const PEOPLE: Doc[] = range(0, 10).map((i) =>
+    i % 2 === 1 && i < 9 ? { _id: i } : { _id: i, last: `L${i % 4}` },
+  );
+
+  it('descending sort: paging forward reaches the documents without the field', () => {
+    const sort = parseSort({ last: -1, _id: 1 }) ?? [];
+    const start = createPaging({ sort, pageSize: 3 });
+    expect(start.mode).toBe('range');
+    expect(ids(collectForward(PEOPLE, start).rows)).toEqual(ids(sortDocs(PEOPLE, sort)));
+  });
+
+  it('ascending sort: paging back from the last page reaches the documents without the field', () => {
+    const sort = parseSort({ last: 1, _id: 1 }) ?? [];
+    const start = setCount(createPaging({ sort, pageSize: 3 }), PEOPLE.length, true);
+    const last = load(PEOPLE, start, lastPage(start));
+    expect(ids(collectBackward(PEOPLE, last.state, last.rows))).toEqual(
+      ids(sortDocs(PEOPLE, sort)),
+    );
+  });
+
+  it('ascending sort: paging forward from the null rows works', () => {
+    const sort = parseSort({ last: 1, _id: 1 }) ?? [];
+    const start = createPaging({ sort, pageSize: 3 });
+    expect(ids(collectForward(PEOPLE, start).rows)).toEqual(ids(sortDocs(PEOPLE, sort)));
   });
 });
