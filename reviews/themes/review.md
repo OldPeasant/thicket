@@ -4,52 +4,54 @@ Date: 2026-11-16
 
 Task: themes - M0: Business and Tron styles, each light and dark
 
-Scope: third review of the final revision. `git diff bec07cbd7a9529b987170bccd01d84fd1f1060e5..5331615 -- packages apps .gitignore`. The focus is the round-2 change to `packages/renderer/src/app/theme/theme.service.ts` (commit 5331615, fix for CR-3/TW-4), and the rest of the task diff was re-checked against the final code. Only committed code was reviewed. The working tree was clean when this review ran.
+Scope: fourth review round. Task diff `git diff 1dfcf47d005346393de36220875ea064bbccab2b..60a9323 -- packages apps .gitignore`. The focus is commit 60a9323, which rewrote the `ThemeService` bookkeeping per CR-4 (per key `confirmed`/`confirmedBy` plus `latest = {request, value, state}`, with the display recomputed by `refresh()`), and the two regression tests added in 9563ba9. The rest of the task diff was re-checked briefly. Only committed code was reviewed; the working tree was clean when the tests ran.
 
 Requirements:
 - tasks/themes.md acceptance criteria and recorded assumptions (Notes)
 - SPEC.md M0 "Two visual styles"
 - docs/ARCHITECTURE.md (renderer conventions, CSP `font-src 'self'`)
 - AGENTS.md (Evidence rules, project notes)
-- Earlier rounds: previous reviews/themes/review.md (CR-1..CR-3), reviews/themes/tests.md (TW-1..TW-4), reviews/themes/fixes.md (rounds 1 and 2)
-- apps/desktop/src/settings/store.ts and apps/desktop/src/main/index.ts (how main answers `app.settings.get/set` and broadcasts `app.settings.changed`)
+- Earlier rounds: previous reviews/themes/review.md (CR-1..CR-4), reviews/themes/tests.md, reviews/themes/fixes.md
+- apps/desktop/src/settings/store.ts, apps/desktop/src/main/handlers.ts and apps/desktop/src/main/index.ts (how main answers `app.settings.get/set` and broadcasts `app.settings.changed`)
 
 Git range:
 - Branch: main
-- HEAD: 5331615
-- Base/start: bec07cbd7a9529b987170bccd01d84fd1f1060e5
-- Commits reviewed: 6 (2d8bcc4, c199edd, d591c5d, 45e8fc7, 7045226, 5331615)
+- HEAD: 60a9323b57755fc08048f83ec65af89db87b599f
+- Base/start: 1dfcf47d005346393de36220875ea064bbccab2b
+- Commits reviewed: 8 (df350c6, 975d7fa, 582f4cf, e65dc18, 7bcbecb, 857a292, 9563ba9, 60a9323)
 
 Summary: 0 P0, 0 P1, 0 P2, 1 P3
 
 ## Status of earlier findings
 
-- **CR-1 (screenshots taken mid-transition): resolved.** This round did not change it. `apps/desktop/test/theme.electron.spec.ts` waits for `document.getAnimations()` to finish and takes the screenshots with `animations: 'disabled'`.
-- **CR-2 (failed save rolls back to an unsaved snapshot): resolved.** The failure path at `theme.service.ts:121-134` reverts only the keys that call changed. It reverts a key only while that call is still the latest choice for it and the key still shows that call's value. It reverts to `confirmed`.
-- **CR-3 / TW-4 (a skipped answer left `confirmed` stale): resolved.**
-    - `takeAnswer` (`theme.service.ts:148-169`) now always records a valid answer in `confirmed` and only gates what is shown. An answer is recorded only if its request number is newer than the one already recorded (`confirmedBy`).
-    - When the latest local choice for a key has failed (`failed[key] === generation[key]`) and no other save of the key is pending, a late answer shows `confirmed` again.
-    - I traced the CR-3 sequence by hand. Tron is stored, `get` is pending, the user picks Business, and the save fails. At that point `failed.style = 1` and the window shows `confirmed`, which is still the default Business. Then the `get` answer arrives: request 1 is newer than `confirmedBy` 0, so `confirmed` becomes Tron. The generation differs from `asked` and `failed` equals the generation, so Tron is shown. The committed test `a save that fails before the late app.settings.get answer ends on the stored value` covers this sequence and passes.
-    - I also traced the `set` variant: save A (Tron) is pending, save B (Business) fails, then A's answer arrives. Tron is recorded and shown, as in the committed test `an earlier save that succeeds after a later one failed ends on its stored value`. I traced the reverse order as well: A succeeds, then B fails and reverts to `confirmed`, which is Tron. That is correct.
+- **CR-1 (screenshots taken mid-transition): resolved.** Unchanged since round 2. The four PNGs are in `reviews/themes/screenshots/`. 60a9323 changes only service bookkeeping, not CSS or markup, so the screenshots still match the code.
+- **CR-2 and CR-3 (revert paths): still resolved under the new code.** A failed choice gets `state = 'failed'`, and `refresh()` (`theme.service.ts:153-161`) then shows `confirmed[key]`. `record()` (`:137-144`) always stores a newer valid answer, whatever is currently shown. I traced the CR-3 sequence again with the new code. Tron is stored, the `get` is pending (request 1), the user picks Business (request 2) and that save fails, so the window shows `confirmed` (still Business). The `get` answer then records Tron with `confirmedBy = 1`. The choice has failed, so the window shows Tron. This is correct.
+- **CR-4 (bookkeeping complexity): resolved.** The service now keeps three per-key structures and applies a single display rule, written in the class comment at `:56-60`: show the latest choice if its save has not failed and its request is newer than the last recorded answer; otherwise show `confirmed`. The revert branch in `change()` is gone, and every path ends in `refresh()`: init (`:96`), the `finally` of every save (`:129`), and broadcasts (`:149`).
+
+## Broadcast while a local save is pending (the behavior change)
+
+`take()` updates `confirmed` but not `confirmedBy`, so while a choice is `pending` it stays on screen until an answer to that request or a later one arrives. I checked this against how main orders its messages:
+
+- `SettingsStore.set()` is serialized through `queue`. `apply()` writes, sets `current`, notifies the listeners (the broadcast to every window) and only then resolves. The `app.settings.set` handler returns that result, so on this window's port, a write's broadcast always arrives before its answer. `get()` is synchronous and returns `current`.
+- **Another window's write W queued before our save S.** W's broadcast arrives while S is pending. It updates `confirmed` but the display keeps our choice. S's answer then carries the stored value, which is ours because S was applied after W, and `record()` stores it. The final display matches main. The old code briefly showed W's value and then switched back; the new code avoids that flicker. Covered by `a broadcast from another window while a save is pending: the later save wins`.
+- **W queued after S.** S's answer is posted when S resolves. W's broadcast comes only after W's file write (asynchronous I/O) and goes over the same port, so it arrives after S's answer. By then `confirmedBy[key]` equals S's request, which is not lower than the choice's request, so `refresh()` shows the broadcast value (W). This is correct.
+- **S fails.** Main's `current` stays unchanged and it sends no broadcast for S. Broadcasts received while S was pending are already in `confirmed`, so the failed choice falls back to the value main actually stores. Covered by the two `a pending save that fails after a broadcast ...` tests.
+- **Our own echo.** The broadcast for S carries S's value and arrives while S is pending, so ignoring it for display changes nothing.
+- **Startup.** `init()` takes request 1 synchronously inside the app initializer, before any UI exists, so no save can be numbered before the `get`. A broadcast that arrives before the `get` answer is for a write main already applied, so the synchronous `get` result includes it, and recording that result (request 1 > 0) is correct.
+- **Other keys.** The rule is per key. A broadcast changing only the other key shows immediately, as in `a broadcast from another window while a save is pending` (the mode becomes dark).
+- **A set answer that lacks a key.** Every set answer carries all settings (`store.get()` returns `Settings` with every key, and the contract requires them), so a successful choice always moves `confirmedBy` up to its own request. After that, later broadcasts from other windows apply. The choice cannot stay "ok and newer" indefinitely.
+
+Conclusion: holding the pending choice is correct for the orderings main can produce, and it removes a visible flicker. The only window where the display differs from main's state is while this window's own write is in flight, and the answer always settles it.
 
 ## Checks
 
-- Request ordering, checked against main:
-    - `SettingsStore.get()` is synchronous. `set()` is serialized through `queue`, and the change listener broadcasts before `set` resolves.
-    - Requests, answers and broadcasts share the window's port, so they reach the renderer in order.
-    - Successful `set` answers therefore arrive in request order. The single `get` is sent first, from `init`, and is answered without waiting. So the comment that main answers requests in sending order holds for every request this service sends.
-    - Broadcasts (`take`) update `confirmed` but not `confirmedBy`. For an older answer to overwrite a newer broadcast value, main would have to send that answer after a later write's broadcast. The ordering above rules that out, so this is not a finding.
-- Bookkeeping hygiene:
-    - `inFlight` is decremented in `finally`.
-    - `failed` is compared with the current generation, so a stale marker is harmless.
-    - The public API (`init`, `setStyle`, `setMode`, `style`, `mode`, `effective`) is unchanged.
-- AC1: the Electron test switches through the UI on `#/dev/explorer` and writes four screenshots after transitions settle. The PNGs are in `reviews/themes/screenshots/`. Unchanged since round 2.
-- AC2: `theme-tokens.spec.ts` computes WCAG ratios for Business light and dark: at least 4.5:1 for text pairs and at least 3:1 for focus. Unchanged.
-- AC3: Tron keeps Canopy's values. Its fonts are bundled `woff2` files under `font-src 'self'`. In Business, every effect token is `none`. Unchanged.
-- AC4: `data-style` and `data-theme` are set on `<html>`, and the `matchMedia` listener is removed on destroy. Unit and Electron tests cover switching and `system` following the OS. Unchanged.
-- AC5: the test enumerates the production, read-only and 20 BSON tokens in all four sets. Unchanged.
-- Integration and security: no change. There is no new IPC surface, and no secrets or personal data appear in the diff.
-- Validation I ran: `cd packages/renderer && npx ng test --include='src/app/theme/*.spec.ts'`. Result: 2 files, 51 of 51 tests passed, run against a clean working tree (the committed code).
+- AC1: the Electron test drives the switcher on `#/dev/explorer` and writes four screenshots after transitions settle. Unchanged.
+- AC2: `theme-tokens.spec.ts` computes WCAG ratios for the Business light and dark token pairs. Unchanged.
+- AC3: Tron keeps Canopy's tokens and bundled `woff2` fonts (`font-src 'self'`). In Business, every glow and scanline token is `none`. Unchanged.
+- AC4: `data-style` and `data-theme` are set on `<html>` without a reload. The `matchMedia` listener follows changes and is removed on destroy. Unit and Electron tests cover both. The public API (`init`, `setStyle`, `setMode`, `style`, `mode`, `effective`) is unchanged.
+- AC5: a test enumerates the production, read-only and 20 BSON tokens in all four sets. Unchanged.
+- Integration and security: no new IPC surface, and no secrets or personal data in the diff. `ThemeSwitcher` still catches rejected saves.
+- Validation I ran: `cd packages/renderer && npx ng test --include='src/app/theme/*.spec.ts'`. Result: 2 files, 53 of 53 tests passed, with a clean working tree.
 
 ## P0 Critical
 
@@ -65,17 +67,13 @@ None.
 
 ## P3 Low
 
-- [ ] **CR-4 | ThemeService needs five bookkeeping structures to reach a simple display rule**
-    - File: `packages/renderer/src/app/theme/theme.service.ts:51-67`, `:109-169`
-    - Category: Quality
-    - Problem: The service tracks a request counter plus `confirmed`, `confirmedBy`, `generation`, `inFlight` and `failed` for two string preferences. From my traces, the observable behavior reduces to one rule per key:
-        - show the latest local choice while its save is pending or after it succeeded;
-        - otherwise show the latest value main reported (`confirmed`).
-
-      The current code reaches this through two branches in `takeAnswer` and a separate revert path in `change`. Each of the three review rounds found a defect in this logic (CR-2, TW-1..3, CR-3).
-    - Why it matters: The final code is correct and well covered: 51 tests, including every sequence found so far. But the next change to this file (for example, when `app.theme` from main replaces the renderer-side `system` resolution, per the recorded assumption) has to keep five structures consistent, so it can easily reintroduce an ordering bug.
-    - Suggested fix: Optional, and not needed to complete the task. Per key, keep `confirmed` (updated by answers newer than the last recorded one and by broadcasts) and `latest = { id, value, state: 'pending' | 'ok' | 'failed' }`. After every answer, failure or broadcast, recompute the shown value as `latest.state !== 'failed' && latest is newer than confirmed ? latest.value : confirmed`. Keep the existing ordering tests as the safety net. Alternatively, keep the current code and record the rule above in the class doc.
+- [ ] **CR-5 | No test pins the new "pending choice wins over a broadcast" display**
+    - File: `packages/renderer/src/app/theme/theme.service.spec.ts:318-335`
+    - Category: Tests
+    - Problem: 60a9323 intentionally changed what a window shows between a broadcast from another window and the answer to its own pending save. The window now keeps showing its pending choice. The old code showed the broadcast value until the answer arrived. Every test checks only the state after the answers (for example `a broadcast from another window while a save is pending` checks only after `await pending`, and `main echoes each save as a broadcast before answering` checks only at the end). Reverting to the old flicker would therefore pass the whole suite.
+    - Why it matters: this is a deliberate, user-visible rule, and it is written in the class comment. Without a test, a later refactor (for example, when `app.theme` from main replaces the renderer-side `system` resolution) can change it unnoticed.
+    - Suggested fix: in the test at `:318`, after `changed({ ...stored })` and before `save.resolve(...)`, assert `theme.style()` is `'tron'` (the pending choice) and `theme.mode()` is `'dark'` (the broadcast value for the key with no choice).
 
 ## Review conclusion
 
-No material issues found. CR-1, CR-2 and CR-3 (with TW-1..TW-4) are resolved in the final revision, and all five acceptance criteria are met. The request-ordering and revert logic in `ThemeService` is correct, as checked against how main orders answers and broadcasts. The only remaining finding, CR-4 (P3), is an optional simplification.
+No material issues found. The CR-4 rewrite keeps CR-1 to CR-3 resolved and implements the display rule correctly. Holding a pending choice while a broadcast arrives is correct for the way main orders writes, broadcasts and answers, including writes from other windows. All five acceptance criteria are met. The only remaining finding, CR-5 (P3), is an optional test addition.
