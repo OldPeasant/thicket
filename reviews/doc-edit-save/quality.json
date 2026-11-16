@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "task": "doc-edit-save",
+  "reviewed_revision": "5e90eac229ce5c402047aaf70593c359715cd34d",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/doc-edit-save/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/doc-edit-save/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/doc-edit-save/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    { "id": "R1-CR-1", "source": "code-reviewer", "severity": "P0", "disposition": "fixed", "note": "round 1: replace under a projection deleted hidden fields; save now refuses replace/container $set for documents edited under a projection (per-document partial flag); confirmed resolved in round 2" },
+    { "id": "R1-CR-2", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "round 1: edits during an in-flight save were dropped; DocumentEdits.rebase, confirmed in round 2" },
+    { "id": "R1-CR-3", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "round 1: Ctrl+S in a field now applies the typed value first" },
+    { "id": "R1-CR-4", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "round 1: table row add/delete tests added (table-editing.spec.ts)" },
+    { "id": "R1-CR-5", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "round 1: 'Not deleted' / 'Not inserted' message prefixes" },
+    { "id": "R1-CR-6", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "round 1: read-only test checks the view's own EditModeService" },
+    { "id": "R1-TW-1", "source": "test-writer", "severity": "Medium", "disposition": "fixed", "note": "round 1: same defect as R1-CR-2, fixed with it" },
+    { "id": "R1-TW-2", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "round 1: e2e type-only fix, done by the test-writer" },
+    { "id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "deferred", "note": "round 2: a nested/$slice projection save gives a misleading 'changed on the server' conflict; no data loss, edits kept. Follow-up task: conflict-ui (projection-specific message); recorded as an assumption" }
+  ],
+  "validation": [
+    { "command": "cd packages/renderer && npx ng test --include='src/app/document/**/*.spec.ts' --include='src/app/collection/**/*.spec.ts'", "result": "pass" },
+    { "command": "npm run test:e2e -- test/e2e/document-edit.e2e.ts", "result": "pass" },
+    { "command": "npm run check", "result": "pass" }
+  ]
+}
