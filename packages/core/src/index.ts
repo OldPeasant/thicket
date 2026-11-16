@@ -6,3 +6,4 @@ export * from './diff';
 export * from './paging';
 export * from './uri';
 export * from './shellsyntax';
+export * from './codegen';

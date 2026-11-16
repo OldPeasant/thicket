@@ -1,0 +1,1024 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`generateCode samples > java > empty pipeline 1`] = `
+"import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
+import java.util.List;
+import org.bson.Document;
+
+public class Query {
+    public static void main(String[] args) {
+        try (MongoClient client = MongoClients.create("mongodb://localhost:27017")) {
+            MongoCollection<Document> coll =
+                    client.getDatabase("shop").getCollection("orders");
+            coll.aggregate(List.of())
+                .forEach(doc -> System.out.println(doc.toJson()));
+        }
+    }
+}
+"
+`;
+
+exports[`generateCode samples > java > find with an empty filter 1`] = `
+"import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
+import org.bson.Document;
+
+public class Query {
+    public static void main(String[] args) {
+        try (MongoClient client = MongoClients.create("mongodb://localhost:27017")) {
+            MongoCollection<Document> coll =
+                    client.getDatabase("shop").getCollection("orders");
+            coll.find(new Document())
+                .forEach(doc -> System.out.println(doc.toJson()));
+        }
+    }
+}
+"
+`;
+
+exports[`generateCode samples > java > find with awkward keys and strings 1`] = `
+"import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
+import java.util.Arrays;
+import org.bson.Document;
+
+public class Query {
+    public static void main(String[] args) {
+        try (MongoClient client = MongoClients.create("mongodb://localhost:27017")) {
+            MongoCollection<Document> coll =
+                    client.getDatabase("my-db").getCollection("weird.names");
+            coll.find(new Document("a.b", "quote \\" and backslash \\\\")
+                .append("with space", "line\\nbreak\\ttab")
+                .append("__proto__", "x")
+                .append("ünï", "çödé ✓")
+                .append("$expr", new Document("$eq", Arrays.asList("$a", "$b"))))
+                .sort(new Document("a.b", 1))
+                .forEach(doc -> System.out.println(doc.toJson()));
+        }
+    }
+}
+"
+`;
+
+exports[`generateCode samples > java > find with binary, uuid, regex and timestamp 1`] = `
+"import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.model.Collation;
+import com.mongodb.client.model.CollationStrength;
+import java.util.Base64;
+import java.util.UUID;
+import org.bson.BsonBinary;
+import org.bson.BsonRegularExpression;
+import org.bson.BsonTimestamp;
+import org.bson.Document;
+import org.bson.types.Binary;
+
+public class Query {
+    public static void main(String[] args) {
+        try (MongoClient client = MongoClients.create("mongodb://localhost:27017")) {
+            MongoCollection<Document> coll =
+                    client.getDatabase("files").getCollection("blobs");
+            coll.find(new Document(
+                "hash",
+                new Binary((byte) 0, Base64.getDecoder().decode("AAECAwQ="))
+            )
+                .append(
+                    "owner",
+                    new BsonBinary(UUID.fromString("0e5a6b43-1f2c-4d8e-9a7b-6c5d4e3f2a1b"))
+                )
+                .append(
+                    "name",
+                    new BsonRegularExpression("^report-\\\\d+\\\\.pdf$", "i")
+                )
+                .append("op", new BsonTimestamp(1700000000, 7)))
+                .collation(Collation.builder()
+                    .locale("en")
+                    .collationStrength(CollationStrength.fromInt(2))
+                    .build())
+                .forEach(doc -> System.out.println(doc.toJson()));
+        }
+    }
+}
+"
+`;
+
+exports[`generateCode samples > java > find with deprecated types 1`] = `
+"import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
+import org.bson.BsonDbPointer;
+import org.bson.BsonUndefined;
+import org.bson.Document;
+import org.bson.types.CodeWithScope;
+import org.bson.types.ObjectId;
+import org.bson.types.Symbol;
+
+public class Query {
+    public static void main(String[] args) {
+        try (MongoClient client = MongoClients.create("mongodb://localhost:27017")) {
+            MongoCollection<Document> coll =
+                    client.getDatabase("legacy").getCollection("old");
+            coll.find(new Document("sym", new Symbol("abc"))
+                .append("undef", new BsonUndefined())
+                .append(
+                    "ptr",
+                    new BsonDbPointer("other.coll", new ObjectId("65a1b2c3d4e5f60718293a4b"))
+                )
+                .append(
+                    "scoped",
+                    new CodeWithScope(
+                        "function () { return x; }",
+                        new Document("x", 1)
+                    )
+                ))
+                .forEach(doc -> System.out.println(doc.toJson()));
+        }
+    }
+}
+"
+`;
+
+exports[`generateCode samples > java > find with filter, projection, sort, skip and limit 1`] = `
+"import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
+import org.bson.Document;
+import org.bson.types.Decimal128;
+
+public class Query {
+    public static void main(String[] args) {
+        try (MongoClient client = MongoClients.create("mongodb://localhost:27017")) {
+            MongoCollection<Document> coll =
+                    client.getDatabase("shop").getCollection("orders");
+            coll.find(new Document("status", "open")
+                .append(
+                    "total",
+                    new Document("$gt", Decimal128.parse("100.50"))
+                ))
+                .projection(new Document("_id", 0)
+                    .append("status", 1)
+                    .append("total", 1))
+                .sort(new Document("total", -1).append("_id", 1))
+                .skip(10)
+                .limit(5)
+                .forEach(doc -> System.out.println(doc.toJson()));
+        }
+    }
+}
+"
+`;
+
+exports[`generateCode samples > java > find with ids, dates and numbers 1`] = `
+"import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
+import java.time.Instant;
+import java.util.Date;
+import org.bson.Document;
+import org.bson.types.ObjectId;
+
+public class Query {
+    public static void main(String[] args) {
+        try (MongoClient client = MongoClients.create("mongodb://localhost:27017")) {
+            MongoCollection<Document> coll =
+                    client.getDatabase("shop").getCollection("events");
+            coll.find(new Document(
+                "_id",
+                new ObjectId("65a1b2c3d4e5f60718293a4b")
+            )
+                .append(
+                    "at",
+                    new Document(
+                        "$gte",
+                        Date.from(Instant.parse("2024-01-02T03:04:05.678Z"))
+                    )
+                        .append(
+                            "$lt",
+                            Date.from(Instant.parse("2025-01-01T00:00:00.000Z"))
+                        )
+                )
+                .append("count", 42)
+                .append("big", 9007199254740993L)
+                .append("ratio", 0.25)
+                .append("whole", 3.0)
+                .append("flag", true)
+                .append("missing", null))
+                .forEach(doc -> System.out.println(doc.toJson()));
+        }
+    }
+}
+"
+`;
+
+exports[`generateCode samples > java > find with min/max keys, code and special doubles 1`] = `
+"import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
+import java.util.Arrays;
+import org.bson.Document;
+import org.bson.types.Code;
+import org.bson.types.MaxKey;
+import org.bson.types.MinKey;
+
+public class Query {
+    public static void main(String[] args) {
+        try (MongoClient client = MongoClients.create("mongodb://localhost:27017")) {
+            MongoCollection<Document> coll =
+                    client.getDatabase("lab").getCollection("odd");
+            coll.find(new Document(
+                "$or",
+                Arrays.asList(
+                    new Document("low", new MinKey()),
+                    new Document("high", new MaxKey())
+                )
+            )
+                .append("script", new Code("function () { return 1; }"))
+                .append("nan", Double.NaN)
+                .append("inf", Double.POSITIVE_INFINITY)
+                .append("ninf", Double.NEGATIVE_INFINITY)
+                .append("negZero", -0.0)
+                .append("huge", 1e+300)
+                .append("tiny", 5e-324))
+                .forEach(doc -> System.out.println(doc.toJson()));
+        }
+    }
+}
+"
+`;
+
+exports[`generateCode samples > java > pipeline match, group, sort 1`] = `
+"import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
+import java.util.List;
+import org.bson.Document;
+
+public class Query {
+    public static void main(String[] args) {
+        try (MongoClient client = MongoClients.create("mongodb://localhost:27017")) {
+            MongoCollection<Document> coll =
+                    client.getDatabase("shop").getCollection("orders");
+            coll.aggregate(List.of(
+                new Document("$match", new Document("status", "open")),
+                new Document(
+                    "$group",
+                    new Document("_id", "$customer")
+                        .append("total", new Document("$sum", "$total"))
+                        .append("n", new Document("$sum", 1))
+                ),
+                new Document("$sort", new Document("total", -1)),
+                new Document("$limit", 10)
+            ))
+                .forEach(doc -> System.out.println(doc.toJson()));
+        }
+    }
+}
+"
+`;
+
+exports[`generateCode samples > java > pipeline with typed values 1`] = `
+"import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.Date;
+import java.util.List;
+import org.bson.BsonTimestamp;
+import org.bson.Document;
+import org.bson.types.Decimal128;
+
+public class Query {
+    public static void main(String[] args) {
+        try (MongoClient client = MongoClients.create("mongodb://localhost:27017")) {
+            MongoCollection<Document> coll =
+                    client.getDatabase("shop").getCollection("orders");
+            coll.aggregate(List.of(
+                new Document(
+                    "$match",
+                    new Document(
+                        "createdAt",
+                        new Document(
+                            "$gte",
+                            Date.from(Instant.parse("2020-02-29T12:00:00.000Z"))
+                        )
+                    )
+                        .append(
+                            "amount",
+                            new Document(
+                                "$in",
+                                Arrays.asList(
+                                    5L,
+                                    Decimal128.parse("1.10"),
+                                    2.0,
+                                    7
+                                )
+                            )
+                        )
+                ),
+                new Document(
+                    "$addFields",
+                    new Document("tags", Arrays.asList("a", "b"))
+                        .append(
+                            "nested",
+                            new Document(
+                                "deep",
+                                new Document(
+                                    "deeper",
+                                    Arrays.asList(
+                                        1,
+                                        Arrays.asList(2, Arrays.asList(3))
+                                    )
+                                )
+                            )
+                        )
+                        .append("ts", new BsonTimestamp(-1L))
+                ),
+                new Document("$project", new Document("_id", 0))
+            ))
+                .forEach(doc -> System.out.println(doc.toJson()));
+        }
+    }
+}
+"
+`;
+
+exports[`generateCode samples > node > empty pipeline 1`] = `
+"const { BSON, MongoClient } = require('mongodb');
+
+async function main() {
+  const client = new MongoClient("mongodb://localhost:27017");
+  try {
+    const coll = client.db("shop").collection("orders");
+    const cursor = coll.aggregate([]);
+    for await (const doc of cursor) {
+      console.log(BSON.EJSON.stringify(doc));
+    }
+  } finally {
+    await client.close();
+  }
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+"
+`;
+
+exports[`generateCode samples > node > find with an empty filter 1`] = `
+"const { BSON, MongoClient } = require('mongodb');
+
+async function main() {
+  const client = new MongoClient("mongodb://localhost:27017");
+  try {
+    const coll = client.db("shop").collection("orders");
+    const cursor = coll.find({});
+    for await (const doc of cursor) {
+      console.log(BSON.EJSON.stringify(doc));
+    }
+  } finally {
+    await client.close();
+  }
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+"
+`;
+
+exports[`generateCode samples > node > find with awkward keys and strings 1`] = `
+"const { BSON, MongoClient } = require('mongodb');
+
+async function main() {
+  const client = new MongoClient("mongodb://localhost:27017");
+  try {
+    const coll = client.db("my-db").collection("weird.names");
+    const cursor = coll.find(
+      {
+        "a.b": "quote \\" and backslash \\\\",
+        "with space": "line\\nbreak\\ttab",
+        ["__proto__"]: "x",
+        "ünï": "çödé ✓",
+        $expr: { $eq: ["$a", "$b"] }
+      },
+      { sort: { "a.b": 1 } }
+    );
+    for await (const doc of cursor) {
+      console.log(BSON.EJSON.stringify(doc));
+    }
+  } finally {
+    await client.close();
+  }
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+"
+`;
+
+exports[`generateCode samples > node > find with binary, uuid, regex and timestamp 1`] = `
+"const { BSON, BSONRegExp, Binary, MongoClient, Timestamp, UUID } = require('mongodb');
+
+async function main() {
+  const client = new MongoClient("mongodb://localhost:27017");
+  try {
+    const coll = client.db("files").collection("blobs");
+    const cursor = coll.find(
+      {
+        hash: Binary.createFromBase64("AAECAwQ=", 0),
+        owner: new UUID("0e5a6b43-1f2c-4d8e-9a7b-6c5d4e3f2a1b"),
+        name: new BSONRegExp("^report-\\\\d+\\\\.pdf$", "i"),
+        op: new Timestamp({ t: 1700000000, i: 7 })
+      },
+      { collation: { locale: "en", strength: 2 } }
+    );
+    for await (const doc of cursor) {
+      console.log(BSON.EJSON.stringify(doc));
+    }
+  } finally {
+    await client.close();
+  }
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+"
+`;
+
+exports[`generateCode samples > node > find with deprecated types 1`] = `
+"const { BSON, BSONSymbol, Code, DBRef, MongoClient, ObjectId } = require('mongodb');
+
+async function main() {
+  const client = new MongoClient("mongodb://localhost:27017");
+  try {
+    const coll = client.db("legacy").collection("old");
+    const cursor = coll.find(
+      {
+        sym: new BSONSymbol("abc"),
+        undef: undefined,
+        ptr: new DBRef("other.coll", new ObjectId("65a1b2c3d4e5f60718293a4b")),
+        scoped: new Code("function () { return x; }", { x: 1 })
+      }
+    );
+    for await (const doc of cursor) {
+      console.log(BSON.EJSON.stringify(doc));
+    }
+  } finally {
+    await client.close();
+  }
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+"
+`;
+
+exports[`generateCode samples > node > find with filter, projection, sort, skip and limit 1`] = `
+"const { BSON, Decimal128, MongoClient } = require('mongodb');
+
+async function main() {
+  const client = new MongoClient("mongodb://localhost:27017");
+  try {
+    const coll = client.db("shop").collection("orders");
+    const cursor = coll.find(
+      { status: "open", total: { $gt: Decimal128.fromString("100.50") } },
+      {
+        projection: { _id: 0, status: 1, total: 1 },
+        sort: { total: -1, _id: 1 },
+        skip: 10,
+        limit: 5
+      }
+    );
+    for await (const doc of cursor) {
+      console.log(BSON.EJSON.stringify(doc));
+    }
+  } finally {
+    await client.close();
+  }
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+"
+`;
+
+exports[`generateCode samples > node > find with ids, dates and numbers 1`] = `
+"const { BSON, Double, Long, MongoClient, ObjectId } = require('mongodb');
+
+async function main() {
+  const client = new MongoClient("mongodb://localhost:27017");
+  try {
+    const coll = client.db("shop").collection("events");
+    const cursor = coll.find(
+      {
+        _id: new ObjectId("65a1b2c3d4e5f60718293a4b"),
+        at: {
+          $gte: new Date("2024-01-02T03:04:05.678Z"),
+          $lt: new Date("2025-01-01T00:00:00.000Z")
+        },
+        count: 42,
+        big: Long.fromString("9007199254740993"),
+        ratio: 0.25,
+        whole: new Double(3),
+        flag: true,
+        missing: null
+      }
+    );
+    for await (const doc of cursor) {
+      console.log(BSON.EJSON.stringify(doc));
+    }
+  } finally {
+    await client.close();
+  }
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+"
+`;
+
+exports[`generateCode samples > node > find with min/max keys, code and special doubles 1`] = `
+"const { BSON, Code, Double, MaxKey, MinKey, MongoClient } = require('mongodb');
+
+async function main() {
+  const client = new MongoClient("mongodb://localhost:27017");
+  try {
+    const coll = client.db("lab").collection("odd");
+    const cursor = coll.find(
+      {
+        $or: [{ low: new MinKey() }, { high: new MaxKey() }],
+        script: new Code("function () { return 1; }"),
+        nan: NaN,
+        inf: Infinity,
+        ninf: -Infinity,
+        negZero: new Double(-0),
+        huge: 1e+300,
+        tiny: 5e-324
+      }
+    );
+    for await (const doc of cursor) {
+      console.log(BSON.EJSON.stringify(doc));
+    }
+  } finally {
+    await client.close();
+  }
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+"
+`;
+
+exports[`generateCode samples > node > pipeline match, group, sort 1`] = `
+"const { BSON, MongoClient } = require('mongodb');
+
+async function main() {
+  const client = new MongoClient("mongodb://localhost:27017");
+  try {
+    const coll = client.db("shop").collection("orders");
+    const cursor = coll.aggregate([
+      { $match: { status: "open" } },
+      {
+        $group: { _id: "$customer", total: { $sum: "$total" }, n: { $sum: 1 } }
+      },
+      { $sort: { total: -1 } },
+      { $limit: 10 }
+    ]);
+    for await (const doc of cursor) {
+      console.log(BSON.EJSON.stringify(doc));
+    }
+  } finally {
+    await client.close();
+  }
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+"
+`;
+
+exports[`generateCode samples > node > pipeline with typed values 1`] = `
+"const { BSON, Decimal128, Double, Long, MongoClient, Timestamp } = require('mongodb');
+
+async function main() {
+  const client = new MongoClient("mongodb://localhost:27017");
+  try {
+    const coll = client.db("shop").collection("orders");
+    const cursor = coll.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: new Date("2020-02-29T12:00:00.000Z") },
+          amount: {
+            $in: [
+              Long.fromString("5"),
+              Decimal128.fromString("1.10"),
+              new Double(2),
+              7
+            ]
+          }
+        }
+      },
+      {
+        $addFields: {
+          tags: ["a", "b"],
+          nested: { deep: { deeper: [1, [2, [3]]] } },
+          ts: new Timestamp({ t: 4294967295, i: 4294967295 })
+        }
+      },
+      { $project: { _id: 0 } }
+    ]);
+    for await (const doc of cursor) {
+      console.log(BSON.EJSON.stringify(doc));
+    }
+  } finally {
+    await client.close();
+  }
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+"
+`;
+
+exports[`generateCode samples > python > empty pipeline 1`] = `
+"from bson import json_util
+from pymongo import MongoClient
+
+client = MongoClient("mongodb://localhost:27017")
+try:
+    coll = client["shop"]["orders"]
+    cursor = coll.aggregate([])
+    for doc in cursor:
+        print(json_util.dumps(doc))
+finally:
+    client.close()
+"
+`;
+
+exports[`generateCode samples > python > find with an empty filter 1`] = `
+"from bson import json_util
+from pymongo import MongoClient
+
+client = MongoClient("mongodb://localhost:27017")
+try:
+    coll = client["shop"]["orders"]
+    cursor = coll.find({})
+    for doc in cursor:
+        print(json_util.dumps(doc))
+finally:
+    client.close()
+"
+`;
+
+exports[`generateCode samples > python > find with awkward keys and strings 1`] = `
+"from bson import json_util
+from pymongo import MongoClient
+
+client = MongoClient("mongodb://localhost:27017")
+try:
+    coll = client["my-db"]["weird.names"]
+    cursor = coll.find(
+        {
+            "a.b": "quote \\" and backslash \\\\",
+            "with space": "line\\nbreak\\ttab",
+            "__proto__": "x",
+            "ünï": "çödé ✓",
+            "$expr": {"$eq": ["$a", "$b"]}
+        },
+        sort=[("a.b", 1)]
+    )
+    for doc in cursor:
+        print(json_util.dumps(doc))
+finally:
+    client.close()
+"
+`;
+
+exports[`generateCode samples > python > find with binary, uuid, regex and timestamp 1`] = `
+"from uuid import UUID
+
+from bson import Binary, Regex, Timestamp, json_util
+from pymongo import MongoClient
+
+client = MongoClient("mongodb://localhost:27017")
+try:
+    coll = client["files"]["blobs"]
+    cursor = coll.find(
+        {
+            "hash": Binary(bytes.fromhex("0001020304"), 0),
+            "owner": Binary.from_uuid(UUID("0e5a6b43-1f2c-4d8e-9a7b-6c5d4e3f2a1b")),
+            "name": Regex("^report-\\\\d+\\\\.pdf$", "i"),
+            "op": Timestamp(1700000000, 7)
+        },
+        collation={"locale": "en", "strength": 2}
+    )
+    for doc in cursor:
+        print(json_util.dumps(doc))
+finally:
+    client.close()
+"
+`;
+
+exports[`generateCode samples > python > find with deprecated types 1`] = `
+"from bson import Code, DBRef, ObjectId, json_util
+from pymongo import MongoClient
+
+client = MongoClient("mongodb://localhost:27017")
+try:
+    coll = client["legacy"]["old"]
+    cursor = coll.find(
+        {
+            "sym": "abc",
+            "undef": None,
+            "ptr": DBRef("other.coll", ObjectId("65a1b2c3d4e5f60718293a4b")),
+            "scoped": Code("function () { return x; }", {"x": 1})
+        }
+    )
+    for doc in cursor:
+        print(json_util.dumps(doc))
+finally:
+    client.close()
+"
+`;
+
+exports[`generateCode samples > python > find with filter, projection, sort, skip and limit 1`] = `
+"from bson import Decimal128, json_util
+from pymongo import MongoClient
+
+client = MongoClient("mongodb://localhost:27017")
+try:
+    coll = client["shop"]["orders"]
+    cursor = coll.find(
+        {"status": "open", "total": {"$gt": Decimal128("100.50")}},
+        {"_id": 0, "status": 1, "total": 1},
+        sort=[("total", -1), ("_id", 1)],
+        skip=10,
+        limit=5
+    )
+    for doc in cursor:
+        print(json_util.dumps(doc))
+finally:
+    client.close()
+"
+`;
+
+exports[`generateCode samples > python > find with ids, dates and numbers 1`] = `
+"from datetime import datetime, timezone
+
+from bson import Int64, ObjectId, json_util
+from pymongo import MongoClient
+
+client = MongoClient("mongodb://localhost:27017")
+try:
+    coll = client["shop"]["events"]
+    cursor = coll.find(
+        {
+            "_id": ObjectId("65a1b2c3d4e5f60718293a4b"),
+            "at": {
+                "$gte": datetime(2024, 1, 2, 3, 4, 5, 678000, tzinfo=timezone.utc),
+                "$lt": datetime(2025, 1, 1, tzinfo=timezone.utc)
+            },
+            "count": 42,
+            "big": Int64(9007199254740993),
+            "ratio": 0.25,
+            "whole": 3.0,
+            "flag": True,
+            "missing": None
+        }
+    )
+    for doc in cursor:
+        print(json_util.dumps(doc))
+finally:
+    client.close()
+"
+`;
+
+exports[`generateCode samples > python > find with min/max keys, code and special doubles 1`] = `
+"from bson import Code, MaxKey, MinKey, json_util
+from pymongo import MongoClient
+
+client = MongoClient("mongodb://localhost:27017")
+try:
+    coll = client["lab"]["odd"]
+    cursor = coll.find(
+        {
+            "$or": [{"low": MinKey()}, {"high": MaxKey()}],
+            "script": Code("function () { return 1; }"),
+            "nan": float("nan"),
+            "inf": float("inf"),
+            "ninf": float("-inf"),
+            "negZero": -0.0,
+            "huge": 1e+300,
+            "tiny": 5e-324
+        }
+    )
+    for doc in cursor:
+        print(json_util.dumps(doc))
+finally:
+    client.close()
+"
+`;
+
+exports[`generateCode samples > python > pipeline match, group, sort 1`] = `
+"from bson import json_util
+from pymongo import MongoClient
+
+client = MongoClient("mongodb://localhost:27017")
+try:
+    coll = client["shop"]["orders"]
+    cursor = coll.aggregate([
+        {"$match": {"status": "open"}},
+        {
+            "$group": {
+                "_id": "$customer",
+                "total": {"$sum": "$total"},
+                "n": {"$sum": 1}
+            }
+        },
+        {"$sort": {"total": -1}},
+        {"$limit": 10}
+    ])
+    for doc in cursor:
+        print(json_util.dumps(doc))
+finally:
+    client.close()
+"
+`;
+
+exports[`generateCode samples > python > pipeline with typed values 1`] = `
+"from datetime import datetime, timezone
+
+from bson import Decimal128, Int64, Timestamp, json_util
+from pymongo import MongoClient
+
+client = MongoClient("mongodb://localhost:27017")
+try:
+    coll = client["shop"]["orders"]
+    cursor = coll.aggregate([
+        {
+            "$match": {
+                "createdAt": {
+                    "$gte": datetime(2020, 2, 29, 12, tzinfo=timezone.utc)
+                },
+                "amount": {"$in": [Int64(5), Decimal128("1.10"), 2.0, 7]}
+            }
+        },
+        {
+            "$addFields": {
+                "tags": ["a", "b"],
+                "nested": {"deep": {"deeper": [1, [2, [3]]]}},
+                "ts": Timestamp(4294967295, 4294967295)
+            }
+        },
+        {"$project": {"_id": 0}}
+    ])
+    for doc in cursor:
+        print(json_util.dumps(doc))
+finally:
+    client.close()
+"
+`;
+
+exports[`generateCode samples > shell > empty pipeline 1`] = `
+"db.getSiblingDB("shop").getCollection("orders").aggregate([]);
+"
+`;
+
+exports[`generateCode samples > shell > find with an empty filter 1`] = `
+"db.getSiblingDB("shop").getCollection("orders").find({});
+"
+`;
+
+exports[`generateCode samples > shell > find with awkward keys and strings 1`] = `
+"db.getSiblingDB("my-db").getCollection("weird.names").find(
+  {
+    "a.b": "quote \\" and backslash \\\\",
+    "with space": "line\\nbreak\\ttab",
+    ["__proto__"]: "x",
+    "ünï": "çödé ✓",
+    $expr: { $eq: ["$a", "$b"] }
+  }
+).sort({ "a.b": 1 });
+"
+`;
+
+exports[`generateCode samples > shell > find with binary, uuid, regex and timestamp 1`] = `
+"db.getSiblingDB("files").getCollection("blobs").find(
+  {
+    hash: BinData(0, "AAECAwQ="),
+    owner: UUID("0e5a6b43-1f2c-4d8e-9a7b-6c5d4e3f2a1b"),
+    name: /^report-\\d+\\.pdf$/i,
+    op: Timestamp({ t: 1700000000, i: 7 })
+  }
+).collation({ locale: "en", strength: 2 });
+"
+`;
+
+exports[`generateCode samples > shell > find with deprecated types 1`] = `
+"db.getSiblingDB("legacy").getCollection("old").find(
+  {
+    sym: BSONSymbol("abc"),
+    undef: undefined,
+    ptr: DBPointer("other.coll", ObjectId("65a1b2c3d4e5f60718293a4b")),
+    scoped: Code("function () { return x; }", { x: 1 })
+  }
+);
+"
+`;
+
+exports[`generateCode samples > shell > find with filter, projection, sort, skip and limit 1`] = `
+"db.getSiblingDB("shop").getCollection("orders").find(
+  { status: "open", total: { $gt: NumberDecimal("100.50") } },
+  { _id: 0, status: 1, total: 1 }
+).sort({ total: -1, _id: 1 }).skip(10).limit(5);
+"
+`;
+
+exports[`generateCode samples > shell > find with ids, dates and numbers 1`] = `
+"db.getSiblingDB("shop").getCollection("events").find(
+  {
+    _id: ObjectId("65a1b2c3d4e5f60718293a4b"),
+    at: {
+      $gte: ISODate("2024-01-02T03:04:05.678Z"),
+      $lt: ISODate("2025-01-01T00:00:00.000Z")
+    },
+    count: 42,
+    big: NumberLong("9007199254740993"),
+    ratio: 0.25,
+    whole: Double(3),
+    flag: true,
+    missing: null
+  }
+);
+"
+`;
+
+exports[`generateCode samples > shell > find with min/max keys, code and special doubles 1`] = `
+"db.getSiblingDB("lab").getCollection("odd").find(
+  {
+    $or: [{ low: MinKey() }, { high: MaxKey() }],
+    script: Code("function () { return 1; }"),
+    nan: NaN,
+    inf: Infinity,
+    ninf: -Infinity,
+    negZero: -0,
+    huge: 1e+300,
+    tiny: 5e-324
+  }
+);
+"
+`;
+
+exports[`generateCode samples > shell > pipeline match, group, sort 1`] = `
+"db.getSiblingDB("shop").getCollection("orders").aggregate([
+  { $match: { status: "open" } },
+  { $group: { _id: "$customer", total: { $sum: "$total" }, n: { $sum: 1 } } },
+  { $sort: { total: -1 } },
+  { $limit: 10 }
+]);
+"
+`;
+
+exports[`generateCode samples > shell > pipeline with typed values 1`] = `
+"db.getSiblingDB("shop").getCollection("orders").aggregate([
+  {
+    $match: {
+      createdAt: { $gte: ISODate("2020-02-29T12:00:00.000Z") },
+      amount: { $in: [NumberLong(5), NumberDecimal("1.10"), Double(2), 7] }
+    }
+  },
+  {
+    $addFields: {
+      tags: ["a", "b"],
+      nested: { deep: { deeper: [1, [2, [3]]] } },
+      ts: Timestamp({ t: 4294967295, i: 4294967295 })
+    }
+  },
+  { $project: { _id: 0 } }
+]);
+"
+`;
