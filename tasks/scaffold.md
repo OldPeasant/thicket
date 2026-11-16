@@ -13,7 +13,8 @@ Create the npm-workspaces monorepo described in docs/ARCHITECTURE.md (apps/deskt
 ## Acceptance criteria
 - [x] `npm ci && npm run check` on a clean clone runs lint + type check + unit tests of every workspace and passes (each workspace has at least one trivial spec); time it, must be < 2 min
   - verified (2026-11-16 18:21+0100 by dell26/agent-1): fresh git clone of ef8b880 into out/clean-clone, Node v24.21.0 npm 11.19.0: npm ci -> 24.1 s; npm run check (eslint+prettier, tsc root + 5 workspaces, vitest 5 projects) -> 5 files/5 tests passed in 3.5 s; total ~28 s < 2 min
-- [ ] `npm run coverage` writes `coverage/coverage-summary.json` and lcov per workspace; the task-scoped command in docs/ARCHITECTURE.md "Coverage" works as written (run it on one file)
+- [x] `npm run coverage` writes `coverage/coverage-summary.json` and lcov per workspace; the task-scoped command in docs/ARCHITECTURE.md "Coverage" works as written (run it on one file)
+  - verified (2026-11-16 18:21+0100 by dell26/agent-1): npm run coverage at ef8b880 -> 5 workspace summaries; apps/desktop, packages/{contract,core,backend,renderer}/coverage/{coverage-summary.json,lcov.info} written; npm --prefix packages/core run coverage -- --coverage.include=src/index.ts (= ARCHITECTURE 'cd packages/core; npx vitest run --coverage --coverage.include=...', also run literally in packages/core) -> 1 test, src/index.ts 1/1 statements 1/1 lines
 - [ ] `sh .taskcheck` passes (it switches to `npm run check` now that package.json exists)
 - [ ] Node version pinned (`engines` + `.nvmrc` = 24); README.md has a 5-line dev quick start
 - [ ] `dashboard/` (TFP tooling, own Angular app) and the TFP Python files are excluded from workspaces, ESLint, Prettier and Vitest (grep the configs; `npm run check` does not touch them)
