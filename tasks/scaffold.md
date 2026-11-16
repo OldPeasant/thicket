@@ -20,3 +20,4 @@ Create the npm-workspaces monorepo described in docs/ARCHITECTURE.md (apps/deskt
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 18:14+0100 by dell26/agent-1): TypeScript pinned to ~6.0.3, not 7.x: Angular 22 compiler-cli and typescript-eslint 8 require <6.1
