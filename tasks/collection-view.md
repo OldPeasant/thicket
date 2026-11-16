@@ -18,3 +18,4 @@ Query bar (filter, projection, sort, collation, limit in shell syntax with valid
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 23:22+0100 by felix/agent-1): With a non-empty filter no count is fetched until 'Count exactly' (docs.estimatedCount only describes the whole collection; counting a filter can be slow). The pager then shows no total and the last page is named 'Last N' until counted.
+- ASSUMPTION (2026-11-16 23:22+0100 by felix/agent-1): Collection tabs show the explorer read-only (EditModeService.setReadOnly(true)): editing and saving documents is doc-edit-save's task; the button then reads 'Read-only'.
