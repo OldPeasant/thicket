@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "task": "collection-view",
+  "reviewed_revision": "6228a0f8434d4c5f568f914aec8758c4ef25cd0a",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/collection-view/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/collection-view/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/collection-view/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "R1-CR-1", "source": "code-reviewer", "severity": "P1", "disposition": "fixed",
+     "note": "round 1: Previous/jump from a last page of unknown position landed on the wrong page (with R1-TW-1); fixed in the round-1 fixer commit"},
+    {"id": "R1-TW-1", "source": "test-writer", "severity": "Medium", "disposition": "fixed",
+     "note": "round 1: same defect as R1-CR-1"},
+    {"id": "R1-CR-2", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "round 1: last page read with an estimated count labelled as aligned"},
+    {"id": "R1-CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "round 1: jumping past the end gave a misleading empty result"},
+    {"id": "R1-CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "round 1: page size change updated paging state before the page arrived"},
+    {"id": "R1-CR-5", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "round 1: Cancel button removed itself while focused"},
+    {"id": "R1-TW-2", "source": "test-writer", "severity": "Low", "disposition": "fixed",
+     "note": "round 1: page jump field kept an out-of-range number"},
+    {"id": "R1-CR-6", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "round 1: unrelated whitespace change in core package.json, reverted before the fixer ran"},
+    {"id": "R2-CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "round 2: short/empty backward read from an unknown last page became page 1 (with R2-TW-3); now reads page 1 aligned"},
+    {"id": "R2-TW-3", "source": "test-writer", "severity": "Medium", "disposition": "fixed",
+     "note": "round 2: Last then Previous over exactly one page showed 'No documents match'; same root cause as R2-CR-1"},
+    {"id": "R2-TW-4", "source": "test-writer", "severity": "Low", "disposition": "fixed",
+     "note": "round 2: exact count arriving during Previous/Next/jump cancelled the navigation"},
+    {"id": "R3-CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "round 3: if an exact count arrives during a read that is then cancelled or fails, the page keeps its 'Last N' label until the next navigation or count; Cancel must not start a read, navigation still works, the limit is recorded in fixes.md and as an assumption"}
+  ],
+  "validation": [
+    {"command": "npm run test -w packages/renderer -- --include='src/app/collection/**/*.spec.ts'", "result": "pass"},
+    {"command": "npm run test:e2e -- test/e2e/collection.e2e.ts", "result": "pass"},
+    {"command": "npm run check (.taskcheck)", "result": "pass"}
+  ]
+}
