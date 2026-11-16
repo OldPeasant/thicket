@@ -5,7 +5,7 @@ owner: dell26/agent-3
 deps: [scaffold]
 touches: [packages/core/src/bson]
 prio: 1
-lease_until: 2026-11-16T18:48:05Z
+lease_until: 2026-11-16T18:51:35Z
 ---
 ## Goal
 Typed, order-preserving value tree for all BSON types (SPEC M1 'Documents and BSON'), parsed from and serialized to canonical EJSON v2 with the `bson` package; explicit conversions between types with validation; no Node APIs (runs in the renderer).
