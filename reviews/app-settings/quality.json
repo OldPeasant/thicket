@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "task": "app-settings",
+  "reviewed_revision": "9378018fa2e7f602ea4b897311db3ad77c355058",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/app-settings/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/app-settings/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/app-settings/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "an unreadable settings.json (non-ENOENT read error) is moved to settings.json.unreadable-<time> before the first write; the set fails if that move fails"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "a corrupt settings.json whose backup rename fails at load is moved aside before the first write instead of being overwritten"}
+  ],
+  "validation": [
+    {"command": "npx vitest run --project desktop --project contract", "result": "pass"},
+    {"command": "npm run check", "result": "pass"},
+    {"command": "npm run test:electron", "result": "pass"}
+  ]
+}

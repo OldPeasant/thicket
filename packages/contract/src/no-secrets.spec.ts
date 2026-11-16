@@ -9,6 +9,7 @@ import {
   methods,
   privilegedMethods,
   route,
+  settingsChanged,
   themeInfo,
   type MethodDef,
 } from './index';
@@ -196,6 +197,7 @@ describe('no renderer-routable method can return a secret (schemas)', () => {
     const payloads: Record<string, z.ZodType> = {
       [BROADCAST_STREAMS.connStatus]: connStatus,
       [BROADCAST_STREAMS.theme]: themeInfo,
+      [BROADCAST_STREAMS.settingsChanged]: settingsChanged,
       [BROADCAST_STREAMS.backendRestarted]: backendRestarted,
     };
     expect(Object.keys(payloads).sort()).toEqual(Object.values(BROADCAST_STREAMS).sort());

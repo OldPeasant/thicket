@@ -24,6 +24,11 @@ export const settings = z.strictObject({
 
 export type Settings = z.infer<typeof settings>;
 
+/** Payload of the `app.settings.changed` broadcast event: the full settings after a change. */
+export const settingsChanged = z.object({ settings });
+
+export type SettingsChanged = z.infer<typeof settingsChanged>;
+
 /** Effective theme: settings plus the resolved light/dark mode. */
 export const themeInfo = z.object({
   style: z.enum(STYLES),

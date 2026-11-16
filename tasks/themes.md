@@ -1,10 +1,11 @@
 ---
 title: M0: Business and Tron styles, each light and dark
-status: todo
-owner:
+status: in_progress
+owner: dell26/agent-1
 deps: [explorer-copy,app-settings]
 touches: [packages/renderer/src/app/theme,packages/renderer/src/styles.css,packages/renderer/src/assets/fonts]
 prio: 1
+lease_until: 2026-11-16T19:37:38Z
 ---
 ## Goal
 Token sets for Business (default) and Tron, each light and dark, selected by `data-style` and `data-theme` on the root; mode follows the OS when set to system; persisted via app settings. Use the frontend-design skill for the visual direction; respect the Business and Tron tokens (no hard-coded colors).
@@ -18,3 +19,8 @@ Token sets for Business (default) and Tron, each light and dark, selected by `da
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 20:19+0100 by dell26/agent-1): Tokens live in packages/renderer/src/app/theme/tokens.css (imported by styles.css); each of the four data-style x data-theme blocks repeats every token (explicit, testable). :root alone = Business light fallback before ThemeService runs.
+- ASSUMPTION (2026-11-16 20:19+0100 by dell26/agent-1): BSON type tokens are --bson-<kebab $type alias> for all 20 $type aliases (double ... maxKey); explorer --val-* kept as aliases to them. Production accent = --production/-bg/-text, read-only marker = --readonly/-bg/-text.
+- ASSUMPTION (2026-11-16 20:19+0100 by dell26/agent-1): Renderer resolves 'system' itself via matchMedia(prefers-color-scheme) instead of the app.theme method/stream (not implemented in main yet); main's nativeTheme.themeSource is not set by this task.
+- ASSUMPTION (2026-11-16 20:19+0100 by dell26/agent-1): Business palette: cool neutral greys + muted ink-blue accent (#2c5a85 light / #8cb4dd dark), system-ui 13px; AA tested for text/muted/faint/accent/danger/production/readonly/all BSON colors on page/elevated/panel/input backgrounds. Style/mode switcher (ThemeSwitcher) shown on the dev explorer page until a settings page exists.
+- ASSUMPTION (2026-11-16 20:19+0100 by dell26/agent-1): 4 Electron tests (app.electron thicket://app URL and dev.electron URL checks expect no '#/') fail on main 64cb776 without this task's changes as well; left for their owners, not in this task's scope.

@@ -1,0 +1,14 @@
+{
+  "name": "thicket-spike-mongosh",
+  "private": true,
+  "description": "Throwaway prototype: host the mongosh runtime in a Node process (not a workspace)",
+  "license": "Apache-2.0",
+  "type": "commonjs",
+  "scripts": {
+    "ping": "node ping.cjs"
+  },
+  "dependencies": {
+    "@mongosh/browser-runtime-electron": "5.11.9",
+    "@mongosh/service-provider-node-driver": "5.6.9"
+  }
+}

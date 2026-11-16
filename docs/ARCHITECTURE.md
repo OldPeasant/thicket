@@ -12,7 +12,7 @@ file current when the structure changes: agents read it before every task.
 | UI | Angular 22, standalone components, signals (as in JSON Canopy) |
 | MongoDB | official `mongodb` Node driver, `bson`, `mongodb-connection-string-url` |
 | SSH tunnels | `ssh2` |
-| Shell-syntax parsing | `ejson-shell-parser` (safe, no `eval`) |
+| Shell-syntax parsing | own parser in `packages/core/src/shellsyntax` (no `eval`; see below) |
 | Schema analysis | `mongodb-schema` |
 | Embedded shell | mongosh packages (`@mongosh/service-provider-node-driver`, the browser/Electron runtime) — confirm with a spike task in M4 |
 | Contract validation | `zod` |
@@ -112,6 +112,18 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   serves `privilegedMethods` (contract `backend.ts`: `main.ping`, `secrets.get`) on it. These
   methods are not in `methods`, so `route()` and the backend's renderer-facing `serve()` refuse
   them (`UNKNOWN_METHOD`).
+- Settings (`src/settings/store.ts`, `SettingsStore`): `userData/settings.json` as
+  `{ "version": 1, "settings": {...} }`. Missing file → `DEFAULT_SETTINGS`; unknown keys are
+  dropped and invalid values fall back to their default per key; a file that is not JSON or not
+  in that layout is renamed to `settings.json.corrupt-<time>` and the defaults are used (if that
+  rename fails, it is retried before the first write, like below). A file
+  that exists but cannot be read also gives the defaults and is renamed to
+  `settings.json.unreadable-<time>` before the first write (if that fails, the set fails). Writes go
+  to `settings.json.tmp` (flushed) and are renamed over the file (a stale temp file is removed at
+  start); writes are serialized. Main serves `app.settings.get/set` and, after a set that changed
+  something, broadcasts `app.settings.changed` (payload `SettingsChanged`) to every window through
+  `Broadcaster` (`src/main/broadcast.ts`) on the window's main port. `THICKET_USER_DATA` overrides
+  Electron's `userData` folder (tests).
 - Secrets (`src/secrets/`): `SecretsStore` keeps `secrets.bin` in `userData` — one JSON document
   `{ version: 1, profiles: { <profileId>: { <SecretKind>: value } } }` encrypted as a whole with
   `safeStorage`'s async API, rewritten atomically (temp file + rename, mode 0600), operations
@@ -265,6 +277,20 @@ Windows: run `.taskcheck` and npm scripts from Git for Windows' bash (TFP runs t
   Python files, `tasks/`, `reviews/`, `.claude/` and Markdown docs (see `.prettierignore`, the
   `ignores` in `eslint.config.mjs`, the explicit `workspaces` list and `test.projects`).
 - No repository-wide percentage is enforced.
+
+## Shell syntax (`packages/core/src/shellsyntax`)
+- `parseShellSyntax(text)` / `parseShellSyntaxDocument(text)` → `BsonValue`; `printShellSyntax(value,
+  { indent })` → text. Used by the raw editor and the query bar; the model ⇄ canonical EJSON is
+  `bson/ejson.ts`, so shell ⇄ EJSON goes through the model.
+- A recursive-descent parser over a JS subset (object/array literals, `'…'`/`"…"` strings, number
+  literals incl. hex/`_`/`5n`, regex literals, comments, unquoted keys), never `eval`. Only the
+  constructors in `value.ts` `CONSTRUCTORS` may be called (`new` optional); `function`, `this`,
+  operators, variables, property access and other calls are refused.
+- Errors are `ShellSyntaxError` (`offset`, 1-based `line`/`column`, `reason`); the message ends
+  with "(line L, column C)".
+- Numbers follow mongosh: an integer literal in Int32 range is Int32, else Double; the printer
+  writes integral Doubles as `Double(n)`, Int64 as `NumberLong(…)`, dates as `ISODate("…")`,
+  Timestamp as `Timestamp({ t, i })`. print → parse is lossless for every BSON type.
 
 ## Conventions
 - TypeScript `strict`; no `any` in `contract` and `core`.

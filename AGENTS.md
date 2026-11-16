@@ -224,9 +224,9 @@ Other commands: `list`, `status`, `check` (validates deps/cycles), `graph` (writ
   scaffold exists. Integration (`npm run test:int`, containers via Docker or Podman) and e2e
   (`npm run test:e2e`) are slower: run them when your task's criteria name them.
 - Coverage: `npm run coverage`, or task-scoped as described in `docs/ARCHITECTURE.md` "Coverage".
-- The JSON Canopy explorer comes from `vendor/json-canopy/` (until the `explorer-copy` task moves it
-  into `packages/renderer` and deletes `vendor/`; afterwards `packages/renderer` is the reference).
-  Never read paths outside your clone such as `../json-master-plugin`: agents can't reach them.
+- The JSON Canopy explorer lives in `packages/renderer/src/app/explorer` (and `src/app/schema`); that
+  copy is the reference (origin and license: root `NOTICE`). Dev page: `#/dev/explorer`.
+  Never read paths outside your clone: agents can't reach them.
 - Never put secrets in the renderer, logs or test fixtures committed to git; generate test
   certificates and keys at test time.
 - MongoDB Enterprise-only or Atlas-only features (LDAP, OIDC, AWS IAM) are verified against the

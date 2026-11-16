@@ -5,9 +5,10 @@
  * Environment:
  * - `THICKET_DEV_SERVER`: load the renderer from this URL (the `ng serve` origin) instead.
  * - `THICKET_RENDERER_DIR`: folder of the built renderer (default `packages/renderer/dist`).
+ * - `THICKET_USER_DATA`: use this folder as Electron's `userData` (settings.json ...), for tests.
  */
 import { fromMainPort, serve } from '@thicket/backend';
-import { privilegedMethods } from '@thicket/contract';
+import { BROADCAST_STREAMS, privilegedMethods, type SettingsChanged } from '@thicket/contract';
 import {
   BrowserWindow,
   MessageChannelMain,
@@ -23,7 +24,9 @@ import path from 'node:path';
 
 import { ProfilesStore } from '../profiles';
 import { SecretsStore } from '../secrets';
+import { SettingsStore } from '../settings/store';
 import { BackendHost } from './backend-host';
+import { Broadcaster } from './broadcast';
 import { mainHandlers, privilegedHandlers } from './handlers';
 import {
   APP_ORIGIN,
@@ -47,6 +50,10 @@ const rendererDir =
   process.env['THICKET_RENDERER_DIR'] ||
   path.resolve(distDir, '..', '..', '..', 'packages', 'renderer', 'dist');
 const csp = contentSecurityPolicy(devServer);
+
+const userDataOverride = process.env['THICKET_USER_DATA'];
+if (userDataOverride) app.setPath('userData', path.resolve(userDataOverride));
+const broadcaster = new Broadcaster(log);
 
 protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -126,7 +133,7 @@ async function serveAppFile(request: Request): Promise<Response> {
   }
 }
 
-function createWindow(): void {
+function createWindow(settings: SettingsStore): void {
   openWindow({
     preload: path.join(distDir, 'preload.cjs'),
     url: devServer ?? `${APP_ORIGIN}/index.html`,
@@ -134,13 +141,24 @@ function createWindow(): void {
     mainHandlers: mainHandlers({
       version: app.getVersion(),
       secrets: secretsStore(),
+      settings,
       profiles: profilesStore(),
     }),
+    broadcaster,
     log,
   });
 }
 
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
+  const settings = await SettingsStore.open(path.join(app.getPath('userData'), 'settings.json'), {
+    log,
+  });
+  settings.onChange((value) =>
+    broadcaster.emit(BROADCAST_STREAMS.settingsChanged, {
+      settings: value,
+    } satisfies SettingsChanged),
+  );
+
   protocol.handle(APP_SCHEME, serveAppFile);
   // The dev server's responses (and anything else loaded over http) get the same CSP.
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -154,9 +172,9 @@ void app.whenReady().then(() => {
     .status()
     .then((status) => log(`secret storage: ${status.level} (${status.backend})`));
   host.start();
-  createWindow();
+  createWindow(settings);
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) createWindow(settings);
   });
 });
 

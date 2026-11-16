@@ -1,10 +1,11 @@
 ---
 title: M0: electron-builder packaging for the current OS
-status: todo
-owner:
+status: in_progress
+owner: felix/agent-1
 deps: [electron-shell]
 touches: [apps/desktop/electron-builder.yml,apps/desktop/build]
 prio: 2
+lease_until: 2026-11-16T19:34:45Z
 ---
 ## Goal
 `npm run dist` produces unsigned installers for the current OS: AppImage/deb/rpm on Linux, dmg on macOS, NSIS + zip on Windows; native modules rebuilt for Electron.
