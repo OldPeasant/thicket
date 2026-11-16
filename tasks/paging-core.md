@@ -16,3 +16,4 @@ Pure functions for paging state: page size, page index, range paging on an index
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 19:31+0100 by felix/agent-2): Range paging applies when the sort keys include all fields of a plain unique index (_id implied); callers pass only non-sparse, non-partial unique indexes. Range bounds use $gt/$lt, so they assume one BSON type per sort key (type bracketing); null bounds handled specially ($ne null / $type minKey).
