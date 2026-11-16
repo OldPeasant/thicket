@@ -5,7 +5,7 @@ owner: dell26/agent-2
 deps: [contract,renderer-scaffold]
 touches: [apps/desktop/src/main,apps/desktop/src/preload,apps/desktop/package.json,packages/backend/src/server]
 prio: 1
-lease_until: 2026-11-16T18:31:39Z
+lease_until: 2026-11-16T18:36:40Z
 ---
 ## Goal
 Electron app that opens a sandboxed window with the renderer build, starts the backend in a utilityProcess, brokers a MessagePort between them, and routes requests by `route(method)` to main or backend. Exposes only `window.thicket.request/cancel/on` in the preload.
