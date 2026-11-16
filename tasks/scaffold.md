@@ -5,7 +5,7 @@ owner: dell26/agent-1
 deps: []
 touches: [package.json,package-lock.json,tsconfig.base.json,eslint.config.mjs,vitest.workspace.ts,apps,packages,README.md]
 prio: 1
-lease_until: 2026-11-16T17:31:01Z
+lease_until: 2026-11-16T17:35:56Z
 ---
 ## Goal
 Create the npm-workspaces monorepo described in docs/ARCHITECTURE.md (apps/desktop, packages/contract, packages/core, packages/backend, packages/renderer as empty but buildable workspaces) with TypeScript strict, ESLint, Prettier, Vitest and V8 coverage.
