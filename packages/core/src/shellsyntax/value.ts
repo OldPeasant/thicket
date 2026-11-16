@@ -210,10 +210,19 @@ const int: Constructor = (list, call, { fail }) => {
   return { type: 'int', value: Number(n) };
 };
 
+/** A bare `Infinity` or `NaN` argument (signed forms such as `-Infinity` parse as numbers). */
+function nonFiniteWord(node: Node): string | null {
+  return node.kind === 'word' && (node.name === 'Infinity' || node.name === 'NaN')
+    ? node.name
+    : null;
+}
+
 const decimal: Constructor = (list, call, { fail }) => {
   const [arg] = args(call, list, 1, 1, fail) as [Node];
   let text: string;
-  if (arg.kind === 'number') text = arg.text || String(arg.value);
+  const word = nonFiniteWord(arg);
+  if (word !== null) text = word;
+  else if (arg.kind === 'number') text = arg.text || String(arg.value);
   else text = stringArg(arg, 'a decimal', fail, call).trim();
   // bson accepts hex for numbers only via Number(); keep that exact for 0x… integer literals.
   if (arg.kind === 'number' && arg.exact !== null) text = String(arg.exact);
@@ -227,6 +236,8 @@ const decimal: Constructor = (list, call, { fail }) => {
 const doubleCtor: Constructor = (list, call, { fail }) => {
   const [arg] = args(call, list, 1, 1, fail) as [Node];
   if (arg.kind === 'number') return { type: 'double', value: arg.value };
+  const word = nonFiniteWord(arg);
+  if (word !== null) return { type: 'double', value: Number(word) };
   const text = stringArg(arg, 'a number', fail, call).trim();
   if (!DOUBLE_TEXT.test(text)) fail(`"${text}" is not a number`, arg);
   return { type: 'double', value: Number(text) };

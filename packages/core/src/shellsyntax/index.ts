@@ -18,10 +18,10 @@ export function parseShellSyntax(text: string): BsonValue {
 
 /** Parses shell syntax whose top level must be a document (a filter, projection, sort, …). */
 export function parseShellSyntaxDocument(text: string): BsonDocument {
-  const value = parseShellSyntax(text);
+  const root = parseSyntax(text);
+  const value = toBsonValue(root, text);
   if (value.type !== 'object') {
-    const start = text.length - text.trimStart().length;
-    throw new ShellSyntaxError('Expected a document ({ … })', text, start);
+    throw new ShellSyntaxError('Expected a document ({ … })', text, root.pos);
   }
   return value;
 }

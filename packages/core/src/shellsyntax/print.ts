@@ -143,6 +143,20 @@ function regex(pattern: string, options: string): string {
     LITERAL_FLAGS.test(options) &&
     pattern !== '' &&
     !pattern.startsWith('*') &&
-    scanRegexBody(literal, 1) === pattern.length + 1;
+    scanRegexBody(literal, 1) === pattern.length + 1 &&
+    compilesInJs(pattern, options);
   return fitsLiteral ? literal + options : `BSONRegExp(${q(pattern)}, ${q(options)})`;
+}
+
+/**
+ * MongoDB patterns are PCRE; some (`(?i)a`, `a++`, `\-` with `u`) are not valid JS, and a
+ * literal of them would be a syntax error in mongosh. Compiling never runs the pattern.
+ */
+function compilesInJs(pattern: string, options: string): boolean {
+  try {
+    new RegExp(pattern, options);
+    return true;
+  } catch {
+    return false;
+  }
 }

@@ -264,6 +264,13 @@ describe('number literals', () => {
     expect(ejson('Double(Infinity)')).toBe('{"$numberDouble":"Infinity"}');
     expect(ejson('Double(NaN)')).toBe('{"$numberDouble":"NaN"}');
     expect(ejson('NumberDecimal(Infinity)')).toBe('{"$numberDecimal":"Infinity"}');
+    expect(ejson('NumberDecimal(NaN)')).toBe('{"$numberDecimal":"NaN"}');
+    expect(ejson('Decimal128(Infinity)')).toBe('{"$numberDecimal":"Infinity"}');
+  });
+
+  it('still refuses Infinity and NaN where an integer is needed', () => {
+    expect(parseError('NumberLong(Infinity)').column).toBe(12);
+    expect(parseError('NumberInt(NaN)').column).toBe(11);
   });
 });
 
@@ -339,6 +346,12 @@ describe('printShellSyntax: regex literal or BSONRegExp', () => {
     ['\\/', '', '/\\//'],
     ['x', 'imsu', '/x/imsu'],
     ['a*', '', '/a*/'],
+    // PCRE-only patterns that JS cannot compile stay in BSONRegExp so mongosh reads them (CR-1).
+    ['(?i)a', '', 'BSONRegExp("(?i)a", "")'],
+    ['a++', '', 'BSONRegExp("a++", "")'],
+    ['(?>a)', 'i', 'BSONRegExp("(?>a)", "i")'],
+    ['a\\-', 'u', 'BSONRegExp("a\\\\-", "u")'],
+    ['a\\-', '', '/a\\-/'],
   ])('pattern %j options %j -> %s', (pattern, options, printed) => {
     expect(expectRoundTrip({ type: 'regex', pattern, options })).toBe(printed);
   });
