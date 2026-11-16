@@ -12,7 +12,7 @@ file current when the structure changes: agents read it before every task.
 | UI | Angular 22, standalone components, signals (as in JSON Canopy) |
 | MongoDB | official `mongodb` Node driver, `bson`, `mongodb-connection-string-url` |
 | SSH tunnels | `ssh2` |
-| Shell-syntax parsing | `ejson-shell-parser` (safe, no `eval`) |
+| Shell-syntax parsing | own parser in `packages/core/src/shellsyntax` (no `eval`; see below) |
 | Schema analysis | `mongodb-schema` |
 | Embedded shell | mongosh packages (`@mongosh/service-provider-node-driver`, the browser/Electron runtime) — confirm with a spike task in M4 |
 | Contract validation | `zod` |
@@ -262,6 +262,20 @@ Windows: run `.taskcheck` and npm scripts from Git for Windows' bash (TFP runs t
   Python files, `tasks/`, `reviews/`, `.claude/` and Markdown docs (see `.prettierignore`, the
   `ignores` in `eslint.config.mjs`, the explicit `workspaces` list and `test.projects`).
 - No repository-wide percentage is enforced.
+
+## Shell syntax (`packages/core/src/shellsyntax`)
+- `parseShellSyntax(text)` / `parseShellSyntaxDocument(text)` → `BsonValue`; `printShellSyntax(value,
+  { indent })` → text. Used by the raw editor and the query bar; the model ⇄ canonical EJSON is
+  `bson/ejson.ts`, so shell ⇄ EJSON goes through the model.
+- A recursive-descent parser over a JS subset (object/array literals, `'…'`/`"…"` strings, number
+  literals incl. hex/`_`/`5n`, regex literals, comments, unquoted keys), never `eval`. Only the
+  constructors in `value.ts` `CONSTRUCTORS` may be called (`new` optional); `function`, `this`,
+  operators, variables, property access and other calls are refused.
+- Errors are `ShellSyntaxError` (`offset`, 1-based `line`/`column`, `reason`); the message ends
+  with "(line L, column C)".
+- Numbers follow mongosh: an integer literal in Int32 range is Int32, else Double; the printer
+  writes integral Doubles as `Double(n)`, Int64 as `NumberLong(…)`, dates as `ISODate("…")`,
+  Timestamp as `Timestamp({ t, i })`. print → parse is lossless for every BSON type.
 
 ## Conventions
 - TypeScript `strict`; no `any` in `contract` and `core`.
