@@ -26,7 +26,8 @@ export class ScanError extends Error {
   }
 }
 
-const isSpace = (c: string) => c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '﻿';
+const isSpace = (c: string) =>
+  c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\uFEFF';
 
 export interface Scanner {
   /** Feeds the next chunk; returns the values completed by it. */
@@ -176,7 +177,7 @@ export class LineScanner implements Scanner {
 
   private push(raw: string, out: ScannedValue[]): void {
     this.line++;
-    const text = (this.line === 1 ? raw.replace(/^﻿/, '') : raw).trim();
+    const text = (this.line === 1 ? raw.replace(/^\uFEFF/, '') : raw).trim();
     if (text.length > 0) out.push({ text, line: this.line });
   }
 }
