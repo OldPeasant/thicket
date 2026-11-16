@@ -136,7 +136,88 @@ describe('diffDocuments', () => {
   });
 });
 
+describe('diffDocuments edge cases', () => {
+  it('treats an _id of another numeric type (int 1 vs long 1) as a changed _id', () => {
+    expect(() =>
+      diffDocuments(
+        parseEJsonDocument('{"_id":{"$numberInt":"1"},"a":1}'),
+        parseEJsonDocument('{"_id":{"$numberLong":"1"},"a":2}'),
+      ),
+    ).toThrow(/cannot be changed/);
+  });
+
+  it('checks every original field except _id for a pure top-level reorder', () => {
+    const diff = diffDocuments(
+      parseEJsonDocument('{"_id":1,"a":1,"b":{"c":2},"d":[3]}'),
+      parseEJsonDocument('{"_id":1,"d":[3],"a":1,"b":{"c":2}}'),
+    );
+    expect(diff.kind).toBe('replace');
+    if (diff.kind !== 'replace') return;
+    expect(diff.changedFields).toEqual(['a', 'b', 'd']);
+    expect(stringifyEJson(diff.filter)).toBe(
+      canonical('{"_id":1,"a":{"$eq":1},"b":{"$eq":{"c":2}},"d":{"$eq":[3]}}'),
+    );
+  });
+
+  it('lists changed fields of a replace in original order, then new fields', () => {
+    const diff = diffDocuments(
+      parseEJsonDocument('{"_id":1,"a":1,"b":2,"c":3}'),
+      parseEJsonDocument('{"_id":1,"c":4,"b":2,"n":0}'),
+    );
+    expect(diff.kind).toBe('replace');
+    if (diff.kind === 'replace') expect(diff.changedFields).toEqual(['a', 'c', 'n']);
+  });
+
+  it('does not modify its inputs', () => {
+    const originalText = '{"_id":1,"a":{"b":1,"x":[1]},"r":true}';
+    const editedText = '{"_id":1,"a":{"b":2,"x":[1,2]},"n":1}';
+    const original = parseEJsonDocument(originalText);
+    const edited = parseEJsonDocument(editedText);
+    diffDocuments(original, edited);
+    expect(stringifyEJson(original)).toBe(canonical(originalText));
+    expect(stringifyEJson(edited)).toBe(canonical(editedText));
+  });
+
+  it('returns none for a structurally equal but separately built document', () => {
+    const text = '{"_id":1,"d":{"$numberDouble":"NaN"},"a":[{"b":null}]}';
+    expect(diffDocuments(parseEJsonDocument(text), parseEJsonDocument(text))).toEqual({
+      kind: 'none',
+    });
+  });
+
+  it('accepts _id values of any type, including documents', () => {
+    const diff = diffDocuments(
+      parseEJsonDocument('{"_id":{"k":1,"t":"x"},"a":1}'),
+      parseEJsonDocument('{"_id":{"k":1,"t":"x"},"a":2}'),
+    );
+    expect(diff.kind).toBe('update');
+    if (diff.kind === 'update')
+      expect(stringifyEJson(diff.filter)).toBe(canonical('{"_id":{"k":1,"t":"x"},"a":{"$eq":1}}'));
+  });
+
+  it('refuses a document whose _id was reordered inside (embedded _id is compared exactly)', () => {
+    expect(() =>
+      diffDocuments(
+        parseEJsonDocument('{"_id":{"k":1,"t":"x"},"a":1}'),
+        parseEJsonDocument('{"_id":{"t":"x","k":1},"a":1}'),
+      ),
+    ).toThrow(/cannot be changed/);
+  });
+});
+
 describe('toUpdateDocument', () => {
+  it('groups operations by operator in $set, $unset, $push order, keeping op order inside', () => {
+    const update = toUpdateDocument([
+      { op: 'push', path: 'l', items: [int32(1)] },
+      { op: 'unset', path: 'u' },
+      { op: 'set', path: 'b', value: str('x') },
+      { op: 'set', path: 'a', value: int32(2) },
+    ]);
+    expect(stringifyEJson(update)).toBe(
+      canonical('{"$set":{"b":"x","a":2},"$unset":{"u":""},"$push":{"l":{"$each":[1]}}}'),
+    );
+  });
+
   it('returns an empty document for no operations', () => {
     expect(toUpdateDocument([])).toEqual(doc());
   });

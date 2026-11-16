@@ -255,6 +255,119 @@ export const DIFF_CASES: DiffCase[] = [
     update: '{"$set":{"a.k":2}}',
     expected: '{"a":{"$eq":{"$x":1,"k":1}}}',
   },
+  // --- Edge cases added by the test-writer -----------------------------------------------------
+  {
+    name: 'null → value (top-level)',
+    original: `{"_id":${ID},"a":null,"b":1}`,
+    edited: `{"_id":${ID},"a":"set","b":1}`,
+    update: '{"$set":{"a":"set"}}',
+    expected: '{"a":{"$eq":null}}',
+  },
+  {
+    name: 'value → null is a set, not an unset',
+    original: `{"_id":${ID},"a":{"b":1,"c":2}}`,
+    edited: `{"_id":${ID},"a":{"b":null,"c":2}}`,
+    update: '{"$set":{"a.b":null}}',
+    expected: '{"a":{"$eq":{"b":1,"c":2}}}',
+  },
+  {
+    name: 'empty nested document gets a field',
+    original: `{"_id":${ID},"a":{}}`,
+    edited: `{"_id":${ID},"a":{"b":1}}`,
+    update: '{"$set":{"a.b":1}}',
+    expected: '{"a":{"$eq":{}}}',
+  },
+  {
+    name: 'last field of a nested document removed leaves an empty document',
+    original: `{"_id":${ID},"a":{"b":1}}`,
+    edited: `{"_id":${ID},"a":{}}`,
+    update: '{"$unset":{"a.b":""}}',
+    expected: '{"a":{"$eq":{"b":1}}}',
+  },
+  {
+    name: 'array emptied → replace array',
+    original: `{"_id":${ID},"l":[1,2]}`,
+    edited: `{"_id":${ID},"l":[]}`,
+    update: '{"$set":{"l":[]}}',
+    expected: '{"l":{"$eq":[1,2]}}',
+  },
+  {
+    name: 'append of an item equal to the last one → $push',
+    original: `{"_id":${ID},"l":[1]}`,
+    edited: `{"_id":${ID},"l":[1,1]}`,
+    update: '{"$push":{"l":{"$each":[1]}}}',
+    expected: '{"l":{"$eq":[1]}}',
+  },
+  {
+    name: 'append of a nested array is pushed as one item',
+    original: `{"_id":${ID},"m":[[1]]}`,
+    edited: `{"_id":${ID},"m":[[1],[2,3]]}`,
+    update: '{"$push":{"m":{"$each":[[2,3]]}}}',
+    expected: '{"m":{"$eq":[[1]]}}',
+  },
+  {
+    name: 'array → document of the same content is a type change',
+    original: `{"_id":${ID},"a":[]}`,
+    edited: `{"_id":${ID},"a":{}}`,
+    update: '{"$set":{"a":{}}}',
+    expected: '{"a":{"$eq":[]}}',
+  },
+  {
+    name: 'decimal, binary and timestamp changes',
+    original: `{"_id":${ID},"p":{"$numberDecimal":"1.10"},"bin":{"$binary":{"base64":"AQI=","subType":"00"}},"ts":{"$timestamp":{"t":1,"i":1}}}`,
+    edited: `{"_id":${ID},"p":{"$numberDecimal":"1.1"},"bin":{"$binary":{"base64":"AQM=","subType":"00"}},"ts":{"$timestamp":{"t":1,"i":2}}}`,
+    update:
+      '{"$set":{"p":{"$numberDecimal":"1.1"},"bin":{"$binary":{"base64":"AQM=","subType":"00"}},"ts":{"$timestamp":{"t":1,"i":2}}}}',
+    expected:
+      '{"p":{"$eq":{"$numberDecimal":"1.10"}},"bin":{"$eq":{"$binary":{"base64":"AQI=","subType":"00"}}},"ts":{"$eq":{"$timestamp":{"t":1,"i":1}}}}',
+  },
+  {
+    name: 'nested reorder plus a new sibling field and an unset elsewhere',
+    original: `{"_id":${ID},"a":{"b":{"x":1,"y":2},"c":1},"d":true}`,
+    edited: `{"_id":${ID},"a":{"b":{"y":2,"x":1},"c":1,"n":"new"}}`,
+    update: '{"$set":{"a.b":{"y":2,"x":1},"a.n":"new"},"$unset":{"d":""}}',
+    expected: '{"a":{"$eq":{"b":{"x":1,"y":2},"c":1}},"d":{"$eq":true}}',
+  },
+  {
+    name: 'top-level reorder plus a value change → replace, filter checks only the changed field',
+    original: `{"_id":${ID},"a":1,"b":2}`,
+    edited: `{"_id":${ID},"b":3,"a":1}`,
+    update: 'replace',
+    expected: '{"b":{"$eq":2}}',
+  },
+  {
+    name: 'new nested empty key → replace parent document',
+    original: `{"_id":${ID},"a":{"k":1}}`,
+    edited: `{"_id":${ID},"a":{"k":1,"":2}}`,
+    update: '{"$set":{"a":{"k":1,"":2}}}',
+    expected: '{"a":{"$eq":{"k":1}}}',
+  },
+  {
+    name: 'changed top-level empty key → replace document, $expr check',
+    original: `{"_id":${ID},"":1,"c":1}`,
+    edited: `{"_id":${ID},"":2,"c":1}`,
+    update: 'replace',
+    expected:
+      '{"$expr":{"$eq":[{"$getField":{"field":{"$literal":""},"input":"$$ROOT"}},{"$literal":1}]}}',
+  },
+  {
+    name: 'removed top-level $-prefixed key → replace document, $expr check',
+    original: `{"_id":${ID},"$k":{"x":1},"c":1}`,
+    edited: `{"_id":${ID},"c":1}`,
+    update: 'replace',
+    expected:
+      '{"$expr":{"$eq":[{"$getField":{"field":{"$literal":"$k"},"input":"$$ROOT"}},{"$literal":{"x":1}}]}}',
+  },
+  {
+    name: 'top-level reorder in a document that keeps a $-prefixed key → replace',
+    original: `{"_id":${ID},"$k":1,"a":1,"b":2}`,
+    edited: `{"_id":${ID},"$k":1,"b":2,"a":1}`,
+    update: 'replace',
+    // A pure reorder checks every original field, the `$k` one through `$expr`.
+    expected:
+      '{"a":{"$eq":1},"b":{"$eq":2},' +
+      '"$expr":{"$eq":[{"$getField":{"field":{"$literal":"$k"},"input":"$$ROOT"}},{"$literal":1}]}}',
+  },
   {
     name: 'no change',
     original: `{"_id":${ID},"a":{"b":[1,{"c":2}]}}`,

@@ -83,8 +83,10 @@ describe.each(['mongo8', 'mongo7'] as const)('diff-ops against %s', (fixture) =>
     await col.insertOne(toDriver(original));
     expect(await col.countDocuments(filter)).toBe(1);
 
-    // A field the edit did not touch was changed concurrently: still no conflict.
-    await col.replaceOne({}, toDriver(concurrentChange(original, 'unrelatedConcurrentField')));
+    // A field the edit did not touch was changed concurrently: still no conflict. (Delete +
+    // insert instead of replaceOne: replacements may not contain top-level `$` keys.)
+    await col.deleteMany({});
+    await col.insertOne(toDriver(concurrentChange(original, 'unrelatedConcurrentField')));
     expect(await col.countDocuments(filter)).toBe(1);
 
     // Any changed top-level field modified on the server: the filter matches nothing.
@@ -94,5 +96,46 @@ describe.each(['mongo8', 'mongo7'] as const)('diff-ops against %s', (fixture) =>
       await col.insertOne(toDriver(concurrentChange(original, key)));
       expect(await col.countDocuments(filter), key).toBe(0);
     }
+  });
+
+  it.each(changing)('conflict filter detects a concurrent removal: $name', async (c) => {
+    const original = parseEJsonDocument(c.original);
+    const diff = diffDocuments(original, parseEJsonDocument(c.edited));
+    if (diff.kind === 'none') throw new Error('expected a change');
+    const col = coll(`r ${c.name}`);
+    const filter = toDriver(diff.filter);
+
+    // Another user removed a changed top-level field that existed in the original.
+    const removable = diff.changedFields.filter((k) => original.fields.some((f) => f.key === k));
+    for (const key of removable) {
+      await col.deleteMany({});
+      await col.insertOne(
+        toDriver({ type: 'object', fields: original.fields.filter((f) => f.key !== key) }),
+      );
+      expect(await col.countDocuments(filter), key).toBe(0);
+    }
+  });
+
+  it('a stale save does not overwrite a concurrent change (updateOne matches nothing)', async () => {
+    const original = parseEJsonDocument(
+      '{"_id":{"$oid":"65a1b2c3d4e5f60718293a4c"},"qty":1,"meta":{"by":"ann"}}',
+    );
+    const diff = diffDocuments(
+      original,
+      parseEJsonDocument('{"_id":{"$oid":"65a1b2c3d4e5f60718293a4c"},"qty":2,"meta":{"by":"ann"}}'),
+    );
+    if (diff.kind !== 'update') throw new Error('expected an update');
+    const col = coll('stale save');
+    await col.deleteMany({});
+    await col.insertOne(toDriver(original));
+    // Someone else saved qty = 5 first.
+    await col.updateOne({}, { $set: { qty: 5 } });
+
+    const result = await col.updateOne(toDriver(diff.filter), toDriver(diff.update));
+    expect(result.matchedCount).toBe(0);
+    const stored = await col.findOne({}, readOptions);
+    expect(fromDriver(stored as Document)).toBe(
+      canonical('{"_id":{"$oid":"65a1b2c3d4e5f60718293a4c"},"qty":5,"meta":{"by":"ann"}}'),
+    );
   });
 });
