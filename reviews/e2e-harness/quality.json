@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "task": "e2e-harness",
+  "reviewed_revision": "493a46271fa97cd4cbc31f84e830a48c5eb8b21e",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/e2e-harness/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/e2e-harness/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/e2e-harness/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "CR-1 (first review)",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "screenshot-on-failure path now exercised by harness-helpers.e2e.ts (nested run of test/e2e/failure-fixture) and recorded with tasks.py verify"
+    },
+    {
+      "id": "CR-2 (first review)",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "harness imports _electron/ElectronApplication/Page from @playwright/test (declared) instead of hoisted playwright-core"
+    },
+    {
+      "id": "CR-3 (first review)",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "keep-in-sync comments in test/e2e/harness/app.ts and apps/desktop/test/helpers.ts"
+    },
+    {
+      "id": "CR-1 (second review)",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "accepted",
+      "note": "xvfb-run is not installed on this host: criterion 1 evidence states the run used the session's Wayland display, recorded as an assumption; no xvfb-run claim made"
+    },
+    {
+      "id": "CR-2 (second review)",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "accepted",
+      "note": "missing comma in the tsconfig.json '//' description string; wording only, not worth another review round"
+    }
+  ],
+  "validation": [
+    { "command": "npm run test:e2e (Linux, session Wayland display, 17 tests)", "result": "pass" },
+    { "command": "sh .taskcheck (npm run check)", "result": "pass" }
+  ]
+}
