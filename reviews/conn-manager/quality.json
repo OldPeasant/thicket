@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "task": "conn-manager",
+  "reviewed_revision": "201286293a9006c7f0e6a15365c8447c782d7e9e",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/conn-manager/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/conn-manager/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/conn-manager/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "cancelled connect closed the MongoClient once the driver connect finishes (test and open); confirmed in second-pass review"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "draft with id gets stored secrets only when connection string/auth/TLS/SSH match the saved profile"},
+    {"id": "CR-3", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "per-caller cancel for concurrent opens; connect closed when the last waiter cancels"},
+    {"id": "CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "conn.close during a connect answers CANCELLED"},
+    {"id": "TW-OBS-1", "source": "test-writer", "severity": "Low", "disposition": "accepted",
+     "note": "test() with an already aborted signal starts a connect before answering CANCELLED; client is closed, nothing leaks"},
+    {"id": "TW-OBS-2", "source": "test-writer", "severity": "Low", "disposition": "accepted",
+     "note": "SERVER_ERROR detail taken only from the top-level error, nested cause yields empty detail; not required by the contract"}
+  ],
+  "validation": [
+    {"command": "cd packages/backend && npx vitest run src/guard src/connections", "result": "pass"},
+    {"command": "npm run test:int -- conn-manager", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}
