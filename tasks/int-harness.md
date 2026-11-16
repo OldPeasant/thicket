@@ -15,7 +15,8 @@ Testcontainers fixtures for MongoDB Community 8.x (replica set and standalone) a
   - verified (2026-11-16 19:02+0100 by dell26/agent-3): npm run test:int with DOCKER_HOST=unix:///run/user/1000/podman/podman.sock (rootless Podman 5.8, Fedora kernel 6.19) -> 4 files, 28 passed; fixtures.int.spec.ts connects with the mongodb 7.9 Node driver to mongo8 (8.2), mongo8rs (8.2 rs0, transaction), mongo7 (7.0), mongo8tls, mongo7tls
 - [x] TLS fixture: connecting without the CA fails, with the CA succeeds (test)
   - verified (2026-11-16 19:02+0100 by dell26/agent-3): npm run test:int -> tls.int.spec.ts passes for mongo8tls and mongo7tls: tls without CA rejects with /certificate/ error, plain and foreign-CA clients rejected, tlsCAFile=generated CA -> ping ok
-- [ ] No certificate or key is committed; docs/ARCHITECTURE.md Install section has the exact Podman env vars used
+- [x] No certificate or key is committed; docs/ARCHITECTURE.md Install section has the exact Podman env vars used
+  - verified (2026-11-16 19:02+0100 by dell26/agent-3): git ls-files *.pem/*.key/*.crt/*.p12/*.pfx -> 0 files; git grep BEGIN -> only regex patterns in certs.int.spec.ts; certs generated per run into a mkdtemp dir removed in teardown; .gitignore *.pem/*.key/*.crt; docs/ARCHITECTURE.md Install lists systemctl --user enable --now podman.socket, DOCKER_HOST=unix://XDG_RUNTIME_DIR/podman/podman.sock, TESTCONTAINERS_RYUK_DISABLED=true
 - [ ] Fixtures start in parallel and are reused across test files (global setup); total sample run < 3 min
 
 ## Notes
