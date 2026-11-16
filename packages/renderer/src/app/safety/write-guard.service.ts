@@ -120,7 +120,7 @@ export class WriteGuard {
     delete plain.confirmed;
     if (!describe.alwaysConfirm && !this.needsConfirmation(method, profileId)) return plain;
     if (signal?.aborted) throw writeCancelled();
-    const ok = await this.confirmer.confirm(this.request(method, plain, describe));
+    const ok = await this.confirmer.confirm(this.request(method, plain, describe), signal);
     if (!ok || signal?.aborted) throw writeCancelled();
     return { ...plain, confirmed: true };
   }

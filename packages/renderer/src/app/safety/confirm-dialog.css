@@ -114,6 +114,11 @@
   box-shadow: var(--focus-ring);
 }
 
+/* The dialog itself only takes focus to keep it inside (clicks on text, the backdrop). */
+.dialog:focus {
+  outline: none;
+}
+
 .detail {
   margin: 0;
   color: var(--text-muted);

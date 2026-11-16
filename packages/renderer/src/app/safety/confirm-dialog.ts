@@ -17,14 +17,22 @@ import { ConfirmService } from './confirm.service';
  * The modal confirm dialog for writes (`ConfirmService`). Shows the exact operation in shell
  * syntax, the connection (red accent for production) and, for large deletes, a field where the
  * collection name must be typed before the confirm button works. Escape and Cancel abort; focus
- * stays inside the dialog while it is open and returns to where it was afterwards.
+ * stays inside the dialog while it is open (also after a click on the backdrop; `AppShell` makes
+ * the rest of the window inert) and returns to where it was afterwards.
  */
 @Component({
   selector: 'app-confirm-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: {
+    '(document:keydown)': 'onDocumentKeydown($event)',
+  },
   template: `
     @if (confirm.current(); as req) {
-      <div class="backdrop" data-testid="confirm-backdrop"></div>
+      <div
+        class="backdrop"
+        data-testid="confirm-backdrop"
+        (mousedown)="onBackdropMousedown($event)"
+      ></div>
       <div
         class="dialog"
         role="alertdialog"
@@ -32,6 +40,7 @@ import { ConfirmService } from './confirm.service';
         aria-labelledby="confirm-title"
         aria-describedby="confirm-operation"
         data-testid="confirm-dialog"
+        tabindex="-1"
         [class.production]="req.connection?.production"
         [class.destructive]="req.destructive"
         (keydown)="onKeydown($event)"
@@ -60,7 +69,6 @@ import { ConfirmService } from './confirm.service';
           class="operation"
           data-testid="confirm-operation"
           tabindex="0"
-          aria-label="Operation"
           >{{ req.operation }}</pre>
 
         @if (req.detail) {
@@ -175,18 +183,49 @@ export class ConfirmDialog {
     } else if (event.key === 'Enter' && (event.target as HTMLElement).id === 'confirm-type') {
       event.preventDefault();
       this.accept();
-    } else if (event.key === 'Tab') {
+    } else if (event.key === 'Tab' && !event.ctrlKey && !event.metaKey && !event.altKey) {
       this.trapFocus(event);
     }
   }
 
-  /** Keeps Tab and Shift+Tab inside the dialog. */
-  private trapFocus(event: KeyboardEvent): void {
-    const items = Array.from(
+  /**
+   * Keys pressed while focus is outside the dialog (e.g. on `<body>`): Escape still cancels and
+   * Tab moves focus back into the dialog.
+   */
+  protected onDocumentKeydown(event: KeyboardEvent): void {
+    const dialog = this.dialogElement();
+    if (!dialog || dialog.contains(event.target as Node | null)) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this.cancel();
+    } else if (event.key === 'Tab' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault();
+      this.focusables()[0]?.focus();
+    }
+  }
+
+  /** A click on the backdrop keeps focus in the dialog, so Escape and Tab keep working. */
+  protected onBackdropMousedown(event: MouseEvent): void {
+    event.preventDefault();
+    const dialog = this.dialogElement();
+    if (dialog && !dialog.contains(this.document.activeElement)) dialog.focus();
+  }
+
+  private dialogElement(): HTMLElement | null {
+    return this.host.nativeElement.querySelector<HTMLElement>('[data-testid="confirm-dialog"]');
+  }
+
+  private focusables(): HTMLElement[] {
+    return Array.from(
       this.host.nativeElement.querySelectorAll<HTMLElement>(
         '.dialog [tabindex="0"], .dialog input, .dialog button:not([disabled])',
       ),
     );
+  }
+
+  /** Keeps Tab and Shift+Tab inside the dialog. */
+  private trapFocus(event: KeyboardEvent): void {
+    const items = this.focusables();
     const first = items[0];
     const last = items.at(-1);
     if (!first || !last) return;

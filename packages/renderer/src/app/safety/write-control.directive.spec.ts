@@ -15,7 +15,41 @@ class Host {
   readonly busy = signal(false);
 }
 
+@Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [WriteControl],
+  template: `
+    <button appWriteControl="a" title="Save (Ctrl+S)">Save</button>
+    <button appWriteControl="a" [title]="tip()">Delete</button>
+  `,
+})
+class TitledHost {
+  readonly tip = signal('Delete the document');
+}
+
 describe('WriteControl', () => {
+  it('keeps the control own title on writable profiles and restores it after read-only', async () => {
+    const fixture = TestBed.createComponent(TitledHost);
+    const safety = TestBed.inject(ProfileSafetyService);
+    const [save, del] = Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll('button'),
+    );
+    await fixture.whenStable();
+    expect(save?.title).toBe('Save (Ctrl+S)');
+    expect(del?.title).toBe('Delete the document');
+
+    safety.set({ id: 'a', name: 'A', readOnly: true, production: false });
+    await fixture.whenStable();
+    expect(save?.title).toBe(READ_ONLY_HINT);
+    expect(del?.title).toBe(READ_ONLY_HINT);
+
+    safety.set({ id: 'a', name: 'A', readOnly: false, production: false });
+    fixture.componentInstance.tip.set('Delete it');
+    await fixture.whenStable();
+    expect(save?.title).toBe('Save (Ctrl+S)');
+    expect(del?.title).toBe('Delete it');
+  });
+
   it('disables the control while its profile is read-only and follows flag changes', async () => {
     const fixture = TestBed.createComponent(Host);
     const safety = TestBed.inject(ProfileSafetyService);

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
 import { routes } from '../app.routes';
+import { ConfirmService } from '../safety/confirm.service';
 import { AppShell, SIDEBAR_KEY_STEP } from './app-shell';
 import { NAV } from './navigation';
 import { SidebarWidthService } from './sidebar-width.service';
@@ -224,6 +225,49 @@ describe('AppShell', () => {
     it('hosts the confirm dialog', async () => {
       await start();
       expect(el.querySelector('app-confirm-dialog')).not.toBeNull();
+    });
+
+    it('while the confirm dialog is open, the rest of the window is inert and shortcuts do nothing', async () => {
+      await start();
+      ['a', 'b', 'c'].forEach((id) => ws.open(tab(id)));
+      await settle();
+      const behind = () =>
+        ['[data-testid="sidebar"]', '[data-testid="splitter"]', '.work', 'app-status-bar'].map(
+          (selector) => must(el.querySelector(selector)).hasAttribute('inert'),
+        );
+      expect(behind()).toEqual([false, false, false, false]);
+
+      const confirm = TestBed.inject(ConfirmService);
+      const answer = confirm.confirm({ title: 'Delete', operation: 'op', confirmLabel: 'Delete' });
+      await settle();
+      expect(behind()).toEqual([true, true, true, true]);
+      const dialog = must(el.querySelector<HTMLElement>('[data-testid="confirm-dialog"]'));
+      expect(dialog.closest('[inert]')).toBeNull();
+
+      // Shortcuts pressed inside the dialog are consumed but leave the tabs alone.
+      const inDialog = (init: KeyboardEventInit) => {
+        const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+        must(dialog.querySelector('[data-testid="confirm-cancel"]')).dispatchEvent(event);
+        return event;
+      };
+      expect(inDialog({ key: 'w', ctrlKey: true }).defaultPrevented).toBe(true);
+      inDialog({ key: 'w', metaKey: true });
+      inDialog({ key: 'Tab', ctrlKey: true });
+      inDialog({ key: 'PageUp', ctrlKey: true });
+      inDialog({ key: 'PageUp', ctrlKey: true, shiftKey: true });
+      expect(key({ key: 'w', ctrlKey: true }).defaultPrevented).toBe(true);
+      await settle();
+      expect(tabIds()).toEqual(['a', 'b', 'c']);
+      expect(activeTab()).toBe('c');
+      expect(confirm.current()).not.toBeNull();
+
+      confirm.answer(false);
+      await expect(answer).resolves.toBe(false);
+      await settle();
+      expect(behind()).toEqual([false, false, false, false]);
+      key({ key: 'w', ctrlKey: true });
+      await settle();
+      expect(tabIds()).toEqual(['a', 'b']);
     });
 
     it('following a link shows the routed page instead of the active tab', async () => {

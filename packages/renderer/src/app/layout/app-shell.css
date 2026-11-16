@@ -43,12 +43,12 @@
   color: var(--accent);
 }
 
-/* The splitter is a 5px hit area with a 1px rule; it shows the accent while hovered or dragged. */
 /* Production accent: a red edge down the sidebar's outer side while the active view is production. */
 :host(.production) .sidebar {
   box-shadow: inset 3px 0 0 var(--production);
 }
 
+/* The splitter is a 5px hit area with a 1px rule; it shows the accent while hovered or dragged. */
 .splitter {
   grid-area: splitter;
   position: relative;

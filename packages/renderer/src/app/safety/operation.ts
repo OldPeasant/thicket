@@ -113,14 +113,30 @@ export function describeWrite<M extends WriteMethodName>(method: M, params: Para
       return call(coll(p.db, p.coll), p['hidden'] ? 'hideIndex' : 'unhideIndex', [
         str(p['name'] as string),
       ]);
-    case 'agg.run':
-      return call(coll(p.db, p.coll), 'aggregate', [shell(p['pipeline'] as string)]);
-    case 'agg.createView':
-      return call(database(p.db), 'createView', [
+    case 'agg.run': {
+      const args = [shell(p['pipeline'] as string)];
+      const options: string[] = [];
+      if (p['collation']) options.push(`collation: ${shell(p['collation'] as string, 0)}`);
+      if (p['hint'] !== undefined) options.push(`hint: ${shell(p['hint'] as string, 0)}`);
+      if (p['allowDiskUse'] !== undefined) {
+        options.push(`allowDiskUse: ${String(p['allowDiskUse'])}`);
+      }
+      if (p['maxTimeMS'] !== undefined) options.push(`maxTimeMS: ${String(p['maxTimeMS'])}`);
+      if (p['batchSize'] !== undefined) {
+        options.push(`batchSize: ${String(p['batchSize'])}`);
+      }
+      if (options.length) args.push(`{ ${options.join(', ')} }`);
+      return call(coll(p.db, p.coll), 'aggregate', args);
+    }
+    case 'agg.createView': {
+      const args = [
         str(p['view'] as string),
         str(p['viewOn'] as string),
         shell(p['pipeline'] as string),
-      ]);
+      ];
+      if (p['collation']) args.push(`{ collation: ${shell(p['collation'] as string, 0)} }`);
+      return call(database(p.db), 'createView', args);
+    }
     case 'admin.killOp':
       return `db.killOp(${shell(p['opId'] as string, 0)})`;
     case 'io.import': {

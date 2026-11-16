@@ -37,6 +37,52 @@ describe('ConfirmService', () => {
     expect(service.current()).toBeNull();
   });
 
+  it('an aborted signal withdraws the shown request: it resolves false and the next one shows', async () => {
+    const controller = new AbortController();
+    const first = service.confirm(request('first'), controller.signal);
+    const second = service.confirm(request('second'));
+    expect(service.current()?.title).toBe('first');
+
+    controller.abort();
+    await expect(first).resolves.toBe(false);
+    expect(service.current()?.title).toBe('second');
+
+    service.answer(true);
+    await expect(second).resolves.toBe(true);
+    expect(service.current()).toBeNull();
+  });
+
+  it('an aborted signal withdraws a waiting request without touching the shown one', async () => {
+    const controller = new AbortController();
+    const first = service.confirm(request('first'));
+    const second = service.confirm(request('second'), controller.signal);
+
+    controller.abort();
+    await expect(second).resolves.toBe(false);
+    expect(service.current()?.title).toBe('first');
+
+    service.answer(true);
+    await expect(first).resolves.toBe(true);
+    expect(service.current()).toBeNull();
+  });
+
+  it('an already aborted signal shows nothing; an abort after the answer changes nothing', async () => {
+    const aborted = new AbortController();
+    aborted.abort();
+    await expect(service.confirm(request('gone'), aborted.signal)).resolves.toBe(false);
+    expect(service.current()).toBeNull();
+
+    const later = new AbortController();
+    const answered = service.confirm(request('answered'), later.signal);
+    const next = service.confirm(request('next'));
+    service.answer(true);
+    await expect(answered).resolves.toBe(true);
+    later.abort();
+    expect(service.current()?.title).toBe('next');
+    service.answer(false);
+    await expect(next).resolves.toBe(false);
+  });
+
   it('type-to-confirm: answer(true) is accepted only with the exact text typed', async () => {
     const wrong = service.confirm(request('a', { typeToConfirm: 'orders' }));
     service.setTyped('ORDERS');

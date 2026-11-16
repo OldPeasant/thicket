@@ -168,7 +168,7 @@ describe('WriteGuard (with the fake API)', () => {
     expect(fake.requestsFor('docs.insert')[0]?.params).toMatchObject({ confirmed: true });
   });
 
-  it('an abort while the dialog is open sends nothing', async () => {
+  it('an abort while the dialog is open closes it and sends nothing', async () => {
     const controller = new AbortController();
     const done = guard.run(
       'docs.insert',
@@ -176,7 +176,9 @@ describe('WriteGuard (with the fake API)', () => {
       { signal: controller.signal },
     );
     await flush();
+    expect(confirm.current()).not.toBeNull();
     controller.abort();
+    expect(confirm.current()).toBeNull();
     confirm.answer(true);
     await expect(done).rejects.toMatchObject({ code: 'CANCELLED' });
     expect(fake.requests).toHaveLength(0);

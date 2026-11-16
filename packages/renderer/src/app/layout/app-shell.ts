@@ -20,6 +20,7 @@ import { SIDEBAR_WIDTH } from '@thicket/contract';
 import { filter } from 'rxjs';
 
 import { ConfirmDialog } from '../safety/confirm-dialog';
+import { ConfirmService } from '../safety/confirm.service';
 import { NAV } from './navigation';
 import { SidebarWidthService } from './sidebar-width.service';
 import { StatusBar } from './status-bar';
@@ -37,8 +38,8 @@ export const SIDEBAR_KEY_STEP = 16;
  * no tab is shown) and the status bar. Keyboard: Ctrl/Cmd+W closes the active tab,
  * Ctrl+Tab / Ctrl+Shift+Tab (and Ctrl+PageDown / Ctrl+PageUp) cycle through the tabs,
  * Ctrl+Shift+PageDown / Ctrl+Shift+PageUp move the active tab. Hosts the write confirm dialog
- * (`ConfirmDialog`) and shows the production accent while the active view is on a production
- * connection.
+ * (`ConfirmDialog`): while it is open the rest of the window is `inert` and the tab shortcuts do
+ * nothing. Shows the production accent while the active view is on a production connection.
  */
 @Component({
   selector: 'app-shell',
@@ -51,7 +52,12 @@ export const SIDEBAR_KEY_STEP = 16;
     '(document:keydown)': 'onKeydown($event)',
   },
   template: `
-    <aside class="sidebar" data-testid="sidebar" aria-label="Connections">
+    <aside
+      class="sidebar"
+      data-testid="sidebar"
+      aria-label="Connections"
+      [attr.inert]="modal() ? '' : null"
+    >
       <h2 class="sidebar-title">Connections</h2>
       <div class="sidebar-empty">
         <p>No connections yet.</p>
@@ -65,6 +71,7 @@ export const SIDEBAR_KEY_STEP = 16;
       tabindex="0"
       aria-orientation="vertical"
       aria-label="Sidebar width"
+      [attr.inert]="modal() ? '' : null"
       [attr.aria-valuenow]="sidebar.width()"
       [attr.aria-valuemin]="min"
       [attr.aria-valuemax]="max"
@@ -75,7 +82,7 @@ export const SIDEBAR_KEY_STEP = 16;
       (dblclick)="saveWidth(defaultWidth)"
       (keydown)="splitterKey($event)"
     ></div>
-    <div class="work">
+    <div class="work" [attr.inert]="modal() ? '' : null">
       <app-tab-bar />
       <main class="content" data-testid="workspace">
         <div
@@ -102,7 +109,7 @@ export const SIDEBAR_KEY_STEP = 16;
         }
       </main>
     </div>
-    <app-status-bar class="status" />
+    <app-status-bar class="status" [attr.inert]="modal() ? '' : null" />
     <app-confirm-dialog />
   `,
   styleUrl: './app-shell.css',
@@ -122,6 +129,9 @@ export class AppShell {
   protected readonly panelId = tabPanelDomId;
 
   private readonly status = inject(StatusService);
+  private readonly confirm = inject(ConfirmService);
+  /** The write confirm dialog is open: everything else is inert and the shortcuts are ignored. */
+  protected readonly modal = computed(() => this.confirm.current() !== null);
   /**
    * The active view belongs to a production connection: the active tab's flag, or (on the start
    * page) the status bar's connection. Draws the red accent along the sidebar and status bar.
@@ -161,15 +171,19 @@ export class AppShell {
     // The physical W key also counts on non-Latin layouts (e.g. key 'ц'), where the menu
     // accelerator could close the window; a Latin letter on that key (AZERTY 'z') is left alone.
     const isW = key === 'w' || key === 'W' || (event.code === 'KeyW' && !/^[a-z]$/i.test(key));
+    // While the confirm dialog is open the shortcuts are still consumed (so Ctrl+W never closes
+    // the window) but do not touch the tabs behind it.
+    const modal = this.modal();
     if (isW && !event.shiftKey) {
       // Always consumed, so the shortcut never closes the window instead of a tab.
       event.preventDefault();
-      this.tabBar().closeActive();
+      if (!modal) this.tabBar().closeActive();
     } else if (key === 'Tab') {
       event.preventDefault();
-      this.workspace.cycle(event.shiftKey ? -1 : 1);
+      if (!modal) this.workspace.cycle(event.shiftKey ? -1 : 1);
     } else if ((key === 'PageDown' || key === 'PageUp') && event.ctrlKey) {
       event.preventDefault();
+      if (modal) return;
       const step = key === 'PageDown' ? 1 : -1;
       const active = this.workspace.activeId();
       if (!event.shiftKey) this.workspace.cycle(step);

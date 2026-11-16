@@ -133,6 +133,38 @@ describe('describeWrite', () => {
     );
   });
 
+  it('prints agg.run options and the agg.createView collation', () => {
+    expect(
+      describeWrite('agg.run', {
+        ...t,
+        pipeline: '[]',
+        collation: '{"locale":"de"}',
+        hint: '{"a":1}',
+        allowDiskUse: true,
+        maxTimeMS: 5000,
+        batchSize: 100,
+      }),
+    ).toBe(
+      `${C}.aggregate([], { collation: { locale: "de" }, hint: { a: 1 }, allowDiskUse: true, ` +
+        'maxTimeMS: 5000, batchSize: 100 })',
+    );
+    expect(describeWrite('agg.run', { ...t, pipeline: '[]', hint: '"a_1"' })).toBe(
+      `${C}.aggregate([], { hint: "a_1" })`,
+    );
+    expect(
+      describeWrite('agg.createView', {
+        profileId: 'p',
+        db: 'shop',
+        view: 'v',
+        viewOn: 'orders',
+        pipeline: '[]',
+        collation: '{"locale":"fr"}',
+      }),
+    ).toBe(
+      'db.getSiblingDB("shop").createView("v", "orders", [], { collation: { locale: "fr" } })',
+    );
+  });
+
   it('prints the full collMod command with a validator', () => {
     expect(
       describeWrite('coll.validator.set', {
