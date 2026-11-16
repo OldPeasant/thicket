@@ -14,7 +14,8 @@ that compare `page.url()` with `thicket://app/index.html` (or the dev server roo
 Found by packaging (2026-11-16) on main 64cb776: 5 failed | 17 passed.
 
 ## Acceptance criteria
-- [ ] `npm run test:electron` (Linux, headless or xvfb-run) -> all specs pass
+- [x] `npm run test:electron` (Linux, headless or xvfb-run) -> all specs pass
+  - verified (2026-11-16 21:00+0100 by felix/agent-2): npm run test:electron on Linux, headless (no DISPLAY -> --ozone-platform=headless; xvfb-run not installed) at c307e38 -> 5 files, 26/26 passed (was 7 failed on main before)
 
 ## Notes
 Failing: app.electron.spec.ts (loads the renderer ... CSP header; profiles.secretStorage ...;
