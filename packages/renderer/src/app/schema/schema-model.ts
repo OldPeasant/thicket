@@ -565,9 +565,15 @@ function mergeTwo(a: JsonSchema, b: JsonSchema): JsonSchema {
     if (!a[key] && !b[key]) continue;
     const merged: Record<string, JsonSchema> = { ...a[key] };
     for (const [name, schema] of Object.entries(b[key] ?? {})) {
-      // Both sides constrain the same property: keep both, resolved later.
-      const existing = merged[name];
-      merged[name] = existing ? { allOf: [existing, schema] } : schema;
+      // Both sides constrain the same property: keep both, resolved later. Own-property checks
+      // and definitions, so names like `toString` or `__proto__` are plain property names.
+      const value = Object.hasOwn(merged, name) ? { allOf: [merged[name], schema] } : schema;
+      Object.defineProperty(merged, name, {
+        value,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
     }
     out[key] = merged;
   }

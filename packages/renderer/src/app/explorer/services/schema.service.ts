@@ -46,7 +46,7 @@ export class SchemaService {
   readonly model = this._model.asReadonly();
   // Display name: the schema's title if it has one, else where it came from.
   readonly name = this._name.asReadonly();
-  // Where the schema came from, in words: 'chosen file', 'IDE settings', a URL.
+  // Where the schema came from, in words: 'chosen file', a URL.
   readonly origin = this._origin.asReadonly();
   // Why the last attempt to load a schema failed, if it did.
   readonly error = this._error.asReadonly();

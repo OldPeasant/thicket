@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SchemaModel, schemaRefOf, type Problem } from './index';
+import { SchemaModel, schemaRefOf, type JsonSchema, type Problem } from './index';
 
 // JSON Canopy's version of this spec also ran against its samples/ folder (team, filters-demo,
 // search-demo, app-config and pipeline schemas and documents), which was not copied into Thicket.
@@ -21,6 +21,30 @@ describe('resolve', () => {
       allOf: [{ properties: { x: { type: 'string' } } }, { properties: { x: { minLength: 1 } } }],
     });
     expect(m.resolve(s.properties?.['x'] ?? {})).toMatchObject({ type: 'string', minLength: 1 });
+  });
+
+  it('treats inherited Object names as ordinary properties when merging allOf parts', () => {
+    const m = new SchemaModel({});
+    const s = m.resolve({
+      allOf: [
+        { properties: { a: { type: 'string' } } },
+        { properties: { toString: { type: 'number' }, constructor: { type: 'boolean' } } },
+      ],
+    });
+    expect(s.properties?.['toString']).toEqual({ type: 'number' });
+    expect(s.properties?.['constructor']).toEqual({ type: 'boolean' });
+  });
+
+  it('keeps a __proto__ property as data instead of changing the prototype', () => {
+    const m = new SchemaModel({});
+    const parts = JSON.parse(
+      '[{"properties":{"a":{"type":"string"}}},{"properties":{"__proto__":{"type":"number"}}}]',
+    ) as JsonSchema[];
+    const s = m.resolve({ allOf: parts });
+    const props = s.properties ?? {};
+    expect(Object.getPrototypeOf(props)).toBe(Object.prototype);
+    expect(Object.hasOwn(props, '__proto__')).toBe(true);
+    expect(Object.keys(props)).toEqual(['a', '__proto__']);
   });
 
   it('survives circular and unresolvable references', () => {

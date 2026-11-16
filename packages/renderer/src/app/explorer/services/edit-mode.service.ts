@@ -25,10 +25,10 @@ export class EditModeService {
     this._enabled.set(false);
   }
 
-  // Called by the IntelliJ host bridge when the underlying file isn't
-  // writable (e.g. a read-only VFS file) — forces edit mode off and keeps
-  // toggle() a no-op until a writable file is loaded. Standalone
-  // (non-host) use never calls this, so it stays permanently false there.
+  // Called by the host app when the current document must not be edited
+  // (e.g. a read-only source) — forces edit mode off and keeps toggle() a
+  // no-op until it is cleared again. Nothing calls this yet, so it stays
+  // false.
   setReadOnly(value: boolean): void {
     this._readOnly.set(value);
     if (value) this._enabled.set(false);
