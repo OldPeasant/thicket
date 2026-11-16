@@ -7,7 +7,7 @@ touches: [docs/mongosh.md,spikes/mongosh]
 quality: exempt
 quality_reason: research spike: produces a decision document and throwaway prototype, no product code
 prio: 2
-lease_until: 2026-11-16T19:27:48Z
+lease_until: 2026-11-16T19:29:43Z
 ---
 ## Goal
 Find out how to host the real mongosh runtime in the utilityProcess (packages, versions, eval API, autocompletion, output types, interrupt), with a throwaway prototype in spikes/mongosh.
