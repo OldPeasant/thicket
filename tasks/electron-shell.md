@@ -17,7 +17,8 @@ Electron app that opens a sandboxed window with the renderer build, starts the b
   - verified (2026-11-16 19:34+0100 by dell26/agent-2): npm run check -> pass; apps/desktop/src/main/security.spec.ts unit-tests secureWebPreferences (sandbox, contextIsolation, nodeIntegration false), contentSecurityPolicy (default-src/script-src 'self', no unsafe-eval), withCspHeader, denyWindowOpen, blockNavigation, blockWebview, denyPermission, resolveAppFile; Electron test also checks the CSP response header, window.open === null, navigation and will-frame-navigate blocked
 - [x] Killing the backend process is detected; it is restarted and the renderer receives a `backend.restarted` event (test)
   - verified (2026-11-16 19:34+0100 by dell26/agent-2): npm run test:electron -w apps/desktop -> 'restarts a killed backend and tells the renderer' passed: SIGKILL of the backend pid, renderer gets backend.restarted {restarts:1}, next backend.ping has a new pid; unit tests backend-host.spec.ts (restart, back-off, stop) and bridge.spec.ts (fail old requests, emit event) pass in npm run check
-- [ ] Cancel: a long dummy backend request is cancelled via `thicket.cancel(id)` and answers `CANCELLED` (test)
+- [x] Cancel: a long dummy backend request is cancelled via `thicket.cancel(id)` and answers `CANCELLED` (test)
+  - verified (2026-11-16 19:34+0100 by dell26/agent-2): npm run test:electron -w apps/desktop -> 'cancels a long backend request with CANCELLED' passed (backend.sleep 30000 ms cancelled via thicket.cancel after 200 ms -> {ok:false, error.code CANCELLED}); rpc.spec.ts cancel races pass in npm run check
 - [ ] Main ↔ backend privileged port exists for secrets (stub handler) and is not reachable from the renderer
 
 ## Notes
