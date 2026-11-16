@@ -4,7 +4,7 @@ Date: 2026-11-16
 
 Task: profiles-store - M1: Connection profiles store (connections.json)
 
-Scope: `git diff 28a9e75dec84fc123e5df40b33588064274b81cb..dd88233f12f478726360ffd24c957fab460f0642` (one task commit `dd88233`, given by the parent worker; branch `main`, HEAD `dd88233`). Production files in scope: `apps/desktop/src/profiles/store.ts`, `apps/desktop/src/profiles/handlers.ts`, `apps/desktop/src/profiles/index.ts`, `apps/desktop/src/main/handlers.ts`, `apps/desktop/src/main/index.ts`. Also changed: the fixture `apps/desktop/src/profiles/fixtures/connections.v0.json`, the spec `apps/desktop/src/profiles/store.spec.ts` and `docs/ARCHITECTURE.md` (documentation, not tested). The only uncommitted changes are the test edits listed below.
+Scope: second pass (see "Second pass" below; it supersedes the first pass's coverage numbers): `git diff 28a9e75dec84fc123e5df40b33588064274b81cb..8381359662d6eb04136d589cccd11f5f682c7429`, task commits `dd88233`, `1255a4d`, `8381359` (plus `f929c33`, which only adds the review). First pass: `git diff 28a9e75dec84fc123e5df40b33588064274b81cb..dd88233f12f478726360ffd24c957fab460f0642` (one task commit `dd88233`, given by the parent worker; branch `main`, HEAD `dd88233`). Production files in scope: `apps/desktop/src/profiles/store.ts`, `apps/desktop/src/profiles/handlers.ts`, `apps/desktop/src/profiles/index.ts`, `apps/desktop/src/main/handlers.ts`, `apps/desktop/src/main/index.ts`. Also changed: the fixture `apps/desktop/src/profiles/fixtures/connections.v0.json`, the spec `apps/desktop/src/profiles/store.spec.ts` and `docs/ARCHITECTURE.md` (documentation, not tested). The only uncommitted changes are the test edits listed below.
 
 Requirements:
 - `tasks/profiles-store.md`: acceptance criteria and the three recorded assumptions (v0 layout, save/duplicate/secretMode semantics, corrupt/unreadable/newer-version handling)
@@ -75,43 +75,43 @@ Pass. `.taskcheck` runs `npm run check`. The first run failed in `prettier --che
 
 None. No test found production behavior that contradicts the acceptance criteria or the recorded assumptions.
 
-Observation, not a defect (no requirement covers it): a v0 entry with a password but no username and no `askPassword` (`mongodb://:pw@host`) gets its password moved to secrets.bin, but the migrated profile has no `auth` block, so that saved password is never used. The next save of the profile removes it, because the profile is not in `saved` mode. The parent may want to record this as an assumption or leave it as is.
+Observation from the first pass, since resolved by `1255a4d`, which now drops such passwords. The test `a password without a username is dropped, not moved into secrets.bin` covers this. Original text: a v0 entry with a password but no username and no `askPassword` (`mongodb://:pw@host`) gets its password moved to secrets.bin, but the migrated profile has no `auth` block, so that saved password is never used. The next save of the profile removes it, because the profile is not in `saved` mode. The parent may want to record this as an assumption or leave it as is.
 
 ## Coverage
 
-Status: verified (fresh run on the final test snapshot, exit 0). `apps/desktop/src/main/index.ts` is measured but not exercised; see below.
+Status: verified. These are the second-pass numbers: a fresh run on HEAD `8381359` plus the uncommitted second-pass tests, exit 0. They replace the first-pass numbers, which described the pre-fix revision `dd88233`. `apps/desktop/src/main/index.ts` is measured but not exercised; see below.
 
 Metric: whole-file coverage of task-changed production files.
 Changed-line coverage: not measured. Three of the four measured files are new in this task, so for them whole-file coverage equals changed-line coverage. `main/handlers.ts` changed 5 of its lines and is fully covered.
 
 Evidence:
-- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: `profiles-store`; base `28a9e75dec84fc123e5df40b33588064274b81cb`; HEAD `dd88233f12f478726360ffd24c957fab460f0642`; one task commit `dd88233`; the parent worker supplied the base and commit, and I checked them against `git diff --stat 28a9e75..dd88233`.
-- Source/test snapshot identifier (including uncommitted inputs), sha256: `profiles/store.ts` fed8d533…59e9a, `profiles/handlers.ts` e2632235…c397, `profiles/index.ts` 9a494c05…f54, `main/handlers.ts` 940b0894…8f54, `main/index.ts` 84196aa9…d3dd3, `profiles/store.spec.ts` (uncommitted) 288ec202…222c, `main/handlers.spec.ts` (uncommitted) bec6ac85…c56a.
-- Exact included files; renamed/deleted/excluded files and reasons: included `src/profiles/store.ts`, `src/profiles/handlers.ts`, `src/profiles/index.ts`, `src/main/handlers.ts` and `src/main/index.ts` (paths relative to `apps/desktop`). Excluded: the `store.spec.ts` test, the JSON fixture (data) and `docs/ARCHITECTURE.md` (documentation). No renamed or deleted files.
-- Provider/version, command, working directory, and test selection: `@vitest/coverage-v8` 5.1.0 (vitest 5.1.0); working directory `apps/desktop`; `npx vitest run --coverage --coverage.include='src/profiles/store.ts' --coverage.include='src/profiles/handlers.ts' --coverage.include='src/profiles/index.ts' --coverage.include='src/main/handlers.ts' --coverage.include='src/main/index.ts' --coverage.reportsDirectory=coverage/profiles-store-20261116-final2 --coverage.reporter=text-summary --coverage.reporter=json-summary --coverage.reporter=json`; the whole desktop workspace suite ran (9 files, 217 tests).
-- Run start/completion time and exit status: started 2026-11-16 20:09:53 (local time), took 589 ms, exit 0.
-- Generated report paths and report hashes/run identifier: `apps/desktop/coverage/profiles-store-20261116-final2/coverage-summary.json` (sha256 494caf225d26d71acf9853a9f0acef74845acca29b03936b1bb4d8da869cfcec) and `coverage-final.json` in the same directory (git-ignored).
-- Evidence outputs are fresh and inputs stayed unchanged: yes. Each run used a new report directory, and the hashes of the production files were the same before and after. The run before Prettier (`...-final`) gave identical counters.
-- Final run after latest test additions and production fixes: yes. It ran after the last test edit (Prettier formatting). There were no production fixes.
+- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: `profiles-store`; base `28a9e75dec84fc123e5df40b33588064274b81cb`; HEAD `8381359662d6eb04136d589cccd11f5f682c7429`; task commits `dd88233`, `1255a4d` and `8381359` (`f929c33` contains only `reviews/`). The coordinator supplied the commits, and I checked them against `git diff --stat dd88233..HEAD` and `git log`.
+- Source/test snapshot identifier (including uncommitted inputs), sha256: `profiles/store.ts` d85ec84e…61f6, `profiles/handlers.ts` e2632235…c397, `profiles/index.ts` 9a494c05…f54, `main/handlers.ts` 940b0894…8f54, `main/index.ts` 84196aa9…d3dd3, `profiles/store.spec.ts` (uncommitted second-pass edits) 768029da…9bd7, `main/handlers.spec.ts` (committed) bec6ac85…c56a.
+- Exact included files; renamed/deleted/excluded files and reasons: included `src/profiles/store.ts`, `src/profiles/handlers.ts`, `src/profiles/index.ts`, `src/main/handlers.ts` and `src/main/index.ts` (paths relative to `apps/desktop`). Excluded: the spec files, the JSON fixture (data), `docs/ARCHITECTURE.md` (documentation) and `reviews/`. No renamed or deleted files.
+- Provider/version, command, working directory, and test selection: `@vitest/coverage-v8` 5.1.0 (vitest 5.1.0); working directory `apps/desktop`; `npx vitest run --coverage --coverage.include='src/profiles/store.ts' --coverage.include='src/profiles/handlers.ts' --coverage.include='src/profiles/index.ts' --coverage.include='src/main/handlers.ts' --coverage.include='src/main/index.ts' --coverage.reportsDirectory=coverage/profiles-store-20261116-pass2 --coverage.reporter=text-summary --coverage.reporter=json-summary --coverage.reporter=json`; the whole desktop workspace suite ran (9 files, 223 tests).
+- Run start/completion time and exit status: started 2026-11-16 20:16:52 (local time), took 927 ms, exit 0.
+- Generated report paths and report hashes/run identifier: `apps/desktop/coverage/profiles-store-20261116-pass2/coverage-summary.json` (sha256 549ff28c634c5483e196e5883537a65614eea15dbdfaadeba91e58c576a99940) and `coverage-final.json` in the same directory (sha256 b089cf4be9d5b3c92372394c9dfdce7ffdb6a724cd99af56934450b880f6cd72), both git-ignored.
+- Evidence outputs are fresh and inputs stayed unchanged: yes. The run wrote to a new report directory, and the `store.ts` and `store.spec.ts` hashes were the same before and after it.
+- Final run after latest test additions and production fixes: yes. It ran after fixer commit `8381359` and after the last test edit (Prettier reported no change).
 
 Values below use covered/total (percentage); zero-denominator or unsupported metrics are N/A.
 
 | Changed file | Statements | Branches | Functions | Lines |
 |---|---:|---:|---:|---:|
-| `apps/desktop/src/profiles/store.ts` | 184/186 (98.9%) | 107/110 (97.3%) | 42/44 (95.5%) | 156/156 (100%) |
+| `apps/desktop/src/profiles/store.ts` | 188/190 (98.9%) | 109/112 (97.3%) | 43/45 (95.6%) | 159/159 (100%) |
 | `apps/desktop/src/profiles/handlers.ts` | 25/25 (100%) | 9/9 (100%) | 12/12 (100%) | 20/20 (100%) |
 | `apps/desktop/src/profiles/index.ts` | N/A (0/0, re-exports only) | N/A | N/A | N/A |
 | `apps/desktop/src/main/handlers.ts` | 7/7 (100%) | 2/2 (100%) | 4/4 (100%) | 6/6 (100%) |
 | `apps/desktop/src/main/index.ts` | 0/57 (0%) | 0/18 (0%) | 0/23 (0%) | 0/51 (0%) |
 
-Aggregate (summed counters) over `profiles/store.ts`, `profiles/handlers.ts` and `main/handlers.ts`: statements 216/218 (99.1%), branches 118/121 (97.5%), functions 58/60 (96.7%), lines 182/182 (100%). This aggregate leaves out `main/index.ts`, which is measured at 0% (Electron bootstrap, see the gaps below). With `main/index.ts` included, the aggregate over all 5 files is statements 216/275 (78.5%), branches 118/139 (84.9%), functions 58/83 (69.9%), lines 182/233 (78.1%). `profiles/index.ts` has no executable code.
+Aggregate (summed counters) over `profiles/store.ts`, `profiles/handlers.ts` and `main/handlers.ts`: statements 220/222 (99.1%), branches 120/123 (97.6%), functions 59/61 (96.7%), lines 185/185 (100%). This aggregate leaves out `main/index.ts`, which is measured at 0% (Electron bootstrap, see the gaps below). With `main/index.ts` included, the aggregate over all 5 files is statements 220/279 (78.9%), branches 120/141 (85.1%), functions 59/84 (70.2%), lines 185/236 (78.4%). `profiles/index.ts` has no executable code.
 
-Coverage of `store.ts` before the new tests (same command, report `coverage/profiles-store-20261116`): statements 182/186, branches 103/110, functions 41/44. The new tests covered the paths through `errorCode` without a code, `splitPassword` with no regex match, migration of a non-string `uri`, and the swallowed unlink failure after a failed write.
+First pass, for history (revision `dd88233`, report `coverage/profiles-store-20261116-final2`): `store.ts` was at statements 184/186, branches 107/110, functions 42/44, lines 156/156.
 
 | File and uncovered lines/branch locations | Required behavior or risk | Action/test added or reason left uncovered |
 |---|---|---|
-| `apps/desktop/src/profiles/store.ts:218-219` (the default `log` and `now` lambdas in the constructor) | None: these are defaults that are used only when the caller omits the option | Gap left on purpose. Every test injects `log` and `now`, so the logs and backup names can be checked. |
-| `apps/desktop/src/profiles/store.ts:391` (the implicit else branch of `if (errorCode(error) !== 'ENOENT')` in `removeStaleTemp`) | The ENOENT case, which is the usual "no stale temp file" path | Not a real gap. Every test that starts without a temp file runs this path, and the EBUSY case has its own test. V8 counts this implicit else as a separate branch with an empty location. |
+| `apps/desktop/src/profiles/store.ts:232-233` (the default `log` and `now` lambdas in the constructor) | None: these are defaults that are used only when the caller omits the option | Gap left on purpose. Every test injects `log` and `now`, so the logs and backup names can be checked. |
+| `apps/desktop/src/profiles/store.ts:407` (the false branch of `if (owner?.auth)` in the migration's "unavailable" fallback) | Defensive code: since `1255a4d`, a v0 password is only moved when the URI has a username, and every such profile gets an `auth` block, so this branch can't be reached. | Gap left on purpose. Correction to the first pass: its row for the same branch (then at line 391) wrongly called it the ENOENT else in `removeStaleTemp`. At `dd88233` the branch was reachable (a password without a username on a system where secret storage is unavailable). |
 | `apps/desktop/src/main/index.ts:42-167` (whole file) | The Electron entry point. In this task it only creates the lazy `profilesStore()` and passes it to `mainHandlers` | Not unit-testable: it needs Electron `app`/`utilityProcess`. The wiring this file relies on, `mainHandlers` with `profiles`, is covered in `main/handlers.spec.ts`. The parent should check it with `npm run test:electron` if needed. |
 
 ## Unable to test
@@ -119,6 +119,29 @@ Coverage of `store.ts` before the new tests (same command, report `coverage/prof
 - `apps/desktop/src/main/index.ts`: that the Electron app creates the ProfilesStore at `userData/connections.json`. This is Electron bootstrap code and the unit runner has no Electron. Follow-up is optional: an Electron smoke test (`npm run test:electron`), which no acceptance criterion requires.
 - A real crash of the process (power loss) between write and rename cannot be simulated in unit tests. The tests simulate it in two ways: a rename that throws after the flushed temp write, and a leftover `.tmp` file on the next start. AC3 asks for exactly these, with "as in app-settings".
 
+## Second pass
+
+Date: 2026-11-16. Reason: production code changed after the first pass. `1255a4d` (parent) drops a v0 password that has no username instead of moving it. `8381359` (fixer) gives an id-less v0 entry the deterministic id `v0-<sha-256>` (CR-1). It also makes migration fall back to `ask` only on `SecretStorageUnavailableError` and rethrow every other error from secrets.bin (CR-2).
+
+Tests reviewed for the changed behavior:
+- 1255a4d: `a password without a username is dropped, not moved into secrets.bin` (added by the parent) covers it.
+- CR-1: `a retried migration gives an id-less entry the same id, so no secret is orphaned` (fixer), plus the fixture and edge-case tests, which now expect `/^v0-[0-9a-f]{32}$/`.
+- CR-2: `a secrets.bin write error other than "unavailable" keeps the v0 file and retries` (fixer), and `asks for the password when secrets.bin cannot take it` (real `SecretsStore` on an unavailable `FakeSafeStorage`).
+
+Tests added in this pass (`apps/desktop/src/profiles/store.spec.ts`, uncommitted), count 3:
+- `only the profile whose password secrets.bin refuses as unavailable switches to "ask"` (CR-2). On `SecretStorageUnavailableError` for one profile, only that profile becomes `ask`, the migration keeps going and still moves the other profile's password, the failure is logged, and connections.json holds neither password.
+- `a non-"unavailable" error on a later secret keeps the v0 file; the retry moves all` (CR-2). One password is already stored when the next `set` fails with ENOSPC. The load then rejects and the v0 file stays as it was. The retry stores both passwords and both profiles stay `saved`.
+- `the id of an id-less v0 entry does not depend on its password` (CR-1). The same entry with a different password gets the same id, and a different name gets a different id. The id therefore carries no value derived from the password, and changing the password between attempts does not orphan a secret. An explicit v0 id is kept as is.
+
+Both CR-2 tests and the CR-1 test would fail against `dd88233`. The old code switched to `ask` on any error, so the load would not reject. It also assigned ids with `newId`/`randomUUID`, so the ids would not be stable.
+
+Commands and results:
+- `npx vitest run apps/desktop/src`: Pass (9 files, 223 tests).
+- Task-scoped coverage (command and evidence in "Coverage" above): Pass, exit 0. Numbers are in the Coverage table.
+- `npm run check` (`.taskcheck`): Pass. eslint and `prettier --check` are clean, typecheck passes, root vitest passed 29 files with 1595 tests, and the renderer `ng test` passed 5 files with 181 tests.
+
+Bugs found in this pass: none.
+
 ## Summary
 
-Tests added and all validation passed. Task-scoped coverage is sufficient and no production defects were found. The only unmeasured file is the Electron bootstrap `main/index.ts`.
+Tests added and all validation passed (second pass on HEAD `8381359` plus 3 uncommitted tests). Task-scoped coverage is sufficient and no production defects were found. The only unmeasured file is the Electron bootstrap `main/index.ts`.

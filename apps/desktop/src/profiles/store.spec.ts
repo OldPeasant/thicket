@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { SecretsStore, secretsHandlers } from '../secrets';
+import { SecretStorageUnavailableError, SecretsStore, secretsHandlers } from '../secrets';
 import { FakeSafeStorage } from '../secrets/testing';
 import { profilesHandlers } from './handlers';
 import {
@@ -814,6 +814,70 @@ describe('migration edge cases', () => {
     expect(p?.auth?.secretMode).toBe('saved');
     expect(secrets.stored.get('a')).toEqual({ password: 'fictitious-pw' });
     expect(await fileJson()).toMatchObject({ version: 1 });
+  });
+
+  it('only the profile whose password secrets.bin refuses as unavailable switches to "ask"', async () => {
+    const v0 = [
+      { id: 'a', name: 'A', uri: 'mongodb://u:fictitious-a@h' },
+      { id: 'b', name: 'B', uri: 'mongodb://u:fictitious-b@h' },
+    ];
+    await writeFile(path.join(dir, 'connections.json'), JSON.stringify(v0));
+    const base = fakeSecrets();
+    const secrets: ProfileSecretsAccess = {
+      ...base,
+      set: (id, kind, value) =>
+        id === 'a'
+          ? Promise.reject(new SecretStorageUnavailableError())
+          : base.set(id, kind, value),
+    };
+    const { store, logs } = storeWith(secrets);
+    const [a, b] = await store.list();
+    expect(a?.auth?.secretMode).toBe('ask');
+    expect(b?.auth?.secretMode).toBe('saved');
+    expect([...base.stored.entries()]).toEqual([['b', { password: 'fictitious-b' }]]);
+    expect(logs.some((m) => m.includes('could not move the password of a'))).toBe(true);
+    const text = await readFile(path.join(dir, 'connections.json'), 'utf8');
+    expect(text).not.toContain('fictitious-a');
+    expect(text).not.toContain('fictitious-b');
+  });
+
+  it('a non-"unavailable" error on a later secret keeps the v0 file; the retry moves all', async () => {
+    const v0 = [
+      { id: 'a', name: 'A', uri: 'mongodb://u:fictitious-a@h' },
+      { id: 'b', name: 'B', uri: 'mongodb://u:fictitious-b@h' },
+    ];
+    await writeFile(path.join(dir, 'connections.json'), JSON.stringify(v0));
+    let failB = true;
+    const base = fakeSecrets();
+    const secrets: ProfileSecretsAccess = {
+      ...base,
+      set: (id, kind, value) =>
+        id === 'b' && failB
+          ? Promise.reject(Object.assign(new Error('no space'), { code: 'ENOSPC' }))
+          : base.set(id, kind, value),
+    };
+    const { store } = storeWith(secrets);
+    await expect(store.list()).rejects.toThrow('no space');
+    expect(await fileJson()).toEqual(v0);
+    failB = false;
+    expect((await store.list()).map((p) => p.auth?.secretMode)).toEqual(['saved', 'saved']);
+    expect(Object.fromEntries(base.stored)).toEqual({
+      a: { password: 'fictitious-a' },
+      b: { password: 'fictitious-b' },
+    });
+  });
+
+  it('the id of an id-less v0 entry does not depend on its password', () => {
+    const ids = (uri: string, name = 'A') =>
+      migrate([{ name, uri }])?.profiles.map((p) => (p as { id: string }).id);
+    const first = ids('mongodb://u:fictitious-one@h');
+    expect(first?.[0]).toMatch(V0_ID);
+    expect(ids('mongodb://u:fictitious-two@h')).toEqual(first);
+    expect(ids('mongodb://u:fictitious-one@h', 'B')).not.toEqual(first);
+    // An explicit id is kept as is.
+    expect(migrate([{ id: 'legacy', name: 'A', uri: 'mongodb://h' }])?.profiles).toMatchObject([
+      { id: 'legacy' },
+    ]);
   });
 
   it('migrate() rejects non-integer and non-number versions and passes newer ones', () => {
