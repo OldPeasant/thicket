@@ -1,10 +1,11 @@
 ---
 title: Ship the SIL OFL 1.1 text with the Orbitron/Share Tech Mono fonts and update docs/ARCHITECTURE.md font note
-status: todo
-owner:
+status: in_progress
+owner: felix/agent-2
 deps: [explorer-copy]
 touches: [packages/renderer/src/assets/fonts,NOTICE,docs/ARCHITECTURE.md]
 prio: 2
+lease_until: 2026-11-16T19:54:01Z
 ---
 ## Goal
 The explorer-copy task extracted the Orbitron and Share Tech Mono fonts from JSON Canopy's inlined CSS into
