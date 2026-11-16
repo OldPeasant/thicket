@@ -18,3 +18,4 @@ Typed Angular service wrapping `window.thicket`: `request<M>()` typed by the con
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 19:12+0100 by felix/agent-2): window.thicket shape (electron-shell not yet merged): request(Request envelope with renderer-chosen id): Promise<Response>, cancel(id): void, on(listener: (Event) => void): () => void. Renderer chooses ids so it can cancel before the response; electron-shell's preload should match ThicketBridge in packages/renderer/src/app/api/thicket-bridge.ts
+- ASSUMPTION (2026-11-16 19:12+0100 by felix/agent-2): ApiService does not zod-validate results in the renderer (backend/main validate with parseResult); a missing window.thicket answers INTERNAL with a readable message instead of throwing, so ng serve still renders
