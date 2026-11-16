@@ -15,7 +15,8 @@ lease_until: 2026-11-16T20:00:02Z
   - verified (2026-11-16 20:42+0100 by felix/agent-1): podman run node:24-bookworm (+apt rpm) on rev 88c6803 (patch-identical to final): npm run dist -> release/thicket-0.0.0-linux-x86_64.AppImage, thicket-0.0.0-linux-amd64.deb, thicket-0.0.0-linux-x86_64.rpm; host Fedora 44 (Wayland, no xvfb): node apps/desktop/scripts/smoke-packaged.mjs release/thicket-0.0.0-linux-x86_64.AppImage -> smoke OK (window visible 1280x800, thicket://app/#/, name Thicket, isPackaged, app.ping=main, backend.ping=backend, screenshot shows the Thicket page). Host npm run dist without rpmbuild builds AppImage+deb then fails at rpm (needs package rpm)
 - [x] App id `io.github.oldpeasant.thicket`, product name Thicket, placeholder icon set in build/
   - verified (2026-11-16 20:42+0100 by felix/agent-1): apps/desktop/electron-builder.yml appId io.github.oldpeasant.thicket, productName Thicket (+package.json productName); apps/desktop/build/icon.png 1024x1024 placeholder (scripts/make-icon.mjs); asserted by apps/desktop/src/packaging.spec.ts (21 passed in npm run check); dpkg-deb -f -> Package thicket, rpm -qip -> Name thicket, icon at usr/share/icons/hicolor/1024x1024/apps/thicket.png; app.getName()=Thicket in the AppImage smoke run
-- [ ] macOS/Windows targets configured; verifying them needs those OSes → skip with reason if not available here
+- [~] macOS/Windows targets configured; verifying them needs those OSes → skip with reason if not available here
+  - skipped (2026-11-16 20:42+0100 by felix/agent-1): mac (dmg arm64+x64, ad-hoc signed) and win (nsis+zip x64) targets configured and schema-validated by packaging.spec.ts; no macOS here for dmg; on Linux electron-builder --win built thicket-0.0.0-win-x64.zip but NSIS needs wine (not installed); no installer started on those OSes
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
