@@ -1,4 +1,5 @@
 import type { Event, Request, Response } from '@thicket/contract';
+import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { dirname, resolve } from 'node:path';
@@ -44,6 +45,49 @@ export async function launchApp(
   app.process().stdout?.on('data', (chunk: Buffer) => output.push(chunk.toString()));
   app.process().stderr?.on('data', (chunk: Buffer) => output.push(chunk.toString()));
   return app;
+}
+
+/**
+ * Starts the built app directly (without Playwright) and resolves with its stdout + stderr once
+ * `pattern` matches, then stops it. For lines main prints right at startup: `launchApp` attaches
+ * its listeners only after Playwright's launch returns, so such early lines never reach `output`.
+ * `env` should set `THICKET_USER_DATA` to a temp folder.
+ */
+export function startupOutput(
+  pattern: RegExp,
+  env: Record<string, string>,
+  timeoutMs = 20_000,
+): Promise<string> {
+  return new Promise((resolveOutput, reject) => {
+    const child = spawn(electronPath, [...headlessArgs(), appDir], {
+      env: { ...process.env, ...env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let text = '';
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.kill();
+      if (error) reject(error);
+      else resolveOutput(text);
+    };
+    const timer = setTimeout(
+      () => finish(new Error(`no output matching ${pattern} within ${timeoutMs} ms:\n${text}`)),
+      timeoutMs,
+    );
+    const onData = (chunk: Buffer) => {
+      text += chunk.toString();
+      if (pattern.test(text)) finish();
+    };
+    child.stdout.on('data', onData);
+    child.stderr.on('data', onData);
+    child.once('error', (error) => finish(error));
+    child.once('exit', (code) =>
+      finish(new Error(`app exited (${code}) before printing ${pattern}:\n${text}`)),
+    );
+  });
 }
 
 /** A TCP port that was free a moment ago on localhost. */

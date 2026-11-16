@@ -1,8 +1,17 @@
 import type { Request, Response } from '@thicket/contract';
 import type { ElectronApplication, Page } from 'playwright-core';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { launchApp, type TestWindow } from './helpers';
+import { launchApp, startupOutput, type TestWindow } from './helpers';
+
+/**
+ * The app page: `thicket://app/index.html` as loaded by main, or `thicket://app/#/` once the
+ * renderer's hash router has bootstrapped (it rewrites the path to its base href `/`).
+ */
+const APP_URL = /^thicket:\/\/app\/(index\.html)?(#\/)?$/;
 
 let app: ElectronApplication;
 let page: Page;
@@ -24,7 +33,7 @@ afterAll(async () => {
 
 describe('Electron shell', () => {
   it('loads the renderer from thicket://app with the CSP header', async () => {
-    expect(page.url()).toBe('thicket://app/index.html');
+    expect(page.url()).toMatch(APP_URL);
     const csp = await page.evaluate(async () => {
       const response = await fetch('thicket://app/index.html');
       return response.headers.get('content-security-policy');
@@ -80,7 +89,17 @@ describe('Electron shell', () => {
     const status = (answer as { result: { level: string; defaultSecretMode: string } }).result;
     expect(['secure', 'weak', 'unavailable']).toContain(status.level);
     expect(status.defaultSecretMode).toBe(status.level === 'secure' ? 'saved' : 'ask');
-    expect(output.join('')).toContain(`secret storage: ${status.level}`);
+    // main logs the detected backend right at startup, before `launchApp` can listen; check it
+    // on a separate start (same machine, so the same backend).
+    const userData = await mkdtemp(path.join(tmpdir(), 'thicket-electron-startup-'));
+    try {
+      const startup = await startupOutput(/\[main\] secret storage: \S+/, {
+        THICKET_USER_DATA: userData,
+      });
+      expect(startup).toContain(`[main] secret storage: ${status.level}`);
+    } finally {
+      await rm(userData, { recursive: true, force: true });
+    }
   });
 
   it('cancels a long backend request with CANCELLED', async () => {
@@ -107,7 +126,7 @@ describe('Electron shell', () => {
       window.location.href = 'https://example.com/';
     });
     await new Promise((r) => setTimeout(r, 500));
-    expect(page.url()).toBe('thicket://app/index.html');
+    expect(page.url()).toMatch(APP_URL);
     expect(app.windows()).toHaveLength(1);
   });
 
@@ -143,7 +162,7 @@ describe('Electron shell', () => {
       .poll(() => output.join(''), { timeout: 5_000 })
       .toContain('[main] blocked frame navigation to https://frame.example.test/');
     expect(output.join('')).not.toContain('blocked frame navigation to thicket://app');
-    expect(page.url()).toBe('thicket://app/index.html');
+    expect(page.url()).toMatch(APP_URL);
   });
 
   it('restarts a killed backend and tells the renderer', async () => {

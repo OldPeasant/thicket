@@ -73,7 +73,8 @@ afterAll(async () => {
 
 describe('Electron shell in dev mode (THICKET_DEV_SERVER)', () => {
   it('loads the renderer from the dev server', () => {
-    expect(page.url()).toBe(`${devServer}/`);
+    // `/` as loaded by main, or `/#/` once the renderer's hash router has bootstrapped.
+    expect([`${devServer}/`, `${devServer}/#/`]).toContain(page.url());
   });
 
   it("serves the dev server's document with the CSP header, allowing its live-reload socket", async () => {

@@ -19,6 +19,8 @@ linuxOnly('secrets with the real safeStorage on basic_text (Linux)', () => {
   let app: ElectronApplication;
   let page: Page;
   let userData: string;
+  /** Set by the setSecret test: `profiles.setSecret` only stores secrets of an existing profile. */
+  let profileId = '';
   const output: string[] = [];
 
   function call(request: Request): Promise<Response> {
@@ -55,10 +57,25 @@ linuxOnly('secrets with the real safeStorage on basic_text (Linux)', () => {
     // Never write a test secret into a real profile folder.
     const actual = await app.evaluate(({ app: electronApp }) => electronApp.getPath('userData'));
     expect(actual).toBe(userData);
+    const saved = await call({
+      id: 'save',
+      method: 'profiles.save',
+      params: {
+        profile: {
+          name: 'Electron secrets',
+          connectionString: 'mongodb://alice@db.example.test:27017/?authSource=admin',
+          auth: { mechanism: 'SCRAM-SHA-256', username: 'alice', secretMode: 'saved' },
+          readOnly: false,
+          production: false,
+        },
+      },
+    });
+    expect(saved).toMatchObject({ id: 'save', ok: true });
+    profileId = (saved as { result: { profile: { id: string } } }).result.profile.id;
     const set = await call({
       id: 'set',
       method: 'profiles.setSecret',
-      params: { profileId: 'p-electron', kind: 'password', value: SECRET },
+      params: { profileId, kind: 'password', value: SECRET },
     });
     expect(set).toEqual({ id: 'set', ok: true, result: { secureStorage: false } });
     const bytes = await readFile(path.join(userData, 'secrets.bin'));
@@ -67,12 +84,12 @@ linuxOnly('secrets with the real safeStorage on basic_text (Linux)', () => {
     // store relies on this to tell a corrupt file from one written with an absent keyring.
     expect(bytes.subarray(0, 3).toString('latin1')).toBe('v10');
     expect(bytes.toString('latin1')).not.toContain(SECRET);
-    expect(bytes.toString('latin1')).not.toContain('p-electron');
+    expect(bytes.toString('latin1')).not.toContain(profileId);
 
     const get = await call({
       id: 'get',
       method: 'secrets.get',
-      params: { profileId: 'p-electron' },
+      params: { profileId },
     });
     expect(get).toMatchObject({ ok: false, error: { code: 'UNKNOWN_METHOD' } });
     expect(JSON.stringify([set, get])).not.toContain(SECRET);
@@ -88,12 +105,12 @@ linuxOnly('secrets with the real safeStorage on basic_text (Linux)', () => {
     const cleared = await call({
       id: 'clr',
       method: 'profiles.clearSecret',
-      params: { profileId: 'p-electron', kind: 'password' },
+      params: { profileId, kind: 'password' },
     });
     expect(cleared).toEqual({ id: 'clr', ok: true, result: {} });
     const files = await readdir(userData);
     expect(files.filter((name) => name.startsWith('secrets.bin.corrupt'))).toEqual([]);
-    // The rewrite happened only because the old file decrypted and held p-electron's password.
+    // The rewrite happened only because the old file decrypted and held the profile's password.
     expect(await readFile(path.join(userData, 'secrets.bin'))).not.toEqual(before);
   });
 });
