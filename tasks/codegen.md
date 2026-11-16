@@ -16,3 +16,4 @@ Generate code for a find query or an aggregation pipeline in mongosh syntax, Nod
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 20:22+0100 by dell26/agent-3): Code export API: generateCode(query, language, {uri}) in packages/core/src/codegen; Node/Python/Java output is a complete program (connect, run, print each result as one line of relaxed EJSON/JSON); shell output is one mongosh statement using db.getSiblingDB(...).getCollection(...).
