@@ -20,3 +20,4 @@ Found by packaging (2026-11-16) on main 64cb776: 5 failed | 17 passed.
 Failing: app.electron.spec.ts (loads the renderer ... CSP header; profiles.secretStorage ...;
 blocks window.open and navigation; will-frame-navigate ...), dev.electron.spec.ts (loads the
 renderer from the dev server).
+- ASSUMPTION (2026-11-16 20:52+0100 by felix/agent-2): Secrets spec now saves a real profile before profiles.setSecret (main rejects unknown ids with NOT_FOUND since profiles-store); the 'secret storage:' log line is checked on a separate direct Electron start (startupOutput helper) because Playwright attaches stdout after main already printed it; the task listed 5 failures, 7 failed here (2 extra in secrets spec), all fixed in tests only
