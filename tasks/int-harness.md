@@ -1,11 +1,11 @@
 ---
 title: M0: Integration test harness with MongoDB containers
-status: in_progress
+status: done
 owner: dell26/agent-3
 deps: [scaffold]
 touches: [test/integration/fixtures,test/integration/vitest.config.ts,package.json]
 prio: 1
-lease_until: 2026-11-16T18:21:36Z
+lease_until: 
 ---
 ## Goal
 Testcontainers fixtures for MongoDB Community 8.x (replica set and standalone) and 7.0 (standalone), with TLS variants using a CA and server cert generated at test time; `npm run test:int` runs test/integration.
@@ -26,3 +26,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 18:51+0100 by dell26/agent-3): Test certs are generated with node-forge (new root devDependency; keys from node:crypto) instead of shelling out to openssl, so test:int needs no openssl binary on any OS
 - ASSUMPTION (2026-11-16 18:51+0100 by dell26/agent-3): test/integration/vitest.config.ts defaults TESTCONTAINERS_RYUK_DISABLED=true when DOCKER_HOST contains 'podman' (Ryuk fails on rootless Podman); teardown stops containers itself
 - ASSUMPTION (2026-11-16 18:51+0100 by dell26/agent-3): TLS variants: mongo8tls and mongo7tls standalones with requireTLS + tlsAllowConnectionsWithoutCertificates; the replica set fixture has no TLS variant and its URI uses directConnection=true
+- done by dell26/agent-3: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 6s on a8d366b7a; criteria verified 4/4
