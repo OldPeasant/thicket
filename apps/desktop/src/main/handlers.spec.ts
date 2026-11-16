@@ -4,11 +4,19 @@ import {
   parseResult,
   parseResultIn,
   privilegedMethods,
+  BROADCAST_STREAMS,
+  settingsChanged,
+  type Event,
   type Response,
   type Settings,
 } from '@thicket/contract';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
+import { DEFAULT_SETTINGS, SettingsStore } from '../settings/store';
+import { Broadcaster } from './broadcast';
 import { mainHandlers, privilegedHandlers } from './handlers';
 
 const ctx = { signal: new AbortController().signal, requestId: '1' };
@@ -188,5 +196,55 @@ describe('app.settings handlers', () => {
     await vi.waitFor(() => expect(port.sent).toHaveLength(1));
     expect(port.sent[0]).toMatchObject({ ok: false, error: { code: 'INTERNAL' } });
     expect(onError).toHaveBeenCalled();
+  });
+});
+
+describe('app.settings with the real store and broadcaster (as wired in index.ts)', () => {
+  it('a set over the port saves, answers and broadcasts one valid app.settings.changed', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'thicket-handlers-'));
+    try {
+      const file = path.join(dir, 'settings.json');
+      const store = await SettingsStore.open(file);
+      const broadcaster = new Broadcaster();
+      store.onChange((value) =>
+        broadcaster.emit(BROADCAST_STREAMS.settingsChanged, { settings: value }),
+      );
+      const events: Event[] = [];
+      broadcaster.add((e) => events.push(e));
+      const port = fakePort();
+      serve(port, {
+        table: methods,
+        route: 'main',
+        handlers: mainHandlers({ version: '1', settings: store }),
+      });
+
+      port.push({ id: 's', method: 'app.settings.set', params: { settings: { mode: 'dark' } } });
+      await vi.waitFor(() => expect(port.sent).toHaveLength(1));
+      const expected = { ...DEFAULT_SETTINGS, mode: 'dark' };
+      expect(port.sent[0]).toEqual({ id: 's', ok: true, result: { settings: expected } });
+      expect(parseResult('app.settings.set', (port.sent[0] as { result: unknown }).result).ok).toBe(
+        true,
+      );
+      expect(events).toEqual([
+        { stream: 'app.settings.changed', kind: 'data', payload: { settings: expected } },
+      ]);
+      expect(settingsChanged.safeParse(events[0]?.payload).success).toBe(true);
+      expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ version: 1, settings: expected });
+
+      // Same value again, and an invalid value: answered, but no further event.
+      port.push({ id: 'same', method: 'app.settings.set', params: { settings: { mode: 'dark' } } });
+      port.push({ id: 'bad', method: 'app.settings.set', params: { settings: { pageSize: 7 } } });
+      await vi.waitFor(() => expect(port.sent).toHaveLength(3));
+      const byId = new Map(port.sent.map((r) => [r.id, r]));
+      expect(byId.get('same')).toMatchObject({ ok: true, result: { settings: expected } });
+      expect(byId.get('bad')).toMatchObject({ ok: false, error: { code: 'INVALID_PARAMS' } });
+      expect(events).toHaveLength(1);
+
+      port.push({ id: 'g', method: 'app.settings.get', params: {} });
+      await vi.waitFor(() => expect(port.sent).toHaveLength(4));
+      expect(port.sent[3]).toEqual({ id: 'g', ok: true, result: { settings: expected } });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

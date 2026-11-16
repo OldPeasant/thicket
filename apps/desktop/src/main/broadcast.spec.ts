@@ -31,4 +31,19 @@ describe('Broadcaster', () => {
     expect(ok).toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith(expect.stringContaining('port closed'));
   });
+
+  it('without a log, a failing sink is swallowed and emit does not throw', () => {
+    const broadcaster = new Broadcaster();
+    const ok = vi.fn();
+    broadcaster.add(() => {
+      throw new Error('port closed');
+    });
+    broadcaster.add(ok);
+    expect(() => broadcaster.emit('s', 1)).not.toThrow();
+    expect(ok).toHaveBeenCalledTimes(1);
+  });
+
+  it('emit with no renderers connected does nothing', () => {
+    expect(() => new Broadcaster().emit('app.settings.changed', {})).not.toThrow();
+  });
 });

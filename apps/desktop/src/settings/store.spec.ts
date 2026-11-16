@@ -65,6 +65,21 @@ describe('SettingsStore unknown keys', () => {
     });
   });
 
+  it('__proto__ and constructor keys in the file are dropped and do not pollute settings', async () => {
+    // Raw JSON so that `__proto__` is an own property after JSON.parse (as in a hand-edited file).
+    await fs.writeFile(
+      file,
+      '{"version":1,"settings":{"__proto__":{"style":"tron","polluted":true},' +
+        '"constructor":{"prototype":{"polluted":true}},"mode":"light"}}',
+    );
+    const store = await SettingsStore.open(file);
+    const value = store.get();
+    expect(value).toEqual({ ...DEFAULT_SETTINGS, mode: 'light' });
+    expect(Object.keys(value).sort()).toEqual(Object.keys(DEFAULT_SETTINGS).sort());
+    expect(({} as Record<string, unknown>)['polluted']).toBeUndefined();
+    expect((value as Record<string, unknown>)['polluted']).toBeUndefined();
+  });
+
   it('ignores unknown keys passed to set()', async () => {
     const store = await SettingsStore.open(file);
     await store.set({ style: 'tron', bogus: true } as never);
@@ -102,6 +117,73 @@ describe('SettingsStore corrupt file', () => {
     expect(await fs.readFile(backup(), 'utf8')).toBe(content);
     await expect(fs.access(file)).rejects.toThrow();
     expect(log).toHaveBeenCalledWith(expect.stringContaining('corrupt-'));
+  });
+
+  it.each([
+    ['version 0', { version: 0, settings: {} }],
+    ['negative version', { version: -1, settings: {} }],
+    ['fractional version', { version: 1.5, settings: {} }],
+    ['version as a string', { version: '1', settings: {} }],
+    ['settings is an array', { version: 1, settings: [] }],
+    ['settings is null', { version: 1, settings: null }],
+  ])('%s → treated as corrupt (defaults + backup)', async (_name, content) => {
+    const text = JSON.stringify(content);
+    await fs.writeFile(file, text);
+    const store = await SettingsStore.open(file, { now });
+    expect(store.get()).toEqual(DEFAULT_SETTINGS);
+    expect(await fs.readFile(backup(), 'utf8')).toBe(text);
+  });
+
+  it('a corrupt file that cannot be moved aside still gives the defaults (logged)', async () => {
+    await fs.writeFile(file, 'garbage');
+    const log = vi.fn();
+    const stuck: SettingsFs = {
+      readFile: (p, e) => fs.readFile(p, e),
+      writeFile: (p, d, o) => fs.writeFile(p, d, o),
+      rename: () => Promise.reject(Object.assign(new Error('EBUSY'), { code: 'EBUSY' })),
+      unlink: (p) => fs.unlink(p),
+    };
+    const store = await SettingsStore.open(file, { fs: stuck, log, now });
+    expect(store.get()).toEqual(DEFAULT_SETTINGS);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('could not be moved aside'));
+    expect(await fs.readFile(file, 'utf8')).toBe('garbage');
+  });
+
+  it('without an injected clock the backup is named after the current time', async () => {
+    await fs.writeFile(file, 'garbage');
+    const before = Date.now();
+    await SettingsStore.open(file);
+    const backups = (await fs.readdir(dir)).filter((name) =>
+      name.startsWith('settings.json.corrupt-'),
+    );
+    expect(backups).toHaveLength(1);
+    const stamp = (backups[0] ?? '').slice('settings.json.corrupt-'.length);
+    // 2026-11-16T12-34-56-789Z → 2026-11-16T12:34:56.789Z
+    const iso = stamp.replace(/T(\d+)-(\d+)-(\d+)-(\d+)Z$/, 'T$1:$2:$3.$4Z');
+    const time = new Date(iso).getTime();
+    expect(time).toBeGreaterThanOrEqual(before);
+    expect(time).toBeLessThanOrEqual(Date.now());
+  });
+
+  it('a read error without an error code gives the defaults (logged)', async () => {
+    const log = vi.fn();
+    const odd: SettingsFs = {
+      readFile: () => Promise.reject(new Error('device gone')),
+      writeFile: (p, d, o) => fs.writeFile(p, d, o),
+      rename: (a, b) => fs.rename(a, b),
+      unlink: () => Promise.reject('not an Error object'),
+    };
+    const store = await SettingsStore.open(file, { fs: odd, log });
+    expect(store.get()).toEqual(DEFAULT_SETTINGS);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('could not read'));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('could not remove'));
+  });
+
+  it('a version-1 file does not log a newer-version warning', async () => {
+    await fs.writeFile(file, JSON.stringify({ version: 1, settings: { mode: 'dark' } }));
+    const log = vi.fn();
+    await SettingsStore.open(file, { log });
+    expect(log).not.toHaveBeenCalled();
   });
 
   it('a later set() writes a fresh valid file next to the backup', async () => {
@@ -198,6 +280,84 @@ describe('SettingsStore atomic writes', () => {
     expect(next.get()).toEqual(DEFAULT_SETTINGS);
   });
 
+  it('a crash while writing the temp file (torn temp) keeps settings.json; restart cleans up', async () => {
+    const first = await SettingsStore.open(file);
+    await first.set({ mode: 'dark' });
+    const before = await fs.readFile(file, 'utf8');
+
+    const torn: SettingsFs = {
+      readFile: (p, e) => fs.readFile(p, e),
+      // Half of the content reaches the temp file, then the process dies.
+      writeFile: async (p, d) => {
+        await fs.writeFile(p, d.slice(0, Math.floor(d.length / 2)));
+        throw new Error('process died');
+      },
+      rename: (a, b) => fs.rename(a, b),
+      unlink: (p) => fs.unlink(p),
+    };
+    const second = await SettingsStore.open(file, { fs: torn });
+    await expect(second.set({ mode: 'light' })).rejects.toThrow('process died');
+    expect(await fs.readFile(file, 'utf8')).toBe(before);
+
+    const third = await SettingsStore.open(file);
+    expect(third.get()).toEqual({ ...DEFAULT_SETTINGS, mode: 'dark' });
+    await expect(fs.access(`${file}.tmp`)).rejects.toThrow();
+  });
+
+  it('a set queued behind a failed one starts from the saved settings, not the failed change', async () => {
+    let failNext = true;
+    const once: SettingsFs = {
+      readFile: (p, e) => fs.readFile(p, e),
+      writeFile: (p, d, o) => {
+        if (failNext) {
+          failNext = false;
+          return Promise.reject(new Error('disk full'));
+        }
+        return fs.writeFile(p, d, o);
+      },
+      rename: (a, b) => fs.rename(a, b),
+      unlink: (p) => fs.unlink(p),
+    };
+    const store = await SettingsStore.open(file, { fs: once });
+    const listener = vi.fn();
+    store.onChange(listener);
+    const [failed, ok] = await Promise.allSettled([
+      store.set({ style: 'tron' }),
+      store.set({ pageSize: 500 }),
+    ]);
+    expect(failed.status).toBe('rejected');
+    expect(ok).toEqual({
+      status: 'fulfilled',
+      value: { ...DEFAULT_SETTINGS, pageSize: 500 },
+    });
+    expect(await readJson(file)).toEqual({
+      version: SETTINGS_VERSION,
+      settings: { ...DEFAULT_SETTINGS, pageSize: 500 },
+    });
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith({ ...DEFAULT_SETTINGS, pageSize: 500 });
+  });
+
+  it('a stale temp file that cannot be removed is logged; loading still works', async () => {
+    await fs.writeFile(file, JSON.stringify({ version: 1, settings: { style: 'tron' } }));
+    const log = vi.fn();
+    const locked: SettingsFs = {
+      readFile: (p, e) => fs.readFile(p, e),
+      writeFile: (p, d, o) => fs.writeFile(p, d, o),
+      rename: (a, b) => fs.rename(a, b),
+      unlink: () => Promise.reject(Object.assign(new Error('EPERM: locked'), { code: 'EPERM' })),
+    };
+    const store = await SettingsStore.open(file, { fs: locked, log });
+    expect(store.get()).toEqual({ ...DEFAULT_SETTINGS, style: 'tron' });
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('could not remove'));
+  });
+
+  it('no stale temp file: nothing is logged about it', async () => {
+    const log = vi.fn();
+    await SettingsStore.open(file, { log });
+    expect(log).not.toHaveBeenCalled();
+  });
+
   it('serializes concurrent sets; the file ends with the last one', async () => {
     const store = await SettingsStore.open(file);
     await Promise.all([
@@ -263,6 +423,21 @@ describe('SettingsStore change listeners', () => {
     });
     expect(other).toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith(expect.stringContaining('boom'));
+  });
+
+  it('a set() with an invalid value is refused: nothing written, nobody notified', async () => {
+    const store = await SettingsStore.open(file);
+    await store.set({ style: 'tron' });
+    const before = await fs.readFile(file, 'utf8');
+    const listener = vi.fn();
+    store.onChange(listener);
+    await expect(store.set({ pageSize: 30 } as never)).rejects.toThrow();
+    expect(store.get()).toEqual({ ...DEFAULT_SETTINGS, style: 'tron' });
+    expect(await fs.readFile(file, 'utf8')).toBe(before);
+    expect(listener).not.toHaveBeenCalled();
+    // The queue is not blocked by the refused change.
+    await expect(store.set({ pageSize: 20 })).resolves.toMatchObject({ pageSize: 20 });
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 
   it('undefined values in set() keep the current value', async () => {

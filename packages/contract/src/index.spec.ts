@@ -19,6 +19,7 @@ import {
   request,
   response,
   route,
+  settingsChanged,
   type MethodDef,
   type MethodName,
   type ParamsOf,
@@ -618,6 +619,24 @@ describe('envelope', () => {
       'app.settings.changed',
       'backend.restarted',
     ]);
+  });
+
+  it('the app.settings.changed payload carries the full, valid settings', () => {
+    const full = {
+      style: 'tron',
+      mode: 'dark',
+      pageSize: 100,
+      nestedPageSize: 100,
+      defaultIntegerType: 'int32',
+      dateDisplay: 'utc',
+      checkForUpdates: false,
+      schemaSampleSize: 1000,
+    };
+    expect(settingsChanged.safeParse({ settings: full }).success).toBe(true);
+    expect(settingsChanged.safeParse({ settings: { style: 'tron' } }).success).toBe(false);
+    expect(settingsChanged.safeParse({ settings: { ...full, pageSize: 30 } }).success).toBe(false);
+    expect(settingsChanged.safeParse({ settings: { ...full, extra: 1 } }).success).toBe(false);
+    expect(settingsChanged.safeParse({}).success).toBe(false);
   });
 
   it('has the stable error codes named in SPEC.md', () => {
