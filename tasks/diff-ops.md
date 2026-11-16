@@ -17,3 +17,4 @@ From original and edited documents compute the minimal update (`$set`/`$unset`, 
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 19:57+0100 by felix/agent-2): Fields new to the original (incl. the new name of a rename) end up at the end of their parent after the update (MongoDB $set semantics), so 'applied == edited' is checked with those fields last; only a reorder of fields both sides share forces replacing the parent.
