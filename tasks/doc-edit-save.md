@@ -5,7 +5,7 @@ owner: felix/agent-1
 deps: [collection-view,docs-write-backend,bson-inputs,safety-ui]
 touches: [packages/renderer/src/app/document]
 prio: 1
-lease_until: 2026-11-16T23:47:35Z
+lease_until: 2026-11-16T23:52:38Z
 ---
 ## Goal
 Edit session per document: modified marker and change count, undo/redo within unsaved edits, Revert, Save via diff-ops + docs.update through WriteGuard; insert (empty/copy), clone and delete.
