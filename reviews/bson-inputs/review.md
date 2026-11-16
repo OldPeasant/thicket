@@ -2,33 +2,40 @@
 
 Date: 2026-11-16
 
-Task: bson-inputs - M1: Explorer edits BSON values without changing types
+Task: bson-inputs - M1: Explorer edits BSON values without changing types (round 2, final code after fixes)
 
-Scope: production code of task commits ba71ffa and b47a8f5 on top of base fc84d7a (`git diff fc84d7a..b47a8f5 -- packages`); test-writer changes made at the same time are not part of this review.
+Scope: `git diff 0960ae4..HEAD -- . ':!tasks' ':!reviews'`. This covers task commits 57ea653, e596035, ba4f4d0, c3aa44c (fixes) and efebada (round-2 tests). The fix commit c3aa44c was read in full against the round-1 findings.
 
 Requirements:
 - tasks/bson-inputs.md acceptance criteria and recorded assumptions
 - SPEC.md "Documents and BSON"
-- docs/ARCHITECTURE.md, AGENTS.md (project notes, quality sub-agent boundaries)
-- packages/core/src/bson/convert.ts and iso-date.ts (bson-model conversion table and ISO parser)
+- docs/ARCHITECTURE.md, AGENTS.md project notes
+- packages/core/src/bson/convert.ts and iso-date.ts (bson-model conversion table, ISO parser)
+- Round-1 reports: reviews/bson-inputs/review.md (CR-1..CR-6), fixes.md, tests.md
 
 Git range:
 - Branch: main
-- HEAD: b47a8f5b94e74e0751097848c20381a3f23a8be4
-- Base/start: fc84d7a400ffc80511c5e7337fabf160126c7369
-- Commits reviewed: 2 (ba71ffa, b47a8f5); no uncommitted changes at review start
+- HEAD: efebada9b9c9952dc387869a76c782f9e04cda52
+- Base/start: 0960ae48e45e9a930ed13f45d31c222c327ddba2
+- Commits reviewed: 5. There were no uncommitted changes when the review started.
 
 Commands run:
-- `cd packages/renderer && npx ng test --include=src/app/explorer/bson-inputs.spec.ts` -> 1 file, 22 tests passed
-- `node -e` with `Intl.DateTimeFormat` for Europe/Berlin at 1800-01-01T00:00Z -> wall clock `00:53:28` (offset with seconds, used for CR-1)
+- `cd packages/renderer && npx ng test --include=<bson-input.util, bson-input.component, bson-inputs, editable-value.component, bson-value.util specs>`: 5 files, 212 tests passed
 
-Summary: 0 P0, 0 P1, 3 P2, 3 P3
+Summary: 0 P0, 0 P1, 1 P2, 1 P3
+
+Round-1 findings, checked against the current code:
+- CR-1 (date text round trip): resolved. `commit` skips parsing when the text equals `partText(part)`. `parseDate` reads `±HH:MM:SS` offsets: the base is parsed as UTC and the offset is subtracted, with the sign handled correctly. It also reads bare epoch milliseconds within the Int64 range. Tests cover pre-1894 Zurich and out-of-range dates. The bare-millisecond path adds a new issue, reported as CR-1 below.
+- CR-2 (type-dropdown cost): resolved. Options are memoized by value identity and by the schema's `typesFor` array, which `SchemaService.typeCache` keeps stable. The template reads them once through `@let`. Non-empty containers are checked with an empty shell of the same type, so subtrees are no longer copied. Core `convert` decides object and array conversions by type alone, so the result does not change. Tests compare the options with `convertValue`.
+- CR-3 (number default ownership): partly resolved. `fromExplorerValue` accepts the setting, but no production caller passes it, and the badge still ignores it. See CR-2 below.
+- CR-4 (stale error): resolved. `ngOnChanges` clears the error and rewrites the input that held the invalid text. Tests cover both.
+- CR-5 (move buttons with schema order): resolved. Move buttons are hidden when the schema declares this object's keys. `keyIndex` is memoized with the fields, which removes the O(n²) cost. A test covers it.
+- CR-6: not fixed, by recorded parent decision (explorer data in Thicket is BSON). Not re-raised.
 
 Criteria check:
-- Int64 stays Int64, overflow error, invalid ObjectId rejected: met (`parseInt64`/`parseInt32` use BigInt range checks, `parseObjectId` checks 24 hex; component tests in bson-inputs.spec.ts).
-- Dropdown follows core `convert`, impossible ones disabled: met (`typeOptions` enables an option exactly when `convertValue` succeeds; the empty-value exception is a recorded assumption).
-- New numbers per setting, fields movable, order kept with integer-like keys: met on the tested paths (`NumberDefaultService`, `moveEntry`, `KEY_ORDER` in key-order.util.ts). CR-3 covers a gap in the number default.
-- No `eval`/`Function` anywhere in the change; ObjectId/UUID generation uses `crypto.getRandomValues`.
+- Int64 stays Int64, overflow shows an error, invalid ObjectId is rejected: met. Component tests are in bson-inputs.spec.ts and bson-input.component.spec.ts.
+- Dropdown follows bson-model `convert`, and impossible conversions are disabled with a reason: met. `typeOptions` and its tests cover it. The empty-value exception is a recorded assumption.
+- New numbers follow the setting, and fields can be moved: met for typed numbers (`NumberDefaultService`, `commitNumber`) and for `moveEntry` and the form move buttons, with tests. The gap is CR-2.
 
 ## P0 Critical
 
@@ -40,50 +47,22 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | Date text input reports an error for unchanged dates with an LMT offset or outside the JS date range**
-    - File: `packages/renderer/src/app/explorer/bson-input.util.ts:145` (with `editText` at line 218 and `formatOffset` in `bson-value.util.ts:317`)
+- [ ] **CR-1 | Date input silently reads any bare integer as epoch milliseconds (typing a year gives a 1970 date)**
+    - File: `packages/renderer/src/app/explorer/bson-input.util.ts:152-156`
     - Category: Correctness
-    - Problem: `editText` shows `formatDate(...)`. For historical dates in local mode the offset has seconds (Europe/Berlin before 1893 is `+00:53:28`, checked with `Intl.DateTimeFormat`), so the input shows e.g. `1800-01-01T00:53:28.000+00:53:28 Europe/Berlin`. `parseDate` removes the zone name, the text does not match `WALL_TIME`, and core `parseIsoDate` only accepts `±HH:MM` offsets. The parse fails. Dates outside the JS range show only the millisecond count (`8640000000000001`), which `parseDate` also rejects. `commit` runs on every blur, so focusing the input and tabbing away without typing shows "is not an ISO-8601 date". The user can't apply a text edit in the text form shown for these dates, and dates outside the JS range have no picker either.
-    - Why it matters: the criterion says editing never fails on a valid value. Imported historical data such as birth dates in LMT zones gives a false error and blocks ISO text editing.
-    - Suggested fix: in `parseDate`, accept an `±HH:MM:SS` offset (or treat text equal to `editText(current)` as unchanged), and parse a bare integer as epoch ms for dates outside the JS range. Add a test for a pre-1893 Europe/Berlin date.
-
-- [ ] **CR-2 | Type dropdown deep-converts every container's whole subtree 36 times per change detection**
-    - File: `packages/renderer/src/app/explorer/editable-value/editable-value.component.ts:109` (template `editable-value.component.html:18` and `:27`), `bson-input.util.ts:304-333`
-    - Category: Quality (performance)
-    - Problem: the `typeOptions` getter runs `typeOptions(this.value)` twice per change detection (once for `typeOptions.length > 1`, once in `@for`). Each call runs `convertValue` for 18 targets. Each `convertValue` calls `fromExplorerValue(value)`, a full deep copy of the subtree, and for object/array targets it also runs `convert` and `toExplorerValue` on the whole subtree. In edit mode `<app-editable-value>` is rendered for container values too (`json-form.component.html:90`, `json-table.component.html:12`). One change detection therefore costs about 36 x subtree size for every visible container, summed over all nesting levels. The old getter filtered a constant list.
-    - Why it matters: under zoneless change detection every template event (click, blur, Enter) re-renders. A large document or deep nesting makes every interaction in edit mode slow. SPEC expects documents large enough to need paging.
-    - Suggested fix: memoize the options per value reference, as `JsonFormComponent.fieldMemo` does, or use a `computed` from a signal input. For containers, decide availability from the type alone (object to array, array to object, null/minKey/maxKey, empty-value rule) without converting the subtree.
-
-- [ ] **CR-3 | `defaultIntegerType` is applied only when a plain number is re-typed; other paths ignore it**
-    - File: `packages/renderer/src/app/explorer/editable-value/editable-value.component.ts:156-161`, `packages/renderer/src/app/explorer/bson-value.util.ts:82-83`
-    - Category: Integration
-    - Problem: two places decide the BSON type of a new plain number, and only one follows the setting. `commitNumber` uses `NumberDefaultService` but returns early when the number did not change (`next === this.value`). A plain number that was seeded (schema default or `seedFor`) and never edited keeps its JS number form. `fromExplorerValue` then turns it into Int32/Double no matter what the setting says, and `bsonTypeOf` labels it Int32. Scenario: with `defaultIntegerType = 'double'`, add a field whose schema default is `5` and save without editing it. It is stored as Int32. Edit it to `6` and it becomes a Double.
-    - Why it matters: SPEC says "the default can be changed in settings", but the stored type depends on whether the user touched the input. The architecture should have one owner for this decision.
-    - Suggested fix: apply the setting where plain numbers enter the tree (wrap seeds and defaults in a `BsonLeaf` through `NumberDefaultService` when they are inserted), or route the `fromExplorerValue` number branch through the same setting. Make the badge match.
+    - Problem: the CR-1 fix added `if (INT_TEXT.test(t)) return ok({ type: 'date', ms: BigInt(t) })` ahead of ISO parsing, for every date. Before, text like `2024` or `20240501` was rejected with "is not an ISO-8601 date", because core `parseIsoDate` needs `YYYY-MM-DD`. Now it is accepted and saved as `1970-01-01T00:00:02.024Z` or `1970-01-01T05:37:20.501Z`, with no error. The placeholder still says `ISO-8601`. The bare form is only needed for dates outside the JS date range, which `formatDate` shows as their millisecond count. Fix (a) in `commit` already covers the unchanged case, because the shown text is never parsed.
+    - Why it matters: a plausible user input, a year or a compact date, is turned into a wrong date without a warning. The task's typed inputs exist so that edits are validated and do not change values unexpectedly.
+    - Suggested fix: accept a bare integer only when its magnitude is outside the JS date range (`|ms| > 8_640_000_000_000_000`). Otherwise keep the ISO error, or ask for an explicit form. Add a test that `2024` is rejected, or not read as milliseconds.
 
 ## P3 Low
 
-- [ ] **CR-4 | Stale error and invalid text remain after the value changes elsewhere**
-    - File: `packages/renderer/src/app/explorer/bson-input/bson-input.component.ts:48`, `:163-172`
-    - Category: Correctness
-    - Problem: `error` is a plain field that only `commit`, `revert`, `commitWallTime` and `generate` clear. The input's `[value]="text"` binding writes the DOM only when `text` changes. Scenario: an Int64 `7`. Type `abc` and blur, so the error is shown. Then switch the type dropdown to Int32. The component is reused (same `@default` branch) and `text` is still `"7"`, so the DOM keeps `abc` and the stale "is not an integer" error stays under a valid Int32 7. Undo, Revert or a reload that changes the value also leaves the old error.
-    - Why it matters: the error describes a value that is no longer there, which is confusing. It is not a data problem, because nothing invalid is applied.
-    - Suggested fix: make `value` a signal input, or use an `ngOnChanges` setter, that clears `error` and rewrites the input text when the value changes.
-
-- [ ] **CR-5 | Move buttons use document order while the form shows schema order**
-    - File: `packages/renderer/src/app/explorer/json-form/json-form.component.ts:323-338`, `json-form.component.html:97-121`, `form-fields.util.ts:27-40`
-    - Category: Correctness
-    - Problem: `formFields` lists schema-declared keys in schema order first. `fieldIndex`/`moveField` and the disabled state use `orderedKeys` (document order). With a schema declaring `[b, a]` and data `{a, b}`, the first row shown (`b`) has "up" enabled and the second (`a`) has it disabled. Clicking moves the data, but the rows on screen do not move.
-    - Why it matters: this only happens when a schema is active, which the dev explorer uses and Thicket does not yet use for documents. The controls then look broken.
-    - Suggested fix: hide or disable the move buttons for schema-declared fields, or compute neighbors from the displayed field list. Calling `orderedKeys` once per render instead of once per field (`fieldIndex` in the `@for`, O(n^2)) would also remove the quadratic cost.
-
-- [ ] **CR-6 | Plain-JSON number edits now serialize as canonical EJSON**
-    - File: `packages/renderer/src/app/explorer/editable-value/editable-value.component.ts:156-161`
+- [ ] **CR-2 | The integer-default setting is still not applied to plain numbers that were not edited (badge and type dropdown)**
+    - File: `packages/renderer/src/app/explorer/bson-value.util.ts:123-133` (`bsonTypeOf`), `:78` (`fromExplorerValue`); `packages/renderer/src/app/explorer/bson-input.util.ts:325` (`convertValue` calls `fromExplorerValue(value)` without the setting)
     - Category: Integration
-    - Problem: `commitNumber` now always emits `new BsonLeaf(...)`, including in the plain-JSON explorer modes (dev page, JSON Lines). `json-lines.util.ts:83` writes `JSON.stringify(value)`, so editing `5` to `6` in a JSON line produces `{"$numberInt":"6"}` instead of `6`.
-    - Why it matters: this is a behavior change in the reference explorer's plain-JSON editing. It does not affect BSON documents, where numbers are already leaves.
-    - Suggested fix: if JSON Lines and plain JSON remain supported, keep plain numbers in those modes (for example, a flag from the explorer that BSON typing is active). Otherwise record that plain-JSON editing is out of scope.
+    - Problem: the CR-3 fix added an `integers` parameter to `fromExplorerValue`. Nothing in production passes it: the only caller is `convertValue`, which uses the default `'int32'`. `bsonTypeOf`, and through it `currentTarget`, the badge and the dropdown's selected type, still labels a plain integer as Int32 whatever `defaultIntegerType` is. With the setting `double`, a schema-seeded `5` shows Int32 until it is edited, then becomes a Double. Fixes.md states this openly. The document save path does not exist yet, so nothing is stored wrongly today.
+    - Why it matters: the type shown is not the type that a setting-aware save would write, and the setting still has no single owner. Once a save path exists, it has to remember to pass the setting.
+    - Suggested fix: when the save or serialize path is added (a later task), route it through `NumberDefaultService.integers()`. Better, turn seeded plain numbers into `BsonLeaf`s through `NumberDefaultService` when they are inserted, so the badge, the dropdown and the saved type agree. Otherwise, record the gap as an assumption on the task.
 
 ## Review conclusion
 
-Material issues found; fix before completing the task. No P0 or P1 issues. The three P2 findings (CR-1 date text round-trip, CR-2 type-dropdown cost on containers, CR-3 number-default ownership) should be fixed or explicitly accepted by the parent worker. The acceptance criteria are implemented and covered by passing component tests.
+Material issues found; fix before completing the task. CR-1 to CR-5 from round 1 are resolved, CR-3 only partly (see CR-2 here), and the tests pass. The one P2, CR-1 (bare integers read as epoch milliseconds in the date input), is a regression from the round-1 date fix and should be fixed or explicitly accepted by the parent worker. CR-2 is low priority and can be recorded as an assumption or follow-up.
