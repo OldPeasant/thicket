@@ -5,7 +5,7 @@ owner: dell26/agent-3
 deps: [bson-model]
 touches: [packages/core/src/shellsyntax]
 prio: 1
-lease_until: 2026-11-16T19:09:01Z
+lease_until: 2026-11-16T19:13:16Z
 ---
 ## Goal
 Parse mongosh-style literals (`ObjectId("…")`, `ISODate`, `NumberLong`, `NumberDecimal`, `UUID`, `BinData`, `Timestamp`, regex literals, unquoted keys) into the BSON model without eval, and print the model back in that syntax with stable formatting.
