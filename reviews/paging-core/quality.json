@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "task": "paging-core",
-  "reviewed_revision": "7ad3671c26e79b18b48b87e0d6022ece5fcc6155",
+  "reviewed_revision": "8714983193a9af7099d2ddde2543d2708fe4edf4",
   "helpers": {
     "test-writer": { "status": "completed", "report": "reviews/paging-core/tests.md" },
     "code-reviewer": { "status": "completed", "report": "reviews/paging-core/review.md" },
