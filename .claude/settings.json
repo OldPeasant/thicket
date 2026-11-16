@@ -10,6 +10,6 @@
       "Bash(docker:*)", "Bash(podman:*)",
       "Agent", "Task", "Skill"
     ],
-    "deny": ["Bash(git push:*)"]
+    "deny": ["Bash(git push:*)", "ScheduleWakeup"]
   }
 }
