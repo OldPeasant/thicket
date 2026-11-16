@@ -825,3 +825,147 @@ describe('readServerInfo / topologyOf', () => {
     expect(topologyOf(hello)).toBe(topology);
   });
 });
+
+describe('ConnectionManager cancellation and draft secrets: edge cases', () => {
+  it('waiters are counted: a caller joining after another cancelled keeps the connect alive', async () => {
+    const gate = deferred();
+    const client = fakeClient(() => gate.promise);
+    const { manager, created } = setup({ clients: [client] });
+    const a = new AbortController();
+    const b = new AbortController();
+    const c = new AbortController();
+    const first = manager.open('p1', undefined, a.signal);
+    const second = manager.open('p1', undefined, b.signal);
+    await vi.waitFor(() => expect(client.connect).toHaveBeenCalled());
+    a.abort();
+    expect((await rejection(first)).code).toBe('CANCELLED');
+    const third = manager.open('p1', undefined, c.signal);
+    b.abort();
+    expect((await rejection(second)).code).toBe('CANCELLED');
+    expect(manager.statusOf('p1').state).toBe('connecting');
+    expect(client.close).not.toHaveBeenCalled();
+    gate.resolve();
+    await expect(third).resolves.toEqual({ profileId: 'p1', state: 'connected' });
+    expect(created).toHaveLength(1);
+    // Aborting after the open succeeded changes nothing.
+    c.abort();
+    await Promise.resolve();
+    expect(manager.statusOf('p1').state).toBe('connected');
+    expect(client.close).not.toHaveBeenCalled();
+  });
+
+  it('the only caller aborting while the profile loads: CANCELLED, no client is created', async () => {
+    const profileGate = deferred<Profile>();
+    const { manager, created, loadProfile, logs } = setup();
+    loadProfile.mockImplementationOnce(() => profileGate.promise);
+    const controller = new AbortController();
+    const opening = manager.open('p1', undefined, controller.signal);
+    controller.abort();
+    expect((await rejection(opening)).code).toBe('CANCELLED');
+    expect(manager.statusOf('p1')).toEqual({ profileId: 'p1', state: 'disconnected' });
+    profileGate.resolve(savedProfile('p1'));
+    await vi.waitFor(() =>
+      expect(logs).toContain('open p1: CANCELLED The connection was closed while connecting'),
+    );
+    expect(created).toEqual([]);
+    expect(manager.statuses()).toEqual([]);
+  });
+
+  it('a new open after every caller cancelled starts a fresh connect; the old one is closed', async () => {
+    const gate = deferred();
+    const stale = fakeClient(() => gate.promise);
+    const fresh = fakeClient();
+    const { manager } = setup({ clients: [stale, fresh] });
+    const controller = new AbortController();
+    const first = manager.open('p1', undefined, controller.signal);
+    await vi.waitFor(() => expect(stale.connect).toHaveBeenCalled());
+    controller.abort();
+    expect((await rejection(first)).code).toBe('CANCELLED');
+    await expect(manager.open('p1', undefined)).resolves.toMatchObject({ state: 'connected' });
+    gate.resolve();
+    await vi.waitFor(() => expect(stale.close.mock.calls.length).toBeGreaterThan(1));
+    expect(manager.client('p1')).toBe(fresh);
+    expect(fresh.close).not.toHaveBeenCalled();
+  });
+
+  it('test() with an already aborted signal answers CANCELLED and closes the client after its connect', async () => {
+    const gate = deferred();
+    const client = fakeClient(() => gate.promise);
+    const { manager } = setup({ clients: [client] });
+    const controller = new AbortController();
+    controller.abort();
+    const error = await rejection(manager.test({ profileId: 'p1' }, undefined, controller.signal));
+    expect(error.code).toBe('CANCELLED');
+    expect(client.close).toHaveBeenCalledTimes(1);
+    gate.resolve();
+    await vi.waitFor(() => expect(client.close).toHaveBeenCalledTimes(2));
+    expect(client.commands).toEqual([]);
+  });
+
+  it('a cancelled test whose connect later fails is not closed again and raises no unhandled error', async () => {
+    const gate = deferred();
+    const client = fakeClient(() => gate.promise);
+    const { manager } = setup({ clients: [client] });
+    const controller = new AbortController();
+    const testing = manager.test({ profileId: 'p1' }, undefined, controller.signal);
+    await vi.waitFor(() => expect(client.connect).toHaveBeenCalled());
+    controller.abort();
+    expect((await rejection(testing)).code).toBe('CANCELLED');
+    gate.reject(Object.assign(new Error('getaddrinfo ENOTFOUND x'), { code: 'ENOTFOUND' }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(client.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('a test whose ping fails after connecting is closed once (no second close)', async () => {
+    const client = fakeClient();
+    client.answerWith(() => Promise.reject(new Error('connection timed out')));
+    const { manager } = setup({ clients: [client] });
+    expect((await rejection(manager.test({ profileId: 'p1' }, undefined))).code).toBe('TIMEOUT');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(client.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('draft matching ignores key order and fields that do not change the target', async () => {
+    const { manager, loadSecrets, created } = setup();
+    const draft: ProfileDraft = {
+      id: 'p1',
+      name: 'Edited name',
+      // Same values as the saved profile, keys in another order.
+      auth: { secretMode: 'saved', username: 'alice', mechanism: 'SCRAM-SHA-256' },
+      connectionString: 'mongodb://db.example.test:27017',
+      appName: 'Other app',
+      readPreference: 'nearest',
+      serverSelectionTimeoutMS: 1234,
+      readOnly: true,
+      production: true,
+    };
+    await manager.test({ profile: draft }, undefined);
+    expect(loadSecrets).toHaveBeenCalledWith('p1');
+    expect(created[0]?.options).toMatchObject({
+      auth: { username: 'alice', password: STORED_PASSWORD },
+      appName: 'Other app',
+      readPreference: 'nearest',
+      serverSelectionTimeoutMS: 1234,
+    });
+  });
+
+  it('a CANCELLED answer from main (e.g. privileged port replaced) forgets the entry', async () => {
+    const { manager, loadProfile, created } = setup();
+    loadProfile.mockImplementationOnce(() =>
+      Promise.reject(new RpcError('CANCELLED', 'Replaced by a new privileged port')),
+    );
+    expect((await rejection(manager.open('p1', undefined))).code).toBe('CANCELLED');
+    expect(manager.statusOf('p1')).toEqual({ profileId: 'p1', state: 'disconnected' });
+    expect(manager.statuses()).toEqual([]);
+    expect(created).toEqual([]);
+  });
+
+  it('a draft that drops the auth section of its saved profile gets no stored secrets', async () => {
+    const { manager, loadSecrets, created } = setup();
+    const withoutAuth: ProfileDraft = { ...savedProfile('p1') };
+    delete withoutAuth.auth;
+    await manager.test({ profile: withoutAuth }, undefined);
+    expect(loadSecrets).not.toHaveBeenCalled();
+    expect(created[0]?.options.auth).toBeUndefined();
+  });
+});
