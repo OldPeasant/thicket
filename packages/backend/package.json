@@ -12,5 +12,8 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@thicket/contract": "0.0.0"
   }
 }

@@ -22,6 +22,9 @@
     "typecheck": "tsc -p tsconfig.json && npm run typecheck --workspaces --if-present",
     "test": "vitest run && npm run test -w packages/renderer",
     "test:int": "vitest run --config test/integration/vitest.config.ts",
+    "test:electron": "npm run build -w packages/renderer && npm run test:electron -w apps/desktop",
+    "dev": "npm run dev -w apps/desktop",
+    "start": "npm run build -w packages/renderer && npm run start -w apps/desktop",
     "coverage": "npm run coverage --workspaces --if-present"
   },
   "devDependencies": {

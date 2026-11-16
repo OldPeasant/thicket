@@ -1,2 +1,8 @@
-/** Name of this workspace; placeholder until the first real module lands. */
+/** Name of this workspace. */
 export const WORKSPACE = '@thicket/backend';
+
+export * from './server/backend';
+export * from './server/handlers';
+export * from './server/ports';
+export * from './server/protocol';
+export * from './server/rpc';

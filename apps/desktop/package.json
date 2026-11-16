@@ -5,13 +5,22 @@
   "description": "Electron main process, preload script and packaging",
   "license": "Apache-2.0",
   "type": "module",
+  "main": "dist/main.cjs",
   "exports": {
     ".": "./src/index.ts"
   },
   "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/build.mjs && electron .",
+    "dev": "node scripts/dev.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
+    "test:electron": "node scripts/build.mjs && vitest run --config vitest.electron.config.ts",
     "coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@thicket/backend": "0.0.0",
+    "@thicket/contract": "0.0.0"
   },
   "devDependencies": {
     "electron": "^45.3.3",
