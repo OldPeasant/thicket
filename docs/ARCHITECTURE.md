@@ -297,9 +297,29 @@ Contract layout (`packages/contract/src/`):
 - Sidebar width: setting `sidebarWidth` (`SIDEBAR_WIDTH` in the contract: 180…560, default 260),
   `SidebarWidthService` (`preview` while dragging, `commit` saves once on release; arrow keys,
   Home/End and double click on the splitter). The width is the `--sidebar-width` property on the
-  shell. The sidebar content is a placeholder until sidebar-tree.
+  shell. The sidebar content is `SidebarTree` (below).
 - Status bar: `StatusService.setConnection({ name, state, production?, readonly? })` and
   `begin(label, progress?) → { update, done }` / `track(label, promise)` for running operations.
+
+## Sidebar tree (`packages/renderer/src/app/sidebar`)
+- `SidebarTreeService` (root): profiles from `profiles.list` (registered in `ProfileSafetyService`;
+  `reloadProfiles()` is what the connection editor calls after a save or delete), connection
+  states (`conn.open/close/status`, the `conn.status` broadcast; `backend.restarted` clears
+  everything), and `Load<T>` (`loading` / `loaded` / `error`) per database list, collection list,
+  `db.stats` and `coll.stats`, loaded on demand. A slower older answer never overwrites a newer
+  one. A list answering `NOT_CONNECTED` marks the connection disconnected.
+- Writes go through `WriteGuard`: `db.create` (with the first collection), `coll.create`,
+  `coll.rename`, and `db.drop` / `coll.drop` always with the confirm dialog and the name typed
+  (`alwaysConfirm` + `typeToConfirm`). Drop and rename close the affected collection tabs.
+- `SidebarTree` renders the visible rows flat (`role="tree"`, `aria-level`); arrows move and
+  expand/collapse, Enter/click opens a collection tab; right click, Shift+F10 or the menu key opens
+  the context menu. Write items use `[appWriteControl]` (disabled with the read-only hint). Names
+  are typed into the sidebar's own prompt (client-side name checks: `dbNameProblem`,
+  `collNameProblem`); profiles with `secretMode: 'ask'` get a password prompt before `conn.open`.
+- Collection tabs: id `collectionTabId(profileId, db, coll)`, kind `collection`, `data` is
+  `CollectionTabData` (`profileId`, `db`, `coll`, `type`).
+- The profile's `color` draws the connection's dot and the guide line down its subtree (user data,
+  the only color not from the tokens). e2e: `test/e2e/sidebar.e2e.ts` (mongo fixture).
 
 ## Write safety in the renderer (`packages/renderer/src/app/safety`)
 - Every write UI sends writes through `WriteGuard.run(method, params, options)` (or `approve()`,
