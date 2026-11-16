@@ -17,3 +17,4 @@ lease_until: 2026-11-16T19:44:47Z
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 20:27+0100 by felix/agent-1): @thicket/backend and @thicket/contract moved to devDependencies of apps/desktop: main/preload/backend are esbuild bundles, so the asar only needs dist/*.cjs; native modules added later must be externals + dependencies
