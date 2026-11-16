@@ -15,7 +15,8 @@ A WriteGuard service and confirm dialog showing the exact operation (shell synta
   - verified (2026-11-16 22:13+0100 by felix/agent-1): cd packages/renderer && npx ng test --include='src/app/safety/**/*.spec.ts' --include='src/app/layout/**/*.spec.ts' --watch=false at fdf5869 -> 12 files, 237 tests passed (ConfirmDialog: shows exact operation text, cancel/Escape aborts, enforces type-to-confirm; WriteGuard: deleteMany >1000 needs collection name, exactly 1000 does not)
 - [x] Requests from WriteGuard carry `confirmed: true` only after the dialog (test with the fake API)
   - verified (2026-11-16 22:13+0100 by felix/agent-1): same ng test run at fdf5869 -> 'WriteGuard (with the fake API)' suite (FakeThicketBridge/provideFakeThicket) passed: nothing sent before the dialog, confirmed:true only after confirming, cancel sends nothing, caller-preset confirmed stripped
-- [ ] Accent visible in all four theme combinations (screenshots in reviews/)
+- [x] Accent visible in all four theme combinations (screenshots in reviews/)
+  - verified (2026-11-16 22:13+0100 by felix/agent-1): npm run test:e2e -- test/e2e/safety.e2e.ts (Playwright Electron, headless ozone) at fdf5869 -> 4 passed (business/tron x light/dark); screenshots committed in reviews/safety-ui/screenshots/ (12 PNGs), red accent on sidebar/tab/status bar inspected visually
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
