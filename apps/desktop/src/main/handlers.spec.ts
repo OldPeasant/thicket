@@ -206,6 +206,66 @@ describe('main handlers with a ProfilesStore', () => {
     expect(byId.get('l1')).toMatchObject({ ok: true });
     expect(JSON.stringify(port.sent)).not.toContain('"fictitious"');
   });
+
+  describe('together with a settings store', () => {
+    function both() {
+      const secrets = new SecretsStore({
+        file: path.join(dir, 'secrets.bin'),
+        safeStorage: new FakeSafeStorage(),
+        platform: 'linux',
+      });
+      const profiles = new ProfilesStore({ file: path.join(dir, 'connections.json'), secrets });
+      const settings = {
+        get: vi.fn((): Settings => ({ ...DEFAULT_SETTINGS })),
+        set: vi.fn((changes: Partial<Settings>) =>
+          Promise.resolve({ ...DEFAULT_SETTINGS, ...changes }),
+        ),
+      };
+      return { secrets, profiles, settings };
+    }
+
+    it('serve the union of both handler sets; nothing is replaced or lost', () => {
+      const { secrets, profiles, settings } = both();
+      const onlyProfiles = Object.keys(mainHandlers({ version: '1', secrets, profiles }));
+      const onlySettings = Object.keys(mainHandlers({ version: '1', secrets, settings }));
+      const all = Object.keys(mainHandlers({ version: '1', secrets, profiles, settings }));
+      expect([...all].sort()).toEqual([...new Set([...onlyProfiles, ...onlySettings])].sort());
+      expect(all).toEqual(
+        expect.arrayContaining(['profiles.list', 'profiles.setSecret', 'app.settings.set']),
+      );
+      for (const name of all) {
+        expect(Object.hasOwn(methods, name)).toBe(true);
+        expect(route(name)).toBe('main');
+      }
+      const privileged = Object.keys(privilegedHandlers({ secrets: emptyStore() }));
+      expect(all.filter((name) => privileged.includes(name))).toEqual([]);
+    });
+
+    it('answer profiles, settings and the gated setSecret on one window port', async () => {
+      const { secrets, profiles, settings } = both();
+      const port = fakePort();
+      serve(port, {
+        table: methods,
+        route: 'main',
+        handlers: mainHandlers({ version: '1', secrets, profiles, settings }),
+      });
+      port.push({ id: 'l', method: 'profiles.list', params: {} });
+      port.push({ id: 'g', method: 'app.settings.get', params: {} });
+      port.push({
+        id: 's',
+        method: 'profiles.setSecret',
+        params: { profileId: 'ghost', kind: 'password', value: 'fictitious' },
+      });
+      await vi.waitFor(() => expect(port.sent).toHaveLength(3));
+      const byId = new Map(port.sent.map((r) => [r.id, r]));
+      expect(byId.get('l')).toEqual({ id: 'l', ok: true, result: { profiles: [] } });
+      expect(byId.get('g')).toEqual({ id: 'g', ok: true, result: { settings: DEFAULT_SETTINGS } });
+      // The settings store does not undo the profile-existence gate on setSecret.
+      expect(byId.get('s')).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } });
+      expect(settings.set).not.toHaveBeenCalled();
+      await expect(readdir(dir)).resolves.toEqual([]);
+    });
+  });
 });
 
 describe('the privileged port (main side)', () => {
