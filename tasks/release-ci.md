@@ -5,7 +5,7 @@ owner: felix/agent-1
 deps: [packaging,ci-check]
 touches: [.github/workflows/release.yml]
 prio: 2
-lease_until: 2026-11-16T20:05:13Z
+lease_until: 2026-11-16T20:10:15Z
 ---
 ## Goal
 On a `v*` tag build AppImage/deb/rpm (x64, arm64), dmg (arm64, x64), NSIS + zip (x64), with SHA-256 checksums, and upload them to a draft GitHub release.
