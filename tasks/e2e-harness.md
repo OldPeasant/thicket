@@ -13,7 +13,8 @@ Playwright `_electron` launches the built app with an isolated userData dir; hel
 ## Acceptance criteria
 - [x] `npm run test:e2e` builds the app and a smoke test sees the main window title (xvfb-run on Linux)
   - verified (2026-11-16 20:32+0100 by felix/agent-2): npm run test:e2e on Fedora Linux at 493a462 (builds renderer + apps/desktop bundles, then playwright test) -> 17 passed; smoke.e2e.ts asserts toHaveTitle('Thicket'). Ran with the session's Wayland display (app log shows ozone/platform/wayland), NOT under xvfb-run: xvfb-run is not installed here
-- [ ] Each test gets a fresh temporary userData directory (assert no writes to the real one)
+- [x] Each test gets a fresh temporary userData directory (assert no writes to the real one)
+  - verified (2026-11-16 20:32+0100 by felix/agent-2): npm run test:e2e -> smoke.e2e.ts: app.getPath('userData') equals the fixture's fresh mkdtemp dir, settings.json is written there, two consecutive tests get different empty dirs; electronApp fixture teardown snapshots Electron's default userData (appData+name, cross-checked against the running app) before launch and asserts it unchanged after close (passes for every app test); harness-helpers.e2e.ts covers snapshotDir change detection -> 17 passed
 - [ ] Screenshot on failure saved under test-results/ (git-ignored)
 
 ## Notes
