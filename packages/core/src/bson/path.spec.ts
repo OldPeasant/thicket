@@ -25,6 +25,11 @@ describe('getAt', () => {
     expect(getAt(ROOT, ['d', 'x'])).toBeUndefined();
   });
 
+  it('returns undefined for negative or fractional array indexes', () => {
+    expect(getAt(ROOT, ['a', 'b', -1])).toBeUndefined();
+    expect(getAt(ROOT, ['a', 'b', 1.5])).toBeUndefined();
+  });
+
   it('addresses the first of repeated keys', () => {
     expect(getAt(parseEJson('{"k":"1","k":"2"}'), ['k'])).toEqual(str('1'));
   });

@@ -219,7 +219,12 @@ function fromWrapper(entries: Entries): BsonValue | null {
 function binary(base64: string, subTypeHex: string): BsonValue {
   if (!BASE64.test(base64)) invalid('$binary', 'invalid base64');
   if (!HEX_BYTE.test(subTypeHex)) invalid('$binary', `invalid subType "${subTypeHex}"`);
-  return { type: 'binary', subtype: parseInt(subTypeHex, 16), base64 };
+  // Decode and re-encode, as bson does, so non-zero padding bits ("AB==") become canonical ("AA==").
+  return {
+    type: 'binary',
+    subtype: parseInt(subTypeHex, 16),
+    base64: bytesToBase64(base64ToBytes(base64)),
+  };
 }
 
 function dateMs(node: JsonNode): bigint {

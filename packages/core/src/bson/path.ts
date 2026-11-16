@@ -47,9 +47,11 @@ export function getAt(root: BsonValue, path: BsonPath): BsonValue | undefined {
   let current: BsonValue = root;
   for (const segment of path) {
     if (current.type !== 'object' && current.type !== 'array') return undefined;
-    if (current.type === 'object' ? typeof segment !== 'string' : typeof segment !== 'number') {
-      return undefined;
-    }
+    const mistyped =
+      current.type === 'object'
+        ? typeof segment !== 'string'
+        : typeof segment !== 'number' || !Number.isInteger(segment) || segment < 0;
+    if (mistyped) return undefined;
     const i = indexIn(current, segment, path);
     if (i < 0) return undefined;
     current = child(current, i);

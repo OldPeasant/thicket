@@ -136,6 +136,7 @@ function toText(value: BsonValue, fail: Fail): string {
     case 'symbol':
       return value.value;
     case 'regex':
+      if (value.options !== '') return fail(`the options "${value.options}" would be lost`);
       return value.pattern;
     default:
       return fail('no text form');
@@ -158,7 +159,7 @@ function toInteger(value: BsonValue, fail: Fail): bigint {
     case 'string': {
       const text = value.value.trim();
       if (INT_TEXT.test(text)) return BigInt(text);
-      // Decimal128 integers in exponent form, e.g. "1.0E+3" or "1E+2"
+      // Decimal128 integers with fractional zeros or an exponent, e.g. "1200.0" or "1.0E+3"
       const decimal = value.type === 'decimal' ? decimalInteger(text) : null;
       return decimal ?? fail(`"${value.value}" is not an integer`);
     }
@@ -168,9 +169,9 @@ function toInteger(value: BsonValue, fail: Fail): bigint {
 }
 
 function decimalInteger(text: string): bigint | null {
-  const m = /^([+-]?)(\d+)(?:\.(\d+))?E([+-]\d+)$/.exec(text);
+  const m = /^([+-]?)(\d+)(?:\.(\d+))?(?:E([+-]\d+))?$/.exec(text);
   if (!m) return null;
-  const [, sign, int, frac = '', exp] = m;
+  const [, sign, int, frac = '', exp = '0'] = m;
   const shift = Number(exp) - frac.length;
   const digits = BigInt(int + frac);
   if (shift < 0) {
@@ -201,10 +202,11 @@ function toDouble(value: BsonValue, fail: Fail): number {
     }
     case 'string': {
       const text = value.value.trim();
-      if (!NUMBER_TEXT.test(text) && !/^(?:[+-]?Infinity|NaN)$/.test(text)) {
-        return fail(`"${value.value}" is not a number`);
-      }
-      return Number(text);
+      if (/^(?:[+-]?Infinity|NaN)$/.test(text)) return Number(text);
+      if (!NUMBER_TEXT.test(text)) return fail(`"${value.value}" is not a number`);
+      const n = Number(text);
+      if (!Number.isFinite(n)) return fail(`"${value.value}" overflows Double`);
+      return n;
     }
     default:
       return fail('not a number');
@@ -276,7 +278,6 @@ function toUuidBase64(value: BsonValue, fail: Fail): string {
     return hexToBase64(text.replace(/-/g, '').toLowerCase());
   }
   if (value.type === 'binary') {
-    if (value.subtype === BINARY_SUBTYPE_UUID) return value.base64;
     if (base64ToBytes(value.base64).length !== 16) return fail('a UUID has 16 bytes');
     return value.base64;
   }

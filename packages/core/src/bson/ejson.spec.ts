@@ -341,6 +341,25 @@ describe('EJSON round trip edge cases', () => {
   });
 });
 
+describe('Binary base64 canonicalization', () => {
+  it.each(['AB==', 'AAB=', 'AQIDBA==', 'AQIDBAU=', ''])(
+    'stores %s as bson canonical EJSON writes it',
+    (b64) => {
+      const text = `{"v":{"$binary":{"base64":"${b64}","subType":"00"}}}`;
+      const viaBson = EJSON.stringify(EJSON.parse(text, { relaxed: false }), { relaxed: false });
+      expect(stringifyEJson(parseEJson(text))).toBe(viaBson);
+    },
+  );
+
+  it('normalizes the legacy form too', () => {
+    expect(parseEJson('{"$binary":"AB==","$type":"00"}')).toEqual({
+      type: 'binary',
+      subtype: 0,
+      base64: 'AA==',
+    });
+  });
+});
+
 describe('base64 helpers', () => {
   it('round-trip byte arrays of every padding length', () => {
     for (let n = 0; n <= 7; n++) {

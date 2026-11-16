@@ -100,7 +100,8 @@ describe('convert: every target', () => {
     expect(convert(bool(true), 'string')).toEqual(s('true'));
     expect(convert({ type: 'javascript', code: 'f()' }, 'string')).toEqual(s('f()'));
     expect(convert({ type: 'symbol', value: 'sym' }, 'string')).toEqual(s('sym'));
-    expect(convert({ type: 'regex', pattern: 'a+', options: 'i' }, 'string')).toEqual(s('a+'));
+    expect(convert({ type: 'regex', pattern: 'a+', options: '' }, 'string')).toEqual(s('a+'));
+    fails({ type: 'regex', pattern: 'a+', options: 'i' }, 'string', 'options "i" would be lost');
     fails(NULL, 'string', 'no text form');
   });
 
@@ -248,7 +249,10 @@ describe('convert: edge cases', () => {
     // 12000E-1 (accepted above) and has the exact integer value 1200.
     expect(convert(dec('1200.0'), 'int')).toEqual(i32(1200));
     expect(convert(dec('-7.00'), 'long')).toEqual(i64(-7n));
+    expect(convert(dec('100.00'), 'int')).toEqual(i32(100));
+    expect(convert(dec('2.0'), 'long')).toEqual(i64(2n));
     fails(dec('7.50'), 'int', 'not an integer');
+    fails(dec('-0.5'), 'long', 'not an integer');
   });
 
   it('Decimal128 integers beyond Int64 overflow; specials are not integers', () => {
@@ -268,6 +272,31 @@ describe('convert: edge cases', () => {
     for (const ms of [0n, -1n, 1714566600123n, -62135596800000n, 253402300799999n]) {
       expect(convert(convert(date(ms), 'string'), 'date'), String(ms)).toEqual(date(ms));
     }
+  });
+
+  it('Date → String → Date round-trips outside the ISO year range 0000-9999', () => {
+    const cases: [bigint, string][] = [
+      [253402300800000n, '+010000-01-01T00:00:00.000Z'],
+      [-62167219200001n, '-000001-12-31T23:59:59.999Z'],
+      [8_640_000_000_000_000n, '+275760-09-13T00:00:00.000Z'],
+      [-8_640_000_000_000_000n, '-271821-04-20T00:00:00.000Z'],
+    ];
+    for (const [ms, text] of cases) {
+      expect(convert(date(ms), 'string')).toEqual(s(text));
+      expect(convert(s(text), 'date'), text).toEqual(date(ms));
+    }
+  });
+
+  it('String → Double fails when a finite-looking number overflows', () => {
+    fails(s('1e400'), 'double', '"1e400" overflows Double');
+    fails(s('-1e400'), 'double', 'overflows Double');
+    expect(convert(s('Infinity'), 'double')).toEqual(dbl(Infinity));
+    expect(convert(s('NaN'), 'double')).toEqual(dbl(NaN));
+    expect(convert(s('1.7976931348623157e308'), 'double')).toEqual(dbl(1.7976931348623157e308));
+  });
+
+  it('Binary subtype 4 → UUID requires 16 bytes', () => {
+    fails(bin(4, 'AQID'), 'uuid', 'a UUID has 16 bytes');
   });
 
   it('String → Date accepts the documented forms and rejects zone-less date-times', () => {
