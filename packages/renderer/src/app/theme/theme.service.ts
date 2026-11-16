@@ -56,6 +56,15 @@ export class ThemeService {
   /** Per key: how many local choices were made, and how many saves are still on their way. */
   private readonly generation: Generations = { style: 0, mode: 0 };
   private readonly inFlight: Generations = { style: 0, mode: 0 };
+  /** Per key: the generation of the latest local choice whose save failed (0: none). */
+  private readonly failed: Generations = { style: 0, mode: 0 };
+  /**
+   * Requests to main are numbered in sending order (main answers them in that order). Per key, the
+   * number of the request whose answer `confirmed` holds, so an older answer arriving late does
+   * not overwrite it.
+   */
+  private requests = 0;
+  private readonly confirmedBy: Generations = { style: 0, mode: 0 };
 
   readonly style = this.styleState.asReadonly();
   readonly mode = this.modeState.asReadonly();
@@ -77,10 +86,11 @@ export class ThemeService {
     this.destroyRef.onDestroy(() => sub.unsubscribe());
 
     const asked = { ...this.generation };
+    const request = ++this.requests;
     try {
       const { settings } = await this.api.request('app.settings.get', {});
       // A choice made while the answer was on its way is newer than what main read.
-      this.takeAnswer(settings, asked, []);
+      this.takeAnswer(settings, request, asked, []);
     } catch {
       // No desktop bridge (ng serve, tests) or main unavailable: keep the defaults.
     }
@@ -103,16 +113,20 @@ export class ThemeService {
       this.inFlight[key] += 1;
     }
     const mine = { ...this.generation };
+    const request = ++this.requests;
     this.show(patch);
     try {
       const { settings } = await this.api.request('app.settings.set', { settings: patch });
-      this.takeAnswer(settings, mine, keys);
+      this.takeAnswer(settings, request, mine, keys);
     } catch (error) {
       // Not persisted: show what is stored again, so the UI does not pretend it was saved. Only the
       // keys this call changed, and only while nothing newer was chosen for them.
       const revert: ThemeSettings = {};
       for (const key of keys) {
-        if (this.generation[key] === mine[key] && this.current()[key] === patch[key]) {
+        if (this.generation[key] !== mine[key]) continue;
+        // Answers still on their way show the value they confirm (see takeAnswer).
+        this.failed[key] = mine[key];
+        if (this.current()[key] === patch[key]) {
           Object.assign(revert, { [key]: this.confirmed[key] });
         }
       }
@@ -124,18 +138,34 @@ export class ThemeService {
   }
 
   /**
-   * Applies an answer from main (`app.settings.get/set`) requested when the local generations
-   * were `asked`. A key is taken only if no newer local choice was made for it since, and no other
-   * save of it is still on its way (unless this answer is for the latest save of that key).
+   * Applies answer number `request` from main (`app.settings.get/set`), requested when the local
+   * generations were `asked`. Its values are always recorded as stored (unless a later answer was
+   * already recorded), so a later failed save reverts to what main really holds. A key is shown
+   * only if no newer local choice was made for it since and no other save of it is still on its
+   * way (unless this answer is for the latest save of that key). If the newer choice failed and no
+   * other save of the key is pending, the stored value is shown again.
    */
-  private takeAnswer(settings: ThemeSettings, asked: Generations, own: readonly ThemeKey[]): void {
-    const accepted: ThemeSettings = {};
+  private takeAnswer(
+    settings: ThemeSettings,
+    request: number,
+    asked: Generations,
+    own: readonly ThemeKey[],
+  ): void {
+    const valid = this.valid(settings);
+    const shown: ThemeSettings = {};
     for (const key of THEME_KEYS) {
-      if (this.generation[key] !== asked[key]) continue;
-      if (this.inFlight[key] > 0 && !own.includes(key)) continue;
-      Object.assign(accepted, { [key]: settings[key] });
+      if (valid[key] !== undefined && request > this.confirmedBy[key]) {
+        Object.assign(this.confirmed, { [key]: valid[key] });
+        this.confirmedBy[key] = request;
+      }
+      const othersInFlight = this.inFlight[key] - (own.includes(key) ? 1 : 0);
+      if (this.generation[key] === asked[key]) {
+        if (own.includes(key) || othersInFlight === 0) Object.assign(shown, { [key]: valid[key] });
+      } else if (this.failed[key] === this.generation[key] && othersInFlight === 0) {
+        Object.assign(shown, { [key]: this.confirmed[key] });
+      }
     }
-    this.take(accepted);
+    this.show(shown);
   }
 
   /** Takes values known to be stored (answers and broadcasts from main). */

@@ -413,6 +413,54 @@ describe('ThemeService', () => {
       expect(theme.style()).toBe('tron');
       expect(attrs().style).toBe('tron');
     });
+
+    it('an earlier save that succeeds after a later one failed ends on its stored value', async () => {
+      const first = deferred<{ settings: Settings }>();
+      let calls = 0;
+      fake.handle('app.settings.set', (params) => {
+        calls += 1;
+        if (calls === 2) return { error: { code: 'INTERNAL', message: 'disk full' } };
+        stored = { ...stored, ...params.settings };
+        const snapshot = { settings: { ...stored } };
+        return first.promise.then(() => snapshot);
+      });
+      const theme = TestBed.inject(ThemeService);
+      await theme.init();
+
+      const saved = theme.setStyle('tron'); // stored, but the answer is late
+      await expect(theme.setStyle('business')).rejects.toMatchObject({ code: 'INTERNAL' });
+      first.resolve({ settings: { ...stored } });
+      await saved;
+
+      // The fake does not broadcast: only the late answer tells the window that Tron is stored.
+      expect(stored.style).toBe('tron');
+      expect(theme.style()).toBe('tron');
+      expect(attrs().style).toBe('tron');
+    });
+
+    it('a stale app.settings.get answer does not replace a newer stored value for a later revert', async () => {
+      const get = deferred<{ settings: Settings }>();
+      const before = { ...stored };
+      fake.handle('app.settings.get', () => get.promise);
+      let calls = 0;
+      fake.handle('app.settings.set', (params) => {
+        calls += 1;
+        if (calls === 2) return { error: { code: 'INTERNAL', message: 'disk full' } };
+        stored = { ...stored, ...params.settings };
+        return { settings: { ...stored } };
+      });
+      const theme = TestBed.inject(ThemeService);
+      const started = theme.init();
+
+      await theme.setStyle('tron'); // stored
+      get.resolve({ settings: before }); // read before the save: Business
+      await started;
+      await expect(theme.setStyle('business')).rejects.toMatchObject({ code: 'INTERNAL' });
+
+      expect(stored.style).toBe('tron');
+      expect(theme.style()).toBe('tron');
+      expect(attrs().style).toBe('tron');
+    });
   });
 });
 
