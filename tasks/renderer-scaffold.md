@@ -15,7 +15,8 @@ Angular 22 app in packages/renderer (standalone components, signals, zoneless if
   - skipped (2026-11-16 18:52+0100 by dell26/agent-1): Loading in Electron not run: launching the Electron 45 binary (installed in out/electron-check) needed an interactive approval nobody could give. What was checked at 044a8e7: npm run build -w packages/renderer -> production build in packages/renderer/dist, index.html at top level, <base href="./">, script/style refs relative and present (node structural check), no external URLs. Electron file:// load is left to the electron-shell/e2e tasks (assumption recorded).
 - [x] `npm run dev -w packages/renderer` serves it for development
   - verified (2026-11-16 18:52+0100 by dell26/agent-1): npm run dev -w packages/renderer -- --port 4317 (ng serve, development config) -> 'Local: http://localhost:4317/', node fetch GET / -> 200 with app-root + vite client, GET /main.js -> 200 text/javascript; then stopped
-- [ ] Unit test for the root component runs in `npm run check`
+- [x] Unit test for the root component runs in `npm run check`
+  - verified (2026-11-16 18:53+0100 by dell26/agent-1): npm run check at 044a8e7 -> lint + typecheck (ngc strictTemplates + tsc) pass; root vitest 4/4, then ng test (Vitest runner, jsdom) 46/46 incl. src/app/app.spec.ts (root component renders title, zoneless); a deliberately failing renderer spec made the test step exit 1 (test-writer probe)
 - [ ] No external network resources (fonts are bundled locally, no CDN)
 
 ## Notes
