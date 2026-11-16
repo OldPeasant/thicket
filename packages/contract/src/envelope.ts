@@ -74,4 +74,9 @@ export const BROADCAST_STREAMS = {
   connStatus: 'conn.status',
   /** Effective theme changed (setting or OS); payload `ThemeInfo`. */
   theme: 'app.theme',
+  /**
+   * The backend process died and was restarted; payload `BackendRestarted`. Requests that were
+   * running in it failed with `INTERNAL`, its streams ended, its connections are closed.
+   */
+  backendRestarted: 'backend.restarted',
 } as const;

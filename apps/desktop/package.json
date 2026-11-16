@@ -12,5 +12,10 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "electron": "^45.3.3",
+    "esbuild": "^0.28.2",
+    "playwright-core": "^1.65.1"
   }
 }

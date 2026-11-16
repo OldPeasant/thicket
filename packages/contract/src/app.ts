@@ -34,6 +34,12 @@ export const themeInfo = z.object({
 export type ThemeInfo = z.infer<typeof themeInfo>;
 
 export const appMethods = defineMethods({
+  'app.ping': {
+    summary: 'Answer from the main process (wiring check)',
+    route: 'main',
+    params: emptyParams,
+    result: z.object({ process: z.literal('main'), version: z.string() }),
+  },
   'app.settings.get': {
     summary: 'Current settings',
     route: 'main',

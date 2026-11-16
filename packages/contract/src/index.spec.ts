@@ -4,6 +4,7 @@ import { z } from 'zod';
 import {
   BROADCAST_STREAMS,
   ERROR_CODES,
+  MAX_SLEEP_MS,
   METHOD_NAMES,
   WRITE_METHODS,
   cancel,
@@ -228,6 +229,7 @@ const SAMPLES: { [M in MethodName]: { valid: ParamsOf<M>; invalid: unknown } } =
     invalid: { profileId: P, fullDocument: 'all' },
   },
 
+  'app.ping': { valid: {}, invalid: { echo: 1 } },
   'app.settings.get': { valid: {}, invalid: { key: 'style' } },
   'app.settings.set': {
     valid: { settings: { style: 'tron', pageSize: 100 } },
@@ -235,6 +237,8 @@ const SAMPLES: { [M in MethodName]: { valid: ParamsOf<M>; invalid: unknown } } =
   },
   'app.theme': { valid: {}, invalid: { style: 'tron' } },
   'app.checkForUpdate': { valid: {}, invalid: { force: true } },
+  'backend.ping': { valid: {}, invalid: { pid: 1 } },
+  'backend.sleep': { valid: { ms: 50 }, invalid: { ms: MAX_SLEEP_MS + 1 } },
 };
 
 /** The methods that write to the server (SPEC.md section 4: they carry profileId and confirmed). */
@@ -263,13 +267,14 @@ const EXPECTED_WRITES = [
 const table: Record<string, MethodDef> = methods;
 
 describe('method table', () => {
-  it('covers every group of SPEC.md section 4', () => {
+  it('covers every group of SPEC.md section 4 (plus the backend.* wiring diagnostics)', () => {
     const groups = new Set(METHOD_NAMES.map((name) => name.split('.')[0]));
     expect([...groups].sort()).toEqual(
       [
         'admin',
         'agg',
         'app',
+        'backend',
         'coll',
         'conn',
         'db',
@@ -607,7 +612,11 @@ describe('envelope', () => {
     );
     expect(event.safeParse({ stream: 's', kind: 'progress', payload: null }).success).toBe(false);
     expect(cancel.safeParse({ cancel: '1' }).success).toBe(true);
-    expect(Object.values(BROADCAST_STREAMS)).toEqual(['conn.status', 'app.theme']);
+    expect(Object.values(BROADCAST_STREAMS)).toEqual([
+      'conn.status',
+      'app.theme',
+      'backend.restarted',
+    ]);
   });
 
   it('has the stable error codes named in SPEC.md', () => {

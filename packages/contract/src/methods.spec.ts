@@ -301,6 +301,15 @@ const RESULTS: { [M in MethodName]: { valid: ResultOf<M>; invalid: unknown } } =
     },
     invalid: { current: '0.1.0', latest: null, updateAvailable: 'no', url: null },
   },
+  'app.ping': {
+    valid: { process: 'main', version: '0.1.0' },
+    invalid: { process: 'backend', version: '0.1.0' },
+  },
+  'backend.ping': {
+    valid: { process: 'backend', pid: 4242, mainReachable: true },
+    invalid: { process: 'backend', pid: 0, mainReachable: true },
+  },
+  'backend.sleep': { valid: { sleptMs: 50 }, invalid: { sleptMs: -1 } },
 };
 
 /** Data payload samples of every streaming method (the type forces one per stream method). */

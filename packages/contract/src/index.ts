@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { adminMethods } from './admin';
 import { aggMethods } from './agg';
 import { appMethods } from './app';
+import { backendMethods } from './backend';
 import { collMethods } from './coll';
 import { connMethods } from './conn';
 import { dbMethods } from './db';
@@ -18,6 +19,7 @@ import { shellMethods } from './shell';
 export * from './admin';
 export * from './agg';
 export * from './app';
+export * from './backend';
 export * from './coll';
 export * from './common';
 export * from './conn';
@@ -46,6 +48,7 @@ export const methods = {
   ...shellMethods,
   ...adminMethods,
   ...appMethods,
+  ...backendMethods,
 } as const satisfies Record<string, MethodDef>;
 
 export type Methods = typeof methods;
@@ -115,7 +118,19 @@ export function parseParams<M extends MethodName>(
 ): ParseResult<ParsedParamsOf<M>>;
 export function parseParams(method: string, params: unknown): ParseResult<unknown>;
 export function parseParams(method: string, params: unknown): ParseResult<unknown> {
-  const def = isMethodName(method) ? methodTable[method] : undefined;
+  return parseParamsIn(methodTable, method, params);
+}
+
+/**
+ * `parseParams` against another method table (the privileged main ↔ backend port uses
+ * `privilegedMethods`). Unknown names, including inherited keys, answer `UNKNOWN_METHOD`.
+ */
+export function parseParamsIn(
+  table: Readonly<Record<string, MethodDef>>,
+  method: string,
+  params: unknown,
+): ParseResult<unknown> {
+  const def = Object.hasOwn(table, method) ? table[method] : undefined;
   if (!def) return unknownMethod(method);
   const parsed = def.params.safeParse(params);
   return parsed.success ? { ok: true, data: parsed.data } : invalid(method, 'params', parsed.error);
@@ -128,7 +143,16 @@ export function parseResult<M extends MethodName>(
 ): ParseResult<ResultOf<M>>;
 export function parseResult(method: string, result: unknown): ParseResult<unknown>;
 export function parseResult(method: string, result: unknown): ParseResult<unknown> {
-  const def = isMethodName(method) ? methodTable[method] : undefined;
+  return parseResultIn(methodTable, method, result);
+}
+
+/** `parseResult` against another method table; a mismatch is an `INTERNAL` error (a bug). */
+export function parseResultIn(
+  table: Readonly<Record<string, MethodDef>>,
+  method: string,
+  result: unknown,
+): ParseResult<unknown> {
+  const def = Object.hasOwn(table, method) ? table[method] : undefined;
   if (!def) return unknownMethod(method);
   const parsed = def.result.safeParse(result);
   if (parsed.success) return { ok: true, data: parsed.data };
