@@ -207,6 +207,82 @@ describe('SettingsStore corrupt file', () => {
   });
 });
 
+describe('SettingsStore unreadable file', () => {
+  const now = () => new Date('2026-11-16T12:34:56.789Z');
+  const backup = () => `${file}.unreadable-2026-11-16T12-34-56-789Z`;
+  const original = JSON.stringify({ version: 1, settings: { style: 'tron', pageSize: 500 } });
+  const eacces = () => Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+
+  /** Real fs, but reading settings.json fails with EACCES; `failMoveAside` breaks the backup rename. */
+  function unreadableFs(): SettingsFs & { failMoveAside: boolean } {
+    const wrapper = {
+      failMoveAside: false,
+      readFile: (p: string, e: 'utf8') =>
+        p === file ? Promise.reject(eacces()) : fs.readFile(p, e),
+      writeFile: (p: string, d: string, o: { flush: boolean }) => fs.writeFile(p, d, o),
+      unlink: (p: string) => fs.unlink(p),
+      rename: (from: string, to: string) =>
+        wrapper.failMoveAside && to.includes('.unreadable-')
+          ? Promise.reject(Object.assign(new Error('EBUSY: locked'), { code: 'EBUSY' }))
+          : fs.rename(from, to),
+    };
+    return wrapper;
+  }
+
+  it('the first set moves the unreadable file aside, then writes the new file', async () => {
+    await fs.writeFile(file, original);
+    const log = vi.fn();
+    const store = await SettingsStore.open(file, { fs: unreadableFs(), log, now });
+    expect(store.get()).toEqual(DEFAULT_SETTINGS);
+    expect(await fs.readFile(file, 'utf8')).toBe(original); // nothing touched at start
+
+    await store.set({ mode: 'dark' });
+    expect(await fs.readFile(backup(), 'utf8')).toBe(original);
+    expect(await readJson(file)).toEqual({
+      version: SETTINGS_VERSION,
+      settings: { ...DEFAULT_SETTINGS, mode: 'dark' },
+    });
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('unreadable-'));
+
+    // Only the first write moves the file aside.
+    await store.set({ mode: 'light' });
+    const backups = (await fs.readdir(dir)).filter((n) => n.includes('.unreadable-'));
+    expect(backups).toHaveLength(1);
+    expect(await fs.readFile(backup(), 'utf8')).toBe(original);
+  });
+
+  it('an unreadable file that disappeared before the first set (ENOENT) is just written', async () => {
+    const store = await SettingsStore.open(file, { fs: unreadableFs(), now });
+    await store.set({ mode: 'dark' });
+    expect(await readJson(file)).toMatchObject({ settings: { mode: 'dark' } });
+    await expect(fs.access(backup())).rejects.toThrow();
+  });
+
+  it('if the file cannot be moved aside, set rejects and nothing changes; a later set retries', async () => {
+    await fs.writeFile(file, original);
+    const log = vi.fn();
+    const unreadable = unreadableFs();
+    unreadable.failMoveAside = true;
+    const store = await SettingsStore.open(file, { fs: unreadable, log, now });
+    const listener = vi.fn();
+    store.onChange(listener);
+
+    await expect(store.set({ mode: 'dark' })).rejects.toThrow('EBUSY');
+    expect(await fs.readFile(file, 'utf8')).toBe(original);
+    await expect(fs.access(`${file}.tmp`)).rejects.toThrow();
+    await expect(fs.access(backup())).rejects.toThrow();
+    expect(store.get()).toEqual(DEFAULT_SETTINGS);
+    expect(listener).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('not writing'));
+
+    unreadable.failMoveAside = false;
+    await expect(store.set({ mode: 'dark' })).resolves.toMatchObject({ mode: 'dark' });
+    expect(await fs.readFile(backup(), 'utf8')).toBe(original);
+    expect(await readJson(file)).toMatchObject({ settings: { mode: 'dark' } });
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+});
+
 /** Real fs, but `rename` of the temp file over the settings file "crashes" (never happens). */
 function crashBeforeRename(): SettingsFs & { crashed: boolean } {
   const wrapper = {

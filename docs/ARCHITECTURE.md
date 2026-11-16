@@ -115,7 +115,9 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
 - Settings (`src/settings/store.ts`, `SettingsStore`): `userData/settings.json` as
   `{ "version": 1, "settings": {...} }`. Missing file → `DEFAULT_SETTINGS`; unknown keys are
   dropped and invalid values fall back to their default per key; a file that is not JSON or not
-  in that layout is renamed to `settings.json.corrupt-<time>` and the defaults are used. Writes go
+  in that layout is renamed to `settings.json.corrupt-<time>` and the defaults are used. A file
+  that exists but cannot be read also gives the defaults and is renamed to
+  `settings.json.unreadable-<time>` before the first write (if that fails, the set fails). Writes go
   to `settings.json.tmp` (flushed) and are renamed over the file (a stale temp file is removed at
   start); writes are serialized. Main serves `app.settings.get/set` and, after a set that changed
   something, broadcasts `app.settings.changed` (payload `SettingsChanged`) to every window through

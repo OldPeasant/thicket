@@ -28,7 +28,7 @@ export interface SettingsFs {
 export interface SettingsStoreOptions {
   fs?: SettingsFs;
   log?: (message: string) => void;
-  /** Clock for the backup file name of a corrupt file. */
+  /** Clock for the backup file name of a corrupt or unreadable file. */
   now?: () => Date;
 }
 
@@ -80,6 +80,9 @@ function sameSettings(a: Settings, b: Settings): boolean {
  *
  * - A missing file gives the defaults. A file that is not JSON or not in that layout is renamed to
  *   `settings.json.corrupt-<time>` (kept for the user) and the defaults are used.
+ * - A file that exists but cannot be read (EACCES, a lock, ...) also gives the defaults. Before the
+ *   first write it is moved to `settings.json.unreadable-<time>` so the write does not destroy it;
+ *   if that move fails (other than ENOENT) the set fails and the next set tries again.
  * - Writes are atomic: the new content goes to `settings.json.tmp` (flushed), which is then renamed
  *   over `settings.json`. A crash in between leaves the previous file intact; the stale temp file
  *   is removed on the next start.
@@ -93,6 +96,8 @@ export class SettingsStore {
   private current: Settings = { ...DEFAULT_SETTINGS };
   private readonly listeners = new Set<SettingsListener>();
   private queue: Promise<unknown> = Promise.resolve();
+  /** The file could not be read at start; it must be moved aside before the first write. */
+  private unreadable = false;
 
   private constructor(file: string, options: SettingsStoreOptions) {
     this.file = file;
@@ -155,6 +160,7 @@ export class SettingsStore {
   }
 
   private async write(value: Settings): Promise<void> {
+    if (this.unreadable) await this.backUpUnreadable();
     const text = `${JSON.stringify({ version: SETTINGS_VERSION, settings: value }, null, 2)}\n`;
     await this.fs.writeFile(this.tempFile, text, { flush: true });
     await this.fs.rename(this.tempFile, this.file);
@@ -167,6 +173,7 @@ export class SettingsStore {
       text = await this.fs.readFile(this.file, 'utf8');
     } catch (error) {
       if (errorCode(error) !== 'ENOENT') {
+        this.unreadable = true;
         this.log(`could not read ${this.file}, using the defaults: ${String(error)}`);
       }
       return;
@@ -192,9 +199,28 @@ export class SettingsStore {
     this.current = sanitize(raw);
   }
 
-  private async backUpCorrupt(): Promise<void> {
+  private backupName(kind: 'corrupt' | 'unreadable'): string {
     const stamp = this.now().toISOString().replace(/[:.]/g, '-');
-    const backup = `${this.file}.corrupt-${stamp}`;
+    return `${this.file}.${kind}-${stamp}`;
+  }
+
+  /** Moves the file that could not be read at start aside; throws (no write) if that fails. */
+  private async backUpUnreadable(): Promise<void> {
+    const backup = this.backupName('unreadable');
+    try {
+      await this.fs.rename(this.file, backup);
+      this.log(`moved the unreadable ${this.file} to ${backup} before writing`);
+    } catch (error) {
+      if (errorCode(error) !== 'ENOENT') {
+        this.log(`could not move the unreadable ${this.file} aside, not writing: ${String(error)}`);
+        throw error;
+      }
+    }
+    this.unreadable = false;
+  }
+
+  private async backUpCorrupt(): Promise<void> {
+    const backup = this.backupName('corrupt');
     try {
       await this.fs.rename(this.file, backup);
       this.log(`${this.file} is not valid; moved it to ${backup} and using the defaults`);
