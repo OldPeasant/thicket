@@ -256,6 +256,26 @@ Contract layout (`packages/contract/src/`):
 - Adding a method: add it to its group file, add a valid/invalid sample to `SAMPLES` in
   `index.spec.ts` (the test fails otherwise), and to `EXPECTED_WRITES` if it writes.
 
+## Main window layout (`packages/renderer/src/app/layout`)
+- Routes: `''` is `AppShell` (sidebar, splitter, tab strip, work area, status bar); its child routes
+  are the "start page" shown when no tab is active: `''` → `Welcome`, `NAV.newConnection`
+  (`/connections/new`) and `NAV.importCompass` (`/connections/import/compass`) → `PlannedPage`
+  placeholders that connection-ui and profiles-import-export replace. `dev/explorer` stays outside
+  the shell. Any `NavigationEnd` shows the routed page (`WorkspaceService.showHome()`).
+- Tabs: `WorkspaceService` (`tabs`, `activeId`, `open/close/activate/cycle/move/showHome`); a tab is
+  `{ id, kind: 'collection' | 'shell' | 'admin', title, detail?, production?, data? }`, opening a
+  known id selects it. Views register per kind with `provideTabView(kind, Component)` (the
+  component gets the tab as its required `tab` input; `TabPlaceholder` otherwise). Every open tab
+  stays rendered (hidden when inactive), so its state survives switching. Keys (document level):
+  Ctrl/Cmd+W closes the active tab (always consumed, so it never closes the window),
+  Ctrl+Tab / Ctrl+Shift+Tab and Ctrl+PageDown/PageUp cycle, Ctrl+Shift+PageDown/PageUp move.
+- Sidebar width: setting `sidebarWidth` (`SIDEBAR_WIDTH` in the contract: 180…560, default 260),
+  `SidebarWidthService` (`preview` while dragging, `commit` saves once on release; arrow keys,
+  Home/End and double click on the splitter). The width is the `--sidebar-width` property on the
+  shell. The sidebar content is a placeholder until sidebar-tree.
+- Status bar: `StatusService.setConnection({ name, state, production?, readonly? })` and
+  `begin(label, progress?) → { update, done }` / `track(label, promise)` for running operations.
+
 ## Install (development)
 All OSes: Node 24 LTS, 24.15.0 or newer (Angular 22 and jsdom require it), with npm, git, Python 3
 (for TFP and native module builds). Then `npm ci` in the repo root.

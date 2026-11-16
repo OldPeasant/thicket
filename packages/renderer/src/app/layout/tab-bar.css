@@ -11,7 +11,11 @@
   align-items: stretch;
   height: 2.25rem;
   overflow-x: auto;
-  scrollbar-width: thin;
+  overflow-y: hidden;
+}
+
+.strip::-webkit-scrollbar {
+  height: 4px;
 }
 
 .tab {
