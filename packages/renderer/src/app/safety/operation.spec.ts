@@ -104,4 +104,75 @@ describe('describeWrite', () => {
       describeWrite('io.import', { ...t, fileToken: 'tok', ordered: true, stopOnError: false }),
     ).toContain('{ ordered: true, stopOnError: false }');
   });
+
+  it('prints optional arguments only when given', () => {
+    const D = 'db.getSiblingDB("shop")';
+    expect(describeWrite('coll.create', { ...t, options: '{"capped":true,"size":1024}' })).toBe(
+      `${D}.createCollection("orders", {\n  capped: true,\n  size: 1024\n})`,
+    );
+    expect(describeWrite('coll.rename', { ...t, newName: 'o2' })).toBe(
+      `${C}.renameCollection("o2")`,
+    );
+    expect(describeWrite('idx.create', { ...t, key: '{"a":1}', options: '{"unique":true}' })).toBe(
+      `${C}.createIndex({ a: 1 }, {\n  unique: true\n})`,
+    );
+    expect(describeWrite('idx.hide', { ...t, name: 'a_1', hidden: true })).toBe(
+      `${C}.hideIndex("a_1")`,
+    );
+    expect(
+      describeWrite('docs.deleteMany', { ...t, filter: '{}', collation: '{"locale":"de"}' }),
+    ).toBe(`${C}.deleteMany({}, { collation: { locale: "de" } })`);
+    expect(
+      describeWrite('docs.updateMany', { ...t, filter: '{}', update: '{"$set":{"a":1}}' }),
+    ).toBe(`${C}.updateMany({}, {\n  $set: {\n    a: 1\n  }\n})`);
+    expect(describeWrite('docs.insert', { ...t, docs: ['{}', '{}'] })).toBe(
+      `${C}.insertMany([{}, {}])`,
+    );
+    expect(describeWrite('io.import', { ...t, fileToken: 'tok' })).toBe(
+      `// Import the chosen file\n${C}.insertMany(<file documents>)`,
+    );
+  });
+
+  it('prints the full collMod command with a validator', () => {
+    expect(
+      describeWrite('coll.validator.set', {
+        ...t,
+        validator: '{"$jsonSchema":{"required":["a"]}}',
+        validationLevel: 'strict',
+        validationAction: 'error',
+      }),
+    ).toBe(
+      'db.getSiblingDB("shop").runCommand({\n' +
+        '  collMod: "orders",\n' +
+        '  validator: {\n    $jsonSchema: {\n      required: [\n        "a"\n      ]\n    }\n  },\n' +
+        '  validationLevel: "strict",\n' +
+        '  validationAction: "error"\n})',
+    );
+  });
+
+  it('a document-delete with expected values shows them in the filter', () => {
+    expect(
+      describeWrite('docs.delete', { ...t, id: OID, expected: '{"v":{"$numberInt":"3"},"s":"a"}' }),
+    ).toBe(`${C}.deleteOne({ _id: ObjectId("64b7f0c2a1b2c3d4e5f60718"), v: 3, s: "a" })`);
+  });
+
+  it('escapes database and collection names as string literals', () => {
+    expect(describeWrite('coll.drop', { profileId: 'p', db: 'we"ird', coll: 'a\\b\nc' })).toBe(
+      'db.getSiblingDB("we\\"ird").getCollection("a\\\\b\\nc").drop()',
+    );
+  });
+
+  it('dates and ids appear in shell syntax', () => {
+    expect(
+      describeWrite('docs.deleteMany', {
+        ...t,
+        filter: '{"at":{"$lt":{"$date":"2025-01-01T00:00:00Z"}}}',
+      }),
+    ).toContain('ISODate("2025-01-01T00:00:00');
+  });
+
+  it('shell() indents by two by default and leaves invalid EJSON as it is', () => {
+    expect(shell('{"a":1}')).toBe('{\n  a: 1\n}');
+    expect(shell('{"a":', 0)).toBe('{"a":');
+  });
 });

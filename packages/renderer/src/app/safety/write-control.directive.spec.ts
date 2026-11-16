@@ -40,6 +40,37 @@ describe('WriteControl', () => {
     expect(button?.hasAttribute('data-readonly')).toBe(false);
   });
 
+  it('re-enables the control and drops the hint when the profile stops being read-only', async () => {
+    const safety = TestBed.inject(ProfileSafetyService);
+    safety.set({ id: 'a', name: 'A', readOnly: true, production: true });
+    const fixture = TestBed.createComponent(Host);
+    const button = (fixture.nativeElement as HTMLElement).querySelector('button');
+    await fixture.whenStable();
+    expect(button?.disabled).toBe(true);
+
+    safety.set({ id: 'a', name: 'A', readOnly: false, production: true });
+    await fixture.whenStable();
+    expect(button?.disabled).toBe(false);
+    expect(button?.hasAttribute('title')).toBe(false);
+    expect(button?.hasAttribute('data-readonly')).toBe(false);
+
+    safety.set({ id: 'a', name: 'A', readOnly: true, production: true });
+    await fixture.whenStable();
+    safety.remove('a');
+    await fixture.whenStable();
+    expect(button?.disabled).toBe(false);
+  });
+
+  it('production alone does not disable write controls', async () => {
+    const safety = TestBed.inject(ProfileSafetyService);
+    safety.set({ id: 'a', name: 'A', readOnly: false, production: true });
+    const fixture = TestBed.createComponent(Host);
+    await fixture.whenStable();
+    const button = (fixture.nativeElement as HTMLElement).querySelector('button');
+    expect(button?.disabled).toBe(false);
+    expect(safety.production('a')).toBe(safety.production('a'));
+  });
+
   it('profile flags are signals per id; unknown profiles are neither', () => {
     const safety = TestBed.inject(ProfileSafetyService);
     const ro = safety.readOnly('x');

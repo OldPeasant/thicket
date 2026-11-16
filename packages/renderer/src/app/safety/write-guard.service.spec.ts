@@ -199,6 +199,227 @@ describe('WriteGuard (with the fake API)', () => {
     expect(fake.requests).toHaveLength(0);
   });
 
+  it('deleteMany of 1 001 documents (count option) needs the name; the option wins over expectedCount', async () => {
+    const done = guard.run(
+      'docs.deleteMany',
+      { profileId: 'dev', db: 'shop', coll: 'orders', filter: '{}', expectedCount: 5 },
+      { count: 1001 },
+    );
+    await flush();
+    expect(confirm.current()).toMatchObject({
+      typeToConfirm: 'orders',
+      detail: 'Affects 1 001 documents.',
+    });
+    confirm.answer(true);
+    await expect(done).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it('deleteMany without a known count does not ask for the name', async () => {
+    const done = guard.run('docs.deleteMany', {
+      profileId: 'dev',
+      db: 'shop',
+      coll: 'orders',
+      filter: '{}',
+    });
+    await flush();
+    expect(confirm.current()?.typeToConfirm).toBeUndefined();
+    expect(confirm.current()?.detail).toBeUndefined();
+    confirm.answer(true);
+    await done;
+  });
+
+  it('updateMany over 1 000 documents does not ask for the name', async () => {
+    const done = guard.run(
+      'docs.updateMany',
+      { profileId: 'dev', db: 'shop', coll: 'orders', filter: '{}', update: '{"$set":{"a":1}}' },
+      { count: 50_000 },
+    );
+    await flush();
+    expect(confirm.current()?.typeToConfirm).toBeUndefined();
+    expect(confirm.current()?.destructive).toBe(false);
+    confirm.answer(true);
+    await done;
+  });
+
+  it('cancelling a type-to-confirm delete sends nothing', async () => {
+    const done = guard.run('docs.deleteMany', {
+      profileId: 'prod',
+      db: 'shop',
+      coll: 'orders',
+      filter: '{}',
+      expectedCount: 12_431,
+    });
+    await render();
+    expect(el.querySelector('[data-testid="confirm-production"]')).not.toBeNull();
+    expect(el.querySelector('[data-testid="confirm-detail"]')?.textContent).toBe(
+      'Affects 12 431 documents.',
+    );
+    el.querySelector<HTMLButtonElement>('[data-testid="confirm-cancel"]')?.click();
+    await expect(done).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it('other destructive writes can opt in to type-to-confirm', async () => {
+    fake.respond('coll.drop', {});
+    const done = guard.run(
+      'coll.drop',
+      { profileId: 'prod', db: 'shop', coll: 'orders' },
+      { typeToConfirm: 'orders', confirmLabel: 'Drop collection' },
+    );
+    await flush();
+    expect(confirm.current()).toMatchObject({
+      title: 'Drop collection',
+      operation: 'db.getSiblingDB("shop").getCollection("orders").drop()',
+      destructive: true,
+      typeToConfirm: 'orders',
+    });
+    confirm.setTyped('orders');
+    confirm.answer(true);
+    await done;
+    expect(fake.requestsFor('coll.drop')[0]?.params).toMatchObject({ confirmed: true });
+  });
+
+  it('database writes show the database as namespace; detail and destructive can be overridden', async () => {
+    fake.respond('db.drop', {});
+    const done = guard.run(
+      'db.drop',
+      { profileId: 'prod', db: 'shop' },
+      { detail: 'Drops 4 collections.', destructive: false },
+    );
+    await flush();
+    expect(confirm.current()).toMatchObject({
+      title: 'Drop database',
+      namespace: 'shop',
+      detail: 'Drops 4 collections.',
+      destructive: false,
+      connection: { name: 'prod-eu', production: true },
+    });
+    confirm.answer(true);
+    await done;
+  });
+
+  it('a single document count reads "1 document"', async () => {
+    const done = guard.run(
+      'docs.deleteMany',
+      { profileId: 'dev', db: 'shop', coll: 'orders', filter: '{}' },
+      { count: 1 },
+    );
+    await flush();
+    expect(confirm.current()?.detail).toBe('Affects 1 document.');
+    confirm.answer(false);
+    await expect(done).rejects.toMatchObject({ code: 'CANCELLED' });
+  });
+
+  it('unknown profiles are not production: single writes go out without a dialog', async () => {
+    await insert('unknown');
+    expect(confirm.current()).toBeNull();
+    expect(fake.requestsFor('docs.insert')[0]?.params).not.toHaveProperty('confirmed');
+  });
+
+  it('a bulk write on an unknown profile shows no connection in the dialog', async () => {
+    const done = guard.run('docs.deleteMany', {
+      profileId: 'unknown',
+      db: 'shop',
+      coll: 'orders',
+      filter: '{}',
+    });
+    await flush();
+    expect(confirm.current()?.connection).toBeUndefined();
+    confirm.answer(false);
+    await expect(done).rejects.toMatchObject({ code: 'CANCELLED' });
+  });
+
+  it('read-only wins over alwaysConfirm and bulk writes', async () => {
+    await expect(
+      guard.run(
+        'docs.insert',
+        { profileId: 'ro', db: 'shop', coll: 'orders', docs: [DOC] },
+        { alwaysConfirm: true },
+      ),
+    ).rejects.toMatchObject({ code: 'READ_ONLY' });
+    await expect(
+      guard.approve('docs.deleteMany', {
+        profileId: 'ro',
+        db: 'shop',
+        coll: 'orders',
+        filter: '{}',
+      }),
+    ).rejects.toMatchObject({ code: 'READ_ONLY' });
+    expect(confirm.current()).toBeNull();
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it('a caller-supplied confirmed: false is not sent either', async () => {
+    const params = { profileId: 'dev', db: 'shop', coll: 'orders', docs: [DOC], confirmed: false };
+    await guard.run('docs.insert', params);
+    expect(fake.requestsFor('docs.insert')[0]?.params).not.toHaveProperty('confirmed');
+  });
+
+  it('an already aborted signal opens no dialog and sends nothing', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      guard.run(
+        'docs.insert',
+        { profileId: 'prod', db: 'shop', coll: 'orders', docs: [DOC] },
+        { signal: controller.signal },
+      ),
+    ).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(confirm.current()).toBeNull();
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it('two production writes are confirmed one after the other', async () => {
+    const first = insert('prod');
+    const second = guard.run('docs.deleteMany', {
+      profileId: 'prod',
+      db: 'shop',
+      coll: 'orders',
+      filter: '{}',
+    });
+    await flush();
+    expect(confirm.current()?.title).toBe('Insert documents');
+    confirm.answer(false);
+    await expect(first).rejects.toMatchObject({ code: 'CANCELLED' });
+    await flush();
+    expect(confirm.current()?.title).toBe('Delete documents');
+    confirm.answer(true);
+    await second;
+    expect(fake.requests.map((r) => r.method)).toEqual(['docs.deleteMany']);
+    expect(fake.requests[0]?.params).toMatchObject({ confirmed: true });
+  });
+
+  it('a backend error after confirming reaches the caller', async () => {
+    fake.fail('docs.insert', { code: 'CONFIRMATION_REQUIRED', message: 'no' });
+    const done = insert('prod');
+    await flush();
+    confirm.answer(true);
+    await expect(done).rejects.toMatchObject({ code: 'CONFIRMATION_REQUIRED' });
+    expect(fake.requestsFor('docs.insert')[0]?.params).toMatchObject({ confirmed: true });
+  });
+
+  it('needsConfirmation: bulk writes everywhere, other writes on production only', () => {
+    expect(guard.needsConfirmation('docs.updateMany', 'dev')).toBe(true);
+    expect(guard.needsConfirmation('docs.deleteMany', 'unknown')).toBe(true);
+    expect(guard.needsConfirmation('docs.insert', 'dev')).toBe(false);
+    expect(guard.needsConfirmation('docs.insert', 'prod')).toBe(true);
+    expect(guard.needsConfirmation('coll.drop', 'prod')).toBe(true);
+  });
+
+  it('writes without a database (killOp) show no namespace', async () => {
+    const done = guard.approve('admin.killOp', { profileId: 'prod', opId: '{"$numberInt":"42"}' });
+    await flush();
+    expect(confirm.current()).toMatchObject({
+      title: 'Kill operation',
+      operation: 'db.killOp(42)',
+      destructive: true,
+    });
+    expect(confirm.current()?.namespace).toBeUndefined();
+    confirm.answer(true);
+    await expect(done).resolves.toMatchObject({ confirmed: true });
+  });
+
   it('flag changes take effect on the next write', async () => {
     safety.set({ id: 'dev', name: 'local', readOnly: true, production: false });
     await expect(insert('dev')).rejects.toMatchObject({ code: 'READ_ONLY' });

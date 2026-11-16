@@ -179,6 +179,19 @@ describe('ConfirmDialog', () => {
     before.remove();
   });
 
+  it('does not try to focus an element removed while the dialog was open', async () => {
+    const before = document.createElement('button');
+    document.body.appendChild(before);
+    before.focus();
+    void service.confirm(request());
+    await render();
+    before.remove();
+    cancel()?.click();
+    await render();
+    expect(dialog()).toBeNull();
+    expect(document.activeElement).not.toBe(before);
+  });
+
   it('keeps Tab inside the dialog', async () => {
     void service.confirm(request());
     await render();
@@ -196,5 +209,80 @@ describe('ConfirmDialog', () => {
     });
     operation?.dispatchEvent(back);
     expect(document.activeElement).toBe(ok());
+  });
+
+  it('Tab between inner controls is left to the browser', async () => {
+    void service.confirm(request());
+    await render();
+    cancel()?.focus();
+    const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    cancel()?.dispatchEvent(tab);
+    expect(tab.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(cancel());
+  });
+
+  it('shows the namespace without a connection', async () => {
+    void service.confirm(request({ namespace: 'shop.orders' }));
+    await render();
+    expect(el.querySelector('[data-testid="confirm-target"]')).toBeNull();
+    expect(el.querySelector('.ns')?.textContent).toBe('shop.orders');
+  });
+
+  it('shows neither target nor detail when the request has none', async () => {
+    void service.confirm(request());
+    await render();
+    expect(el.querySelector('.target')).toBeNull();
+    expect(el.querySelector('[data-testid="confirm-detail"]')).toBeNull();
+    expect(typeField()).toBeNull();
+  });
+
+  it('marks destructive writes', async () => {
+    void service.confirm(request({ destructive: true }));
+    await render();
+    expect(dialog()?.classList).toContain('destructive');
+  });
+
+  it('focuses Cancel on production connections', async () => {
+    void service.confirm(request({ connection: { name: 'prod-eu', production: true } }));
+    await render();
+    expect(document.activeElement).toBe(cancel());
+  });
+
+  it('Escape in the name field aborts even with the name typed', async () => {
+    const answer = service.confirm(request({ typeToConfirm: 'orders' }));
+    await render();
+    await type('orders');
+    typeField()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await expect(answer).resolves.toBe(false);
+  });
+
+  it('Enter outside the name field does not confirm', async () => {
+    let settled = false;
+    void service.confirm(request()).then(() => (settled = true));
+    await render();
+    el.querySelector('[data-testid="confirm-operation"]')?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+    );
+    await render();
+    expect(settled).toBe(false);
+    expect(dialog()).not.toBeNull();
+  });
+
+  it('the name field is not marked invalid while empty', async () => {
+    void service.confirm(request({ typeToConfirm: 'orders' }));
+    await render();
+    expect(typeField()?.getAttribute('aria-invalid')).toBe('false');
+    await type('orders');
+    expect(typeField()?.getAttribute('aria-invalid')).toBe('false');
+  });
+
+  it('shows type-to-confirm text verbatim (no HTML interpretation)', async () => {
+    void service.confirm(
+      request({ typeToConfirm: '<b>x</b>', operation: 'db.getCollection("<img src=x>")' }),
+    );
+    await render();
+    expect(el.querySelector('.type b')).toBeNull();
+    expect(el.querySelector('.word')?.textContent).toBe('<b>x</b>');
+    expect(el.querySelector('[data-testid="confirm-operation"] img')).toBeNull();
   });
 });
