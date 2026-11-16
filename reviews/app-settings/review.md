@@ -4,21 +4,32 @@ Date: 2026-11-16
 
 Task: app-settings - M0: Settings store in main (settings.json, app.* methods)
 
-Scope: `git diff e46732c..HEAD` (all task commits up to 523e847; committed changes only). Third pass on the final code, including verification of the CR-2 fix from the second pass and a re-check of the CR-1 fix from the first pass. Extended from 875b681 to the final revision 523e847, which only adds test-writer tests (`git diff 875b681 523e847`: `apps/desktop/src/settings/store.spec.ts`, +118 lines).
+Scope: Fourth pass. It started after main (with the secrets-store task) was merged into the task branch, and was then extended to the final revision 9378018. Reviewed:
+1. How the merge 1a9c70f resolved conflicts and combined the task code with main's secrets store: `git show --cc 1a9c70f` and `git diff 523e847 1a9c70f -- apps packages docs`, focusing on `apps/desktop/src/main/handlers.ts`, `index.ts`, `handlers.spec.ts`, `packages/contract/src/no-secrets.spec.ts` and `docs/ARCHITECTURE.md`.
+2. The whole task diff, `git diff $(git merge-base HEAD origin/main)..HEAD`, checked for anything the merge broke.
+3. The delta `git diff 1a9c70f 9378018`. Its only code change is two test-writer tests in `apps/desktop/src/main/handlers.spec.ts`. The other commits in between change only `tasks/` files.
+
+Only committed changes were reviewed.
 
 Requirements:
 - tasks/app-settings.md acceptance criteria and recorded assumptions
-- SPEC.md (settings in `userData/settings.json`, `app.*` settings methods, page sizes, styles/modes)
-- docs/ARCHITECTURE.md (main process layout, settings paragraph, contract conventions)
+- SPEC.md (settings in `userData/settings.json`, `app.*` settings methods)
+- docs/ARCHITECTURE.md (main process, settings and secrets paragraphs)
 - AGENTS.md, docs/QUALITY.md
-- reviews/app-settings/fixes.md (CR-1 and CR-2 fix descriptions)
+- Earlier passes of this report (the CR-1 and CR-2 fixes were verified at 523e847)
 
 Git range:
 - Branch: main
-- HEAD: 523e847 (app-settings: third-pass corrupt-file tests); reviewed revision 523e84770471637365c0b0a9ae1299f5ca0f8e82
-- Base/start: e46732c98118f1cae207337fdc22e418298430c0
-- Commits reviewed: 8 (3613a30 settings store; 2e365ba main handlers, broadcaster and wiring; b21a38b ARCHITECTURE.md; 6f8d535 first-pass tests and review; 21f43f0 CR-1 fix; 4a43fc8 second-pass tests and review; 875b681 CR-2 fix; 523e847 third-pass corrupt-file tests)
-- Uncommitted changes: at 523e847, only `reviews/app-settings/tests.md` and this report were modified in the working tree. No code or test files had uncommitted changes.
+- HEAD: 9378018 (app-settings: settings and secrets handlers coexist on the main port); reviewed revision 9378018fa2e7f602ea4b897311db3ad77c355058
+- Base/start: c250ef6830c89286f91c8b3c522302a9386ccb41 (`git merge-base HEAD origin/main`). The previous pass covered up to 523e847.
+- Commits reviewed since 523e847:
+  - cbef273: reports only.
+  - c362008: main-side assumption.
+  - 1a9c70f: the merge of main (secrets store).
+  - 4b3cabf, c96a288, 56085f4, 8f5fd8f, 8d60038 and the main heartbeat commits: `tasks/` only.
+  - 9378018: two tests.
+  The whole task diff from the base was re-checked.
+- Uncommitted changes: at 9378018 the working tree had changes only in `reviews/app-settings/review.md` and `reviews/app-settings/tests.md`. No code or test files had uncommitted changes.
 
 Summary: 0 P0, 0 P1, 0 P2, 0 P3
 
@@ -38,34 +49,31 @@ None.
 
 None.
 
-## CR-2 verification (second pass)
+## Merge resolution check
 
-CR-2 (a corrupt file that could not be moved aside at start was overwritten by the first set without a backup) is fixed in 875b681:
-- The boolean `unreadable` flag is now `pendingBackup: 'corrupt' | 'unreadable' | undefined` (`store.ts:107`). If the load-time rename in `backUpCorrupt()` fails with anything other than ENOENT, it sets `pendingBackup = 'corrupt'` (`store.ts:237`). ENOENT means the file is already gone, so nothing is pending.
-- `write()` calls `moveAsideBeforeWrite(kind)` before it writes the temp file (`store.ts:170`). That method renames the file to `settings.json.<kind>-<time>`. On a non-ENOENT failure it logs and throws before any write, so `apply()` leaves `current` unchanged, no listener runs, and the flag stays set for the next set. The flag is cleared only after a successful move or ENOENT (`store.ts:215-227`). The serialized queue recovers through `run.catch` (`store.ts:139`).
-- New regression tests in `describe('SettingsStore corrupt file')` cover three cases. In the first, the backup happens at the first set, and only one backup is made. In the second, the move fails again at set: the set rejects, the file, settings and listeners are untouched, and a later set retries and succeeds. In the third, a load-time ENOENT is not retried. The class comment and the settings paragraph in docs/ARCHITECTURE.md describe the retry.
+- `apps/desktop/src/main/handlers.ts`: `MainHandlerDeps` combines both sides. It keeps the task's optional `settings?: SettingsAccess` and adds main's required `secrets: SecretsStore`. `mainHandlers` spreads `secretsHandlers(deps.secrets)` into the handler map and still adds `app.settings.get/set` only when a store is given. Main's handler names (`profiles.secretStorage/setSecret/clearSecret`) and the task's names (`app.settings.*`) do not collide. `privilegedHandlers` is main's version unchanged: it takes `{ secrets }` and serves the real `secrets.get`.
+- `apps/desktop/src/main/index.ts`: `createWindow(settings)` passes `secrets: secretsStore()` and `settings` to `mainHandlers`, and still passes `broadcaster`. Main's lazy `secretsStore()` is used for both the privileged port and the window handlers, so there is one owner. The startup order in `whenReady` is: `SettingsStore.open`, `onChange` → broadcast, protocol and session setup, the secret-storage status log, `host.start()`, `createWindow(settings)`. Both sides keep their behavior, and `activate` still passes `settings`. No leftover conflict markers or duplicate imports.
+- `apps/desktop/src/main/handlers.spec.ts`: the task's settings tests now use main's `deps()` helper, which gives a `SecretsStore` on a file that does not exist. This is needed because `secrets` is now required. The assertions did not change.
+- `packages/contract/src/no-secrets.spec.ts`: this new file comes from main. The merge adds `[BROADCAST_STREAMS.settingsChanged]: settingsChanged` to its broadcast map. That entry is required, because the test checks that the map's keys equal `Object.values(BROADCAST_STREAMS)` and the task added `settingsChanged` to `BROADCAST_STREAMS`. `app.settings.get/set` results are already covered by the `it.each(methods)` case. The `Settings` schema has no field whose name matches `SECRET_FIELD`.
+- `docs/ARCHITECTURE.md`: the merged text keeps the task's settings paragraph unchanged, followed by main's secrets paragraph and main's updated privileged-port text, which no longer calls `secrets.get` a stub. The two paragraphs do not contradict each other. Both stores are under `userData`, in different files (`settings.json` and `secrets.bin`).
+- Other callers: the only callers of `mainHandlers`/`privilegedHandlers` are `index.ts`, `handlers.spec.ts` and main's `secrets/no-secrets-to-renderer.spec.ts`. The latter calls without `settings`, which the optional field allows. `window.ts`, `broadcast.ts`, `settings/store.ts` and `test/settings.electron.spec.ts` were not touched by the merge. `test/helpers.ts` gained an optional `switches` parameter with a default, so existing callers, including the task's Electron settings test, are unaffected.
+- The task diff from the merge base also lists `tasks/diff-ops.md`, `tasks/explorer-copy.md` and `tasks/shell-syntax.md`. These are other agents' task-state changes that came in with the merged main line. They are not task code.
 
-## CR-1 re-check (first pass)
+## Delta 1a9c70f..9378018 (test-writer tests)
 
-CR-1 still holds. On a non-ENOENT read error, `load()` sets `pendingBackup = 'unreadable'` (`store.ts:182-185`), and the same `moveAsideBeforeWrite` path guards the first write. The log messages are the same as before, now built from `kind`. The tests in `describe('SettingsStore unreadable file')` still pass.
+Two tests were added to `describe('app.settings handlers')` in `apps/desktop/src/main/handlers.spec.ts`:
+- **Settings and secrets handlers coexist.** Giving a settings store adds exactly `app.settings.get/set` to the handler names. The secrets handlers are kept. Every handler name is a renderer method in `methods` with `route(name) === 'main'`. This guards the merge resolution in `mainHandlers` against one set of handlers overwriting or losing the other.
+- **One window port answers both.** `profiles.secretStorage` (its result is checked with `parseResult`), `app.settings.get` and a valid `app.settings.set` (`pageSize: 100`) are all answered correctly on the same port.
+
+Both tests check behavior through the real `serve()` and the contract tables. They need nothing outside the test. No production code changed in this delta.
 
 ## Notes (not findings)
 
-- I ran `npx vitest run --project desktop` (repo root, clean working tree at 875b681) -> 7 files, 138 tests passed. Rerun at 523e847 (no uncommitted code or test changes) -> 7 files, 143 tests passed.
-- Delta 875b681..523e847: five new tests in `describe('SettingsStore corrupt file')`. They cover these cases:
-  - a pending corrupt file is not moved by a set that changes nothing or that the schema refuses;
-  - concurrent sets produce exactly one backup, and the final file holds the last values;
-  - a move that fails during a set, with a second set queued behind it, is retried by that second set;
-  - a crash between the temp write and the rename after the move keeps the backup, and a restart uses the defaults without a second backup;
-  - a load-time move failure without an error code is retried.
-  The tests check behavior through the real file system and an injected `rename`, and they match the store code at `store.ts:139`, `store.ts:155-157`, `store.ts:170` and `store.ts:237`. No production code changed, so the findings above are unchanged.
-- Acceptance criterion 1: `store.spec.ts` covers defaults, per-key fallback, unknown keys dropped on load and on set, corrupt-file backups for several malformed layouts, and now the failed-backup retry.
-- Acceptance criterion 2: `store.spec.ts` checks the write order (flushed temp file, then rename) and simulates a crash between write and rename with an injected `rename`. It checks that the previous file is intact, that the stale temp file is removed at the next start, and the restart. The store code on this path did not change since the second pass.
-- Acceptance criterion 3: `apps/desktop/test/settings.electron.spec.ts` uses electron-shell's `launchApp` harness with `THICKET_USER_DATA`. In the second pass I ran `npm run test:electron` and it passed. The main/window/broadcast code has not changed since then, but I did not rerun it in this pass.
-- `python tasks.py verify app-settings` shows no evidence recorded yet for criteria 1-3. The parent worker must record it before `done`. This is not a code finding.
-- Contract and integration did not change since the second pass. `BROADCAST_STREAMS.settingsChanged`, the `settingsChanged` schema and the `SettingsChanged` type match what main emits. Handlers receive contract-parsed params. Each window's broadcaster sink is removed on detach.
-- Behavior covered by recorded assumptions and therefore not reported: the chosen defaults, the `{version, settings}` layout, reading a newer version leniently and writing it back as version 1, no event when nothing changed, and the `THICKET_USER_DATA` override.
+- Ran `npx vitest run --project desktop --project contract` at 1a9c70f -> 14 files, 932 tests passed. That run included the test-writer's uncommitted edit to `handlers.spec.ts`, which was later committed as 9378018.
+- Ran `npx vitest run --project desktop` at 9378018 (no uncommitted code or test changes) -> 10 files, 224 tests passed.
+- Could not run a standalone type check or `npm run test:electron` in this pass (shell permission denied). The parent worker's `.taskcheck` (lint, type check, unit tests) on the merged result is the evidence for those. Criterion 3 (the Electron settings test) should be re-run on the merged code, because main's secrets wiring now runs at startup in the same process.
+- The earlier findings did not change. The settings store and the CR-1/CR-2 fixes were not touched by the merge or by the delta.
 
 ## Review conclusion
 
-No material issues found. CR-1 and CR-2 are fixed.
+No material issues found.
