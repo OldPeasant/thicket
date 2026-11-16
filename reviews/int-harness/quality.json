@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "task": "int-harness",
+  "reviewed_revision": "85e6f42b642f8e230463cc441d1cc59f30d39a37",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/int-harness/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/int-harness/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/int-harness/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "accepted",
+      "note": "TLS SANs cover only localhost/127.0.0.1/::1; limitation documented in global-setup.ts and docs/ARCHITECTURE.md (remote DOCKER_HOST would need its host added)"
+    },
+    {
+      "id": "CR-2",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "temp cert dir removed on setup errors; teardown warns per fixture that fails to stop; regression tests in global-setup.int.spec.ts"
+    },
+    {
+      "id": "CR-3",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "accepted",
+      "note": "CA file mode 0600 assertion in global-setup.int.spec.ts is POSIX-only; test:int is only verified on Linux/Podman in this task, a Windows run would need a win32 guard"
+    }
+  ],
+  "validation": [
+    { "command": "npm run test:int (rootless Podman, DOCKER_HOST set)", "result": "pass" },
+    { "command": "npm run check", "result": "pass" },
+    { "command": "podman ps -a --filter ancestor=docker.io/library/mongo:8.2 --filter ancestor=docker.io/library/mongo:7.0 (after test:int: none)", "result": "pass" }
+  ]
+}
