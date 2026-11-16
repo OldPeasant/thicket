@@ -286,6 +286,31 @@ describe('ThemeService', () => {
       expect(theme.mode()).toBe('dark');
       expect(attrs()).toEqual({ style: 'business', theme: 'dark' });
     });
+
+    it('two overlapping failed saves end on the stored values, not an unsaved one', async () => {
+      const failures = [
+        deferred<{ error: { code: 'INTERNAL'; message: string } }>(),
+        deferred<{ error: { code: 'INTERNAL'; message: string } }>(),
+      ];
+      let calls = 0;
+      fake.handle(
+        'app.settings.set',
+        () => failures[calls++]?.promise ?? new Promise(() => undefined),
+      );
+      const theme = TestBed.inject(ThemeService);
+      await theme.init();
+
+      const style = theme.setStyle('tron');
+      const mode = theme.setMode('dark');
+      failures[0]?.resolve({ error: { code: 'INTERNAL', message: 'disk full' } });
+      await expect(style).rejects.toMatchObject({ code: 'INTERNAL' });
+      failures[1]?.resolve({ error: { code: 'INTERNAL', message: 'disk full' } });
+      await expect(mode).rejects.toMatchObject({ code: 'INTERNAL' });
+
+      expect(theme.style()).toBe('business');
+      expect(theme.mode()).toBe('system');
+      expect(attrs()).toEqual({ style: 'business', theme: 'light' });
+    });
   });
 });
 

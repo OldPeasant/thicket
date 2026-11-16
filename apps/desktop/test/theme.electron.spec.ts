@@ -112,7 +112,14 @@ describe('themes in the running app', () => {
           expect(now.font).toMatch(/^system-ui/);
           expect(now.overlay).toMatch(/^none(, none)*$/);
         }
-        await page.screenshot({ path: path.join(shots, `explorer-${style}-${mode}.png`) });
+        // Controls fade between themes (CSS transitions): shoot the final colors, not a mix.
+        await page.evaluate(() =>
+          Promise.all(document.getAnimations().map((a) => a.finished)).then(() => undefined),
+        );
+        await page.screenshot({
+          path: path.join(shots, `explorer-${style}-${mode}.png`),
+          animations: 'disabled',
+        });
       }
     }
     // Four different page backgrounds, and the page was never reloaded.

@@ -14,6 +14,11 @@ export type Style = (typeof STYLES)[number];
 export type ThemeMode = (typeof THEME_MODES)[number];
 export type EffectiveMode = Exclude<ThemeMode, 'system'>;
 
+type ThemeSettings = Partial<Pick<Settings, 'style' | 'mode'>>;
+type ThemeKey = keyof ThemeSettings;
+type Generations = Record<ThemeKey, number>;
+const THEME_KEYS: readonly ThemeKey[] = ['style', 'mode'];
+
 /** Defaults until the settings arrive (and in a plain browser without the desktop bridge). */
 export const DEFAULT_STYLE: Style = 'business';
 export const DEFAULT_MODE: ThemeMode = 'system';
@@ -43,6 +48,14 @@ export class ThemeService {
   private readonly modeState = signal<ThemeMode>(DEFAULT_MODE);
   private readonly systemDark = signal(false);
   private started = false;
+  /** Last values known to be stored in main; a failed save shows these again. */
+  private readonly confirmed: Required<ThemeSettings> = {
+    style: DEFAULT_STYLE,
+    mode: DEFAULT_MODE,
+  };
+  /** Per key: how many local choices were made, and how many saves are still on their way. */
+  private readonly generation: Generations = { style: 0, mode: 0 };
+  private readonly inFlight: Generations = { style: 0, mode: 0 };
 
   readonly style = this.styleState.asReadonly();
   readonly mode = this.modeState.asReadonly();
@@ -63,9 +76,11 @@ export class ThemeService {
       .subscribe((event: SettingsChanged) => this.take(event.settings));
     this.destroyRef.onDestroy(() => sub.unsubscribe());
 
+    const asked = { ...this.generation };
     try {
       const { settings } = await this.api.request('app.settings.get', {});
-      this.take(settings);
+      // A choice made while the answer was on its way is newer than what main read.
+      this.takeAnswer(settings, asked, []);
     } catch {
       // No desktop bridge (ng serve, tests) or main unavailable: keep the defaults.
     }
@@ -81,27 +96,76 @@ export class ThemeService {
     return this.change({ mode });
   }
 
-  private async change(patch: Partial<Pick<Settings, 'style' | 'mode'>>): Promise<void> {
-    const before = { style: this.styleState(), mode: this.modeState() };
-    this.take(patch);
+  private async change(patch: ThemeSettings): Promise<void> {
+    const keys = THEME_KEYS.filter((key) => patch[key] !== undefined);
+    for (const key of keys) {
+      this.generation[key] += 1;
+      this.inFlight[key] += 1;
+    }
+    const mine = { ...this.generation };
+    this.show(patch);
     try {
       const { settings } = await this.api.request('app.settings.set', { settings: patch });
-      this.take(settings);
+      this.takeAnswer(settings, mine, keys);
     } catch (error) {
-      // Not persisted: show what is stored again, so the UI does not pretend it was saved.
-      this.take(before);
+      // Not persisted: show what is stored again, so the UI does not pretend it was saved. Only the
+      // keys this call changed, and only while nothing newer was chosen for them.
+      const revert: ThemeSettings = {};
+      for (const key of keys) {
+        if (this.generation[key] === mine[key] && this.current()[key] === patch[key]) {
+          Object.assign(revert, { [key]: this.confirmed[key] });
+        }
+      }
+      this.show(revert);
       throw error;
+    } finally {
+      for (const key of keys) this.inFlight[key] -= 1;
     }
   }
 
-  private take(settings: Partial<Pick<Settings, 'style' | 'mode'>>): void {
+  /**
+   * Applies an answer from main (`app.settings.get/set`) requested when the local generations
+   * were `asked`. A key is taken only if no newer local choice was made for it since, and no other
+   * save of it is still on its way (unless this answer is for the latest save of that key).
+   */
+  private takeAnswer(settings: ThemeSettings, asked: Generations, own: readonly ThemeKey[]): void {
+    const accepted: ThemeSettings = {};
+    for (const key of THEME_KEYS) {
+      if (this.generation[key] !== asked[key]) continue;
+      if (this.inFlight[key] > 0 && !own.includes(key)) continue;
+      Object.assign(accepted, { [key]: settings[key] });
+    }
+    this.take(accepted);
+  }
+
+  /** Takes values known to be stored (answers and broadcasts from main). */
+  private take(settings: ThemeSettings): void {
+    const valid = this.valid(settings);
+    Object.assign(this.confirmed, valid);
+    this.show(valid);
+  }
+
+  /** Shows `settings` without recording them as stored. */
+  private show(settings: ThemeSettings): void {
+    const valid = this.valid(settings);
+    if (valid.style) this.styleState.set(valid.style);
+    if (valid.mode) this.modeState.set(valid.mode);
+    this.apply();
+  }
+
+  private valid(settings: ThemeSettings): ThemeSettings {
+    const valid: ThemeSettings = {};
     if (settings.style && (STYLES as readonly string[]).includes(settings.style)) {
-      this.styleState.set(settings.style);
+      valid.style = settings.style;
     }
     if (settings.mode && (THEME_MODES as readonly string[]).includes(settings.mode)) {
-      this.modeState.set(settings.mode);
+      valid.mode = settings.mode;
     }
-    this.apply();
+    return valid;
+  }
+
+  private current(): Required<ThemeSettings> {
+    return { style: this.styleState(), mode: this.modeState() };
   }
 
   private watchSystem(): void {
