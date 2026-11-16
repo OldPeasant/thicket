@@ -5,7 +5,7 @@ owner: felix/agent-2
 deps: [conn-manager]
 touches: [packages/backend/src/connections/options,test/integration/fixtures/x509]
 prio: 2
-lease_until: 2026-11-16T23:31:43Z
+lease_until: 2026-11-16T23:36:46Z
 ---
 ## Goal
 Client certificate (cert+key or PEM bundle with passphrase) and MONGODB-X509 auth; SOCKS5 proxy options; read preference/tags and write concern from the profile.
