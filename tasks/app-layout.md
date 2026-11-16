@@ -5,7 +5,7 @@ owner: felix/agent-1
 deps: [themes,api-client]
 touches: [packages/renderer/src/app/layout]
 prio: 1
-lease_until: 2026-11-16T20:35:37Z
+lease_until: 2026-11-16T20:40:39Z
 ---
 ## Goal
 The main window layout: resizable sidebar, tabbed workspace (tabs for collections, shell, admin views), status bar (connection, operation progress), welcome screen with "New connection" and "Import from Compass". Use the frontend-design skill for the visual direction; respect the Business and Tron tokens (no hard-coded colors).
