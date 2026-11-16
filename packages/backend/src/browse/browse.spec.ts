@@ -991,3 +991,229 @@ describe('collectionStats', () => {
     ]);
   });
 });
+
+// Round 3 (round-2 CR-1): cursor batches arrive as BSON bytes (`fieldsAsRaw`) and are decoded
+// without promotion, so `raw` keeps every BSON type, also in getMore batches and $collStats.
+describe('lossless cursor batches given as BSON bytes', () => {
+  /** A cursor answer whose batch documents are BSON bytes, like the driver hands them with fieldsAsRaw. */
+  function rawCursorAnswer(id: number, batch: Document[], first: boolean, ns = 'shop.$cmd') {
+    return cursorAnswer(
+      id,
+      batch.map((doc) => BSON.serialize(doc)) as unknown as Document[],
+      first,
+      ns,
+    );
+  }
+
+  /** The canonical EJSON text, read back and serialized, gives the server's exact bytes. */
+  function expectSameBson(raw: string, original: Document) {
+    const reparsed = BSON.EJSON.parse(raw, { relaxed: false }) as Document;
+    expect(
+      Buffer.from(BSON.serialize(reparsed)).equals(Buffer.from(BSON.serialize(original))),
+    ).toBe(true);
+  }
+
+  const validatedEntry = {
+    name: 'orders',
+    type: 'collection',
+    options: {
+      validator: {
+        $and: [
+          { total: { $gte: new BSON.Double(0) } },
+          { qty: { $lte: BSON.Long.fromString('9007199254740993') } },
+          { tag: new BSON.BSONRegExp('^ord-', 'i') },
+          { price: { $ne: BSON.Decimal128.fromString('0.10') } },
+          { half: new BSON.Double(-0) },
+          { big: new BSON.Double(Infinity) },
+          { since: { $gt: new Date('2026-01-02T03:04:05.006Z') } },
+          { blob: new BSON.Binary(new Uint8Array([1, 2, 3]), 0) },
+          { ts: new BSON.Timestamp({ t: 1_700_000_000, i: 7 }) },
+          { lo: new BSON.MinKey() },
+        ],
+      },
+      validationLevel: 'strict',
+      size: new BSON.Int32(4096),
+    },
+    info: { readOnly: false, uuid: new BSON.Binary(new Uint8Array(16), 4) },
+    idIndex: { v: new BSON.Int32(2), key: { _id: new BSON.Int32(1) }, name: '_id_' },
+  };
+
+  it('coll.list raw of a validator keeps Double, Int64 beyond 2^53, Decimal128, regex, Binary, Date and Timestamp', async () => {
+    const client = fakeClient(() => rawCursorAnswer(0, [validatedEntry], true));
+    const { collections } = await listCollections(client, 'shop');
+    expect(collections).toHaveLength(1);
+    const raw = collections[0]?.raw ?? '';
+    expectSameBson(raw, validatedEntry);
+    const parsed = JSON.parse(raw) as { options: { validator: { $and: Document[] } } };
+    expect(parsed.options.validator.$and).toEqual([
+      { total: { $gte: { $numberDouble: '0.0' } } },
+      { qty: { $lte: { $numberLong: '9007199254740993' } } },
+      { tag: { $regularExpression: { pattern: '^ord-', options: 'i' } } },
+      { price: { $ne: { $numberDecimal: '0.10' } } },
+      { half: { $numberDouble: '-0.0' } },
+      { big: { $numberDouble: 'Infinity' } },
+      { since: { $gt: { $date: { $numberLong: '1767323045006' } } } },
+      { blob: { $binary: { base64: 'AQID', subType: '00' } } },
+      { ts: { $timestamp: { t: 1_700_000_000, i: 7 } } },
+      { lo: { $minKey: 1 } },
+    ]);
+    expect(JSON.parse(raw)).toMatchObject({
+      options: { size: { $numberInt: '4096' } },
+      idIndex: { v: { $numberInt: '2' } },
+    });
+  });
+
+  it('decodes getMore nextBatch bytes losslessly, like the first batch', async () => {
+    const view = (name: string, x: number) => ({
+      name,
+      type: 'view',
+      options: { viewOn: 'orders', pipeline: [{ $match: { x: new BSON.Double(x) } }] },
+    });
+    const answers = [
+      rawCursorAnswer(55, [view('v1', 1)], true),
+      rawCursorAnswer(55, [view('v2', 2), view('v3', 3)], false),
+      rawCursorAnswer(0, [view('v4', 4)], false),
+    ];
+    const client = fakeClient(() => answers.shift() ?? { ok: 0 });
+    const { collections } = await listCollections(client, 'shop');
+    expect(collections.map((c) => [c.name, c.type, c.viewOn])).toEqual([
+      ['v1', 'view', 'orders'],
+      ['v2', 'view', 'orders'],
+      ['v3', 'view', 'orders'],
+      ['v4', 'view', 'orders'],
+    ]);
+    collections.forEach((c, i) => {
+      expect(JSON.parse(c.raw)).toMatchObject({
+        options: { pipeline: [{ $match: { x: { $numberDouble: `${i + 1}.0` } } }] },
+      });
+    });
+    // getMore is still sent with the Long cursor id (fieldsAsRaw does not touch `id`).
+    expect(client.sent.map((s) => s.command)).toEqual([
+      { listCollections: 1, cursor: {} },
+      { getMore: BSON.Long.fromNumber(55), collection: '$cmd.listCollections' },
+      { getMore: BSON.Long.fromNumber(55), collection: '$cmd.listCollections' },
+    ]);
+    for (const sent of client.sent) {
+      expect(sent.options).toMatchObject({ fieldsAsRaw: { firstBatch: true, nextBatch: true } });
+      expect(sent.options?.promoteValues).toBeUndefined();
+    }
+  });
+
+  it('hides system.buckets.<name> and reads viewOn from byte-decoded entries', async () => {
+    const client = fakeClient(() =>
+      rawCursorAnswer(
+        0,
+        [
+          { name: 'series', type: 'timeseries', options: { timeseries: { timeField: 't' } } },
+          { name: 'system.buckets.series', type: 'collection', options: {} },
+        ],
+        true,
+      ),
+    );
+    const { collections } = await listCollections(client, 'shop');
+    expect(collections.map((c) => [c.name, c.type])).toEqual([['series', 'timeseries']]);
+  });
+
+  it('decodes a batch document given as a Uint8Array view with a byte offset', async () => {
+    const bytes = BSON.serialize(validatedEntry);
+    const backing = new Uint8Array(bytes.length + 11);
+    backing.set(bytes, 7);
+    const view = new Uint8Array(backing.buffer, 7, bytes.length);
+    expect(Buffer.isBuffer(view)).toBe(false);
+    const client = fakeClient(() => cursorAnswer(0, [view as unknown as Document], true));
+    const { collections } = await listCollections(client, 'shop');
+    expect(collections.map((c) => c.name)).toEqual(['orders']);
+    expectSameBson(collections[0]?.raw ?? '', validatedEntry);
+  });
+
+  it('a cursor without a batch array lists nothing (and coll.stats answers NOT_FOUND)', async () => {
+    const noBatch = { cursor: { id: BSON.Long.fromNumber(0), ns: 'shop.$cmd' }, ok: 1 };
+    await expect(
+      listCollections(
+        fakeClient(() => noBatch),
+        'shop',
+      ),
+    ).resolves.toEqual({
+      collections: [],
+    });
+    const error = await rejection(
+      collectionStats(
+        fakeClient(() => noBatch),
+        'shop',
+        'orders',
+      ),
+    );
+    expect(error.code).toBe('NOT_FOUND');
+  });
+
+  it('coll.stats reads unpromoted Int32/Long/Double sizes from bytes; raw keeps whole-number Doubles', async () => {
+    const statsDoc = {
+      ns: 'shop.orders',
+      host: 'db0.example.test:27017',
+      localTime: new Date('2026-11-16T12:00:00.000Z'),
+      storageStats: {
+        size: new BSON.Double(250),
+        count: new BSON.Int32(5),
+        avgObjSize: new BSON.Double(50),
+        storageSize: BSON.Long.fromNumber(4096),
+        freeStorageSize: new BSON.Int32(0),
+        capped: false,
+        nindexes: new BSON.Int32(2),
+        totalIndexSize: new BSON.Double(8192),
+        totalSize: BSON.Long.fromNumber(12288),
+        scaleFactor: new BSON.Int32(1),
+      },
+    };
+    const client = fakeClient(() => rawCursorAnswer(0, [statsDoc], true, 'shop.orders'));
+    const result = await collectionStats(client, 'shop', 'orders');
+    expect(result).toMatchObject({
+      count: 5,
+      size: 250,
+      storageSize: 4096,
+      totalIndexSize: 8192,
+      nindexes: 2,
+    });
+    expectSameBson(result.raw, statsDoc);
+    expect(JSON.parse(result.raw)).toMatchObject({
+      storageStats: {
+        size: { $numberDouble: '250.0' },
+        count: { $numberInt: '5' },
+        avgObjSize: { $numberDouble: '50.0' },
+        storageSize: { $numberLong: '4096' },
+        totalIndexSize: { $numberDouble: '8192.0' },
+      },
+    });
+  });
+
+  it('coll.stats over shards in a getMore batch: sums decoded values, raw shards stay lossless', async () => {
+    const shard = (name: string, count: number) => ({
+      ns: 'shop.orders',
+      shard: name,
+      storageStats: {
+        count: BSON.Long.fromNumber(count),
+        size: new BSON.Double(count * 10),
+        storageSize: new BSON.Int32(count * 100),
+        totalIndexSize: new BSON.Double(count * 1000),
+        nindexes: new BSON.Int32(count),
+      },
+    });
+    const answers = [
+      rawCursorAnswer(8, [shard('s0', 1)], true, 'shop.orders'),
+      rawCursorAnswer(0, [shard('s1', 2)], false, 'shop.orders'),
+    ];
+    const client = fakeClient(() => answers.shift() ?? { ok: 0 });
+    const result = await collectionStats(client, 'shop', 'orders');
+    expect(result).toMatchObject({
+      count: 3,
+      size: 30,
+      storageSize: 300,
+      totalIndexSize: 3000,
+      nindexes: 2,
+    });
+    expect(client.sent[1]?.command).toEqual({
+      getMore: BSON.Long.fromNumber(8),
+      collection: 'orders',
+    });
+    expectSameBson(result.raw, { shards: [shard('s0', 1), shard('s1', 2)] });
+  });
+});

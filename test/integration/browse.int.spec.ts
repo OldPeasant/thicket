@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 
-import { Double, Long, MongoClient } from 'mongodb';
+import { BSON, BSONRegExp, Decimal128, Double, Int32, Long, MongoClient } from 'mongodb';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 
 import {
@@ -203,18 +203,90 @@ describe('coll.* on the 8.x replica set', () => {
     expect(collections.map((c) => c.name)).toEqual([...collections.map((c) => c.name)].sort());
   });
 
-  it('coll.list pages through more than one batch', async () => {
+  it('coll.list lists 130 collections, each with a lossless raw', async () => {
+    // Note: the server answers these 130 entries in its first batch (listCollections has no
+    // 101-document default); the getMore path is exercised by the next test.
     const db = direct.db(`${DB}_many`);
     try {
-      for (let i = 0; i < 130; i++) await db.createCollection(`c${String(i).padStart(3, '0')}`);
+      for (let i = 0; i < 130; i++) {
+        await db.createCollection(`c${String(i).padStart(3, '0')}`, {
+          validator: { n: { $gte: new Double(i) } },
+        });
+      }
       const { collections } = await backend.call('coll.list', {
         profileId: RW.id,
         db: `${DB}_many`,
       });
       expect(collections).toHaveLength(130);
+      for (const c of collections) {
+        const i = Number(c.name.slice(1));
+        expect(JSON.parse(c.raw)).toMatchObject({
+          options: { validator: { n: { $gte: { $numberDouble: `${i}.0` } } } },
+        });
+      }
     } finally {
       await db.dropDatabase();
     }
+  });
+
+  it('coll.list pages with getMore past a 16 MB first batch; nextBatch entries keep a lossless raw', async () => {
+    const db = direct.db(`${DB}_big`);
+    // Five ~4 MB validators: more than one 16 MB reply, so the server needs getMore.
+    const filler = 'f'.repeat(4 * 1024 * 1024);
+    try {
+      for (let i = 0; i < 5; i++) {
+        await db.createCollection(`big${i}`, {
+          validator: { $and: [{ n: { $gte: new Double(i) } }, { s: { $ne: filler } }] },
+        });
+      }
+      const first = await db.command({ listCollections: 1, cursor: {} }, { promoteLongs: false });
+      const cursor = first['cursor'] as { id: unknown; firstBatch: unknown[] };
+      expect(cursor.firstBatch.length).toBeLessThan(5);
+      expect(String(cursor.id)).not.toBe('0');
+      await db.command({ killCursors: '$cmd.listCollections', cursors: [cursor.id] });
+
+      const { collections } = await backend.call('coll.list', {
+        profileId: RW.id,
+        db: `${DB}_big`,
+      });
+      expect(collections.map((c) => c.name)).toEqual(['big0', 'big1', 'big2', 'big3', 'big4']);
+      for (const [i, c] of collections.entries()) {
+        expect(JSON.parse(c.raw)).toMatchObject({
+          options: { validator: { $and: [{ n: { $gte: { $numberDouble: `${i}.0` } } }, {}] } },
+        });
+      }
+    } finally {
+      await db.dropDatabase();
+    }
+  });
+
+  it('coll.list raw of a validator keeps Double, Int64 beyond 2^53, Decimal128 and regex', async () => {
+    await direct.db(DB).createCollection('validated', {
+      validator: {
+        $and: [
+          { total: { $gte: new Double(0) } },
+          { qty: { $lte: Long.fromString('9007199254740993') } },
+          { price: { $ne: Decimal128.fromString('0.10') } },
+          { tag: new BSONRegExp('^ord-', 'i') },
+          { small: { $lt: new Int32(7) } },
+        ],
+      },
+    });
+    const { collections } = await backend.call('coll.list', { profileId: RW.id, db: DB });
+    const entry = collections.find((c) => c.name === 'validated');
+    expect(JSON.parse(entry?.raw ?? '{}')).toMatchObject({
+      options: {
+        validator: {
+          $and: [
+            { total: { $gte: { $numberDouble: '0.0' } } },
+            { qty: { $lte: { $numberLong: '9007199254740993' } } },
+            { price: { $ne: { $numberDecimal: '0.10' } } },
+            { tag: { $regularExpression: { pattern: '^ord-', options: 'i' } } },
+            { small: { $lt: { $numberInt: '7' } } },
+          ],
+        },
+      },
+    });
   });
 
   it('coll.create creates a collection with options given as canonical EJSON', async () => {
@@ -295,8 +367,36 @@ describe('coll.* on the 8.x replica set', () => {
     expect(stats.storageSize).toBeGreaterThan(0);
     expect(stats.totalIndexSize).toBeGreaterThan(0);
     expect(stats.nindexes).toBe(2);
-    const raw = JSON.parse(stats.raw) as { ns: string; storageStats: { count: unknown } };
+    const raw = JSON.parse(stats.raw) as { ns: string; storageStats: Record<string, unknown> };
     expect(raw.ns).toBe(`${DB}.counted`);
+
+    // raw keeps the BSON types the server sent: compare with an unpromoted read of $collStats.
+    const [unpromoted] = await direct
+      .db(DB)
+      .collection('counted')
+      .aggregate([{ $collStats: { storageStats: { scale: 1 } } }], {
+        promoteValues: false,
+        promoteLongs: false,
+      })
+      .toArray();
+    const expected = JSON.parse(BSON.EJSON.stringify(unpromoted ?? {}, { relaxed: false })) as {
+      storageStats: Record<string, unknown>;
+    };
+    const typeOf = (value: unknown) =>
+      typeof value === 'object' && value !== null ? Object.keys(value)[0] : typeof value;
+    for (const field of [
+      'count',
+      'size',
+      'avgObjSize',
+      'storageSize',
+      'nindexes',
+      'totalIndexSize',
+    ]) {
+      expect(field in raw.storageStats, field).toBe(true);
+      expect(typeOf(raw.storageStats[field]), field).toBe(typeOf(expected.storageStats[field]));
+    }
+    expect(raw.storageStats['count']).toEqual(expected.storageStats['count']);
+    expect(raw.storageStats['nindexes']).toEqual(expected.storageStats['nindexes']);
   });
 
   it('coll.stats of a missing collection is NOT_FOUND', async () => {
