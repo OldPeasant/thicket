@@ -1,0 +1,18 @@
+---
+title: M1: Export and import JSON / JSON Lines
+status: todo
+owner:
+deps: [docs-query-backend]
+touches: [packages/backend/src/io,apps/desktop/src/dialogs]
+prio: 2
+---
+## Goal
+Export a query result as JSON array or JSON Lines (EJSON relaxed or canonical) streamed to a file chosen in a native dialog; import JSON/JSONL with preview, ordered/unordered, stop/continue on error, progress events.
+
+## Acceptance criteria
+- [ ] Integration test: export 10 000 docs and import into a new collection gives identical documents (canonical)
+- [ ] Import with a bad line: continue mode reports the line number and imports the rest (int test)
+- [ ] Memory stays bounded: export streams (test with 200 000 small docs checks no full buffering)
+
+## Notes
+See SPEC.md and docs/ARCHITECTURE.md.

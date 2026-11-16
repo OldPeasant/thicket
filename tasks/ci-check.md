@@ -1,0 +1,19 @@
+---
+title: M0: GitHub Actions runs the check on Linux, macOS and Windows
+status: todo
+owner:
+deps: [scaffold]
+touches: [.github/workflows/check.yml]
+prio: 1
+---
+## Goal
+Every push and PR runs `npm ci && npm run check` on ubuntu-latest, macos-latest and windows-latest with the Node version from .nvmrc.
+
+## Acceptance criteria
+- [ ] Workflow file passes `npx --yes @action-validator/cli .github/workflows/check.yml` (or actionlint) locally
+- [ ] The check job uses the same Node major as `.nvmrc` and the same command as `.taskcheck` (diff shown in verify)
+- [ ] Windows job runs the check in bash (Git for Windows), as TFP does
+- [ ] A run on GitHub is green on all three OSes — if the repo has no remote yet, skip with reason and `assume`
+
+## Notes
+See SPEC.md and docs/ARCHITECTURE.md.

@@ -1,0 +1,1 @@
+if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi

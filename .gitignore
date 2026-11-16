@@ -1,0 +1,9 @@
+.idea/
+node_modules/
+dist/
+out/
+coverage/
+.angular/
+*.log
+board.html
+.env

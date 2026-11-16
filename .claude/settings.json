@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python tasks.py:*)", "Bash(python3 tasks.py:*)",
+      "Bash(git:*)", "Bash(npm:*)", "Bash(npx:*)", "Bash(node:*)",
+      "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(grep:*)", "Bash(find:*)",
+      "Bash(wc:*)", "Bash(mkdir:*)", "Bash(sh .taskcheck:*)",
+      "Bash(docker ps:*)", "Bash(docker logs:*)", "Bash(podman ps:*)", "Bash(podman logs:*)",
+      "Agent", "Task", "Skill"
+    ],
+    "deny": ["Bash(git push:*)"]
+  }
+}
