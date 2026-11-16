@@ -5,7 +5,7 @@ owner: dell26/agent-2
 deps: [profiles-store,int-harness,uri-model]
 touches: [packages/backend/src/connections,packages/backend/src/guard]
 prio: 1
-lease_until: 2026-11-16T19:52:23Z
+lease_until: 2026-11-16T19:57:24Z
 ---
 ## Goal
 Backend conn.test/open/close/status/serverInfo; builds MongoClient options from profile + secrets (SCRAM-SHA-1/256, TLS with CA file, allow-invalid flags, SRV, directConnection); classifies errors (DNS, TLS, AUTH_FAILED, TIMEOUT); a guard every write handler uses: READ_ONLY on read-only profiles, confirmation required on production profiles.
