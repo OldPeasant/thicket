@@ -65,13 +65,25 @@ export function startupOutput(
     });
     let text = '';
     let settled = false;
-    const finish = (error?: Error) => {
+    let exited = false;
+    const exit = new Promise<void>((done) => child.once('exit', () => done()));
+    // Settles only after the child is gone, so the caller can delete its userData folder:
+    // SIGTERM (graceful quit), then SIGKILL if it has not exited after a grace period.
+    const finish = (error?: Error, spawned = true) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      child.kill();
-      if (error) reject(error);
-      else resolveOutput(text);
+      const settle = () => (error ? reject(error) : resolveOutput(text));
+      if (!spawned || exited || child.exitCode !== null || child.signalCode !== null) {
+        settle();
+        return;
+      }
+      const kill = setTimeout(() => child.kill('SIGKILL'), 5_000);
+      child.kill('SIGTERM');
+      void exit.then(() => {
+        clearTimeout(kill);
+        settle();
+      });
     };
     const timer = setTimeout(
       () => finish(new Error(`no output matching ${pattern} within ${timeoutMs} ms:\n${text}`)),
@@ -83,10 +95,12 @@ export function startupOutput(
     };
     child.stdout.on('data', onData);
     child.stderr.on('data', onData);
-    child.once('error', (error) => finish(error));
-    child.once('exit', (code) =>
-      finish(new Error(`app exited (${code}) before printing ${pattern}:\n${text}`)),
-    );
+    // 'error' without a pid: the binary could not be started, no 'exit' will follow.
+    child.once('error', (error) => finish(error, child.pid !== undefined));
+    child.once('exit', (code) => {
+      exited = true;
+      finish(new Error(`app exited (${code}) before printing ${pattern}:\n${text}`));
+    });
   });
 }
 
