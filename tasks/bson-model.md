@@ -1,10 +1,11 @@
 ---
 title: Core: BSON value model with lossless EJSON round trip
-status: todo
-owner:
+status: in_progress
+owner: 0/agent-1
 deps: [scaffold]
 touches: [packages/core/src/bson]
 prio: 1
+lease_until: 2026-11-16T18:23:26Z
 ---
 ## Goal
 Typed, order-preserving value tree for all BSON types (SPEC M1 'Documents and BSON'), parsed from and serialized to canonical EJSON v2 with the `bson` package; explicit conversions between types with validation; no Node APIs (runs in the renderer).
