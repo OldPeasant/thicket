@@ -473,6 +473,8 @@ export class SidebarTree {
 
   private promptCreateDatabase(profile: Profile): void {
     this.setExpanded(connKey(profile.id), true);
+    // Expanding shows the database list, so load it unless it is loaded or loading already.
+    if (!this.tree.databases(profile.id)) void this.tree.loadDatabases(profile.id);
     this.openPrompt({
       title: 'Create database',
       context: profile.name,
@@ -490,6 +492,8 @@ export class SidebarTree {
 
   private promptCreateCollection(profileId: string, db: string): void {
     this.setExpanded(dbNodeKey(profileId, db), true);
+    // Expanding shows the collection list, so load it unless it is loaded or loading already.
+    if (!this.tree.collections(profileId, db)) void this.tree.loadCollections(profileId, db);
     this.openPrompt({
       title: 'Create collection',
       context: `${this.tree.profile(profileId)?.name ?? profileId} / ${db}`,

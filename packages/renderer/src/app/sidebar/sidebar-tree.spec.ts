@@ -1124,6 +1124,47 @@ describe('SidebarTree', () => {
       expect(service.promptOpen()).toBe(false);
     });
 
+    it('cancelling Create collection… on a collapsed database leaves its collections loaded', async () => {
+      await start();
+      await click(node('conn', 'Profile p1'));
+      expect(fake.requestsFor('coll.list')).toHaveLength(0);
+      await menu(node('db', 'shop'));
+      await click(must('menu-create-coll'));
+      await click(must('prompt-cancel'));
+      expect(byTestId('tree-prompt')).toBeNull();
+      expect(node('db', 'shop').getAttribute('aria-expanded')).toBe('true');
+      expect(fake.requestsFor('coll.list')).toHaveLength(1);
+      expect(nodes('coll')).toEqual(['big_orders', 'orders', 'ticks']);
+      expect(el.textContent).not.toContain('Loading collections…');
+
+      // Opening the prompt again on the loaded database does not reload the list.
+      await menu(node('db', 'shop'));
+      await click(must('menu-create-coll'));
+      await key(must('prompt-coll'), 'Escape');
+      expect(fake.requestsFor('coll.list')).toHaveLength(1);
+    });
+
+    it('cancelling Create database… on an open connection never listed loads its databases', async () => {
+      fake.respond('conn.status', { connections: [{ profileId: 'p1', state: 'connected' }] });
+      await start();
+      expect(node('conn', 'Profile p1').dataset['state']).toBe('connected');
+      expect(fake.requestsFor('db.listDatabases')).toHaveLength(0);
+      await menu(node('conn', 'Profile p1'));
+      await click(must('menu-create-db'));
+      await key(must('prompt-db'), 'Escape');
+      expect(byTestId('tree-prompt')).toBeNull();
+      expect(node('conn', 'Profile p1').getAttribute('aria-expanded')).toBe('true');
+      expect(fake.requestsFor('conn.open')).toHaveLength(0);
+      expect(fake.requestsFor('db.listDatabases')).toHaveLength(1);
+      expect(nodes('db')).toEqual(['admin', 'shop']);
+      expect(el.textContent).not.toContain('Loading databases…');
+
+      await menu(node('conn', 'Profile p1'));
+      await click(must('menu-create-db'));
+      await key(must('prompt-db'), 'Escape');
+      expect(fake.requestsFor('db.listDatabases')).toHaveLength(1);
+    });
+
     it('clears the prompt flag when the sidebar is destroyed with the prompt open', async () => {
       const service = TestBed.inject(SidebarTreeService);
       await start();
