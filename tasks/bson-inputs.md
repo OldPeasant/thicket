@@ -17,3 +17,4 @@ Typed inputs per BSON type (ObjectId with validation/generate, date-time picker,
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 22:59+0100 by felix/agent-2): Type dropdown lists all creatable types (String, Int32, Int64, Double, Decimal128, Boolean, Date, ObjectId, UUID, Binary, Regex, Code, Timestamp, Object, Array, Null, MinKey, MaxKey); an option is enabled iff core convert() succeeds. Exception: empty values (null, MinKey, MaxKey, '', {}, []) may become any type's empty value (new ObjectId/UUID, now for Date), so a new field (added as '') can be given a type. Timestamp is reachable only this way since convert() refuses it.
