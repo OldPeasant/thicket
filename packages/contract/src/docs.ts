@@ -218,7 +218,10 @@ export const docsMethods = defineMethods({
       /** Update document, or an update pipeline as an EJSON array. */
       update: ejsonDocumentOrArray('update'),
       collation: queryFields.collation,
-      /** Matched count shown in the preview; the backend may refuse when it changed a lot. */
+      /**
+       * Matched count shown in the preview: when more documents match now, the write answers
+       * `CONFLICT` without detail (best effort; checked before the write, not atomically).
+       */
       expectedCount: count.optional(),
     }),
     result: z.object({ matched: count, modified: count }),
@@ -231,6 +234,7 @@ export const docsMethods = defineMethods({
       ...collWrite,
       filter: queryFields.filter,
       collation: queryFields.collation,
+      /** As in `docs.updateMany`: more matches than this → `CONFLICT` without detail. */
       expectedCount: count.optional(),
     }),
     result: z.object({ deleted: count }),

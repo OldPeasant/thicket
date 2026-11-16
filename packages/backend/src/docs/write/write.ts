@@ -58,7 +58,13 @@ function manyUpdate(text: string): Document | Document[] {
   if (parsed.length === 0)
     throw new RpcError('INVALID_PARAMS', 'update pipeline must not be empty');
   for (const stage of parsed as unknown[]) {
-    if (typeof stage !== 'object' || stage === null || Array.isArray(stage)) {
+    if (
+      typeof stage !== 'object' ||
+      stage === null ||
+      Array.isArray(stage) ||
+      Object.getPrototypeOf(stage) !== Object.prototype ||
+      '_bsontype' in stage
+    ) {
       throw new RpcError('INVALID_PARAMS', 'every stage of an update pipeline must be a document');
     }
   }
@@ -124,7 +130,7 @@ function checkReply(reply: Document, what: string, done?: string): void {
   if (wce) {
     const code = toNumber(wce['code']);
     throw serverError(
-      `${what}: write concern error: ${typeof wce['errmsg'] === 'string' ? wce['errmsg'] : 'unknown'}`,
+      `${what}: the write was applied but not acknowledged by the requested write concern: ${typeof wce['errmsg'] === 'string' ? wce['errmsg'] : 'unknown'}`,
       {
         ...(code !== undefined ? { code } : {}),
         ...(typeof wce['codeName'] === 'string' ? { codeName: wce['codeName'] } : {}),
@@ -328,8 +334,11 @@ export async function previewMany(
 
 /**
  * With `expectedCount` (the count the user confirmed in the preview): refuses with `CONFLICT`
- * when more documents match now than were confirmed. Fewer is allowed (documents the user saw
- * were changed or removed meanwhile; nothing unconfirmed is touched by that).
+ * (no detail) when more documents match now than were confirmed. Fewer is allowed (documents the
+ * user saw were changed or removed meanwhile; nothing unconfirmed is touched by that).
+ *
+ * Best effort: the count and the write are separate commands, not atomic, so documents that
+ * start to match between the two are still written.
  */
 async function checkExpectedCount(
   client: ClientLike,

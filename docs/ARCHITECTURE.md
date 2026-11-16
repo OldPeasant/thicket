@@ -216,8 +216,8 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   `ConflictDetail` (`current`: the server version, `null` when deleted), except a delete of a
   document that is gone, which answers `deleted: false`. `docs.previewMany` = `docs.count`'s
   aggregation + a `find` sample (default 20); `docs.updateMany` (operators or pipeline) /
-  `docs.deleteMany` refuse with `CONFLICT` when more documents match than the confirmed
-  `expectedCount`. Write and write-concern errors in a reply → `SERVER_ERROR`.
+  `docs.deleteMany` refuse with `CONFLICT` (no detail) when more documents match than the
+  confirmed `expectedCount` (best effort: count, then write; not atomic). Write and write-concern errors in a reply → `SERVER_ERROR`.
 - Write guard (`packages/backend/src/guard/`): `startBackend` wraps every handler of a
   `WRITE_METHODS` method with `guardWrites()`, which loads the profile from main (fresh, per
   write) and throws `READ_ONLY` for read-only profiles (even when confirmed), and

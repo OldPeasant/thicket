@@ -168,7 +168,9 @@ describe('insertDocuments', () => {
     const client = server({ write: { n: 1, writeConcernError, ok: 1 } });
     const error = await rejection(insertDocuments(client, insert()));
     expect(error.code).toBe('SERVER_ERROR');
-    expect(error.message).toBe('insert: write concern error: waiting for replication timed out');
+    expect(error.message).toBe(
+      'insert: the write was applied but not acknowledged by the requested write concern: waiting for replication timed out',
+    );
     expect(error.detail).toEqual({ serverCode: 64, codeName: 'WriteConcernFailed' });
   });
 
@@ -176,7 +178,9 @@ describe('insertDocuments', () => {
     const client = server({ write: { n: 1, writeConcernError: {}, ok: 1 } });
     const error = await rejection(insertDocuments(client, insert()));
     expect(error.code).toBe('SERVER_ERROR');
-    expect(error.message).toBe('insert: write concern error: unknown');
+    expect(error.message).toBe(
+      'insert: the write was applied but not acknowledged by the requested write concern: unknown',
+    );
     expect(error.detail).toEqual({});
   });
 
@@ -346,7 +350,9 @@ describe('updateDocument', () => {
     const client = server({ write: { n: 1, nModified: 1, writeConcernError, ok: 1 } });
     const error = await rejection(updateDocument(client, update()));
     expect(error.code).toBe('SERVER_ERROR');
-    expect(error.message).toBe('update: write concern error: waiting for replication timed out');
+    expect(error.message).toBe(
+      'update: the write was applied but not acknowledged by the requested write concern: waiting for replication timed out',
+    );
     expect(error.detail).toEqual({ serverCode: 64, codeName: 'WriteConcernFailed' });
   });
 });
@@ -496,7 +502,8 @@ describe('deleteDocument', () => {
     const client = server({ write: { n: 1, writeConcernError, ok: 1 } });
     await expect(deleteDocument(client, del())).rejects.toMatchObject({
       code: 'SERVER_ERROR',
-      message: 'delete: write concern error: waiting for replication timed out',
+      message:
+        'delete: the write was applied but not acknowledged by the requested write concern: waiting for replication timed out',
     });
   });
 
@@ -622,6 +629,11 @@ describe('updateMany', () => {
     ['a pipeline stage that is a string', '[{"$set":{"a":1}},"x"]', /every stage/],
     // Canonical EJSON parses 1 to a BSON Int32 object: still not a document.
     ['a pipeline stage that is a number', '[{"$set":{"a":1}},1]', /every stage/],
+    [
+      'a pipeline stage that is an ObjectId',
+      '[{"$oid":"64b7f0a1e4b0c1a2b3c4d5e6"}]',
+      /every stage/,
+    ],
     ['a pipeline stage that is an array', '[[]]', /every stage/],
     ['a pipeline stage that is null', '[null]', /every stage/],
     ['a non-operator update', '{"flag":true}', /only update operators/],
@@ -695,7 +707,8 @@ describe('updateMany', () => {
     const client = server({ write: { n: 2, nModified: 2, writeConcernError, ok: 1 } });
     await expect(updateMany(client, many())).rejects.toMatchObject({
       code: 'SERVER_ERROR',
-      message: 'updateMany: write concern error: waiting for replication timed out',
+      message:
+        'updateMany: the write was applied but not acknowledged by the requested write concern: waiting for replication timed out',
     });
   });
 });

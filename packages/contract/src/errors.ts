@@ -19,7 +19,11 @@ export const ERROR_CODES = [
   'NETWORK_ERROR',
   /** SSH tunnel could not be established (auth, host key, forwarding). */
   'SSH_ERROR',
-  /** The update's conflict filter matched nothing: the document changed on the server. */
+  /**
+   * The update's conflict filter matched nothing: the document changed on the server (detail:
+   * `ConflictDetail`). Bulk writes (`docs.updateMany/deleteMany`) answer it without detail when
+   * more documents match than their `expectedCount`.
+   */
   'CONFLICT',
   /** A write was sent for a read-only profile. */
   'READ_ONLY',
