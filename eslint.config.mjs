@@ -51,9 +51,15 @@ export default tseslint.config(
       'no-restricted-imports': [
         'error',
         {
+          // Builtins go in `paths` (exact names, subpaths like 'fs/promises' are listed in
+          // builtinModules): `patterns` uses gitignore matching, so 'util' would also flag './util'.
+          paths: builtinModules.map((name) => ({
+            name,
+            message: 'packages/core must stay free of Node and Electron APIs',
+          })),
           patterns: [
             {
-              group: [...builtinModules, 'node:*', 'electron', 'electron/*'],
+              group: ['node:*', 'electron', 'electron/*'],
               message: 'packages/core must stay free of Node and Electron APIs',
             },
           ],
