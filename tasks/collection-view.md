@@ -5,7 +5,7 @@ owner: felix/agent-1
 deps: [sidebar-tree,docs-query-backend,bson-display,paging-core,shell-syntax]
 touches: [packages/renderer/src/app/collection]
 prio: 1
-lease_until: 2026-11-16T22:52:13Z
+lease_until: 2026-11-16T22:57:15Z
 ---
 ## Goal
 Query bar (filter, projection, sort, collation, limit in shell syntax with validation), pager (sizes 20/50/100/500, first/prev/next/last/jump, estimated count with exact on request), cancel, and three result views: table (one row per document), document list, raw. Use the frontend-design skill for the visual direction; respect the Business and Tron tokens (no hard-coded colors).
