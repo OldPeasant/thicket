@@ -615,6 +615,7 @@ describe('envelope', () => {
     expect(Object.values(BROADCAST_STREAMS)).toEqual([
       'conn.status',
       'app.theme',
+      'app.settings.changed',
       'backend.restarted',
     ]);
   });
