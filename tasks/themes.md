@@ -19,7 +19,8 @@ Token sets for Business (default) and Tron, each light and dark, selected by `da
   - verified (2026-11-16 20:47+0100 by dell26/agent-1): theme-tokens.spec.ts 'Tron: glow, grid and scanlines, Orbitron and Share Tech Mono', 'Tron keeps Canopy original colors', 'Business: no glow, grid or scanlines' -> pass; theme.electron.spec.ts checks the bundled woff2 fonts load under font-src 'self' -> pass (at d370b59)
 - [x] Switching style/mode applies without reload; `system` follows `prefers-color-scheme` changes (test)
   - verified (2026-11-16 20:47+0100 by dell26/agent-1): theme.service.spec.ts (switching sets data-style/data-theme without reload, system follows matchMedia change; 64 theme tests pass) + theme.electron.spec.ts 'system mode follows prefers-color-scheme changes live' and 'switched without reload' -> pass (at d370b59)
-- [ ] Tokens exist for production accent, read-only marker and each BSON type in all four sets (test enumerates)
+- [x] Tokens exist for production accent, read-only marker and each BSON type in all four sets (test enumerates)
+  - verified (2026-11-16 20:47+0100 by dell26/agent-1): theme-tokens.spec.ts enumerates the 4 sets: '<style>/<theme>: production accent, read-only marker and every BSON type' (20 types) -> 4 passed (at d370b59)
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
