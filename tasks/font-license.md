@@ -1,11 +1,11 @@
 ---
 title: Ship the SIL OFL 1.1 text with the Orbitron/Share Tech Mono fonts and update docs/ARCHITECTURE.md font note
-status: in_progress
+status: done
 owner: felix/agent-2
 deps: [explorer-copy]
 touches: [packages/renderer/src/assets/fonts,NOTICE,docs/ARCHITECTURE.md]
 prio: 2
-lease_until: 2026-11-16T20:05:00Z
+lease_until: 
 ---
 ## Goal
 The explorer-copy task extracted the Orbitron and Share Tech Mono fonts from JSON Canopy's inlined CSS into
@@ -22,3 +22,4 @@ which the OFL requires. `docs/ARCHITECTURE.md:41` still says fonts come from npm
 
 ## Notes
 - ASSUMPTION (2026-11-16 20:36+0100 by felix/agent-2): OFL.txt is copied to dist/media/ (where the build emits the hashed woff2 files) via an angular.json assets entry; angular.json is outside the task's touches list but is the only way to include it in the build output. Copyright lines taken verbatim from the fonts' name tables.
+- done by felix/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 29s on 05a40eaaa; criteria verified 2/2
