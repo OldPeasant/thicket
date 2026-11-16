@@ -11,7 +11,8 @@ lease_until: 2026-11-16T19:29:40Z
 From original and edited documents compute the minimal update (`$set`/`$unset`, `$push` for pure appends, whole-array replace otherwise) and the conflict filter (`_id` + original values of changed top-level fields).
 
 ## Acceptance criteria
-- [ ] Table-driven tests: nested set, unset, rename (= unset+set), type change, array append → $push, array item change → replace, field reorder only → replace of the parent object
+- [x] Table-driven tests: nested set, unset, rename (= unset+set), type change, array append → $push, array item change → replace, field reorder only → replace of the parent object
+  - verified (2026-11-16 20:13+0100 by felix/agent-2): npx vitest run --root packages/core src/diff -> 112 passed; table DIFF_CASES (packages/core/src/diff/fixtures.ts) covers nested set, unset, rename (unset+set), type changes, array append -> push with each, array item change -> set of whole array, field reorder only -> set of parent object
 - [ ] Applying the produced update to the original (mongodb-memory-free simulation or int test) yields the edited doc for every case — run against a real server in test/integration (`npm run test:int`)
 - [ ] Conflict filter matches the unchanged server document and not one where a changed field was modified (int test)
 
