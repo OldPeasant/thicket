@@ -13,7 +13,8 @@ Client certificate (cert+key or PEM bundle with passphrase) and MONGODB-X509 aut
 ## Acceptance criteria
 - [x] Integration tests: X.509 user authenticates with generated client cert; wrong cert → AUTH_FAILED
   - verified (2026-11-17 00:32+0100 by felix/agent-2): npx vitest run --config test/integration/vitest.config.ts x509 proxy (Docker fixtures) -> 2 files, 18 passed; x509.int.spec.ts: generated client cert (PEM bundle, encrypted bundle, separate cert/key) authenticates; same-CA cert without user and mismatching user name -> AUTH_FAILED
-- [ ] Proxy: connection through a SOCKS5 container works (int test)
+- [x] Proxy: connection through a SOCKS5 container works (int test)
+  - verified (2026-11-17 00:32+0100 by felix/agent-2): npx vitest run --config test/integration/vitest.config.ts x509 proxy (Docker, serjs/go-socks5-proxy fixture) -> 18 passed; proxy.int.spec.ts 'SOCKS5 proxy': connects through the SOCKS5 container to a replica set whose member names resolve only behind the proxy (without proxy -> DNS_ERROR)
 - [ ] secondaryPreferred read preference routes reads to a secondary (int test checks `hello.me`)
 
 ## Notes
