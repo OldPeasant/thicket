@@ -1,9 +1,12 @@
 import { DOCUMENT } from '@angular/common';
+import { ApplicationInitStatus } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { BROADCAST_STREAMS, type Settings } from '@thicket/contract';
+import { BROADCAST_STREAMS, STYLES, THEME_MODES, type Settings } from '@thicket/contract';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
+import { appConfig } from '../app.config';
+import { provideTheme } from './index';
 import { ThemeSwitcher } from './theme-switcher';
 import { DARK_QUERY, ThemeService, resolveMode } from './theme.service';
 
@@ -197,6 +200,125 @@ describe('ThemeService', () => {
     await TestBed.inject(ThemeService).init();
     expect(attrs()).toEqual({ style: 'business', theme: 'light' });
   });
+
+  it('applies a broadcast that changes only the mode, keeping the style', async () => {
+    stored = { ...stored, style: 'tron', mode: 'light' };
+    const theme = TestBed.inject(ThemeService);
+    await theme.init();
+    fake.emit({
+      stream: BROADCAST_STREAMS.settingsChanged,
+      kind: 'data',
+      payload: { settings: { mode: 'dark' } as Settings },
+    });
+    expect(attrs()).toEqual({ style: 'tron', theme: 'dark' });
+  });
+
+  it('switching to system mode picks up the current OS preference at once', async () => {
+    media = new FakeMediaQuery(true);
+    stored = { ...stored, mode: 'light' };
+    const theme = TestBed.inject(ThemeService);
+    await theme.init();
+    expect(attrs().theme).toBe('light');
+    await theme.setMode('system');
+    expect(attrs().theme).toBe('dark');
+  });
+
+  describe('overlapping requests (order controlled with deferred answers)', () => {
+    it('a late app.settings.get answer does not undo a choice made meanwhile', async () => {
+      const get = deferred<{ settings: Settings }>();
+      const before = { ...stored }; // what main read before the user changed anything
+      fake.handle('app.settings.get', () => get.promise);
+      const theme = TestBed.inject(ThemeService);
+      const started = theme.init();
+
+      await theme.setStyle('tron');
+      expect(stored.style).toBe('tron');
+      get.resolve({ settings: before });
+      await started;
+
+      // The stored setting is Tron; the window must not fall back to Business.
+      expect(attrs().style).toBe('tron');
+      expect(theme.style()).toBe('tron');
+    });
+
+    it('answers in reverse order: the last choice wins (shown == stored)', async () => {
+      const answers: (() => void)[] = [];
+      fake.handle('app.settings.set', (params) => {
+        stored = { ...stored, ...params.settings };
+        const snapshot = { settings: { ...stored } };
+        return new Promise((resolve) => answers.push(() => resolve(snapshot)));
+      });
+      const theme = TestBed.inject(ThemeService);
+      await theme.init();
+
+      const first = theme.setStyle('tron');
+      const second = theme.setStyle('business');
+      await flushAll();
+      expect(answers).toHaveLength(2);
+      answers[1]?.();
+      await second;
+      answers[0]?.(); // the older answer (style: tron) arrives last
+      await first;
+
+      expect(stored.style).toBe('business');
+      expect(attrs().style).toBe('business');
+      expect(theme.style()).toBe('business');
+    });
+
+    it('a failed earlier save does not revert a later save that succeeded', async () => {
+      const failing = deferred<{ error: { code: 'INTERNAL'; message: string } }>();
+      let calls = 0;
+      fake.handle('app.settings.set', (params) => {
+        calls += 1;
+        if (calls === 1) return failing.promise;
+        stored = { ...stored, ...params.settings };
+        return { settings: { ...stored } };
+      });
+      const theme = TestBed.inject(ThemeService);
+      await theme.init();
+
+      const style = theme.setStyle('tron');
+      await theme.setMode('dark'); // saved
+      failing.resolve({ error: { code: 'INTERNAL', message: 'disk full' } });
+      await expect(style).rejects.toMatchObject({ code: 'INTERNAL' });
+
+      expect(stored).toMatchObject({ style: 'business', mode: 'dark' });
+      expect(theme.mode()).toBe('dark');
+      expect(attrs()).toEqual({ style: 'business', theme: 'dark' });
+    });
+  });
+});
+
+describe('provideTheme', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  it('themes the root at startup without waiting for the settings', async () => {
+    const fake = new FakeThicketBridge();
+    // main never answers: bootstrap must not hang on it.
+    fake.handle('app.settings.get', () => new Promise(() => undefined));
+    // TestBed's DOCUMENT is the global jsdom document; clear it before the initializers run.
+    const root = document.documentElement;
+    root.removeAttribute('data-style');
+    root.removeAttribute('data-theme');
+    TestBed.configureTestingModule({ providers: [provideFakeThicket(fake), provideTheme()] });
+
+    await TestBed.inject(ApplicationInitStatus).donePromise;
+    expect(TestBed.inject(DOCUMENT).documentElement).toBe(root);
+
+    expect(root.getAttribute('data-style')).toBe('business');
+    expect(root.getAttribute('data-theme')).toMatch(/^(light|dark)$/);
+    expect(fake.requestsFor('app.settings.get')).toHaveLength(1);
+  });
+
+  it('is part of the root app config', () => {
+    const fake = new FakeThicketBridge();
+    fake.respond('app.settings.get', { settings: { ...SETTINGS, style: 'tron', mode: 'dark' } });
+    TestBed.configureTestingModule({
+      providers: [...appConfig.providers, provideFakeThicket(fake)],
+    });
+    TestBed.inject(ApplicationInitStatus);
+    expect(fake.requestsFor('app.settings.get')).toHaveLength(1);
+  });
 });
 
 describe('ThemeSwitcher', () => {
@@ -253,8 +375,62 @@ describe('ThemeSwitcher', () => {
     expect(log).toHaveBeenCalled();
     log.mockRestore();
   });
+
+  it('logs a failed mode save and shows the stored mode again', async () => {
+    const answer = deferred<{ error: { code: 'INTERNAL'; message: string } }>();
+    fake.handle('app.settings.set', () => answer.promise);
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await TestBed.inject(ThemeService).init();
+    const fixture = TestBed.createComponent(ThemeSwitcher);
+    await fixture.whenStable();
+    const mode = (fixture.nativeElement as HTMLElement).querySelector<HTMLSelectElement>(
+      '[data-testid=theme-mode]',
+    );
+    if (!mode) throw new Error('mode select missing');
+    mode.value = 'dark';
+    mode.dispatchEvent(new Event('change'));
+    await fixture.whenStable(); // rendered while the save is pending (IPC answers later)
+    answer.resolve({ error: { code: 'INTERNAL', message: 'disk full' } });
+    await flushAll();
+    await fixture.whenStable();
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({ code: 'INTERNAL' }));
+    expect(mode.value).toBe('system');
+    log.mockRestore();
+  });
+
+  it('offers exactly the contract styles and modes', async () => {
+    await TestBed.inject(ThemeService).init();
+    const fixture = TestBed.createComponent(ThemeSwitcher);
+    await fixture.whenStable();
+    const el = fixture.nativeElement as HTMLElement;
+    const values = (id: string) =>
+      [...el.querySelectorAll<HTMLOptionElement>(`[data-testid=${id}] option`)].map((o) => o.value);
+    expect(values('theme-style')).toEqual([...STYLES]);
+    expect([...values('theme-mode')].sort()).toEqual([...THEME_MODES].sort());
+  });
+
+  it('reflects a change made elsewhere (app.settings.changed)', async () => {
+    await TestBed.inject(ThemeService).init();
+    const fixture = TestBed.createComponent(ThemeSwitcher);
+    await fixture.whenStable();
+    fake.emit({
+      stream: BROADCAST_STREAMS.settingsChanged,
+      kind: 'data',
+      payload: { settings: { ...SETTINGS, style: 'tron', mode: 'light' } },
+    });
+    await fixture.whenStable();
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector<HTMLSelectElement>('[data-testid=theme-style]')?.value).toBe('tron');
+    expect(el.querySelector<HTMLSelectElement>('[data-testid=theme-mode]')?.value).toBe('light');
+  });
 });
 
 function flushAll(): Promise<void> {
   return new Promise((r) => setTimeout(r, 0));
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => (resolve = r));
+  return { promise, resolve };
 }
