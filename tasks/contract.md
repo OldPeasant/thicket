@@ -5,7 +5,7 @@ owner: dell26/agent-2
 deps: [scaffold]
 touches: [packages/contract]
 prio: 1
-lease_until: 2026-11-16T18:06:28Z
+lease_until: 2026-11-16T18:11:30Z
 ---
 ## Goal
 Implement SPEC.md section 4 in packages/contract: envelope types, stable error codes, and params/result types with zod schemas for every method group (profiles, conn, db, coll, docs, agg, idx, schema, io, shell, admin, app). One file per group (`src/<group>.ts`) so later tasks extend only their group. Also a `route(method)` helper saying whether a method is served by `main` (profiles.*, app.*, io dialogs) or `backend`.
