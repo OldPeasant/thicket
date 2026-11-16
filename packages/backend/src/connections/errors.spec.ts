@@ -153,6 +153,99 @@ describe('classifyCode', () => {
     expect(classifyCode(deep)).toBe('INTERNAL');
   });
 
+  describe('OpenSSL errors (task x509-proxy)', () => {
+    it.each([
+      // Wrong passphrase of an encrypted client key: the message alone names no TLS word.
+      ['ERR_OSSL_BAD_DECRYPT', 'error:1C800064:Provider routines::bad decrypt'],
+      ['ERR_OSSL_EVP_BAD_DECRYPT', 'error:06065064:digital envelope routines::bad decrypt'],
+      ['ERR_OSSL_PEM_NO_START_LINE', 'error:0480006C:PEM routines::no start line'],
+    ])('TLS_ERROR by code %s', (code, message) => {
+      expect(classifyCode(sysError(code, message))).toBe('TLS_ERROR');
+    });
+
+    it('finds an OpenSSL cause wrapped by a driver error', () => {
+      const inner = sysError(
+        'ERR_OSSL_BAD_DECRYPT',
+        'error:1C800064:Provider routines::bad decrypt',
+      );
+      const outer = driverError('MongoNetworkError', 'connection 1 failed', { cause: inner });
+      expect(classifyCode(outer)).toBe('TLS_ERROR');
+    });
+
+    it('an OpenSSL code ranks below AUTH_FAILED and above NETWORK_ERROR', () => {
+      const ossl = sysError('ERR_OSSL_BAD_DECRYPT', 'bad decrypt');
+      const auth = driverError('MongoServerError', 'Authentication failed.', { code: 18 });
+      const all = (...errors: Error[]) => driverError('Error', 'outer', { errors });
+      expect(classifyCode(all(sysError('ECONNREFUSED'), ossl))).toBe('TLS_ERROR');
+      expect(classifyCode(all(ossl, auth))).toBe('AUTH_FAILED');
+    });
+
+    it('a code merely containing OSSL elsewhere is not TLS', () => {
+      expect(classifyCode(sysError('X_ERR_OSSL_THING', 'x'))).toBe('INTERNAL');
+    });
+  });
+
+  describe('UserNotFound (task x509-proxy)', () => {
+    const byCode = () =>
+      driverError(
+        'MongoServerError',
+        'Could not find user "CN=nobody,O=Example" for db "$external"',
+        {
+          code: 11,
+        },
+      );
+    const byCodeName = () =>
+      driverError('MongoServerError', 'Could not find user', { codeName: 'UserNotFound' });
+    const both = () =>
+      driverError('MongoServerError', 'Could not find user', {
+        code: 11,
+        codeName: 'UserNotFound',
+      });
+
+    it.each([
+      ['code 11', byCode],
+      ['codeName UserNotFound', byCodeName],
+      ['code and codeName', both],
+    ])('is AUTH_FAILED while connecting (%s)', (_label, make) => {
+      expect(classifyCode(make(), true)).toBe('AUTH_FAILED');
+    });
+
+    it.each([
+      ['code 11', byCode],
+      ['codeName UserNotFound', byCodeName],
+      ['code and codeName', both],
+    ])('stays SERVER_ERROR outside a connect (%s), also by default', (_label, make) => {
+      expect(classifyCode(make(), false)).toBe('SERVER_ERROR');
+      expect(classifyCode(make())).toBe('SERVER_ERROR');
+    });
+
+    it('is found in a server selection failure while connecting', () => {
+      expect(classifyCode(selectionError(undefined, both()), true)).toBe('AUTH_FAILED');
+      // Outside a connect the selection failure itself (TIMEOUT) outranks a SERVER_ERROR.
+      expect(classifyCode(selectionError(undefined, both()), false)).toBe('TIMEOUT');
+    });
+
+    it('is found in a cause chain while connecting', () => {
+      const outer = driverError('MongoError', 'connect failed', { cause: byCode() });
+      expect(classifyCode(outer, true)).toBe('AUTH_FAILED');
+    });
+
+    it('the string code "11" (not a server code) is not UserNotFound', () => {
+      expect(classifyCode(driverError('MongoServerError', 'odd', { code: '11' }), true)).toBe(
+        'SERVER_ERROR',
+      );
+    });
+
+    it('connecting does not change the classification of other server errors', () => {
+      const unauthorized = driverError('MongoServerError', 'not allowed', {
+        code: 13,
+        codeName: 'Unauthorized',
+      });
+      expect(classifyCode(unauthorized, true)).toBe('SERVER_ERROR');
+      expect(classifyCode(sysError('ECONNREFUSED'), true)).toBe('NETWORK_ERROR');
+    });
+  });
+
   it('walks plain-object wrappers but only classifies Error instances', () => {
     expect(classifyCode({ cause: sysError('ENOTFOUND') })).toBe('DNS_ERROR');
     expect(classifyCode({ name: 'MongoServerError', code: 18, message: 'x' })).toBe('INTERNAL');
@@ -236,6 +329,37 @@ describe('toConnectError', () => {
     expect(failure.message).not.toContain(FICTITIOUS_PASSWORD);
     expect(failure.message).toContain('db.example.test');
     expect(failure.message).toContain('****');
+  });
+
+  it('UserNotFound: AUTH_FAILED with its prefix while connecting, SERVER_ERROR with detail otherwise', () => {
+    const userNotFound = () =>
+      driverError('MongoServerError', 'Could not find user "CN=nobody" for db "$external"', {
+        code: 11,
+        codeName: 'UserNotFound',
+      });
+    const connecting = toConnectError(userNotFound(), [], true);
+    expect(connecting.code).toBe('AUTH_FAILED');
+    expect(connecting.message).toBe(
+      'Authentication failed: Could not find user "CN=nobody" for db "$external"',
+    );
+    expect(connecting.detail).toBeUndefined();
+
+    const later = toConnectError(userNotFound());
+    expect(later.code).toBe('SERVER_ERROR');
+    expect(later.detail).toEqual({ serverCode: 11, codeName: 'UserNotFound' });
+    expect(toConnectError(userNotFound(), [], false).code).toBe('SERVER_ERROR');
+  });
+
+  it('a wrong key passphrase (ERR_OSSL_*) is a TLS_ERROR with the TLS prefix', () => {
+    const failure = toConnectError(
+      sysError('ERR_OSSL_BAD_DECRYPT', 'error:1C800064:Provider routines::bad decrypt'),
+      [],
+      true,
+    );
+    expect(failure.code).toBe('TLS_ERROR');
+    expect(failure.message).toBe(
+      'TLS connection failed: error:1C800064:Provider routines::bad decrypt',
+    );
   });
 
   it('masks a password in a connection string even when it is not among the secrets', () => {

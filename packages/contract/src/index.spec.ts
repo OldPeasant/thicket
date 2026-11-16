@@ -6,6 +6,7 @@ import {
   ERROR_CODES,
   MAX_SLEEP_MS,
   METHOD_NAMES,
+  SECRET_KINDS,
   SIDEBAR_WIDTH,
   WRITE_METHODS,
   cancel,
@@ -705,5 +706,80 @@ describe('envelope', () => {
     }
     expect(isErrorCode('NOPE')).toBe(false);
     expect(isErrorCode(1)).toBe(false);
+  });
+});
+
+describe('profile connection options (task x509-proxy)', () => {
+  const ok = (extra: Record<string, unknown>) =>
+    profile.safeParse({ ...PROFILE, ...extra }).success;
+
+  it('accepts a SOCKS5 proxy with and without a user, in profiles and drafts', () => {
+    const proxy = { host: 'proxy.example.test', port: 1080 };
+    expect(ok({ proxy })).toBe(true);
+    expect(ok({ proxy: { ...proxy, username: 'pat' } })).toBe(true);
+    const draft: Record<string, unknown> = { ...PROFILE, proxy };
+    delete draft['id'];
+    expect(profileDraft.safeParse(draft).success).toBe(true);
+  });
+
+  it('rejects malformed proxies and never takes a proxy password in the profile', () => {
+    const proxy = { host: 'proxy.example.test', port: 1080 };
+    for (const port of [0, 65536, 1080.5, '1080', -1]) {
+      expect(ok({ proxy: { ...proxy, port } })).toBe(false);
+    }
+    expect(ok({ proxy: { ...proxy, port: 1 } })).toBe(true);
+    expect(ok({ proxy: { ...proxy, port: 65535 } })).toBe(true);
+    expect(ok({ proxy: { ...proxy, host: '' } })).toBe(false);
+    expect(ok({ proxy: { port: 1080 } })).toBe(false);
+    expect(ok({ proxy: { ...proxy, username: '' } })).toBe(false);
+    expect(ok({ proxy: { ...proxy, username: 'pat', password: 'fictitious' } })).toBe(false);
+  });
+
+  it('proxyPassword is a secret kind that profiles.setSecret accepts', () => {
+    expect(SECRET_KINDS).toContain('proxyPassword');
+    expect(
+      parseParams('profiles.setSecret', { profileId: P, kind: 'proxyPassword', value: 'x' }).ok,
+    ).toBe(true);
+  });
+
+  it('read preference tag sets are name/value pairs; at least one set, empty sets allowed', () => {
+    expect(ok({ readPreferenceTags: [[{ name: 'dc', value: 'east' }], []] })).toBe(true);
+    expect(ok({ readPreferenceTags: [[]] })).toBe(true);
+    expect(ok({ readPreferenceTags: [[{ name: 'dc', value: '' }]] })).toBe(true);
+    expect(ok({ readPreferenceTags: [] })).toBe(false);
+    expect(ok({ readPreferenceTags: [[{ name: '', value: 'east' }]] })).toBe(false);
+    // Free-form records are not tag sets.
+    expect(ok({ readPreferenceTags: [{ dc: 'east' }] })).toBe(false);
+    expect(ok({ readPreferenceTags: [[{ dc: 'east' }]] })).toBe(false);
+    expect(ok({ readPreferenceTags: [[{ name: 'dc', value: 'east', extra: 1 }]] })).toBe(false);
+    expect(ok({ readPreferenceTags: [[{ name: 'dc', value: 1 }]] })).toBe(false);
+  });
+
+  it('write concern: w as count, majority or a name; journal; wtimeoutMS', () => {
+    expect(ok({ writeConcern: {} })).toBe(true);
+    expect(ok({ writeConcern: { w: 0 } })).toBe(true);
+    expect(ok({ writeConcern: { w: 'majority', journal: true, wtimeoutMS: 0 } })).toBe(true);
+    expect(ok({ writeConcern: { w: 'multiDC' } })).toBe(true);
+    for (const w of [-1, 1.5, '', true, null]) expect(ok({ writeConcern: { w } })).toBe(false);
+    expect(ok({ writeConcern: { wtimeoutMS: -1 } })).toBe(false);
+    expect(ok({ writeConcern: { wtimeoutMS: 2.5 } })).toBe(false);
+    expect(ok({ writeConcern: { journal: 'yes' } })).toBe(false);
+    expect(ok({ writeConcern: { j: true } })).toBe(false);
+  });
+
+  it('tls.keyFile is an optional, non-empty path', () => {
+    const tls = { enabled: true, certificateKeyFile: '/tmp/fictitious/cert.pem' };
+    expect(ok({ tls: { ...tls, keyFile: '/tmp/fictitious/key.pem' } })).toBe(true);
+    expect(ok({ tls })).toBe(true);
+    expect(ok({ tls: { ...tls, keyFile: '' } })).toBe(false);
+  });
+
+  it('a MONGODB-X509 profile with a client certificate validates', () => {
+    expect(
+      ok({
+        auth: { mechanism: 'MONGODB-X509', secretMode: 'none' },
+        tls: { enabled: true, certificateKeyFile: '/tmp/fictitious/client.pem' },
+      }),
+    ).toBe(true);
   });
 });

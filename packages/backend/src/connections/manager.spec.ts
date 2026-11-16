@@ -969,3 +969,168 @@ describe('ConnectionManager cancellation and draft secrets: edge cases', () => {
     expect(created[0]?.options.auth).toBeUndefined();
   });
 });
+
+describe('ConnectionManager proxy and X.509 (task x509-proxy)', () => {
+  const PROXY_PASSWORD = 'fictitious-proxy-Pw4';
+  const PROXY = { host: 'proxy.example.test', port: 1080, username: 'pat' };
+
+  function proxySetup() {
+    return setup({
+      profiles: { p1: savedProfile('p1', { proxy: PROXY }) },
+      secrets: { p1: { password: STORED_PASSWORD, proxyPassword: PROXY_PASSWORD } },
+    });
+  }
+
+  it('a saved profile with a proxy connects with the stored proxy password', async () => {
+    const { manager, created } = proxySetup();
+    await manager.open('p1', undefined);
+    expect(created[0]?.options).toMatchObject({
+      proxyHost: 'proxy.example.test',
+      proxyPort: 1080,
+      proxyUsername: 'pat',
+      proxyPassword: PROXY_PASSWORD,
+    });
+    await manager.close('p1');
+  });
+
+  it('a draft with an id and the same proxy (keys reordered) gets the stored proxy password', async () => {
+    const { manager, loadSecrets, created } = proxySetup();
+    const draft: ProfileDraft = {
+      ...savedProfile('p1'),
+      proxy: { username: 'pat', port: 1080, host: 'proxy.example.test' },
+    };
+    await manager.test({ profile: draft }, undefined);
+    expect(loadSecrets).toHaveBeenCalledWith('p1');
+    expect(created[0]?.options.proxyPassword).toBe(PROXY_PASSWORD);
+  });
+
+  it.each([
+    ['another proxy host', { ...PROXY, host: 'attacker.example.test' }],
+    ['another proxy port', { ...PROXY, port: 1081 }],
+    ['another proxy user', { ...PROXY, username: 'mallory' }],
+  ])(
+    'a draft with an id but %s gets no stored secrets (no proxy password leaves)',
+    async (_label, proxy) => {
+      const { manager, loadSecrets, created } = proxySetup();
+      const draft: ProfileDraft = { ...savedProfile('p1'), proxy };
+      // The typed DB password lets clientConfig get as far as the proxy check.
+      const error = await rejection(manager.test({ profile: draft }, TYPED_PASSWORD));
+      expect(loadSecrets).not.toHaveBeenCalled();
+      expect(error.code).toBe('AUTH_FAILED');
+      expect(error.message).toMatch(/proxy user/);
+      expect(created).toEqual([]);
+    },
+  );
+
+  it('a draft with an id that removes the proxy gets no stored secrets', async () => {
+    const { manager, loadSecrets, created } = proxySetup();
+    const draft: ProfileDraft = { ...savedProfile('p1') };
+    await manager.test({ profile: draft }, TYPED_PASSWORD);
+    expect(loadSecrets).not.toHaveBeenCalled();
+    expect(created[0]?.options).not.toHaveProperty('proxyHost');
+    expect(created[0]?.options.auth).toEqual({ username: 'alice', password: TYPED_PASSWORD });
+  });
+
+  it('a draft with an id that adds a proxy without user gets no stored secrets', async () => {
+    const { manager, loadSecrets, created } = setup({
+      secrets: { p1: { password: STORED_PASSWORD, proxyPassword: PROXY_PASSWORD } },
+    });
+    const draft: ProfileDraft = {
+      ...savedProfile('p1'),
+      proxy: { host: 'proxy.example.test', port: 1080 },
+    };
+    await manager.test({ profile: draft }, TYPED_PASSWORD);
+    expect(loadSecrets).not.toHaveBeenCalled();
+    expect(created[0]?.options).toMatchObject({ proxyHost: 'proxy.example.test', proxyPort: 1080 });
+    expect(created[0]?.options).not.toHaveProperty('proxyPassword');
+    expect(JSON.stringify(created[0]?.options)).not.toContain(STORED_PASSWORD);
+  });
+
+  it('the proxy password never reaches log lines or the error message', async () => {
+    const client = fakeClient(() =>
+      Promise.reject(
+        Object.assign(new Error(`socks auth for pat:${PROXY_PASSWORD} rejected`), {
+          code: 'ECONNREFUSED',
+        }),
+      ),
+    );
+    const { manager, logs } = setup({
+      profiles: { p1: savedProfile('p1', { proxy: PROXY }) },
+      secrets: { p1: { password: STORED_PASSWORD, proxyPassword: PROXY_PASSWORD } },
+      clients: [client],
+    });
+    const error = await rejection(manager.open('p1', undefined));
+    expect(error.code).toBe('NETWORK_ERROR');
+    expect(error.message).not.toContain(PROXY_PASSWORD);
+    expect(manager.statusOf('p1').error?.message).not.toContain(PROXY_PASSWORD);
+    expect(logs.length).toBeGreaterThan(0);
+    for (const line of logs) expect(line).not.toContain(PROXY_PASSWORD);
+  });
+
+  function userNotFound(): Error {
+    return Object.assign(
+      new Error('Could not find user "CN=nobody,O=Example" for db "$external"'),
+      {
+        name: 'MongoServerError',
+        code: 11,
+        codeName: 'UserNotFound',
+      },
+    );
+  }
+
+  it('UserNotFound while opening is AUTH_FAILED (X.509 subject without a user)', async () => {
+    const client = fakeClient(() => Promise.reject(userNotFound()));
+    const { manager } = setup({ clients: [client] });
+    const error = await rejection(manager.open('p1', undefined));
+    expect(error.code).toBe('AUTH_FAILED');
+    expect(manager.statusOf('p1')).toMatchObject({
+      state: 'error',
+      error: { code: 'AUTH_FAILED' },
+    });
+  });
+
+  it('UserNotFound while testing (connect or ping) is AUTH_FAILED', async () => {
+    const failingConnect = fakeClient(() => Promise.reject(userNotFound()));
+    const failingPing = fakeClient();
+    failingPing.answerWith(() => Promise.reject(userNotFound()));
+    const { manager } = setup({ clients: [failingConnect, failingPing] });
+    expect((await rejection(manager.test({ profileId: 'p1' }, undefined))).code).toBe(
+      'AUTH_FAILED',
+    );
+    expect((await rejection(manager.test({ profileId: 'p1' }, undefined))).code).toBe(
+      'AUTH_FAILED',
+    );
+  });
+
+  it('UserNotFound on an open connection (serverInfo) stays SERVER_ERROR', async () => {
+    const client = fakeClient();
+    const { manager } = setup({ clients: [client] });
+    await manager.open('p1', undefined);
+    client.answerWith(() => Promise.reject(userNotFound()));
+    const error = await rejection(manager.serverInfo('p1'));
+    expect(error.code).toBe('SERVER_ERROR');
+    expect(error.detail).toEqual({ serverCode: 11, codeName: 'UserNotFound' });
+    await manager.close('p1');
+  });
+
+  it('opens an X.509 profile from $external without sending the stored password', async () => {
+    const { manager, created } = setup({
+      profiles: {
+        p1: savedProfile('p1', {
+          auth: { mechanism: 'MONGODB-X509', secretMode: 'none' },
+          tls: { enabled: true, certificateKeyFile: '/tmp/fictitious/client.pem' },
+        }),
+      },
+      secrets: { p1: { password: STORED_PASSWORD, tlsKeyPassphrase: PASSPHRASE } },
+    });
+    await manager.open('p1', undefined);
+    expect(created[0]?.options).toMatchObject({
+      authMechanism: 'MONGODB-X509',
+      authSource: '$external',
+      tlsCertificateKeyFile: '/tmp/fictitious/client.pem',
+      tlsCertificateKeyFilePassword: PASSPHRASE,
+    });
+    expect(JSON.stringify(created[0]?.options)).not.toContain(STORED_PASSWORD);
+    await manager.close('p1');
+  });
+});
