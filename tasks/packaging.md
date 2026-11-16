@@ -26,3 +26,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 20:27+0100 by felix/agent-1): homepage https://github.com/oldpeasant/thicket and maintainer 'Thicket contributors <thicket@users.noreply.github.com>' guessed from the app id; deb/rpm need them
 - ASSUMPTION (2026-11-16 20:27+0100 by felix/agent-1): Placeholder icon is a generated 1024px PNG (scripts/make-icon.mjs); electron-builder derives icns/ico from it
 - ASSUMPTION (2026-11-16 20:27+0100 by felix/agent-1): rpm verified by running npm run dist in podman node:24-bookworm with apt rpm installed (host has no rpmbuild and no sudo); host lacks rpmbuild so npm run dist on this host fails at the rpm step
+- ASSUMPTION (2026-11-16 20:42+0100 by felix/agent-1): macOS/Windows installers unverified here; release-ci / installer-smoke must build and start them on macOS (Gatekeeper with ad-hoc signing) and Windows runners
