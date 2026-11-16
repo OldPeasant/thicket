@@ -1,10 +1,11 @@
 ---
 title: M3: Code export (shell, Node, Python, Java)
-status: todo
-owner:
+status: in_progress
+owner: dell26/agent-3
 deps: [shell-syntax]
 touches: [packages/core/src/codegen]
 prio: 2
+lease_until: 2026-11-16T19:33:51Z
 ---
 ## Goal
 Generate code for a find query or an aggregation pipeline in mongosh syntax, Node driver, PyMongo and Java driver, with correct BSON type constructors per language.
