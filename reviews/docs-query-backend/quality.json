@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "task": "docs-query-backend",
+  "reviewed_revision": "fd4b4de0bb4fe793ac097a945343f80f7a2a9c35",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/docs-query-backend/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/docs-query-backend/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/docs-query-backend/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1 (round 1)", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "early cancel: currentOp probed until the op shows up or the command settles; a late reply's cursor is killed (3fb3177)"},
+    {"id": "CR-2 (round 1)", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "sliceAbove with an inclusion projection uses the $slice expression; core isInclusion reused"},
+    {"id": "CR-3 (round 1)", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "docs.find stream ends CANCELLED after conn.close (assumption recorded)"},
+    {"id": "CR-4 (round 1)", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "getSlice: paths through arrays are NOT_FOUND (server-side parent check), numeric components INVALID_PARAMS"},
+    {"id": "CR-5 (round 1)", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "before/fromEnd require limit > 0 (INVALID_PARAMS); assumption recorded"},
+    {"id": "CR-6 (round 1)", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "docs.get/getSlice match _id with $eq"},
+    {"id": "CR-7 (round 1)", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "serve() stop drops streams: nothing sent, grace timers cleared"},
+    {"id": "TW-1 (round 1)", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "same defect as CR-7; its test passes"},
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "accepted", "note": "getSlice refuses all-digit path components (e.g. byYear.2024): conservative, matches the recorded 'no array indexes in paths' assumption; can be relaxed later without a contract change (assumption recorded)"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "deferred", "note": "conn.close leaves the closed stream's server op running: follow-up task conn-close-streams (ConnectionManager cancels streams before closing the client)"}
+  ],
+  "validation": [
+    {"command": "npm run check", "result": "pass"},
+    {"command": "npm run test:int -- test/integration/docs-query.int.spec.ts", "result": "pass"}
+  ]
+}
