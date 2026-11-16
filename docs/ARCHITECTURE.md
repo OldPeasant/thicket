@@ -1,6 +1,6 @@
 # Architecture
 
-Status: **M0 in progress** — the workspace scaffold exists (empty workspaces with one spec each);
+Status: **M0 in progress** — the workspace scaffold and the Angular renderer shell exist;
 the other M0 tasks create the rest of what this file describes. Keep this
 file current when the structure changes: agents read it before every task.
 
@@ -27,6 +27,21 @@ Vitest uses `test.projects` in the root `vitest.config.ts` (`vitest.workspace.ts
 each workspace's `vitest.config.ts` calls `workspaceConfig()` from `vitest.shared.ts`.
 Workspace packages are named `@thicket/<folder>` and export their TypeScript source
 (`"exports": "./src/index.ts"`) until a build task needs compiled output.
+
+Renderer (`packages/renderer`, an Angular CLI workspace with its own `angular.json`): Angular
+22.2, standalone components, signals, zoneless (`provideZonelessChangeDetection`, no zone.js),
+`@angular/build` (esbuild). Its specs run with `ng test` (`@angular/build:unit-test`, Vitest
+runner, jsdom, AOT-compiled templates so `templateUrl`/`styleUrl` work), not with the root Vitest
+projects; the root `test` script runs `vitest run` and then `npm run test -w packages/renderer`.
+Spec files may use Vitest globals or import from `vitest`. `typecheck` runs `ngc` with
+`strictTemplates` (template type errors) and `tsc` for the specs.
+- `npm run build -w packages/renderer`: production build into `packages/renderer/dist/`
+  (`index.html` at the top, `<base href="./">`, relative asset URLs) for Electron's `loadFile`.
+- `npm run dev -w packages/renderer`: `ng serve` on http://localhost:4200.
+- No network resources: fonts come from npm packages bundled into `dist/`, never a CDN;
+  `src/no-network.spec.ts` fails on remote `src`/`href`/`url()`/`@import` in `src/`. The CSP
+  meta tag in `src/index.html` is `default-src 'self'; script-src 'self'` (+ inline styles, which
+  Angular's component styles need).
 
 Library choices other than Electron, Angular and the MongoDB driver may be changed by the M0 stack
 task if it finds a better fit; record the change here and with `tasks.py assume`.
@@ -105,6 +120,8 @@ Windows: run `.taskcheck` and npm scripts from Git for Windows' bash (TFP runs t
   in the workspace of the changed files (`cd packages/core`, paths relative to that workspace, e.g.
   `--coverage.include='src/index.ts'`); get the list with
   `git diff --name-only $(git merge-base HEAD origin/main) -- '*.ts'`.
+  Renderer: `cd packages/renderer && npx ng test --coverage --coverage-include='src/app/app.ts'`
+  (repeat `--coverage-include` per file).
 - Not part of any workspace, lint, Prettier or Vitest: `dashboard/` (TFP's own Angular app), the TFP
   Python files, `tasks/`, `reviews/`, `.claude/` and Markdown docs (see `.prettierignore`, the
   `ignores` in `eslint.config.mjs`, the explicit `workspaces` list and `test.projects`).
