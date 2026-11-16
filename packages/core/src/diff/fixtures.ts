@@ -261,7 +261,16 @@ export const DIFF_CASES: DiffCase[] = [
     original: `{"_id":${ID},"a":null,"b":1}`,
     edited: `{"_id":${ID},"a":"set","b":1}`,
     update: '{"$set":{"a":"set"}}',
-    expected: '{"a":{"$eq":null}}',
+    // `$type` instead of `$eq: null`, which would also match a concurrently removed field.
+    expected: '{"a":{"$type":"null"}}',
+  },
+  {
+    name: 'null → value for a top-level key with a dot → replace, $expr $type check',
+    original: `{"_id":${ID},"a.b":null,"c":1}`,
+    edited: `{"_id":${ID},"a.b":2,"c":1}`,
+    update: 'replace',
+    expected:
+      '{"$expr":{"$eq":[{"$type":{"$getField":{"field":{"$literal":"a.b"},"input":"$$ROOT"}}},"null"]}}',
   },
   {
     name: 'value → null is a set, not an unset',
@@ -358,16 +367,8 @@ export const DIFF_CASES: DiffCase[] = [
     expected:
       '{"$expr":{"$eq":[{"$getField":{"field":{"$literal":"$k"},"input":"$$ROOT"}},{"$literal":{"x":1}}]}}',
   },
-  {
-    name: 'top-level reorder in a document that keeps a $-prefixed key → replace',
-    original: `{"_id":${ID},"$k":1,"a":1,"b":2}`,
-    edited: `{"_id":${ID},"$k":1,"b":2,"a":1}`,
-    update: 'replace',
-    // A pure reorder checks every original field, the `$k` one through `$expr`.
-    expected:
-      '{"a":{"$eq":1},"b":{"$eq":2},' +
-      '"$expr":{"$eq":[{"$getField":{"field":{"$literal":"$k"},"input":"$$ROOT"}},{"$literal":1}]}}',
-  },
+  // A replace whose edited document keeps a top-level `$` key throws (MongoDB rejects such a
+  // replacement); that is unit-tested in diff.spec.ts, not here, since it has no server result.
   {
     name: 'no change',
     original: `{"_id":${ID},"a":{"b":[1,{"c":2}]}}`,

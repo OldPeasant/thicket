@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { parseEJson, parseEJsonDocument, stringifyEJson } from '../bson/ejson';
-import { doc, int32, str } from '../bson/model';
+import { BsonModelError, doc, int32, str } from '../bson/model';
 import { renameAt } from '../bson/path';
 import { diffDocuments, isAddressableKey, toUpdateDocument } from './diff';
 import { bsonEquals } from './equals';
@@ -107,19 +107,80 @@ describe('diffDocuments', () => {
     if (diff.kind === 'replace') expect(diff.changedFields).toEqual(['k']);
   });
 
-  it('replaces the document for a top-level key with a $ prefix (no update path for it)', () => {
+  it('throws for a new top-level key with a $ prefix (neither an update path nor a valid replacement)', () => {
+    expect(() =>
+      diffDocuments(
+        parseEJsonDocument('{"_id":1,"c":1}'),
+        parseEJsonDocument('{"_id":1,"c":1,"$x":1}'),
+      ),
+    ).toThrow(new BsonModelError('Top-level field names starting with $ cannot be saved: $x'));
+  });
+
+  it('throws for a top-level reorder in a document that keeps a $-prefixed key', () => {
+    expect(() =>
+      diffDocuments(
+        parseEJsonDocument('{"_id":1,"$k":1,"$m":2,"a":1,"b":2}'),
+        parseEJsonDocument('{"_id":1,"$k":1,"$m":2,"b":2,"a":1}'),
+      ),
+    ).toThrow(new BsonModelError('Top-level field names starting with $ cannot be saved: $k, $m'));
+  });
+
+  it('still updates a document with an unchanged top-level $ key', () => {
     const diff = diffDocuments(
-      parseEJsonDocument('{"_id":1,"c":1}'),
-      parseEJsonDocument('{"_id":1,"c":1,"$x":1}'),
+      parseEJsonDocument('{"_id":1,"$k":1,"a":1}'),
+      parseEJsonDocument('{"_id":1,"$k":1,"a":2}'),
+    );
+    expect(diff.kind).toBe('update');
+    if (diff.kind === 'update')
+      expect(stringifyEJson(diff.update)).toBe(canonical('{"$set":{"a":2}}'));
+  });
+
+  it('checks a null original by $type, so a missing field does not match', () => {
+    const diff = diffDocuments(
+      parseEJsonDocument('{"_id":1,"a":null,"b.c":null}'),
+      parseEJsonDocument('{"_id":1,"a":1,"b.c":2}'),
     );
     expect(diff.kind).toBe('replace');
     if (diff.kind === 'replace') {
       expect(stringifyEJson(diff.expected)).toBe(
         canonical(
-          '{"$expr":{"$eq":[{"$type":{"$getField":{"field":{"$literal":"$x"},"input":"$$ROOT"}}},"missing"]}}',
+          '{"a":{"$type":"null"},' +
+            '"$expr":{"$eq":[{"$type":{"$getField":{"field":{"$literal":"b.c"},"input":"$$ROOT"}}},"null"]}}',
         ),
       );
     }
+  });
+
+  it('checks a BSON undefined original by $type (the server rejects $eq: undefined)', () => {
+    const update = diffDocuments(
+      parseEJsonDocument('{"_id":1,"a":{"$undefined":true}}'),
+      parseEJsonDocument('{"_id":1,"a":1}'),
+    );
+    expect(update.kind).toBe('update');
+    if (update.kind === 'update')
+      expect(stringifyEJson(update.expected)).toBe(canonical('{"a":{"$type":"undefined"}}'));
+
+    const replace = diffDocuments(
+      parseEJsonDocument('{"_id":1,"a.b":{"$undefined":true}}'),
+      parseEJsonDocument('{"_id":1,"a.b":1}'),
+    );
+    expect(replace.kind).toBe('replace');
+    if (replace.kind === 'replace')
+      expect(stringifyEJson(replace.expected)).toBe(
+        canonical(
+          '{"$expr":{"$eq":[{"$type":{"$getField":{"field":{"$literal":"a.b"},"input":"$$ROOT"}}},"undefined"]}}',
+        ),
+      );
+  });
+
+  it('keeps $eq for a null nested inside a changed document (exact document equality)', () => {
+    const diff = diffDocuments(
+      parseEJsonDocument('{"_id":1,"a":{"n":null,"k":1}}'),
+      parseEJsonDocument('{"_id":1,"a":{"n":null,"k":2}}'),
+    );
+    expect(diff.kind).toBe('update');
+    if (diff.kind === 'update')
+      expect(stringifyEJson(diff.expected)).toBe(canonical('{"a":{"$eq":{"n":null,"k":1}}}'));
   });
 
   it('refuses a changed or removed _id and a document without _id', () => {

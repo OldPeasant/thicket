@@ -24,7 +24,9 @@ import { bsonEquals } from './equals';
  * - If the fields both sides share are in a different order (reorder), or a changed field
  *   cannot be addressed by a dotted path (empty, contains `.`, starts with `$`, or the document
  *   has repeated keys), the whole parent document is `$set`. At the top level that is not
- *   possible: the result is then a `replace` of the whole document.
+ *   possible: the result is then a `replace` of the whole document. MongoDB rejects a
+ *   replacement with a top-level field name starting with `$`, so such an edit throws a
+ *   `BsonModelError` instead of returning a `replace` that cannot be saved.
  * - Arrays are not merged: when only items were appended (the original is an unchanged prefix)
  *   the new items are `$push`ed with `$each`, otherwise the whole array is `$set`.
  * - `_id` cannot change (MongoDB rejects it), the diff throws instead.
@@ -40,7 +42,9 @@ interface DiffBase {
   /**
    * Query fragment checking the original values of every changed top-level field (ANDed to the
    * `_id` filter; this is `docs.update`'s `expected`). A field that was absent is checked with
-   * `$exists: false`; fields whose names cannot be used as a query path use `$expr`/`$getField`.
+   * `$exists: false`, an original `null` or `undefined` with `$type` (`$eq: null` would also
+   * match a missing field, `$eq: undefined` is rejected by the server), any other value with
+   * `$eq`. Fields whose names cannot be used as a query path use `$expr`/`$getField`.
    */
   readonly expected: BsonDocument;
   /** `{ _id: <original _id>, ...expected }`: the full `updateOne`/`replaceOne` filter. */
@@ -59,7 +63,10 @@ export type DocumentDiff =
     })
   | (DiffBase & {
       readonly kind: 'replace';
-      /** The edited document, for `replaceOne` (top-level reorder or unaddressable fields). */
+      /**
+       * The edited document, for `replaceOne` (top-level reorder or unaddressable fields). It
+       * never has a top-level field name starting with `$` (the diff throws instead).
+       */
       readonly replacement: BsonDocument;
     });
 
@@ -80,6 +87,13 @@ export function diffDocuments(original: BsonDocument, edited: BsonDocument): Doc
 
   const ops = diffFields(original, edited, '');
   if (ops === 'replace') {
+    // MongoDB rejects replacement documents with top-level `$` field names.
+    const dollarKeys = uniqueKeys(edited).filter((k) => k.startsWith('$'));
+    if (dollarKeys.length > 0) {
+      throw new BsonModelError(
+        `Top-level field names starting with $ cannot be saved: ${dollarKeys.join(', ')}`,
+      );
+    }
     const changed = changedTopLevel(original, edited);
     // A pure reorder changes no value: check the whole original instead.
     const fields = changed.length > 0 ? changed : uniqueKeys(original).filter((k) => k !== '_id');
@@ -184,10 +198,7 @@ function conflict(original: BsonDocument, id: BsonValue, keys: readonly string[]
   for (const key of keys) {
     const ov = firstValue(original, key);
     if (isAddressableKey(key)) {
-      const cond = ov
-        ? { key: '$eq', value: ov }
-        : { key: '$exists', value: { type: 'bool', value: false } as const };
-      expected.push({ key, value: doc([cond]) });
+      expected.push({ key, value: doc([queryFieldCheck(ov)]) });
     } else {
       exprs.push(exprFieldCheck(key, ov));
     }
@@ -199,7 +210,24 @@ function conflict(original: BsonDocument, id: BsonValue, keys: readonly string[]
   return { expected: doc(expected), filter, changedFields: keys };
 }
 
-/** `$expr` condition for a field whose name is not a valid path (`.`, `$`, empty). */
+/**
+ * Query operator checking a field against its original value (`undefined`: the field was absent).
+ * Null and BSON undefined are checked by type: `$eq: null` also matches a missing field, and the
+ * server rejects `$eq: undefined`.
+ */
+function queryFieldCheck(value: BsonValue | undefined): BsonField {
+  if (!value) return { key: '$exists', value: { type: 'bool', value: false } };
+  if (value.type === 'null' || value.type === 'undefined') {
+    return { key: '$type', value: str(value.type) };
+  }
+  return { key: '$eq', value };
+}
+
+/**
+ * `$expr` condition for a field whose name is not a valid path (`.`, `$`, empty). Absent, null
+ * and BSON undefined originals compare the field's `$type` ("missing", "null", "undefined"), so a
+ * null original never matches a missing field.
+ */
 function exprFieldCheck(key: string, value: BsonValue | undefined): BsonValue {
   const literal = (v: BsonValue) => doc([{ key: '$literal', value: v }]);
   const getField = doc([
@@ -211,8 +239,10 @@ function exprFieldCheck(key: string, value: BsonValue | undefined): BsonValue {
       ]),
     },
   ]);
-  const pair = value
-    ? arr([getField, literal(value)])
-    : arr([doc([{ key: '$type', value: getField }]), str('missing')]);
+  const typeIs = (name: string) => arr([doc([{ key: '$type', value: getField }]), str(name)]);
+  let pair: BsonValue;
+  if (!value) pair = typeIs('missing');
+  else if (value.type === 'null' || value.type === 'undefined') pair = typeIs(value.type);
+  else pair = arr([getField, literal(value)]);
   return doc([{ key: '$eq', value: pair }]);
 }
