@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "task": "shell-syntax",
+  "reviewed_revision": "0d8baee1e7d4e6be732513f40af4b0449169c2c0",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/shell-syntax/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/shell-syntax/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/shell-syntax/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    { "id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "printer writes a regex literal only when the pattern also compiles as a JS RegExp, else BSONRegExp(...)" },
+    { "id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "parseShellSyntaxDocument reports the error at the root node position (after leading comments)" },
+    { "id": "TW-1", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "Double/NumberDecimal/Decimal128 accept bare Infinity and NaN" },
+    { "id": "TW-2", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "same defect as CR-2" },
+    { "id": "OBS-1", "source": "test-writer", "severity": "Low", "disposition": "accepted", "note": "lone surrogate in the error text for an unexpected astral character; position is correct, cosmetic" },
+    { "id": "OBS-2", "source": "test-writer", "severity": "Low", "disposition": "accepted", "note": "Date(\"...\") without new read as a Date; recorded as an assumption" },
+    { "id": "OBS-3", "source": "test-writer", "severity": "Low", "disposition": "accepted", "note": "+5n accepted as NumberLong 5; harmless leniency, recorded as an assumption" },
+    { "id": "OBS-4", "source": "test-writer", "severity": "Low", "disposition": "accepted", "note": "\\u{...} limited to 8 hex digits; larger code points are invalid anyway" },
+    { "id": "OBS-5", "source": "test-writer", "severity": "Low", "disposition": "accepted", "note": "positionAt counts \\n, \\r\\n, \\r as line breaks like CodeMirror-style editors; U+2028/2029 inside text are rare" },
+    { "id": "OBS-6", "source": "test-writer", "severity": "Low", "disposition": "accepted", "note": "regex literal choice depends on the host JS engine; BSONRegExp is always a valid fallback" }
+  ],
+  "notes": "Production code is identical at c2317675 (re-reviewed by code-reviewer, no findings) and 0d8baee (adds only test-writer tests in shellsyntax.edge.spec.ts and report updates; test-writer ran on this revision).",
+  "validation": [
+    { "command": "cd packages/core && npx vitest run src/shellsyntax (390 tests)", "result": "pass" },
+    { "command": "cd packages/core && npx vitest run src/shellsyntax --coverage --coverage.include='src/shellsyntax/*.ts' (99.83% statements, 97.82% branches)", "result": "pass" },
+    { "command": "npm run check", "result": "pass" }
+  ]
+}
