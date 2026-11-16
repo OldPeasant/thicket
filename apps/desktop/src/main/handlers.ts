@@ -1,6 +1,7 @@
 import type { Handler } from '@thicket/backend';
 import type { ParsedParamsOf, ResultOf, Settings } from '@thicket/contract';
 
+import { dialogHandlers, type NativeDialogs } from '../dialogs';
 import { profileForConnectHandler, profilesHandlers, type ProfilesStore } from '../profiles';
 import { secretsGetHandler, secretsHandlers, type SecretsStore } from '../secrets';
 
@@ -44,6 +45,8 @@ export function privilegedHandlers(deps: {
   secrets: SecretsStore;
   /** Serves `profiles.forConnect` when given. */
   profiles?: ProfilesStore;
+  /** Serves `dialog.saveFile` / `dialog.openFile` when given. */
+  dialogs?: NativeDialogs;
 }): Record<string, Handler> {
   const handlers: Record<string, Handler> = {
     'main.ping': () => ({ process: 'main' }),
@@ -51,5 +54,5 @@ export function privilegedHandlers(deps: {
   };
   const profiles = deps.profiles;
   if (profiles) handlers['profiles.forConnect'] = profileForConnectHandler(profiles);
-  return handlers;
+  return deps.dialogs ? { ...handlers, ...dialogHandlers(deps.dialogs) } : handlers;
 }

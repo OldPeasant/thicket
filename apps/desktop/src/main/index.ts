@@ -14,6 +14,7 @@ import {
   BrowserWindow,
   MessageChannelMain,
   app,
+  dialog,
   protocol,
   safeStorage,
   session,
@@ -23,6 +24,7 @@ import {
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import type { NativeDialogs } from '../dialogs';
 import { ProfilesStore } from '../profiles';
 import { SecretsStore } from '../secrets';
 import { SettingsStore } from '../settings/store';
@@ -106,6 +108,18 @@ function profilesStore(): ProfilesStore {
   return profiles;
 }
 
+/** File dialogs for the backend (io.*), attached to the focused window (or any window). */
+const nativeDialogs: NativeDialogs = {
+  showSaveDialog: (options) => {
+    const parent = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+    return parent ? dialog.showSaveDialog(parent, options) : dialog.showSaveDialog(options);
+  },
+  showOpenDialog: (options) => {
+    const parent = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+    return parent ? dialog.showOpenDialog(parent, options) : dialog.showOpenDialog(options);
+  },
+};
+
 const host = new BackendHost<MessagePortMain>({
   fork: () =>
     utilityProcess.fork(path.join(distDir, 'backend.cjs'), [], {
@@ -117,7 +131,11 @@ const host = new BackendHost<MessagePortMain>({
     serve(fromMainPort(port), {
       table: privilegedMethods,
       route: 'main',
-      handlers: privilegedHandlers({ secrets: secretsStore(), profiles: profilesStore() }),
+      handlers: privilegedHandlers({
+        secrets: secretsStore(),
+        profiles: profilesStore(),
+        dialogs: nativeDialogs,
+      }),
       onError: (error) => log(`privileged handler: ${String(error)}`),
     }),
   closePort: (port) => port.close(),

@@ -92,4 +92,25 @@ describe('privileged methods', () => {
     });
     expect(leaking.ok).toBe(false);
   });
+
+  it('dialog.saveFile / dialog.openFile answer a path or null (cancelled)', () => {
+    const filters = [{ name: 'JSON', extensions: ['json'] }];
+    expect(
+      parseParamsIn(privilegedMethods, 'dialog.saveFile', { defaultName: 'c.json', filters }).ok,
+    ).toBe(true);
+    expect(parseParamsIn(privilegedMethods, 'dialog.openFile', { filters }).ok).toBe(true);
+    expect(
+      parseParamsIn(privilegedMethods, 'dialog.openFile', {
+        filters: [{ name: 'JSON', extensions: [] }],
+      }).ok,
+    ).toBe(false);
+    expect(parseParamsIn(privilegedMethods, 'dialog.saveFile', { path: '/etc/passwd' }).ok).toBe(
+      false,
+    );
+    expect(parseResultIn(privilegedMethods, 'dialog.saveFile', { path: null }).ok).toBe(true);
+    expect(parseResultIn(privilegedMethods, 'dialog.openFile', { path: '/tmp/a.json' }).ok).toBe(
+      true,
+    );
+    expect(parseResultIn(privilegedMethods, 'dialog.openFile', { path: '' }).ok).toBe(false);
+  });
 });

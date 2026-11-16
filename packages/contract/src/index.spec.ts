@@ -576,12 +576,12 @@ describe('writes', () => {
 });
 
 describe('route', () => {
-  it('sends profiles.*, app.* and io.* to main, the rest to the backend', () => {
+  it('sends profiles.* and app.* to main, the rest to the backend', () => {
     for (const name of METHOD_NAMES) {
       const group = name.split('.')[0] ?? '';
       expect([name, route(name)]).toEqual([
         name,
-        ['profiles', 'app', 'io'].includes(group) ? 'main' : 'backend',
+        ['profiles', 'app'].includes(group) ? 'main' : 'backend',
       ]);
     }
   });

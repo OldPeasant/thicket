@@ -776,9 +776,10 @@ describe('method names', () => {
     }
   });
 
-  it('routes io.import (a write) to main because of its native dialog', () => {
-    expect(route('io.import')).toBe('main');
-    expect(route('io.previewImport')).toBe('main');
+  it('routes io.* to the backend (it asks main for the native dialog)', () => {
+    expect(route('io.import')).toBe('backend');
+    expect(route('io.previewImport')).toBe('backend');
+    expect(route('io.export')).toBe('backend');
     expect(route('conn.test')).toBe('backend');
   });
 });

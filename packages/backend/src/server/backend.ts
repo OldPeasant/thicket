@@ -5,6 +5,7 @@ import { ConnectionManager, connHandlers } from '../connections';
 import { docsQueryHandlers } from '../docs/query';
 import { docsWriteHandlers } from '../docs/write';
 import { guardWrites } from '../guard';
+import { dialogsOverLink, ioHandlers } from '../io';
 import { wiringHandlers, type PrivilegedLink } from './handlers';
 import { fromMainPort, type MainPortLike } from './ports';
 import { isBackendControlMessage } from './protocol';
@@ -55,6 +56,11 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
       ...browseHandlers(connections),
       ...docsQueryHandlers(connections),
       ...docsWriteHandlers(connections),
+      // File dialogs can stay open as long as the user likes: no timeout.
+      ...ioHandlers(
+        connections,
+        dialogsOverLink((method, params) => link().call(method, params)),
+      ),
     },
     loadProfile,
   );
