@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "task": "bson-inputs",
+  "reviewed_revision": "f5059914321accfcdb23b0cfa4bac86700fcd667",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/bson-inputs/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/bson-inputs/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/bson-inputs/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "R1-CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "round 1: date text with LMT seconds offsets / out-of-range dates failed to round-trip (c3aa44c)"},
+    {"id": "R1-CR-2", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "round 1: type dropdown options memoized, containers checked without deep copy (c3aa44c)"},
+    {"id": "R1-CR-3", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "round 1: fromExplorerValue takes the integer-default setting (c3aa44c); remaining wiring is R2-CR-2"},
+    {"id": "R1-CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "round 1: stale error cleared when the value changes from outside (c3aa44c)"},
+    {"id": "R1-CR-5", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "round 1: move buttons hidden for schema-declared key order (c3aa44c)"},
+    {"id": "R1-CR-6", "source": "code-reviewer", "severity": "P3", "disposition": "accepted", "note": "plain-JSON number edits serialize as EJSON leaves; Thicket explorer data is BSON, plain numbers only come from schema seeds/defaults"},
+    {"id": "R1-TW-1", "source": "test-writer", "severity": "Medium", "disposition": "fixed", "note": "round 1: dates with seconds offsets could not be read back (c3aa44c)"},
+    {"id": "R1-TW-2", "source": "test-writer", "severity": "Medium", "disposition": "fixed", "note": "round 1: out-of-range dates errored when the untouched input was left (c3aa44c)"},
+    {"id": "R2-CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "round 2: bare integers accepted as epoch ms only outside the JS Date range (f505991)"},
+    {"id": "R2-CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "accepted", "note": "integer-default setting not applied to unedited plain integers in badge/dropdown; a consistent fix needs plumbing through bsonTypeOf/typeOptions and nothing saves documents yet; recorded as task assumption for the save-path work"}
+  ],
+  "validation": [
+    {"command": "cd packages/renderer && npx ng test", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}
