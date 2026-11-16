@@ -1,11 +1,11 @@
 ---
 title: Core: collection paging strategy
 status: in_progress
-owner: 0/agent-2
+owner: felix/agent-2
 deps: [scaffold]
 touches: [packages/core/src/paging]
 prio: 1
-lease_until: 2026-11-16T18:23:30Z
+lease_until: 2026-11-16T18:46:57Z
 ---
 ## Goal
 Pure functions for paging state: page size, page index, range paging on an indexed unique sort key (default `_id`) with fallback to skip/limit, last page via reversed sort, estimated vs exact count.
