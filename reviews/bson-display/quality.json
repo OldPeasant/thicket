@@ -1,0 +1,74 @@
+{
+  "schema": 1,
+  "task": "bson-display",
+  "reviewed_revision": "f2353a98baee0880d971cee7c6d1c1c07f09e38d",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/bson-display/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/bson-display/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/bson-display/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "TW-2",
+      "source": "test-writer",
+      "severity": "Medium",
+      "disposition": "fixed",
+      "note": "formatDate threw RangeError for dates near the JS limits in local time; now falls back to UTC"
+    },
+    {
+      "id": "TW-1",
+      "source": "test-writer",
+      "severity": "Low",
+      "disposition": "fixed",
+      "note": "Code w/ scope badge named an undefined token; mapped to --bson-javascript"
+    },
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "deferred",
+      "note": "Field order of plain JS objects (integer-like keys, repeated keys): deferred to task bson-inputs, which owns editing/field reorder and must use an order-preserving container before saving; recorded as assumption. Display-only here, no data is written back."
+    },
+    {
+      "id": "CR-2",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "Edit-mode tests added by test-writer (BSON values read-only, deprecated types locked, form and tables layouts)"
+    },
+    {
+      "id": "CR-3",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "accepted",
+      "note": "fromExplorerValue kept as the inverse of toExplorerValue, now tested; number default setting belongs to bson-inputs"
+    },
+    {
+      "id": "CR-4",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "Intl.DateTimeFormat cached per zone, system zone resolved once"
+    },
+    {
+      "id": "P-1",
+      "source": "parent",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "Renderer imported the @thicket/core root, bundling CommonJS whatwg-url; now imports @thicket/core/bson subpath, ng build has no warning"
+    },
+    {
+      "id": "CR-5",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "accepted",
+      "note": "System time zone cached for the process lifetime; an OS zone change needs an app restart, and the shown zone name stays accurate to what is displayed"
+    }
+  ],
+  "validation": [
+    { "command": "cd packages/renderer && npx ng test --include='src/app/explorer/bson-*.spec.ts'", "result": "pass" },
+    { "command": "cd packages/renderer && npx ng build", "result": "pass" },
+    { "command": "npm run check", "result": "pass" }
+  ]
+}
