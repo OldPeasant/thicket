@@ -120,7 +120,7 @@ describe('docs.insert', () => {
     expect(stored?.['n']).toBeInstanceOf(BSON.Long);
     expect(stored?.['i']).toBeInstanceOf(BSON.Int32);
     expect(Object.keys(stored ?? {})[0]).toBe('_id');
-    expect(await coll('insert').countDocuments({ _id: 42 })).toBe(1);
+    expect(await coll('insert').countDocuments({ _id: 42 } as Document)).toBe(1);
   });
 
   it('a duplicate _id fails with SERVER_ERROR (DuplicateKey)', async () => {
@@ -269,7 +269,11 @@ describe('updateMany / deleteMany with preview', () => {
   beforeEach(async () => {
     await coll('many').deleteMany({});
     await coll('many').insertMany(
-      Array.from({ length: N }, (_, i) => ({ _id: i, group: i % 3, name: i % 2 ? 'Odd' : 'even' })),
+      Array.from({ length: N }, (_, i): Document => ({
+        _id: i,
+        group: i % 3,
+        name: i % 2 ? 'Odd' : 'even',
+      })),
     );
   });
   const confirmed = { ...target('many'), confirmed: true };
