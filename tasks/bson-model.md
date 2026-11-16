@@ -17,7 +17,8 @@ Typed, order-preserving value tree for all BSON types (SPEC M1 'Documents and BS
   - verified (2026-11-16 19:46+0100 by dell26/agent-3): cd packages/core && npx vitest run src/bson/ejson.spec.ts (field order suite) -> pass: integer-like keys ('10','2'), dollar-prefixed keys (set/id/ref/foo), __proto__ and repeated 'a' keys keep order and re-serialize byte-identically; wrapper-lookalike docs stay documents
 - [x] Conversion table tested: String→ObjectId (valid/invalid), Int32→Int64, Int64→Int32 overflow error, Double→Decimal128, String↔Date ISO, Binary(4)↔UUID
   - verified (2026-11-16 19:46+0100 by dell26/agent-3): cd packages/core && npx vitest run src/bson/convert.spec.ts -> 39 tests pass: String to ObjectId valid/invalid, Int32 to Int64, Int64 to Int32 overflow error, Double to Decimal128, String to/from Date ISO, Binary(4) to/from UUID, plus every other target
-- [ ] Path API (get/set/insert/remove/move field) with tests; 100% branch coverage on conversions
+- [x] Path API (get/set/insert/remove/move field) with tests; 100% branch coverage on conversions
+  - verified (2026-11-16 19:46+0100 by dell26/agent-3): cd packages/core && npx vitest run src/bson/path.spec.ts -> get/set/insert/remove/move/rename tests pass; npx vitest run src/bson/convert.spec.ts --coverage --coverage.include=src/bson/convert.ts -> Branches 100% (148/148); npm run check (after rebase on main) -> pass, 1269 + 181 tests
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
