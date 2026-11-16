@@ -1,11 +1,11 @@
 ---
 title: M0: Electron main, preload, backend utilityProcess and port broker
-status: in_progress
+status: done
 owner: dell26/agent-2
 deps: [contract,renderer-scaffold]
 touches: [apps/desktop/src/main,apps/desktop/src/preload,apps/desktop/package.json,packages/backend/src/server]
 prio: 1
-lease_until: 2026-11-16T18:51:50Z
+lease_until: 
 ---
 ## Goal
 Electron app that opens a sandboxed window with the renderer build, starts the backend in a utilityProcess, brokers a MessagePort between them, and routes requests by `route(method)` to main or backend. Exposes only `window.thicket.request/cancel/on` in the preload.
@@ -29,3 +29,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 19:20+0100 by dell26/agent-2): Renderer served from a custom thicket://app protocol (CSP as response header) rather than file://, since webRequest headers do not apply to file:// loads; packaged path for the renderer dir is left to the packaging task (THICKET_RENDERER_DIR / default packages/renderer/dist)
 - ASSUMPTION (2026-11-16 19:20+0100 by dell26/agent-2): Electron integration test uses playwright-core _electron (npm run test:electron, not part of check). No xvfb-run on this machine: without DISPLAY/WAYLAND_DISPLAY it falls back to --ozone-platform=headless; here it ran against the desktop session display
 - ASSUMPTION (2026-11-16 19:20+0100 by dell26/agent-2): Requests running in a backend that died answer INTERNAL ('process restarted') and its streams end with an error event; npm run dev reloads only the renderer (ng serve), main/preload/backend changes need a restart
+- done by dell26/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 13s on 1c4e7aab4; criteria verified 5/5
