@@ -11,7 +11,8 @@ lease_until: 2026-11-16T21:31:17Z
 A WriteGuard service and confirm dialog showing the exact operation (shell syntax) used by all write UIs; production connections get the red accent on tabs/sidebar/status bar; read-only exposes a signal that write controls bind to; typing the collection name for deletes over 1 000 documents. Use the frontend-design skill for the visual direction; respect the Business and Tron tokens (no hard-coded colors).
 
 ## Acceptance criteria
-- [ ] Component tests: confirm shows operation text, cancel aborts, type-to-confirm enforced above threshold
+- [x] Component tests: confirm shows operation text, cancel aborts, type-to-confirm enforced above threshold
+  - verified (2026-11-16 22:13+0100 by felix/agent-1): cd packages/renderer && npx ng test --include='src/app/safety/**/*.spec.ts' --include='src/app/layout/**/*.spec.ts' --watch=false at fdf5869 -> 12 files, 237 tests passed (ConfirmDialog: shows exact operation text, cancel/Escape aborts, enforces type-to-confirm; WriteGuard: deleteMany >1000 needs collection name, exactly 1000 does not)
 - [ ] Requests from WriteGuard carry `confirmed: true` only after the dialog (test with the fake API)
 - [ ] Accent visible in all four theme combinations (screenshots in reviews/)
 
