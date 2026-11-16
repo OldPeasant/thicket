@@ -13,7 +13,8 @@ Generate code for a find query or an aggregation pipeline in mongosh syntax, Nod
 ## Acceptance criteria
 - [x] Snapshot tests for each language over 10 queries/pipelines including every BSON type
   - verified (2026-11-16 20:42+0100 by dell26/agent-3): npx vitest run --project core packages/core/src/codegen -> 130 passed; codegen.spec.ts snapshots shell/node/python/java x 10 samples (find + aggregate), a test asserts the samples contain all 21 BSON types
-- [ ] Generated Node and Python code for 3 samples actually runs against a fixture (int test; skip Java if no JDK, with reason)
+- [x] Generated Node and Python code for 3 samples actually runs against a fixture (int test; skip Java if no JDK, with reason)
+  - verified (2026-11-16 20:43+0100 by dell26/agent-3): npm run test:int -- codegen (podman, mongo8 fixture) -> 13 passed: generated Node (host node + mongodb 7), Python (python:3.13-slim + pymongo 4.20) and Java (eclipse-temurin:21 + mongodb-driver-sync 5.14.0) programs for 4 samples run and print the same documents as the query run directly via the Node driver
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
