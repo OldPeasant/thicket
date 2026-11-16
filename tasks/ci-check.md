@@ -22,3 +22,4 @@ Every push and PR runs `npm ci && npm run check` on ubuntu-latest, macos-latest 
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-16 19:06+0100 by felix/agent-1): Assumed the workflow is green on GitHub on all three OSes without seeing a run: validated with action-validator and npm run check on Linux only; first run after done pushes main needs a human look (Actions tab of OldPeasant/thicket)
