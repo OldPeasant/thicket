@@ -349,12 +349,18 @@ Contract layout (`packages/contract/src/`):
 - `CollectionResults` drives paging-core (`@thicket/core/paging`): it sends the paging sort
   (`{_id: 1}` when none) for every page, `after`/`before` bounds from the edge rows' sort-key
   values (from the canonical EJSON text, so bounds are canonical EJSON too), `skip` for jumps and
-  `fromEnd` for the last page. A page replaces the shown one only once it arrived completely;
-  Cancel unsubscribes the stream (the backend kills the operation) and aborts a count.
+  `fromEnd` for the last page. A page replaces the shown one, and a new page size applies, only
+  once the page arrived completely; Cancel unsubscribes the stream (the backend kills the
+  operation), aborts a count and moves focus to Run.
 - Counts: an empty filter gets `docs.estimatedCount` (`~N`); with a filter there is no count until
-  "Count exactly" (`docs.count`). A last page read without a count has no known number: the pager
-  says "Last N" (or "N pages before the last") and, once counted exactly, reads that page again
-  aligned to the page boundaries.
+  "Count exactly" (`docs.count`). A last page read from the end without an exact count (none, or
+  only an estimate) has no known number: the pager says "Last N" (or "N pages before the last"),
+  Previous/Next page by range from its edge rows, a jump by number reads with skip, and once
+  counted exactly the page is read again aligned to the page boundaries. In skip mode (collation,
+  a sort that is not range-pageable) there is no `before` bound, so Last without an exact count
+  counts exactly first and then reads the last page. An empty page past page 1 says so
+  ("No documents on this page") rather than blaming the filter; a page beyond the limit is not
+  read (a notice says why).
 - Views: table (explorer, `tables` layout), document list (one `app-json-form` per document), raw
   (shell syntax via `printShellSyntax`, or the canonical EJSON as received). e2e:
   `test/e2e/collection.e2e.ts` (10 000 documents).

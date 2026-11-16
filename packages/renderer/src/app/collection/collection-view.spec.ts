@@ -187,7 +187,9 @@ describe('CollectionView', () => {
     click('pager-last');
     await settle();
     expect(lastFind()).toMatchObject({ fromEnd: true, limit: 50, sort: '{"_id":1}' });
-    expect(q<HTMLInputElement>('pager-page')?.value).toBe('200');
+    // Only an estimate: the last 50 rows are not page 200 of ~200, so no number is guessed.
+    expect(q<HTMLInputElement>('pager-page')?.value).toBe('');
+    expect(q('pager-rows')?.textContent).toMatch(/Last 50\s+of ~10,000/);
     expect(q<HTMLButtonElement>('pager-next')?.disabled).toBe(true);
 
     click('pager-first');
@@ -503,6 +505,89 @@ describe('CollectionView', () => {
     await settle();
     expect(q('pager-rows')?.textContent).toContain('50, 2 pages before the last');
     expect(q<HTMLInputElement>('pager-page')?.value).toBe('');
+  });
+
+  it('an empty page past the end does not blame the filter, and the pager stays usable', async () => {
+    answer = () => [];
+    const page = get<HTMLInputElement>('pager-page');
+    page.value = '1000';
+    page.dispatchEvent(new Event('change'));
+    await settle();
+    expect(lastFind()).toMatchObject({ skip: 49_950 });
+    expect(q('results-empty')?.textContent).toContain('No documents on this page');
+    expect(q('results-empty')?.textContent).not.toContain('match this query');
+    expect(get<HTMLInputElement>('pager-page').value).toBe('1000');
+    expect(q<HTMLButtonElement>('pager-prev')?.disabled).toBe(false);
+    expect(q<HTMLButtonElement>('pager-first')?.disabled).toBe(false);
+    answer = (p) => docs(1, p['limit'] as number);
+    click('pager-first');
+    await settle();
+    expect(q('pager-rows')?.textContent).toContain('1–50');
+  });
+
+  it('a page number beyond the limit says the result ends at the limit', async () => {
+    type('query-filter', '{ a: 1 }');
+    type('query-limit', '120');
+    click('query-run');
+    await settle();
+    const page = get<HTMLInputElement>('pager-page');
+    page.value = '10';
+    page.dispatchEvent(new Event('change'));
+    await settle();
+    expect(q('results-notice')?.textContent).toContain('past the end');
+  });
+
+  it('a jump to the page already shown still shows its number', async () => {
+    click('pager-next');
+    await settle();
+    const page = get<HTMLInputElement>('pager-page');
+    page.value = '2';
+    page.dispatchEvent(new Event('change'));
+    await settle();
+    expect(get<HTMLInputElement>('pager-page').value).toBe('2');
+  });
+
+  it('a cancelled page-size change keeps the old size and page', async () => {
+    click('pager-next');
+    await settle();
+    answer = () => null;
+    const size = get<HTMLSelectElement>('pager-size');
+    size.value = '100';
+    size.dispatchEvent(new Event('change'));
+    await settle();
+    expect(lastFind()).toMatchObject({ limit: 100 });
+    click('query-cancel');
+    await settle();
+    expect(get<HTMLSelectElement>('pager-size').value).toBe('50');
+    expect(q('pager-rows')?.textContent).toContain('51–100');
+    expect(get<HTMLInputElement>('pager-page').value).toBe('2');
+    expect(q<HTMLButtonElement>('pager-prev')?.disabled).toBe(false);
+  });
+
+  it('cancel moves the focus to the Run button', async () => {
+    answer = () => null;
+    click('pager-next');
+    await settle();
+    get<HTMLButtonElement>('query-cancel').focus();
+    click('query-cancel');
+    await settle();
+    expect(q('query-cancel')).toBeNull();
+    expect(document.activeElement).toBe(q('query-run'));
+  });
+
+  it('in skip mode, Last counts exactly and then shows the last page by number', async () => {
+    type('query-filter', '{ a: 1 }');
+    type('query-sort', '{ name: 1 }');
+    type('query-collation', '{ locale: "en" }');
+    click('query-run');
+    await settle();
+    answer = () => docs(9951, 40);
+    click('pager-last');
+    await settle();
+    expect(fake.requestsFor('docs.count')).toHaveLength(1);
+    expect(lastFind()).toMatchObject({ fromEnd: true, limit: 40 });
+    expect(q('pager-rows')?.textContent).toMatch(/9,951–9,990\s+of 9,990 documents/);
+    expect(get<HTMLInputElement>('pager-page').value).toBe('200');
   });
 
   it('shows the explorer read-only', () => {

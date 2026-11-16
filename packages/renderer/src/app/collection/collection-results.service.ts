@@ -65,10 +65,13 @@ export class CollectionResults implements OnDestroy {
   /** Bumped for every new read/count, so late answers of older ones are dropped. */
   private findGeneration = 0;
   private countGeneration = 0;
+  /** Count generation of the exact count that Last waits for (skip mode), else `null`. */
+  private lastAfterCount: number | null = null;
   /**
    * Pages between the shown page and the last one, while the shown page's index is not known: the
-   * last page was read from the end without an exact count, and maybe paged back from there.
-   * `null` when the index is known.
+   * last page was read from the end without an exact count (none, or only an estimate), and maybe
+   * paged by range from there. `null` when the index is known. While it is set, `pageIndex` is
+   * only a placeholder (at least 1 on a last page, so Previous stays possible).
    */
   private readonly fromEndState = signal<number | null>(null);
 
@@ -118,7 +121,22 @@ export class CollectionResults implements OnDestroy {
   }
 
   previous(): void {
-    if (this.canPrevious()) this.load(previousPage(this.pagingState()));
+    if (!this.canPrevious()) return;
+    const state = this.pagingState();
+    const first = state.page?.first;
+    if (this.fromEndState() !== null && state.mode === 'range' && first) {
+      // The index is a placeholder, so paging-core's previousPage could fall back to page 1:
+      // read the rows before the shown page instead. A short answer is page 1 (pageLoaded).
+      this.load({
+        pageIndex: Math.max(1, state.pageIndex - 1),
+        sort: state.sort,
+        limit: state.pageSize,
+        before: first,
+        fromEnd: false,
+      });
+      return;
+    }
+    this.load(previousPage(state));
   }
 
   next(): void {
@@ -126,24 +144,49 @@ export class CollectionResults implements OnDestroy {
   }
 
   last(): void {
-    this.load(lastPage(this.pagingState()));
+    const state = this.pagingState();
+    const limited = this.queryState().limit !== undefined;
+    if (
+      !state.count?.exact &&
+      ((state.mode === 'skip' && (state.count === null || lastPage(state).fromEnd)) || limited)
+    ) {
+      // Skip mode has no `before` bound to page back from a page read from the end, and without
+      // a count there is no last page to skip to: count exactly first, then read the last page.
+      // With a user limit the last page is a skip read too, and the count stops at the limit.
+      this.lastAfterCount = this.startExactCount();
+      return;
+    }
+    this.load(lastPage(state));
   }
 
-  /** Goes to page `pageNumber` (1-based). */
-  jump(pageNumber: number): void {
-    if (!Number.isInteger(pageNumber) || pageNumber < 1) return;
-    this.load(jumpToPage(this.pagingState(), pageNumber - 1));
+  /**
+   * Goes to page `pageNumber` (1-based). Returns false when nothing is read (an invalid number or
+   * a page beyond the user's limit).
+   */
+  jump(pageNumber: number): boolean {
+    if (!Number.isInteger(pageNumber) || pageNumber < 1) return false;
+    const state = this.pagingState();
+    // While the shown page's index is a placeholder, the pages next to that index are not its
+    // neighbours: read the page by number (skip), not from the shown page's edge rows.
+    const base = this.fromEndState() === null ? state : { ...state, page: null };
+    return this.load(jumpToPage(base, pageNumber - 1));
   }
 
+  /** Reads page 1 with `size` rows; the new size applies once that page arrived. */
   setPageSize(size: number): void {
-    this.pagingState.update((state) => setPageSize(state, size));
-    this.load(firstPage(this.pagingState()));
+    this.load(firstPage(setPageSize(this.pagingState(), size)), size);
   }
 
   /** Counts the matching documents exactly (`docs.count`). */
   countExact(): void {
+    this.startExactCount();
+  }
+
+  /** Starts `docs.count`; returns its count generation (`null` without a target). */
+  private startExactCount(): number | null {
     const target = this.targetValue;
-    if (target === null) return;
+    if (target === null) return null;
+    this.lastAfterCount = null;
     const query = this.queryState();
     this.countAbort?.abort();
     const abort = new AbortController();
@@ -160,15 +203,20 @@ export class CollectionResults implements OnDestroy {
         if (generation !== this.countGeneration) return;
         this.countAbort = null;
         this.countingState.set(false);
+        const thenLast = this.lastAfterCount === generation;
+        this.lastAfterCount = null;
         this.applyCount(count, true);
+        if (thenLast) this.load(lastPage(this.pagingState()));
       },
       (error: unknown) => {
         if (generation !== this.countGeneration) return;
         this.countAbort = null;
         this.countingState.set(false);
+        this.lastAfterCount = null;
         this.reportFailure(error);
       },
     );
+    return generation;
   }
 
   /**
@@ -188,6 +236,7 @@ export class CollectionResults implements OnDestroy {
     }
     this.countGeneration++;
     this.countingState.set(false);
+    this.lastAfterCount = null;
     if (report && wasBusy) {
       this.errorState.set(null);
       this.noticeState.set('Query cancelled.');
@@ -224,40 +273,49 @@ export class CollectionResults implements OnDestroy {
   private applyCount(value: number, exact: boolean): void {
     const limit = this.queryState().limit;
     const clipped = limit === undefined ? value : Math.min(value, limit);
-    let state = setCount(this.pagingState(), clipped, exact);
-    const pages = pageCount(state);
-    // A page counted from the end before the count was known now gets its real index.
-    const fromEnd = this.fromEndState();
-    if (fromEnd !== null && pages !== null) {
-      const index = Math.max(0, pages - 1 - fromEnd);
-      if (exact) {
-        // The page was counted from the end, so it doesn't line up with the page boundaries
-        // (the last page holds a full page, not the remainder): read the page with this index.
-        this.fromEndState.set(null);
-        this.pagingState.set(state);
-        this.load(jumpToPage(state, index));
-        return;
-      }
-      state = { ...state, pageIndex: index };
-    }
-    this.pagingState.set(state);
-    this.updateFirstRow();
+    this.pagingState.set(setCount(this.pagingState(), clipped, exact));
+    // An estimate does not place a page read from the end (a full page, not the remainder, and
+    // the estimate may be off): it keeps its "from the end" name. Only an exact count does.
+    if (exact) this.realign();
+    else this.updateFirstRow();
   }
 
-  /** Reads one page; it replaces the shown one once it arrived completely. */
-  private load(request: PageRequest): void {
+  /**
+   * With an exact count, a page whose index is unknown (counted from the end) is read again by its
+   * real index, aligned to the page boundaries (the last page holds the remainder). The shown page
+   * keeps its "from the end" name until that page arrived.
+   */
+  private realign(): void {
+    const state = this.pagingState();
+    const pages = pageCount(state);
+    const fromEnd = this.fromEndState();
+    if (fromEnd === null || pages === null || !state.count?.exact) return;
+    const index = Math.max(0, pages - 1 - fromEnd);
+    // By number, not as a neighbour of the shown page (its index is a placeholder).
+    this.load(jumpToPage({ ...state, page: null }, index));
+  }
+
+  /**
+   * Reads one page; it replaces the shown one once it arrived completely. `pageSize`: a new page
+   * size that applies together with this page. Returns false when nothing is read.
+   */
+  private load(request: PageRequest, pageSize?: number): boolean {
     const target = this.targetValue;
-    if (target === null) return;
+    if (target === null) return false;
     if (this.find !== null) this.find.unsubscribe();
     const generation = ++this.findGeneration;
+    this.lastAfterCount = null;
     const query = this.queryState();
-    const clipped = this.clipToLimit(request);
+    const clipped = this.clipToLimit(request, pageSize ?? this.pagingState().pageSize);
     this.errorState.set(null);
     this.noticeState.set(null);
     if (clipped === null) {
       this.find = null;
       this.loadingState.set(false);
-      return;
+      this.noticeState.set(
+        `That page is past the end of the result (limit ${query.limit ?? 0} documents).`,
+      );
+      return false;
     }
     this.loadingState.set(true);
     const docs: string[] = [];
@@ -269,7 +327,7 @@ export class CollectionResults implements OnDestroy {
         if (generation !== this.findGeneration) return;
         this.find = null;
         this.loadingState.set(false);
-        this.pageArrived(clipped, docs);
+        this.pageArrived(clipped, docs, pageSize);
       },
       error: (error: unknown) => {
         if (generation !== this.findGeneration) return;
@@ -278,11 +336,17 @@ export class CollectionResults implements OnDestroy {
         this.reportFailure(error);
       },
     });
+    return true;
   }
 
-  private pageArrived(request: PageRequest, docs: readonly string[]): void {
+  private pageArrived(request: PageRequest, docs: readonly string[], pageSize?: number): void {
     const plain = docs.map((text) => JSON.parse(text) as unknown);
-    let state = pageLoaded(this.pagingState(), request, plain);
+    const base = this.pagingState();
+    let state = pageLoaded(
+      pageSize === undefined ? base : setPageSize(base, pageSize),
+      request,
+      plain,
+    );
     const limit = this.queryState().limit;
     if (
       limit !== undefined &&
@@ -292,20 +356,32 @@ export class CollectionResults implements OnDestroy {
       state = { ...state, page: { ...state.page, isLast: true } };
     }
     const pages = pageCount(state);
-    const exact = state.count?.exact ?? false;
     const fromEnd = this.fromEndState();
+    let nextFromEnd: number | null = null;
     if (request.fromEnd) {
-      this.fromEndState.set(exact ? null : 0);
-      if (exact && pages !== null) state = { ...state, pageIndex: pages - 1 };
+      // Aligned only when the read was sized from an exact count (the remainder). A full page
+      // read without one (no count, an estimate, or a count that arrived meanwhile) is not.
+      const count = state.count;
+      const remainder =
+        count?.exact && pages !== null ? count.value - (pages - 1) * state.pageSize : null;
+      if (pages !== null && remainder !== null && (remainder <= 0 || request.limit === remainder)) {
+        state = { ...state, pageIndex: pages - 1 };
+      } else {
+        nextFromEnd = 0;
+        state = { ...state, pageIndex: Math.max(1, state.pageIndex) };
+      }
     } else if (fromEnd !== null && state.pageIndex > 0 && (request.after || request.before)) {
       // Paging by range away from a last page whose index is unknown: count from the end.
-      this.fromEndState.set(Math.max(0, fromEnd + (request.before ? 1 : -1)));
-    } else {
-      this.fromEndState.set(null);
+      nextFromEnd = Math.max(0, fromEnd + (request.before ? 1 : -1));
+      // The page after "1 page before the last" is the last page again.
+      if (request.after && nextFromEnd === 0 && state.page !== null) {
+        state = { ...state, page: { ...state.page, isLast: true } };
+      }
     }
+    this.fromEndState.set(nextFromEnd);
     this.pagingState.set(state);
     this.pageState.set({ docs, firstRow: state.pageIndex * state.pageSize });
-    this.updateFirstRow();
+    this.realign();
   }
 
   private updateFirstRow(): void {
@@ -319,10 +395,9 @@ export class CollectionResults implements OnDestroy {
    * and the last page is read with skip from the clipped count instead of from the end of the
    * unlimited result. `null`: the page lies beyond the limit.
    */
-  private clipToLimit(request: PageRequest): PageRequest | null {
+  private clipToLimit(request: PageRequest, pageSize: number): PageRequest | null {
     const limit = this.queryState().limit;
     if (limit === undefined) return request;
-    const pageSize = this.pagingState().pageSize;
     const start = request.pageIndex * pageSize;
     let clipped = request;
     if (request.fromEnd) {

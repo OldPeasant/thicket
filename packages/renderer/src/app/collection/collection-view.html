@@ -80,16 +80,11 @@
           Reset
         </button>
         @if (results.busy()) {
-          <button
-            type="button"
-            class="btn stop"
-            data-testid="query-cancel"
-            (click)="results.cancel()"
-          >
+          <button type="button" class="btn stop" data-testid="query-cancel" (click)="cancel()">
             Cancel
           </button>
         }
-        <button type="submit" class="btn run" data-testid="query-run">Run</button>
+        <button #runButton type="submit" class="btn run" data-testid="query-run">Run</button>
       </span>
     </div>
     @if (errorList().length) {
@@ -194,7 +189,7 @@
 
     <label class="size">
       Per page
-      <select data-testid="pager-size" (change)="changePageSize($event)">
+      <select #sizeSelect data-testid="pager-size" (change)="changePageSize($event)">
         @for (size of pageSizes; track size) {
           <option [value]="size" [selected]="size === results.paging().pageSize">
             {{ size }}
@@ -248,10 +243,17 @@
     }
     @if (results.page(); as page) {
       @if (page.docs.length === 0) {
-        <p class="message" data-testid="results-empty">
-          No documents match this query. Change the filter or press Reset to see the whole
-          collection.
-        </p>
+        @if (emptyPastStart()) {
+          <p class="message" data-testid="results-empty">
+            No documents on this page. The result ends before it: go to the first or the previous
+            page.
+          </p>
+        } @else {
+          <p class="message" data-testid="results-empty">
+            No documents match this query. Change the filter or press Reset to see the whole
+            collection.
+          </p>
+        }
       } @else {
         @switch (view()) {
           @case ('table') {
@@ -269,7 +271,7 @@
                 UTC
               </button>
             </div>
-            <ol class="doc-list" [start]="page.firstRow + 1">
+            <ol class="doc-list" [attr.start]="positionUnknown() ? null : page.firstRow + 1">
               @for (doc of explorerDocs(); track $index) {
                 <li class="doc" data-testid="result-doc">
                   @if (doc === null) {

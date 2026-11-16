@@ -150,11 +150,14 @@ export class CollectionView {
   });
 
   /**
-   * The page's position is unknown: it was counted from the end (last page) without any count.
-   * The pager then names it relative to the end instead of guessing a number.
+   * The page's position is unknown: it was counted from the end (last page) without an exact
+   * count (none, or only an estimate). The pager then names it relative to the end instead of
+   * guessing a number. Once counted exactly, the service reads the page again by number.
    */
-  protected readonly positionUnknown = computed(
-    () => this.results.pagesFromEnd() !== null && this.results.count() === null,
+  protected readonly positionUnknown = computed(() => this.results.pagesFromEnd() !== null);
+  /** The shown page is empty, but it is not page 1: the result ended before it. */
+  protected readonly emptyPastStart = computed(
+    () => this.results.paging().pageIndex > 0 || this.positionUnknown(),
   );
   /** "1–50", the rows shown, or `null` before a page arrived. */
   protected readonly rowRange = computed(() => {
@@ -191,8 +194,24 @@ export class CollectionView {
   protected readonly uid = `coll-view-${++nextUid}`;
 
   private readonly jumpInput = viewChild<ElementRef<HTMLInputElement>>('jumpInput');
+  private readonly sizeSelect = viewChild<ElementRef<HTMLSelectElement>>('sizeSelect');
+  private readonly runButton = viewChild<ElementRef<HTMLButtonElement>>('runButton');
 
   constructor() {
+    // Whenever a read ends (a page arrived, or it was cancelled or failed), the page field and the
+    // page-size select show the page and size actually shown, also when their value didn't change
+    // (the bindings only write changed values, so a typed number would otherwise stay).
+    effect(() => {
+      const loading = this.results.loading();
+      this.results.page();
+      const pageNumber = this.pageNumber();
+      const pageSize = this.results.paging().pageSize;
+      const jumpInput = this.jumpInput()?.nativeElement;
+      const sizeSelect = this.sizeSelect()?.nativeElement;
+      if (loading) return;
+      if (jumpInput !== undefined) jumpInput.value = pageNumber;
+      if (sizeSelect !== undefined) sizeSelect.value = String(pageSize);
+    });
     // Opening the tab shows page 1 of the whole collection.
     effect(() => {
       const target = this.target();
@@ -242,8 +261,16 @@ export class CollectionView {
     const input = this.jumpInput()?.nativeElement;
     if (input === undefined) return;
     const page = Number(input.value);
-    if (Number.isInteger(page) && page >= 1) this.results.jump(page);
-    else input.value = this.pageNumber();
+    // Nothing read (an invalid number, or a page beyond the limit): show the current page again.
+    if (!(Number.isInteger(page) && page >= 1 && this.results.jump(page))) {
+      input.value = this.pageNumber();
+    }
+  }
+
+  /** Cancel removes its own button: keyboard focus moves on to Run instead of the page body. */
+  protected cancel(): void {
+    this.results.cancel();
+    this.runButton()?.nativeElement.focus();
   }
 
   protected changePageSize(event: Event): void {
