@@ -23,3 +23,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 18:14+0100 by dell26/agent-1): TypeScript pinned to ~6.0.3, not 7.x: Angular 22 compiler-cli and typescript-eslint 8 require <6.1
 - ASSUMPTION (2026-11-16 18:14+0100 by dell26/agent-1): typescript-eslint pinned ~8.72.2: 8.73.0 is published but its @typescript-eslint/types@8.73.0 is not resolvable from the registry yet
 - ASSUMPTION (2026-11-16 18:14+0100 by dell26/agent-1): Vitest projects live in root vitest.config.ts (test.projects) instead of the vitest.workspace.ts named in touches; the workspace file is deprecated since Vitest 3.2
+- ASSUMPTION (2026-11-16 18:14+0100 by dell26/agent-1): Workspace packages are named @thicket/<folder> and export src/index.ts directly (no build step) until a build/packaging task needs compiled output
