@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "task": "electron-tests-hash-url",
+  "reviewed_revision": "c307e38769642f6d4e196caa6dacab505131c008",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/electron-tests-hash-url/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/electron-tests-hash-url/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/electron-tests-hash-url/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "startupOutput settles only after the child exits (SIGTERM, SIGKILL after 5 s)"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "startup log regex waits for the full line (fixed by test-writer in 476778c)"}
+  ],
+  "validation": [
+    {"command": "npm run test:electron (Linux, headless)", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}
