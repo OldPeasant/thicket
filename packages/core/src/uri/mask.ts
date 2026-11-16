@@ -9,12 +9,7 @@ const SECRET_OPTIONS = new Set(['proxypassword', 'tlscertificatekeyfilepassword'
 const SECRET_MECHANISM_PROPERTIES = new Set(['aws_session_token']);
 
 const SCHEME = /^mongodb(?:\+srv)?:\/\//i;
-/**
- * A connection string inside free text: up to the next whitespace or the next connection string.
- * Quotes, `<`, `>` and backticks may appear unencoded in a password, so they don't end the match;
- * a quote after the hosts just stays in the token and `mask()` keeps it as it is.
- */
-const URI_IN_TEXT = /mongodb(?:\+srv)?:\/\/(?:(?!mongodb(?:\+srv)?:\/\/)\S)+/gi;
+const SCHEME_SOURCE = 'mongodb(?:\\+srv)?:\\/\\/';
 
 function tryDecode(s: string): string | undefined {
   try {
@@ -86,16 +81,22 @@ export function mask(uri: string): string {
   const authorityEnd = rest.search(/[/?#]/);
   const authority = authorityEnd < 0 ? rest : rest.slice(0, authorityEnd);
   let at = authority.lastIndexOf('@');
+  // Where the visible user name ends at the latest; the rest of the credentials is masked.
+  let userEnd = Infinity;
   if (at < 0 && authorityEnd >= 0 && !isValid(uri)) {
     const later = rest.lastIndexOf('@');
     const colon = rest.indexOf(':');
-    // Only when a ':' (user:password) comes before that '@'.
-    if (later > 0 && colon >= 0 && colon < later) at = later;
+    // Only when a ':' (user:password) comes before that '@'. Nothing after the authority end
+    // stays visible then: it may be a secret option value (e.g. "?proxyPassword=pp",...).
+    if (later > 0 && colon >= 0 && colon < later) {
+      at = later;
+      userEnd = authorityEnd;
+    }
   }
   let userinfo = '';
   if (at >= 0) {
     const credentials = rest.slice(0, at);
-    const colon = credentials.indexOf(':');
+    const colon = Math.min(credentials.indexOf(':'), userEnd);
     userinfo = colon < 0 ? `${credentials}@` : `${credentials.slice(0, colon)}:${MASK}@`;
     rest = rest.slice(at + 1);
   }
@@ -105,7 +106,78 @@ export function mask(uri: string): string {
   return prefix + userinfo + rest;
 }
 
+/**
+ * True when `prefix` (a connection string cut just before an embedded scheme) ends inside a
+ * secret, so the scheme belongs to that secret and must not start a new connection string:
+ * - still in the authority, no `@` yet, and a `:` that isn't a port (`u:pw-mongodb://...`);
+ * - in the value of `proxyPassword` / `tlsCertificateKeyFilePassword`, of an option key that
+ *   can't be decoded, or of an `authMechanismProperties` entry whose key is secret.
+ * Thicket writes `:` and `/` unencoded in option values, so such values can contain a scheme.
+ */
+function endsInSecret(prefix: string): boolean {
+  const body = prefix.replace(SCHEME, '');
+  const authorityEnd = body.search(/[/?#]/);
+  if (authorityEnd < 0) {
+    if (body.includes('@')) return false;
+    // IPv6 literals in brackets contain ':'; a port is ':' + digits, then a non-word character.
+    return /:(?!\d+(?:[^A-Za-z0-9]|$))/.test(body.replace(/\[[^\]]*\]/g, ''));
+  }
+  const q = body.indexOf('?');
+  if (q < 0 || body.lastIndexOf('#') > q) return false;
+  const last =
+    body
+      .slice(q + 1)
+      .split('&')
+      .pop() ?? '';
+  const eq = last.indexOf('=');
+  if (eq < 0) return false;
+  const key = tryDecode(last.slice(0, eq))?.toLowerCase();
+  if (key === undefined || SECRET_OPTIONS.has(key)) return true;
+  if (key !== 'authmechanismproperties') return false;
+  const value = tryDecode(last.slice(eq + 1));
+  if (value === undefined) return true;
+  const entry = value.split(',').pop() ?? '';
+  const colon = entry.indexOf(':');
+  return colon >= 0 && SECRET_MECHANISM_PROPERTIES.has(entry.slice(0, colon).toLowerCase());
+}
+
+/** Where the connection string that starts at `start` (its scheme ends at `bodyStart`) ends. */
+function uriEnd(text: string, start: number, bodyStart: number): number {
+  let end = bodyStart;
+  // CR-5: the driver accepts a raw space or tab in the password (`mongodb://u:my secret@h`), so
+  // when an '@' comes before any '/', '?', '#' or scheme on the same line, the credentials run up
+  // to that '@' even across spaces. Prose can be swallowed too ("mongodb://host:27017 failed for
+  // user@x" becomes "mongodb://host:****@x"): masking more is acceptable, leaking is not.
+  const cred = new RegExp(`[/?#@\\r\\n]|${SCHEME_SOURCE}`, 'gi');
+  cred.lastIndex = bodyStart;
+  const stop = cred.exec(text);
+  if (stop?.[0] === '@') end = stop.index + 1;
+
+  // Then up to the next whitespace, or up to an embedded scheme that starts a new connection
+  // string. Quotes, '<', '>' and backticks may appear unencoded in a password, so they don't end
+  // it; a quote after the hosts just stays in the token and `mask()` keeps it as it is.
+  const ws = /\s/g;
+  ws.lastIndex = end;
+  const runEnd = ws.exec(text)?.index ?? text.length;
+  const inner = new RegExp(SCHEME_SOURCE, 'gi');
+  inner.lastIndex = end;
+  for (let m = inner.exec(text); m !== null && m.index < runEnd; m = inner.exec(text)) {
+    // TW-4: a scheme inside a secret value is part of it, not a new connection string.
+    if (!endsInSecret(text.slice(start, m.index))) return m.index;
+  }
+  return runEnd;
+}
+
 /** Masks every MongoDB connection string inside free text (log lines, error messages). */
 export function maskText(text: string): string {
-  return text.replace(URI_IN_TEXT, (uri) => mask(uri));
+  const scheme = new RegExp(SCHEME_SOURCE, 'gi');
+  let out = '';
+  let copied = 0;
+  for (let m = scheme.exec(text); m !== null; m = scheme.exec(text)) {
+    const end = uriEnd(text, m.index, m.index + m[0].length);
+    out += text.slice(copied, m.index) + mask(text.slice(m.index, end));
+    copied = end;
+    scheme.lastIndex = end;
+  }
+  return out + text.slice(copied);
 }

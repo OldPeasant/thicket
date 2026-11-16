@@ -92,6 +92,73 @@ Lint/type-check/build:
 Remaining unresolved findings:
 0
 
+## Round 2
+
+Date: 2026-11-16
+
+Scope: findings TW-4 (`reviews/uri-model/tests.md`), CR-5 and CR-6 (`reviews/uri-model/review.md`) on revision `9efb954`; only `maskText()` / `mask()` in `packages/core/src/uri/mask.ts`.
+
+### Fixed findings
+
+#### TW-4 — `maskText()` leaks the tail of a secret option value that contains `mongodb://`
+
+Files changed:
+- `packages/core/src/uri/mask.ts`
+- `packages/core/src/uri/mask.spec.ts`
+
+Problem:
+The `URI_IN_TEXT` regex ended a match at every embedded scheme, so `mongodb://h/?proxyPassword=px-mongodb://proxyTail2Secret` was split and the tail was outside `mask()`. Confirmed: the test-writer's test failed on `9efb954`.
+
+Fix:
+Replaced the regex with a small scanner (`maskText` -> `uriEnd`). An embedded scheme inside a non-whitespace run starts a new connection string only when the text before it does not end inside a secret (`endsInSecret`): not in the value of `proxyPassword`, `tlsCertificateKeyFilePassword`, an undecodable option key or a secret `authMechanismProperties` entry, and not in an authority without `@` that has a `:` other than a port. So `"mongodb://a@h1","mongodb://b:pw@h2/db"`, `mongodb://h:27017,mongodb://...` and `...?tls=true","mongodb://...` still split, while `px-mongodb://...` and `mongodb://u:amongodb://bSecret@h` (invalid, now masked as `mongodb://u:****@h`) do not. When such a merge swallows a following connection string, `mask()`'s invalid-URI branch (credentials up to a later `@`) could show a secret option value as the "user name" (`mongodb://h/?proxyPassword=pp","mongodb://b:pw@h2` -> `...pp","mongodb:****@h2`); that branch now keeps only the text before the authority end visible (`mongodb://h:****@h2`). The test-writer's test is unchanged.
+
+Validation:
+- `cd packages/core && npx vitest run` — Pass (TW-4 test passes)
+
+#### CR-5 — `maskText()` leaks a password containing raw whitespace
+
+Files changed:
+- `packages/core/src/uri/mask.ts`
+- `packages/core/src/uri/mask.spec.ts`
+
+Problem:
+`maskText('log: mongodb://u:my secret@h/db failed')` matched only `mongodb://u:my` and left the password in the text. Confirmed against `9efb954`; the driver accepts the URI (the URL parser keeps spaces as `%20` and drops tabs).
+
+Fix:
+In `uriEnd`, when the first of `/`, `?`, `#`, `@`, a line break or another scheme after the scheme is an `@`, the connection string runs to that `@` even across spaces/tabs (never across a line break), then continues to the next whitespace as before. Documented over-masking in a code comment: `mongodb://host:27017 failed for user@x` becomes `mongodb://host:****@x` (masks, never leaks).
+
+New tests (`mask.spec.ts`, `maskText` block): space, tab and mixed whitespace passwords in plain, quoted and multi-URI log text (exact output `log: mongodb://u:****@h/db failed`); no extension across a line break; the over-masking case; the `amongodb` / `a,mongodb` invalid-password cases; joined connection strings after a port, a non-secret option and a secret option. Plus a `mask()` edge-case test for the invalid-branch change.
+
+Validation:
+- `cd packages/core && npx vitest run` — Pass
+
+### Not fixed
+
+#### CR-6 — `maskText()` rewrites the host in compact JSON log lines that contain a later `@`
+
+Status:
+Invalid as a required change (accepted by the parent worker as over-masking).
+
+Reason:
+No secret leaks; SPEC §6 allows masking more. Behavior unchanged (`{"uri":"mongodb://u:p@h","email":"x:y@z"}` -> `{"uri":"mongodb://u:****@z"}`); the existing JSON/quoted tests still pass.
+
+### Validation summary (Round 2)
+
+Focused tests:
+- `cd packages/core && npx vitest run` — Pass: 3 files, 249 tests passed (was 1 failed | 243 passed)
+
+Full test suite:
+- `npm run check` (repo root: eslint, prettier, typecheck of all workspaces, root `vitest run` 7 files / 847 tests, renderer 2 files / 46 tests) — Pass
+
+Lint/type-check/build:
+- Included in `npm run check` — Pass (`prettier --write` applied to `mask.ts` once)
+
+`.taskcheck`:
+- `sh .taskcheck` (runs `npm run check`) — Pass; `tasks.py done` not run by the fixer
+
+Remaining unresolved findings:
+0
+
 ## Final status
 
 All validated findings fixed and validation passed.

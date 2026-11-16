@@ -99,6 +99,10 @@ describe('mask', () => {
   it('treats an unencoded @ after the hosts as the end of credentials, like the driver', () => {
     // The driver reads "host" as user and "27017/?appName=me" as password here.
     expect(mask('mongodb://host:27017/?appName=me@example')).toBe(`mongodb://host:${MASK}@example`);
+    // A secret option before that '@' must not stay visible as the "user name".
+    expect(mask('mongodb://h/?proxyPassword=ppSecret","mongodb://b:pw@h2')).toBe(
+      `mongodb://h:${MASK}@h2`,
+    );
   });
 
   it('returns other strings unchanged', () => {
@@ -144,6 +148,48 @@ describe('maskText', () => {
     expect(maskText('see MONGODB://u:upTxtSecret@h, and mongodb://v:pw2Secret@h2.')).toBe(
       `see MONGODB://u:${MASK}@h, and mongodb://v:${MASK}@h2.`,
     );
+  });
+
+  // CR-5: the driver accepts a raw space or tab in the password.
+  it('masks passwords containing a raw space or tab', () => {
+    for (const secret of ['my spaceSecret', 'my\ttabSecret', 'a  b\t cSecret']) {
+      const uri = `mongodb://u:${secret}@h/db`;
+      // Accepted by the driver (the URL parser drops tabs, so only spaces survive parsing).
+      expect(parseConnectionString(uri).password).toBe(secret.replace(/\t/g, ''));
+      expect(maskText(`log: ${uri} failed`)).toBe(`log: mongodb://u:${MASK}@h/db failed`);
+      expectNoLeak(maskText(`connect "${uri}" failed`), [secret, 'Secret']);
+      expectNoLeak(maskText(`a mongodb://x@h1, then mongodb+srv://u:${secret}@c.net`), ['Secret']);
+    }
+  });
+
+  it('does not extend credentials across a line break', () => {
+    expect(maskText('mongodb://h:27017 failed\nuser:pw@x')).toBe(
+      'mongodb://h:27017 failed\nuser:pw@x',
+    );
+  });
+
+  it('masks rather than leaks prose followed by an "@" on the same line', () => {
+    // Documented over-masking: the text up to the '@' could be a password with spaces.
+    expect(maskText('mongodb://host:27017 failed for user@x')).toBe(`mongodb://host:${MASK}@x`);
+  });
+
+  it('does not start a new connection string at a scheme inside the password', () => {
+    // Invalid for the driver, but mask() masks it, so maskText must not split it.
+    expectNoLeak(maskText('x mongodb://u:amongodb://bSecret@h y'), ['bSecret']);
+    expectNoLeak(maskText('x mongodb://u:a,mongodb://bSecret@h y'), ['bSecret']);
+  });
+
+  it('still splits connection strings joined after a port, a path or a non-secret option', () => {
+    expect(maskText('mongodb://h:27017,mongodb://b:p1Secret@h2')).toBe(
+      `mongodb://h:27017,mongodb://b:${MASK}@h2`,
+    );
+    expect(maskText('"mongodb://h/?tls=true","mongodb://b:p2Secret@h2"')).toBe(
+      `"mongodb://h/?tls=true","mongodb://b:${MASK}@h2"`,
+    );
+    expectNoLeak(maskText('"mongodb://h/?proxyPassword=pp","mongodb://b:p3Secret@h2"'), [
+      'pp',
+      'p3Secret',
+    ]);
   });
 });
 
