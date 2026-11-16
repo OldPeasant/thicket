@@ -19,3 +19,4 @@ docs.insert/update/replace/delete; update takes the diff and expected values and
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 23:44+0100 by felix/agent-2): docs.delete with expected on an already deleted document answers deleted:false (goal reached) instead of CONFLICT; a doc that exists but no longer matches expected gives CONFLICT with the server version
 - ASSUMPTION (2026-11-16 23:44+0100 by felix/agent-2): updateMany/deleteMany expectedCount: refused with CONFLICT (no detail) only when MORE documents match now than the preview showed; fewer is allowed (nothing unconfirmed is touched)
+- ASSUMPTION (2026-11-16 23:44+0100 by felix/agent-2): docs.update refuses update docs with non-operator keys and docs.replace refuses $-keys (INVALID_PARAMS) so an update can never silently replace; insert generates ObjectId _ids so every insertedId is returned; write errors -> SERVER_ERROR with serverCode/codeName
