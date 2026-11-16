@@ -165,6 +165,68 @@ describe('mask and maskText on passwords with special characters', () => {
     expectNoLeak(maskText(`connect '${uri}' failed`), [secret]);
   });
 
+  // CR-1 / TW-3 regression: however the log line wraps the URI Thicket wrote.
+  it.each(specials)('hides a password containing %j in quoted, bracketed and JSON text', (c) => {
+    const secret = `ab${c}cdSecret`;
+    const uri = toConnectionString({
+      ...parseConnectionString('mongodb://host.example.com/db?tls=true'),
+      username: 'u',
+      password: secret,
+    });
+    for (const text of [
+      `connect "${uri}" failed`,
+      `connect \`${uri}\` failed`,
+      `connect <${uri}> failed`,
+      `(${uri}),`,
+      JSON.stringify({ uri, note: 'a@b:c' }),
+      JSON.stringify([uri, uri]),
+    ]) {
+      expectNoLeak(maskText(text), [secret]);
+    }
+  });
+
+  it('hides secret options with quotes inside quoted text', () => {
+    const uri = toConnectionString({
+      ...parseConnectionString('mongodb://h'),
+      proxy: { host: 'p', password: `p'x"y\`Secret` },
+      tls: { certificateKeyFilePassword: `k'e"y<Secret>` },
+    });
+    for (const text of [`'${uri}'`, `"${uri}"`, JSON.stringify({ uri })]) {
+      expectNoLeak(maskText(text), [`p'x"y\`Secret`, `k'e"y<Secret>`]);
+    }
+  });
+
+  it('hides a user password that contains a connection-string scheme', () => {
+    const secret = 'pw-mongodb://inner-mongodb+srv://Secret';
+    const uri = toConnectionString({
+      ...parseConnectionString('mongodb://h'),
+      username: 'u',
+      password: secret,
+    });
+    expectNoLeak(maskText(`connect ${uri} failed`), [secret, 'inner-', 'Secret']);
+  });
+
+  // TW-4: the text scanner splits at an embedded "mongodb://", but Thicket writes ":" and "/"
+  // unencoded in option values, so the tail of such a secret option value ends up outside mask().
+  it('hides secret option values that contain a connection-string scheme', () => {
+    const uri = toConnectionString({
+      ...parseConnectionString('mongodb://h'),
+      auth: {
+        mechanism: 'MONGODB-AWS',
+        mechanismProperties: { AWS_SESSION_TOKEN: 'tok-mongodb://awsTail1Secret' },
+      },
+      proxy: { host: 'p', password: 'px-mongodb://proxyTail2Secret' },
+      tls: { certificateKeyFilePassword: 'kp-mongodb+srv://keyTail3Secret' },
+    });
+    expect(parseConnectionString(uri).proxy.password).toBe('px-mongodb://proxyTail2Secret');
+    expectNoLeak(mask(uri), ['awsTail1Secret', 'proxyTail2Secret', 'keyTail3Secret']);
+    expectNoLeak(maskText(`connect ${uri} failed`), [
+      'awsTail1Secret',
+      'proxyTail2Secret',
+      'keyTail3Secret',
+    ]);
+  });
+
   it('hides proxyPassword and tlsCertificateKeyFilePassword containing special characters', () => {
     const uri = toConnectionString({
       ...parseConnectionString('mongodb://h'),

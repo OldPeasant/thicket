@@ -2,15 +2,15 @@
 
 Date: 2026-11-16
 
-Task: uri-model - Core: connection profile ⇄ connection string
+Task: uri-model - Core: connection profile ⇄ connection string (second pass, final revision after fixes)
 
-Scope: base `6813e14a9613908d1013b47dfe336c487dee57e6` .. task commit `e726035ef73fb07cf50c0a4d00bb33b95152cd01` (HEAD, branch `main`), one task-owned commit (supplied by the parent worker, matches `git diff --name-only 6813e14 HEAD`). Production files: `packages/core/src/uri/{model,convert,mask,index}.ts`, `packages/core/src/index.ts` (re-export), `packages/core/package.json` + `package-lock.json` (dependency `mongodb-connection-string-url`). Test files: `packages/core/src/uri/{convert,mask}.spec.ts`, `fixtures.ts`. Uncommitted at measurement time: only the two spec files changed by this report (hashes below); `reviews/uri-model/review.md` from the code-reviewer is present untracked and was not touched.
+Scope: `git diff ea59a3ddbc07b4922bbc5111b2074a0ecff847f5 645c0a4a364c03dae5f0a0f7f5bd4ad7025acf0a` on branch `main` (base = `git merge-base HEAD origin/main`; HEAD = `645c0a4a364c03dae5f0a0f7f5bd4ad7025acf0a`). Task-owned commits supplied by the parent worker: `edb078d` (implementation), `9476472` (first test-writer pass and reports), `645c0a4` (fixer: CR-1..CR-4, TW-1..TW-3). Production files: `packages/core/src/uri/{convert,mask,model,index}.ts`, `packages/core/src/index.ts` (re-export), `packages/core/package.json` and `package-lock.json` (dependency `mongodb-connection-string-url`). Test files: `packages/core/src/uri/{convert,mask}.spec.ts`, `fixtures.ts`. Uncommitted at measurement time: the two spec files changed by this pass (hashes under Coverage) and `reviews/uri-model/review.md`, modified by the code-reviewer, not touched by me.
 
 Requirements:
 - `tasks/uri-model.md` acceptance criteria and recorded assumptions
-- `SPEC.md` line 267: "logs and error messages mask passwords in URIs"; line 151 (copyable connection string, password masked)
-- `docs/ARCHITECTURE.md` "Coverage" and "Conventions"
-- Parent worker instructions (focus on mask() leak paths and parse/format edge cases)
+- `SPEC.md`: "logs and error messages mask passwords in URIs"; copyable connection string with the password masked
+- `reviews/uri-model/fixes.md` (fixes to verify), `reviews/uri-model/review.md` (CR-1..CR-4)
+- Parent worker instructions for this pass
 
 ## Test files changed
 
@@ -19,26 +19,28 @@ Requirements:
 
 ## Tests added or updated
 
-Count: 67 (23 in `convert.spec.ts`, 44 in `mask.spec.ts`, counting each `it.each` row). No existing test was changed or removed.
+Count: 43 (7 in `convert.spec.ts`, 36 in `mask.spec.ts`, counting each `it.each` row). No existing test was changed or removed. Suite size went from 201 to 244 tests.
 
 Added to `convert.spec.ts`:
-- `toConnectionString`: port boundaries 1/65535/65536; user name without password; `/` and `?` in the database name; `&`, `=`, `#` in option values and extra keys; `w=0`; extra array values written as repeated keys after known options.
-- `parseConnectionString edge cases`: port boundaries and leading zeros; port 0/65536 and malformed IPv6 (`[::1`, `[::1]x`, `[]`) rejected; invalid percent-encoding in host/database; unescaped `:` in password rejected without echoing it; user without password; empty query; numbers beyond safe integer and non-integers kept in extra; empty `w`/`authMechanismProperties` kept in extra; repeated `authMechanismProperties` key kept in extra; no state shared between parses.
-- `unknown options named like Object.prototype members`: `toString`, `constructor`, `hasOwnProperty`, `valueOf`, `__proto__` as option keys; `__proto__` as `authMechanismProperties` / `readPreferenceTags` key (fail, TW-1 / TW-2).
+- `toConnectionString` (CR-2, CR-3, CR-1 writer side): the "password needs a user name" error never contains the password; an apostrophe in a user name without password is written as `%27` and reads back; IPv6 hosts still go in brackets and plain socket paths are still percent-encoded after the `formatHost` change.
+- `unknown options named like Object.prototype members` (CR-4 / TW-1 / TW-2): a repeated `__proto__` / `toString` key keeps all values in order and round-trips (exercises the array push path on an own property); `extra` stays a plain object with `Object.prototype`, global `Object.prototype` untouched, spreading and JSON keep the entries; an own `__proto__` key in an `extra` map coming from `JSON.parse` (stored profile) is written out.
 
 Added to `mask.spec.ts`:
-- `maskText`: upper-case scheme and trailing punctuation.
-- `mask and maskText on passwords with special characters`: one row per printable ASCII punctuation character and space (33 rows): the password is set in the model, written with `toConnectionString`, and must not leak through `mask()`, `maskText()` and `maskText()` with the URI in single quotes (row `'` fails, TW-3); secret options with special characters.
-- `mask edge cases`: leading whitespace, mixed-case scheme, empty password, user without password, mixed-case `AWS_SESSION_TOKEN` next to an entry without `:`, repeated secret option, credentials plus secret option plus fragment, `@` after the hosts without a preceding `:`, user names stay visible.
+- `hides a password containing %j in quoted, bracketed and JSON text` (33 rows, CR-1 / TW-3 regression): a Thicket-written URI with each printable ASCII special character in the password, wrapped in double quotes, backticks, `<>`, `(...)`, a JSON object whose other value contains `@` and `:`, and a JSON array of two URIs.
+- `hides secret options with quotes inside quoted text`: `proxyPassword` and `tlsCertificateKeyFilePassword` containing `'`, `"`, backtick, `<`, `>` inside quoted and JSON text.
+- `hides a user password that contains a connection-string scheme`: passes (Thicket percent-encodes `:` and `/` in user info).
+- `hides secret option values that contain a connection-string scheme`: fails, TW-4.
 
 ## Requirement coverage
 
 | Requirement | Tests | Command | Result |
 |---|---|---|---|
-| AC1 Round-trip tests for 20+ URIs incl. SRV, IPv6, encoded credentials, authMechanismProperties | existing `connection string round trip` (34 fixture URIs + count check); added `toConnectionString` / `parseConnectionString edge cases` rows | `cd packages/core && npx vitest run` | Pass |
-| AC2 Unknown options are preserved in `extra` | existing `unknown options` tests (pass); added `unknown options named like Object.prototype members` (7 tests) | `cd packages/core && npx vitest run` | Fail: 7 tests, TW-1 and TW-2 |
-| AC3 `mask()` never leaks the password in any of the test URIs | existing `mask` tests over all fixtures (pass); added special-character rows and `mask edge cases` (all `mask()` assertions pass) | `cd packages/core && npx vitest run` | Pass for `mask()` |
-| SPEC 267 logs and error messages mask passwords in URIs (`maskText`, error messages of `parseConnectionString`) | added `hides a password containing %j` (33 rows), `rejects a password with an unescaped ":" without echoing it` | `cd packages/core && npx vitest run` | Fail: 1 row (`'`), TW-3 |
+| AC1 Round-trip tests for 20+ URIs incl. SRV, IPv6, encoded credentials, authMechanismProperties | `connection string round trip` (34 fixtures + count check), `toConnectionString`, `parseConnectionString edge cases`; new IPv6/socket and apostrophe tests | `cd packages/core && npx vitest run` | Pass |
+| AC2 Unknown options are preserved in `extra` | `unknown options`, `unknown options named like Object.prototype members` (incl. 4 new tests) | `cd packages/core && npx vitest run` | Pass |
+| AC3 `mask()` never leaks the password in any of the test URIs | `mask` over all fixtures, special-character rows, `mask edge cases`; `mask()` assertion of the TW-4 test | `cd packages/core && npx vitest run` | Pass |
+| SPEC: logs and error messages mask passwords in URIs (`maskText`) | `hides a password containing %j` (both variants, 66 rows), quote/scheme tests | `cd packages/core && npx vitest run` | Fail: 1 test, TW-4 (all user-password cases pass) |
+| CR-2 password without user name rejected, empty user name = none | `rejects a password without a user name ...`, `treats an empty user name as none`, `never puts the password into the error ...` | `cd packages/core && npx vitest run` | Pass |
+| CR-3 socket path with `:` not bracketed | `writes a Unix socket path containing ":" ...`, `still writes IPv6 hosts in brackets ...` | `cd packages/core && npx vitest run` | Pass |
 
 ## Focused test execution
 
@@ -48,9 +50,9 @@ Command:
 
 Result:
 
-Fail: Test Files 2 failed | 1 passed (3); Tests 8 failed | 188 passed (196). The 8 failures are exactly the new tests documenting TW-1, TW-2 and TW-3; all other new and existing tests pass. Before the additions: 128 passed in `src/uri`.
+Fail: Test Files 1 failed | 2 passed (3); Tests 1 failed | 243 passed (244). The single failure is the new TW-4 test. All fixes from `fixes.md` (CR-1..CR-4, TW-1..TW-3) are covered and pass.
 
-Also run on the final test files: `npx prettier --check packages/core` -> pass; `npx eslint packages/core` -> pass; `npx tsc -p packages/core/tsconfig.json` -> pass.
+Also on the final test files: `npx prettier --check packages/core` -> All matched files use Prettier code style (after `prettier --write` on the two spec files I edited); `npx eslint packages/core` -> pass, no output; `npx tsc -p packages/core/tsconfig.json --noEmit` -> pass.
 
 ## Full test execution
 
@@ -60,164 +62,102 @@ Command:
 
 Result:
 
-Fail: `lint` and `typecheck` (all workspaces) pass; `vitest run` fails with Test Files 2 failed | 4 passed (6), Tests 8 failed (the same 8 as above). The renderer test step (`npm run test -w packages/renderer`) did not run because it is chained after the failing `vitest run`.
+Fail: lint (eslint + `prettier --check .`) and typecheck of all workspaces pass; root `vitest run`: Test Files 1 failed | 6 passed (7), Tests 1 failed | 841 passed (842), the same TW-4 test. The renderer test step did not run because it is chained after the failing `vitest run`.
 
 ## .taskcheck
 
 Result:
 
-Fail: `.taskcheck` runs `npm run check`, result as above (the 8 failing tests that document TW-1..TW-3). It passes again once the production defects are fixed.
+Fail: `.taskcheck` runs `npm run check`, result as above. It passes once TW-4 is fixed.
 
 ## Bugs found
 
-### Option keys named like Object.prototype members are corrupted or lost in `extra`
+### `maskText()` leaks the tail of a secret option value that contains `mongodb://`
 
 Finding ID:
 
-`TW-1`
+`TW-4`
 
 Test:
 
-`unknown options named like Object.prototype members > preserves ?%s=x in extra and on the round trip` (rows `toString`, `constructor`, `hasOwnProperty`, `valueOf`, `__proto__`)
+`mask and maskText on passwords with special characters > hides secret option values that contain a connection-string scheme`
 
 Production source:
 
-`packages/core/src/uri/convert.ts:320-325` (`addExtra`), also `model.extra` created as a plain object literal in `packages/core/src/uri/model.ts:131`
+`packages/core/src/uri/mask.ts:17` (`URI_IN_TEXT`, introduced by the CR-1 fix in `645c0a4`), together with `packages/core/src/uri/convert.ts:398-400` (`encodeQuery` leaves `:` and `/` unencoded in option values)
 
 Requirement:
 
-AC2 "Unknown options are preserved in an `extra` map"; model doc "a round trip never drops anything".
+SPEC "logs and error messages mask passwords in URIs"; task goal "password masking for display and logs"; recorded assumption that `mask()` masks `proxyPassword`, `tlsCertificateKeyFilePassword` and `AWS_SESSION_TOKEN`.
 
 Expected behavior:
 
-`parseConnectionString('mongodb://h/?toString=x').extra` is `{ toString: 'x' }` and `toConnectionString` writes back `mongodb://h/?toString=x`; same for any other key.
+`maskText('connect ' + toConnectionString(model) + ' failed')` hides the whole value of `proxyPassword`, `tlsCertificateKeyFilePassword` and the `AWS_SESSION_TOKEN` property for any value, as `mask()` on the bare URI already does.
 
 Actual behavior:
 
-`addExtra` reads `m.extra[key]` and finds the inherited `Object.prototype` member, so `toString`/`constructor`/`valueOf`/`hasOwnProperty` become `[<native function>, 'x']` and the writer emits `toString=function%20toString()%20%7B%20%5Bnative%20code%5D%20%7D&toString=x`. For `__proto__` the assignment replaces the prototype of `extra` and the option disappears (`mongodb://h`).
+The new `URI_IN_TEXT` ends a match at every embedded `mongodb://` / `mongodb+srv://`. Thicket writes option values with `:` and `/` unencoded, so a valid URI such as `mongodb://h/?proxyPassword=px-mongodb://proxyTail2Secret` (accepted by `parseConnectionString`, password read back unchanged) is split in two: `mask()` masks only `px-`, and the second token `mongodb://proxyTail2Secret` has no credentials, so the text becomes `...proxyPassword=****mongodb://proxyTail2Secret`. Same for `authMechanismProperties=AWS_SESSION_TOKEN:tok-mongodb://...` and `tlsCertificateKeyFilePassword=...mongodb+srv://...`. The first failing assertion reports `leaks awsTail1Secret`. User passwords are not affected (`:` and `/` are percent-encoded in user info). Before the fix this case was masked, so this is a regression of the CR-1 fix. Related, for invalid input only (driver rejects it, no test added): `maskText('x mongodb://u:amongodb://bSecret@h y')` now returns the text unchanged, while `mask()` on the same string masks it.
 
 Severity:
 
-Medium
+Low (needs a secret that contains a literal connection-string scheme, but it is a leak into logs for a URI Thicket writes itself)
 
 Fix required:
 
-`Yes — production code must be fixed by the parent worker / fixer.`
+`Yes — production code must be fixed by the parent worker / fixer.` (For example: only split at a scheme that is not inside a query value, e.g. not preceded by `=`, `:` or `,`, or let `maskText` re-join a token whose predecessor ended inside a secret option value.)
 
-### `__proto__` entries in authMechanismProperties / readPreferenceTags are silently dropped
+### Prior findings (disposition)
 
-Finding ID:
-
-`TW-2`
-
-Test:
-
-`unknown options named like Object.prototype members > preserves an authMechanismProperties entry named __proto__`, `... > preserves a readPreferenceTags entry named __proto__`
-
-Production source:
-
-`packages/core/src/uri/convert.ts:54-65` (`parsePairs`: `out[k] = ...` on a plain object)
-
-Requirement:
-
-AC2 / round trip never drops an option.
-
-Expected behavior:
-
-`?authMechanismProperties=__proto__:x` and `?readPreferenceTags=__proto__:x` are written back unchanged (either as a map entry or verbatim in `extra`).
-
-Actual behavior:
-
-The `__proto__` assignment is swallowed, `parsePairs` returns `{}`. `authMechanismProperties` is then omitted entirely (`mongodb://h`); `readPreferenceTags=__proto__:x` becomes `readPreferenceTags=` which changes its meaning to "match any member".
-
-Severity:
-
-Low
-
-Fix required:
-
-`Yes — production code must be fixed by the parent worker / fixer.`
-
-### `maskText()` leaks a password that contains an apostrophe
-
-Finding ID:
-
-`TW-3`
-
-Test:
-
-`mask and maskText on passwords with special characters > hides a password containing "'"`
-
-Production source:
-
-`packages/core/src/uri/mask.ts:12` (`URI_IN_TEXT` stops at `'`), used by `maskText` (`mask.ts:104-106`) and by the error path of `parseConnectionString` (`convert.ts:370`)
-
-Requirement:
-
-SPEC.md 267 "logs and error messages mask passwords in URIs"; task goal "password masking for display and logs".
-
-Expected behavior:
-
-`maskText('connect mongodb://u:ab\'cdSecret@host.example.com failed')` hides `ab'cdSecret`.
-
-Actual behavior:
-
-The text is returned unchanged with the full password. `toConnectionString` itself writes `'` unencoded (`encodeURIComponent` leaves `!'()*` as is) and the driver accepts it, so any profile whose password contains `'` leaks it in every log line or error passed through `maskText`. `mask()` on the bare string is correct. Related, already covered by the recorded assumption and therefore not given a failing test: a URI with an unencoded space in the password (accepted by `parseConnectionString`) is also not masked by `maskText` (`maskText('x mongodb://u:pa ssSecret@h y')` is returned unchanged).
-
-Severity:
-
-High
-
-Fix required:
-
-`Yes — production code must be fixed by the parent worker / fixer.`
+| ID | Disposition in this pass |
+|---|---|
+| TW-1 | Fixed in `645c0a4`; the 5 original rows pass, plus new repeated-key and plain-object tests |
+| TW-2 | Fixed in `645c0a4`; both original tests pass |
+| TW-3 / CR-1 | Fixed in `645c0a4` for user passwords; original row passes, 33 new wrapping rows pass; the new splitting rule causes TW-4 |
+| CR-2 | Fixed; covered by fixer tests plus the new error-message test |
+| CR-3 | Fixed; covered by fixer test plus the new IPv6/socket regression test |
+| CR-4 | Same defect as TW-1/TW-2; fixed and covered |
 
 ### Observations (not defects, no failing test)
 
-- `mongodb://user:@h` (empty password) is written back as `mongodb://user@h`; the model cannot tell an empty password from none. Meaning to the driver is the same in practice.
-- IPv6 zone ids stay percent-encoded in the model (`fe80::1%25eth0`) although `UriHost.host` is documented as decoded; the round trip is correct.
-- `mask()` does not mask `AWS_SESSION_TOKEN` written with a space after the comma (`SERVICE_NAME:x, AWS_SESSION_TOKEN:t`); whether the driver trims property keys was not verified.
+- Documented trade-off of the CR-1 fix: text that follows a URI without whitespace is masked too when it contains `@`/`:` or follows a secret option, e.g. `maskText('{"uri":"mongodb://u:pw@h","a":"b@c"}')` gives `{"uri":"mongodb://u:****@c"}` and `{"uri":"mongodb://h/?proxyPassword=pp","n":"x"}` loses the rest of the JSON. Over-masking only, no leak.
+- Earlier observations (empty password written as none, IPv6 zone ids kept percent-encoded, `AWS_SESSION_TOKEN` key with a leading space not masked) are unchanged.
 
 ## Coverage
 
-Status: partial-failed. The coverage command ran on the final test snapshot and produced a fresh report, but exited nonzero because of the 8 failing tests (TW-1..TW-3). Numbers are diagnostic until the fixes land and coverage is re-run.
+Status: partial-failed. The coverage command ran on the final test snapshot of revision `645c0a4` and produced a fresh report, but exited nonzero because of the TW-4 test. Numbers are diagnostic; re-run after the TW-4 fix.
 
 Metric: whole-file coverage of task-changed production files.
-Changed-line coverage: not measured (all three files are new in this task, so whole-file coverage equals changed-line coverage for them).
+Changed-line coverage: not measured separately; all three files are added by this task (no deletions in `git diff ea59a3d 645c0a4`), so whole-file coverage equals changed-line coverage for them.
 
 Evidence:
-- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: `uri-model`; base `6813e14a9613908d1013b47dfe336c487dee57e6`; HEAD `e726035ef73fb07cf50c0a4d00bb33b95152cd01`; single task commit and file list supplied by the parent worker, confirmed with `git diff --name-only 6813e14 HEAD`.
-- Source/test snapshot identifier (including uncommitted inputs): sha256 `convert.ts` 8206f9b3..., `mask.ts` 119c3d0a..., `model.ts` da63a9eb... (committed, unchanged); uncommitted `convert.spec.ts` db7ffffe809d5d3fddc35b0f21ef937ccba691df29cbaf4c46c5df7788cd04e7, `mask.spec.ts` fc055865d6ccbb90a4e2ed0e23485cb2ebd710d02313586ce8af7d9b93c19e62.
+- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: `uri-model`; base `ea59a3ddbc07b4922bbc5111b2074a0ecff847f5`; HEAD `645c0a4a364c03dae5f0a0f7f5bd4ad7025acf0a`; commits `edb078d`, `9476472`, `645c0a4` supplied by the parent worker, confirmed with `git diff --stat ea59a3d 645c0a4`.
+- Source/test snapshot identifier (including uncommitted inputs): sha256 `convert.ts` 0428507d6d8b8504de6daf3e06736f364d172a1074a4b40a72e76a7b8bc730c6, `mask.ts` 6503de8450375a91debb2d92a97b4204a270e56bf2fa24d4adcfd62393e7e9be, `model.ts` da63a9eb80e58633c566a92e7d46397dcf5e9d4d49a317613df048d64010a5ff, `fixtures.ts` 899cd1c1aeb791fc0cf81693642f1623aea576ffef8a78a5fc98e20f5f77291e (committed, unchanged); uncommitted `convert.spec.ts` 37621a794cc8badc5c4a5b542c49b321398c2556e701609493cc35154e7d804e, `mask.spec.ts` 2cfbd290c5159e462ec36904a6add75cdbda892b5ff8987be5f63415332163a8.
 - Exact included files; renamed/deleted/excluded files and reasons: included `src/uri/convert.ts`, `src/uri/mask.ts`, `src/uri/model.ts`. Excluded: `src/uri/index.ts` and `src/index.ts` (re-exports only), `src/uri/fixtures.ts` (test data), spec files, `package.json`/`package-lock.json` (dependency metadata). No renames or deletions.
-- Provider/version, command, working directory, and test selection: Vitest 5.1.0 with `@vitest/coverage-v8` 5.1.0; `npx vitest run --coverage --coverage.include='src/uri/convert.ts' --coverage.include='src/uri/mask.ts' --coverage.include='src/uri/model.ts' --coverage.reportsDirectory=coverage/uri-model-tw-final2 --coverage.reporter=text --coverage.reporter=json-summary --coverage.reporter=json --coverage.reportOnFailure=true` in `packages/core`; all tests of the `core` workspace.
-- Run start/completion time and exit status: started 2026-11-16 19:04:30 +0100, duration 215 ms; nonzero exit (8 failed | 188 passed).
-- Generated report paths and report hashes/run identifier: `packages/core/coverage/uri-model-tw-final2/coverage-summary.json` sha256 bf348ea741008edbc74df4c9c7a6853cf3eef8ba43972567d3a54d08e128341c (Git-ignored), plus `coverage-final.json` in the same fresh directory.
-- Evidence outputs are fresh and inputs stayed unchanged: new, previously nonexistent reports directory; spec and source hashes taken before and after the run are identical.
-- Final run after latest test additions and production fixes: yes for the test additions; no production fixes exist yet (TW-1..TW-3 open), so coverage must be re-run after the fixer's changes.
+- Provider/version, command, working directory, and test selection: Vitest 5.1.0 with `@vitest/coverage-v8` 5.1.0; `npx vitest run --coverage --coverage.include='src/uri/convert.ts' --coverage.include='src/uri/mask.ts' --coverage.include='src/uri/model.ts' --coverage.reportsDirectory=coverage/uri-model-tw-pass2 --coverage.reporter=text --coverage.reporter=json-summary --coverage.reporter=json --coverage.reportOnFailure=true` in `packages/core`; all tests of the `core` workspace (244).
+- Run start/completion time and exit status: started 2026-11-16 19:11:11 +0100, duration 215 ms; nonzero exit (1 failed | 243 passed).
+- Generated report paths and report hashes/run identifier: `packages/core/coverage/uri-model-tw-pass2/coverage-summary.json` sha256 efd40293d5f19db79c2d3df913ebcac2a2e89c8c74397440d76973c8da41cfbd, `coverage-final.json` sha256 5b955910d834c7d4d9441c96e18388c3d69234952e80e69374b700f122e9b507 (Git-ignored).
+- Evidence outputs are fresh and inputs stayed unchanged: new, previously nonexistent reports directory; source and spec hashes taken before and after the run are identical.
+- Final run after latest test additions and production fixes: yes for revision `645c0a4` and the final test files; a fix for TW-4 would make it stale.
 
 Values below use covered/total (percentage); zero-denominator or unsupported metrics are N/A.
 
 | Changed file | Statements | Branches | Functions | Lines |
 |---|---:|---:|---:|---:|
-| `packages/core/src/uri/convert.ts` | 214/215 (99.53%) | 124/125 (99.20%) | 85/86 (98.84%) | 185/186 (99.46%) |
+| `packages/core/src/uri/convert.ts` | 219/220 (99.55%) | 130/131 (99.24%) | 87/88 (98.86%) | 190/191 (99.48%) |
 | `packages/core/src/uri/mask.ts` | 60/60 (100%) | 36/36 (100%) | 9/9 (100%) | 52/52 (100%) |
 | `packages/core/src/uri/model.ts` | 4/4 (100%) | N/A (0/0) | 1/1 (100%) | 4/4 (100%) |
-| Aggregate (summed counters, 3 measured files, none missing) | 278/279 (99.64%) | 160/161 (99.38%) | 95/96 (98.96%) | 241/242 (99.59%) |
-
-Before the added tests (same command, pre-addition snapshot): statements 271/279, branches 151/161, functions 95/96, lines 240/242.
+| Aggregate (summed counters, 3 measured files, none missing) | 283/284 (99.65%) | 166/167 (99.40%) | 97/98 (98.98%) | 246/247 (99.60%) |
 
 | File and uncovered lines/branch locations | Required behavior or risk | Action/test added or reason left uncovered |
 |---|---|---|
-| `packages/core/src/uri/convert.ts:240` (`readPreferenceTags` `isSet: () => false`) | none: unreachable, `isSet` is never called for a `repeatable` option | Justified gap (dead code); not testable through the public API |
-| `packages/core/src/uri/convert.ts:369` (branch: thrown value not an `Error`) | defensive; the library always throws `Error`s | Justified gap |
-| `packages/core/src/uri/convert.ts:331` (decode error) | invalid percent-encoding in host/database | Covered by `rejects invalid percent-encoding in the host or database name` |
-| `packages/core/src/uri/convert.ts:185`, `:259` (empty `authMechanismProperties` / `w`) | AC2: unrepresentable known values kept in `extra` | Covered by `keeps empty w and authMechanismProperties values verbatim in extra` |
-| `packages/core/src/uri/mask.ts:36` (property entry without `:`), `:88` (`@` without preceding `:`) | AC3 mask edge paths | Covered by `masks the AWS session token whatever the key case, next to entries without a colon` and `does not mask an "@" after the hosts when no ":" comes before it` |
+| `packages/core/src/uri/convert.ts:248` (`readPreferenceTags` `isSet: () => false`) | none: `isSet` is never called for a `repeatable` option | Justified gap (dead code), not reachable through the public API |
+| `packages/core/src/uri/convert.ts:377` (branch: thrown value not an `Error`) | defensive; the library always throws `Error`s | Justified gap |
+| New fixer code (`setOwn`, `encodeUserinfo`, `formatHost` socket branch, password-without-user check) | CR-1..CR-4 | All covered; see tests above |
 
 ## Unable to test
 
-- Whether the MongoDB driver trims whitespace around `authMechanismProperties` keys (affects the third observation): needs the driver or a real server; not required by the criteria. No follow-up unless the fixer wants to harden `mask()`.
+- Whether the MongoDB driver trims whitespace around `authMechanismProperties` keys (earlier observation): needs the driver or a server; not required by the criteria. No follow-up unless the fixer wants to harden `mask()`.
 
 ## Summary
 
-Tests added; production defects were discovered and must be passed to the `fixer` before task completion (TW-1 Medium, TW-2 Low, TW-3 High). The 8 failing tests are intentional and must not be skipped; `.taskcheck` passes once the defects are fixed. The test files and this report were left uncommitted for the parent worker to verify and commit.
+Tests added; production defects were discovered and must be passed to the `fixer` before task completion. All fixes from `fixes.md` (CR-1..CR-4, TW-1..TW-3) are verified by passing tests; one new Low-severity leak, TW-4 (`maskText` splitting at a `mongodb://` inside a secret option value, a regression from the CR-1 fix), has a failing test that must not be skipped. Prettier, ESLint and type check pass. The test files and this report are left uncommitted for the parent worker.

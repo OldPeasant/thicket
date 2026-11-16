@@ -220,6 +220,37 @@ describe('toConnectionString', () => {
     expect(parseConnectionString(uri)).toEqual(m);
   });
 
+  it('never puts the password into the error for a password without a user name', () => {
+    const m = { ...emptyConnectionModel(), password: 'lonelyPwSecret' };
+    expect(() => toConnectionString(m)).toThrow(/user name/);
+    try {
+      toConnectionString(m);
+    } catch (e) {
+      expect((e as Error).message).not.toContain('lonelyPwSecret');
+    }
+  });
+
+  it('encodes an apostrophe in a user name without a password', () => {
+    const uri = toConnectionString({ ...emptyConnectionModel(), username: "o'neil" });
+    expect(uri).toBe('mongodb://o%27neil@localhost:27017');
+    expect(parseConnectionString(uri).username).toBe("o'neil");
+  });
+
+  it('still writes IPv6 hosts in brackets and plain socket paths percent-encoded', () => {
+    const base = emptyConnectionModel();
+    const m = {
+      ...base,
+      hosts: [
+        { host: '::1', port: 27017 },
+        { host: 'fe80::2' },
+        { host: '/tmp/mongodb-27017.sock' },
+      ],
+    };
+    const uri = toConnectionString(m);
+    expect(uri).toBe('mongodb://[::1]:27017,[fe80::2],%2Ftmp%2Fmongodb-27017.sock');
+    expect(parseConnectionString(uri).hosts).toEqual(m.hosts);
+  });
+
   it('writes a Unix socket path containing ":" percent-encoded, not in brackets', () => {
     const uri = 'mongodb://%2Ftmp%2Fa%3Ab.sock';
     const m = parseConnectionString(uri);
@@ -407,5 +438,31 @@ describe('unknown options named like Object.prototype members', () => {
   it('preserves a readPreferenceTags entry named __proto__', () => {
     const uri = 'mongodb://h/?readPreferenceTags=__proto__:x';
     expect(toConnectionString(parseConnectionString(uri))).toBe(uri);
+  });
+
+  it.each(['__proto__', 'toString'])('keeps every value of a repeated ?%s key in order', (key) => {
+    const uri = `mongodb://h/?${key}=a&${key}=b&${key}=c`;
+    const m = parseConnectionString(uri);
+    expect(Object.entries(m.extra)).toEqual([[key, ['a', 'b', 'c']]]);
+    expect(toConnectionString(m)).toBe(uri);
+  });
+
+  it('keeps extra a plain object and does not touch Object.prototype', () => {
+    const m = parseConnectionString('mongodb://h/?__proto__=x&constructor=y');
+    expect(Object.getPrototypeOf(m.extra)).toBe(Object.prototype);
+    expect(({} as Record<string, unknown>).x).toBeUndefined();
+    expect(JSON.parse(JSON.stringify(m.extra))).toEqual(m.extra);
+    // A copy made by spreading keeps the entries as data, too.
+    expect(Object.entries({ ...m.extra })).toEqual([
+      ['__proto__', 'x'],
+      ['constructor', 'y'],
+    ]);
+  });
+
+  it('writes an own __proto__ entry of an extra map that came from JSON (stored profile)', () => {
+    const extra = JSON.parse('{"__proto__":"x","other":"y"}') as Record<string, string>;
+    expect(toConnectionString({ ...emptyConnectionModel(), extra })).toBe(
+      'mongodb://localhost:27017/?__proto__=x&other=y',
+    );
   });
 });
