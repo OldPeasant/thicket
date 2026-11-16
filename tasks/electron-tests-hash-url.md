@@ -1,11 +1,11 @@
 ---
 title: Fix npm run test:electron: 5 specs expect the URL without the router's #/ (pre-existing on main)
-status: in_progress
+status: done
 owner: felix/agent-2
 deps: []
 touches: [apps/desktop/test]
 prio: 2
-lease_until: 2026-11-16T20:20:13Z
+lease_until: 
 ---
 ## Goal
 `npm run test:electron` passes again. Since the renderer's hash router redirects to `#/`, the specs
@@ -22,3 +22,4 @@ Failing: app.electron.spec.ts (loads the renderer ... CSP header; profiles.secre
 blocks window.open and navigation; will-frame-navigate ...), dev.electron.spec.ts (loads the
 renderer from the dev server).
 - ASSUMPTION (2026-11-16 20:52+0100 by felix/agent-2): Secrets spec now saves a real profile before profiles.setSecret (main rejects unknown ids with NOT_FOUND since profiles-store); the 'secret storage:' log line is checked on a separate direct Electron start (startupOutput helper) because Playwright attaches stdout after main already printed it; the task listed 5 failures, 7 failed here (2 extra in secrets spec), all fixed in tests only
+- done by felix/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 31s on 440512a95; criteria verified 1/1
