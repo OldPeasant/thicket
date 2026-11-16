@@ -5,6 +5,7 @@ import {
   parseResultIn,
   privilegedMethods,
   type Response,
+  type Settings,
 } from '@thicket/contract';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -115,5 +116,77 @@ describe('the privileged port (main side)', () => {
     expect(byId.get('b3')).toMatchObject({ ok: false, error: { code: 'INVALID_PARAMS' } });
     // The renderer contract is not served on the privileged port either.
     expect(byId.get('b4')).toMatchObject({ ok: false, error: { code: 'UNKNOWN_METHOD' } });
+  });
+});
+
+describe('app.settings handlers', () => {
+  const SETTINGS: Settings = {
+    style: 'business',
+    mode: 'system',
+    pageSize: 50,
+    nestedPageSize: 100,
+    defaultIntegerType: 'int32',
+    dateDisplay: 'local',
+    checkForUpdates: true,
+    schemaSampleSize: 1000,
+  };
+
+  function fakeStore() {
+    let current: Settings = { ...SETTINGS };
+    return {
+      get: vi.fn(() => ({ ...current })),
+      set: vi.fn((changes: Partial<Settings>) => {
+        current = { ...current, ...changes };
+        return Promise.resolve({ ...current });
+      }),
+    };
+  }
+
+  it('are only served when a settings store is given', () => {
+    expect(mainHandlers({ version: '1' })['app.settings.get']).toBeUndefined();
+    expect(mainHandlers({ version: '1', settings: fakeStore() })['app.settings.get']).toBeDefined();
+  });
+
+  it('get and set go to the store over the renderer contract; invalid values are refused', async () => {
+    const store = fakeStore();
+    const port = fakePort();
+    serve(port, {
+      table: methods,
+      route: 'main',
+      handlers: mainHandlers({ version: '1', settings: store }),
+    });
+    port.push({ id: 'g', method: 'app.settings.get', params: {} });
+    port.push({ id: 's', method: 'app.settings.set', params: { settings: { style: 'tron' } } });
+    port.push({ id: 'bad', method: 'app.settings.set', params: { settings: { pageSize: 30 } } });
+    port.push({ id: 'extra', method: 'app.settings.set', params: { settings: { nope: 1 } } });
+    await vi.waitFor(() => expect(port.sent).toHaveLength(4));
+    const byId = new Map(port.sent.map((r) => [r.id, r]));
+    expect(byId.get('g')).toEqual({ id: 'g', ok: true, result: { settings: SETTINGS } });
+    expect(byId.get('s')).toEqual({
+      id: 's',
+      ok: true,
+      result: { settings: { ...SETTINGS, style: 'tron' } },
+    });
+    expect(byId.get('bad')).toMatchObject({ ok: false, error: { code: 'INVALID_PARAMS' } });
+    expect(byId.get('extra')).toMatchObject({ ok: false, error: { code: 'INVALID_PARAMS' } });
+    expect(store.set).toHaveBeenCalledTimes(1);
+    expect(store.set).toHaveBeenCalledWith({ style: 'tron' });
+  });
+
+  it('a failing store answers INTERNAL', async () => {
+    const store = fakeStore();
+    store.set.mockRejectedValueOnce(new Error('disk full'));
+    const port = fakePort();
+    const onError = vi.fn();
+    serve(port, {
+      table: methods,
+      route: 'main',
+      handlers: mainHandlers({ version: '1', settings: store }),
+      onError,
+    });
+    port.push({ id: 'f', method: 'app.settings.set', params: { settings: { mode: 'dark' } } });
+    await vi.waitFor(() => expect(port.sent).toHaveLength(1));
+    expect(port.sent[0]).toMatchObject({ ok: false, error: { code: 'INTERNAL' } });
+    expect(onError).toHaveBeenCalled();
   });
 });

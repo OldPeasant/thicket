@@ -4,6 +4,7 @@ import { BrowserWindow, MessageChannelMain, type MessagePortMain } from 'electro
 
 import { PORT_CHANNEL, type PortMessage } from '../preload/ports';
 import type { BackendHost } from './backend-host';
+import type { Broadcaster } from './broadcast';
 import { secureWebPreferences } from './security';
 
 export interface WindowOptions {
@@ -12,6 +13,8 @@ export interface WindowOptions {
   url: string;
   host: BackendHost<MessagePortMain>;
   mainHandlers: Record<string, Handler>;
+  /** Broadcast events from main (e.g. `app.settings.changed`) go to the window's main port. */
+  broadcaster?: Broadcaster;
   log: (message: string) => void;
 }
 
@@ -44,10 +47,12 @@ export function openWindow(options: WindowOptions): BrowserWindow {
       onError: (error) => options.log(`main handler: ${String(error)}`),
     });
     post({ target: 'main' }, channel.port2);
+    const removeSink = options.broadcaster?.add((event) => channel.port1.postMessage(event));
     const disconnect = options.host.connectRenderer((port, restarted) =>
       post(restarted ? { target: 'backend', restarted } : { target: 'backend' }, port),
     );
     detach = () => {
+      removeSink?.();
       stopMain();
       channel.port1.close();
       disconnect();
