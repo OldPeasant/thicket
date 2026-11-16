@@ -18,6 +18,9 @@ import {
   type ProfilesFs,
 } from './store';
 
+/** Id given to a v0 entry without one. */
+const V0_ID = /^v0-[0-9a-f]{32}$/;
+
 const ctx = { signal: new AbortController().signal, requestId: '1' };
 let dir: string;
 
@@ -281,7 +284,7 @@ describe('migration', () => {
         production: true,
       },
       {
-        id: 'id-1',
+        id: expect.stringMatching(V0_ID) as string,
         name: 'Ask me',
         connectionString: 'mongodb://alice@db1:27017,db2:27017/?replicaSet=rs0',
         auth: { mechanism: 'SCRAM-SHA-256', username: 'alice', secretMode: 'ask' },
@@ -295,7 +298,7 @@ describe('migration', () => {
     expect(text).not.toContain('cret-pw');
     expect(text).not.toContain('typed-each-time');
     expect(await secrets.get('legacy-2')).toEqual({ password: 's@cret-pw' });
-    expect(await secrets.get('id-1')).toBeNull();
+    expect(await secrets.get(profiles[2]?.id ?? '')).toBeNull();
     expect(logs.some((m) => m.includes('migrated'))).toBe(true);
     // Loading again is a no-op.
     expect(await setup().store.list()).toEqual(profiles);
@@ -662,7 +665,7 @@ describe('migration edge cases', () => {
     ]);
     expect(await store.list()).toEqual([
       {
-        id: 'id-1',
+        id: expect.stringMatching(V0_ID) as string,
         name: 'N',
         connectionString: 'mongodb+srv://al%40ice@cluster.example.test/',
         auth: { mechanism: 'SCRAM-SHA-256', username: 'al@ice', secretMode: 'ask' },
@@ -767,6 +770,49 @@ describe('migration edge cases', () => {
     expect(secrets.stored.get('a')).toEqual({ password: 'fictitious-pw' });
     crashing.crash = false;
     expect((await store.list()).map((p) => p.id)).toEqual(['a']);
+    expect(await fileJson()).toMatchObject({ version: 1 });
+  });
+
+  it('a retried migration gives an id-less entry the same id, so no secret is orphaned', async () => {
+    const crashing = renameCrashFs();
+    crashing.crash = true;
+    const v0 = [
+      { name: 'A', uri: 'mongodb://u:fictitious-pw@h' },
+      { name: 'A', uri: 'mongodb://u:fictitious-pw@h' },
+    ];
+    await writeFile(path.join(dir, 'connections.json'), JSON.stringify(v0));
+    const secrets = fakeSecrets();
+    const { store } = storeWith(secrets, crashing);
+    await expect(store.list()).rejects.toThrow('crash before rename');
+    expect(await fileJson()).toEqual(v0);
+    const firstIds = [...secrets.stored.keys()];
+    // Identical entries at different positions still get different ids.
+    expect(firstIds).toHaveLength(2);
+    for (const id of firstIds) expect(id).toMatch(V0_ID);
+    crashing.crash = false;
+    const ids = (await store.list()).map((p) => p.id);
+    expect(ids).toEqual(firstIds);
+    expect([...secrets.stored.keys()]).toEqual(firstIds);
+    expect(await readFile(path.join(dir, 'connections.json'), 'utf8')).not.toContain(
+      'fictitious-pw',
+    );
+    // The id does not depend on the store instance (a retry after a restart gives the same id).
+    expect(migrate(v0)?.profiles.map((p) => (p as { id: string }).id)).toEqual(firstIds);
+  });
+
+  it('a secrets.bin write error other than "unavailable" keeps the v0 file and retries', async () => {
+    const fail = { set: true };
+    const v0 = [{ id: 'a', name: 'A', uri: 'mongodb://u:fictitious-pw@h' }];
+    await writeFile(path.join(dir, 'connections.json'), JSON.stringify(v0));
+    const secrets = fakeSecrets(fail);
+    const { store } = storeWith(secrets);
+    await expect(store.list()).rejects.toThrow('secrets.bin locked');
+    expect(await fileJson()).toEqual(v0);
+    expect(secrets.stored.size).toBe(0);
+    fail.set = false;
+    const [p] = await store.list();
+    expect(p?.auth?.secretMode).toBe('saved');
+    expect(secrets.stored.get('a')).toEqual({ password: 'fictitious-pw' });
     expect(await fileJson()).toMatchObject({ version: 1 });
   });
 

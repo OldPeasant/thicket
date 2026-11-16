@@ -5,8 +5,10 @@ import {
   type ProfileDraft,
   type SecretKind,
 } from '@thicket/contract';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import * as nodeFs from 'node:fs/promises';
+
+import { SecretStorageUnavailableError } from '../secrets';
 
 /** Version of the `connections.json` layout; bump it and add a step to `migrate` when it changes. */
 export const PROFILES_VERSION = 1;
@@ -35,7 +37,7 @@ export interface ProfilesStoreOptions {
   log?: (message: string) => void;
   /** Clock for the backup file name of a corrupt file. */
   now?: () => Date;
-  /** Id generator for new and duplicated profiles. */
+  /** Id generator for new and duplicated profiles (migrated v0 entries get a derived id). */
   newId?: () => string;
 }
 
@@ -110,14 +112,24 @@ export interface Migrated {
   secrets: { profileId: string; kind: SecretKind; value: string }[];
 }
 
-function migrateV0(entries: unknown[], newId: () => string): Migrated {
+/**
+ * Id for a v0 entry without one: derived from its position and content (without the password),
+ * so a migration that is retried after a failed rewrite assigns the same id again and the
+ * password already moved into `secrets.bin` is not orphaned.
+ */
+function v0Id(index: number, old: V0Profile, uriWithoutPassword: unknown): string {
+  const content = JSON.stringify([index, { ...old, uri: uriWithoutPassword }]);
+  return `v0-${createHash('sha256').update(content).digest('hex').slice(0, 32)}`;
+}
+
+function migrateV0(entries: unknown[]): Migrated {
   const secrets: Migrated['secrets'] = [];
-  const profiles = entries.map((entry): unknown => {
+  const profiles = entries.map((entry, index): unknown => {
     if (!isRecord(entry)) return entry;
     const old = entry as V0Profile;
-    const id = typeof old.id === 'string' && old.id !== '' ? old.id : newId();
     const split: { uri: unknown; password?: string } =
       typeof old.uri === 'string' ? splitPassword(old.uri) : { uri: old.uri };
+    const id = typeof old.id === 'string' && old.id !== '' ? old.id : v0Id(index, old, split.uri);
     const username =
       typeof split.uri === 'string'
         ? /^mongodb(?:\+srv)?:\/\/([^@/?#]*)@/.exec(split.uri)?.[1]
@@ -163,12 +175,13 @@ function decodeURIComponentSafe(value: string): string {
  *   `{ id?, name, uri, color?, group?, readonly?, isProduction?, askPassword? }`. `uri` becomes
  *   `connectionString` without its password (the password goes to `secrets.bin`), `group` becomes
  *   `folder`, `readonly`/`isProduction` become `readOnly`/`production`, a username in the URI gets
- *   SCRAM auth, `askPassword` gets `secretMode: 'ask'`.
+ *   SCRAM auth, `askPassword` gets `secretMode: 'ask'`. An entry without an `id` gets
+ *   `v0-<sha-256 of its index and content without the password>`, the same on every attempt.
  * - Version 1: `{ "version": 1, "profiles": [ Profile, ... ] }`.
  * - A newer version is returned as is (`version` tells the caller).
  */
-export function migrate(file: unknown, newId: () => string = randomUUID): Migrated | undefined {
-  if (Array.isArray(file)) return migrateV0(file, newId);
+export function migrate(file: unknown): Migrated | undefined {
+  if (Array.isArray(file)) return migrateV0(file);
   if (!isRecord(file)) return undefined;
   const { version, profiles } = file;
   if (typeof version !== 'number' || !Number.isInteger(version) || version < 1) return undefined;
@@ -354,7 +367,7 @@ export class ProfilesStore {
     } catch {
       parsed = undefined;
     }
-    const migrated = parsed === undefined ? undefined : migrate(parsed, this.newId);
+    const migrated = parsed === undefined ? undefined : migrate(parsed);
     if (!migrated) return this.corrupt('it has no known layout');
 
     if (migrated.version > PROFILES_VERSION) {
@@ -383,6 +396,8 @@ export class ProfilesStore {
         try {
           await this.secrets.set(secret.profileId, secret.kind, secret.value);
         } catch (error) {
+          // Any other failure (EACCES, ENOSPC, ...) may pass: keep the v0 file, retry later.
+          if (!(error instanceof SecretStorageUnavailableError)) throw error;
           // Never keep it in connections.json: the user is asked for it instead.
           this.log(
             `could not move the password of ${secret.profileId} into secrets.bin, ` +

@@ -127,15 +127,19 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   `setSecret` answers `secureStorage: false`), `unavailable` (`setSecret` → `UNSUPPORTED`).
   Renderer-facing: `profiles.secretStorage`, `profiles.setSecret`, `profiles.clearSecret`
   (`secretsHandlers`); values only go out via `secrets.get` on the privileged port. The profiles
-  store uses `kinds()` for `profiles.get`'s `storedSecrets`, `delete(id)` on profile deletion and
-  `status().defaultSecretMode` for new profiles. Tests use `FakeSafeStorage`
+  store uses `kinds()` for `profiles.get`'s `storedSecrets` and `delete(id)` on profile deletion;
+  it never rewrites `secretMode`. The renderer's connection form takes `defaultSecretMode` from
+  `profiles.secretStorage` for new profiles. Tests use `FakeSafeStorage`
   (`src/secrets/testing.ts`). `packages/contract/src/no-secrets.spec.ts` fails when any
   renderer-visible result, stream or broadcast schema gets a text field named like a secret.
 - Profiles (`src/profiles/`): `ProfilesStore` keeps `connections.json` in `userData` —
   `{ version: 1, profiles: [Profile…] }` (creation order; contract `profile` schema, so no
   password in a connection string). Version 0 (a bare array of `{ id?, name, uri, group, readonly,
   isProduction, askPassword }`, fixture `fixtures/connections.v0.json`) is migrated on load: the
-  URI's password moves to `secrets.bin`, the file is rewritten. Writes are atomic like
+  URI's password moves to `secrets.bin` (falling back to `secretMode: 'ask'` only when secret
+  storage is unavailable; other errors keep the v0 file for a retry), the file is rewritten; an
+  entry without an id gets a deterministic `v0-<sha-256>` id. Saved profiles keep the
+  `secretMode` the caller sends. Writes are atomic like
   `settings.json` (`connections.json.tmp`, flushed, renamed; a stale temp is removed on load);
   an invalid file is renamed `connections.json.corrupt-<time>`; a newer version is read but
   changes answer `UNSUPPORTED`. `delete` also removes the profile's secrets, `duplicate` copies
