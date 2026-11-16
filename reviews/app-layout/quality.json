@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "task": "app-layout",
+  "reviewed_revision": "e48d66a87463535a7e903206a642a67865dbb144",
+  "helpers": {
+    "test-writer":   {"status": "completed", "report": "reviews/app-layout/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/app-layout/review.md"},
+    "fixer":         {"status": "completed", "report": "reviews/app-layout/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "R1-CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "first review (a9c1ea6): stale app.settings.changed broadcasts undid newer sidebar widths; fixed in 148cea3 (fixes.md round 1)"},
+    {"id": "R1-CR-2", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "first review: sidebar New connection link did nothing on the current URL; fixed in 148cea3"},
+    {"id": "R1-CR-3", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "first review: tab strip did not follow the ARIA tabs pattern; fixed in 148cea3"},
+    {"id": "R1-CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "first review: Ctrl/Cmd+W matched only by event.key; fixed in 148cea3"},
+    {"id": "TW-1", "source": "test-writer", "severity": "Low", "disposition": "fixed",
+     "note": "Ctrl/Cmd+W on the focused active tab dropped focus to body; fixed in 0793512 (fixes.md round 2), confirmed by the final test-writer run"},
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "final review: docs/ARCHITECTURE.md main-window section names only NavigationEnd, not the same-URL NavigationSkipped case; wording nit, the behavior is tested in app-shell.spec.ts; left to avoid another review round"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "final review: Ctrl+Tab and Ctrl+PageUp/PageDown change the selected tab but keep focus on the previously focused tab when focus was in the strip; selection, panel and aria-selected are correct and arrow keys move focus; minor a11y polish left deliberately"}
+  ],
+  "validation": [
+    {"command": "cd packages/renderer && npx ng test --include='src/app/layout/**/*.spec.ts'", "result": "pass"},
+    {"command": "npm run check", "result": "pass"},
+    {"command": "npm run test:e2e -- test/e2e/layout.e2e.ts", "result": "pass"}
+  ]
+}
