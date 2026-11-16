@@ -15,7 +15,8 @@ Client certificate (cert+key or PEM bundle with passphrase) and MONGODB-X509 aut
   - verified (2026-11-17 00:32+0100 by felix/agent-2): npx vitest run --config test/integration/vitest.config.ts x509 proxy (Docker fixtures) -> 2 files, 18 passed; x509.int.spec.ts: generated client cert (PEM bundle, encrypted bundle, separate cert/key) authenticates; same-CA cert without user and mismatching user name -> AUTH_FAILED
 - [x] Proxy: connection through a SOCKS5 container works (int test)
   - verified (2026-11-17 00:32+0100 by felix/agent-2): npx vitest run --config test/integration/vitest.config.ts x509 proxy (Docker, serjs/go-socks5-proxy fixture) -> 18 passed; proxy.int.spec.ts 'SOCKS5 proxy': connects through the SOCKS5 container to a replica set whose member names resolve only behind the proxy (without proxy -> DNS_ERROR)
-- [ ] secondaryPreferred read preference routes reads to a secondary (int test checks `hello.me`)
+- [x] secondaryPreferred read preference routes reads to a secondary (int test checks `hello.me`)
+  - verified (2026-11-17 00:32+0100 by felix/agent-2): npx vitest run --config test/integration/vitest.config.ts x509 proxy (Docker 2-member replica set) -> 18 passed; proxy.int.spec.ts 'read preference': secondaryPreferred profile -> hello.me is the secondary; primary -> primary (driver-client level; raw db.command paths tracked in raw-cmd-read-pref)
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
