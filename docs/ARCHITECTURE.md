@@ -100,7 +100,15 @@ Contract layout (`packages/contract/src/`):
 - Helpers: `route(method)`, `parseParams`/`parseResult` (readable `INVALID_PARAMS` errors),
   `WRITE_METHODS`, types `ParamsOf<M>`, `ResultOf<M>`, `StreamDataOf<M>`.
 - Writes carry `profileId` and optional `confirmed`; the backend refuses them on read-only
-  profiles and requires `confirmed: true` on production profiles.
+  profiles and requires `confirmed: true` for every write on production profiles and for
+  `docs.updateMany` / `docs.deleteMany` on every profile.
+- Cancel routing: a request and its stream belong to the process that served the request
+  (`route(method)`). The preload/main sends `cancel` to the owner of the target: by the request's
+  method for a request id, and through a streamId → owner map kept by `main` for a stream id.
+  Streams of main-routed `io.*` methods run in the backend, so `main` forwards their cancel there.
+- File paths: the renderer never sends paths for `io.*` (opaque tokens from native dialogs). The
+  exception is the profile's TLS/SSH file paths, which are stored in the profile; the renderer
+  gets them from `profiles.chooseFile` (native dialog in `main`).
 - Adding a method: add it to its group file, add a valid/invalid sample to `SAMPLES` in
   `index.spec.ts` (the test fails otherwise), and to `EXPECTED_WRITES` if it writes.
 

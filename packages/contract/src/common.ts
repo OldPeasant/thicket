@@ -10,7 +10,7 @@ import { z } from 'zod';
  */
 
 /** Which EJSON shape a string carries. */
-export type EJsonKind = 'document' | 'array' | 'value';
+export type EJsonKind = 'document' | 'array' | 'documentOrArray' | 'value';
 
 /** Every EJSON-text schema, with the shape it carries (used by the contract tests). */
 export const ejsonSchemas = new WeakMap<z.ZodType, EJsonKind>();
@@ -50,11 +50,28 @@ export function ejsonArray(description = 'EJSON array'): z.ZodString {
   return schema;
 }
 
-/** Schema for EJSON text of a single BSON value (any type). */
+/**
+ * Schema for EJSON text of a document (`{...}`) or an array (`[...]`), e.g. an update that may be
+ * an update document or an update pipeline. One schema (not a union) so the message stays readable.
+ */
+export function ejsonDocumentOrArray(description = 'EJSON document or array'): z.ZodString {
+  const schema = z
+    .string()
+    .refine((text) => firstChar(text) === '{' || firstChar(text) === '[', {
+      message: `${description} must be canonical EJSON text of a document (starting with "{") or an array (starting with "[")`,
+    })
+    .describe(description);
+  ejsonSchemas.set(schema, 'documentOrArray');
+  return schema;
+}
+
+/** Schema for EJSON text of a single BSON value (any type). Blank text is rejected. */
 export function ejsonValue(description = 'EJSON value'): z.ZodString {
   const schema = z
     .string()
-    .min(1, { message: `${description} must be non-empty canonical EJSON text` })
+    .refine((text) => text.trim().length > 0, {
+      message: `${description} must be non-empty canonical EJSON text`,
+    })
     .describe(description);
   ejsonSchemas.set(schema, 'value');
   return schema;
@@ -89,7 +106,8 @@ export const collTarget = { profileId, db: dbName, coll: collName };
 
 /**
  * Fields every write carries. The backend refuses writes on read-only profiles and requires
- * `confirmed: true` on production profiles, so a forgotten confirm dialog fails closed.
+ * `confirmed: true` for every write on production profiles and for the bulk writes
+ * `docs.updateMany` / `docs.deleteMany` on every profile, so a forgotten confirm dialog fails closed.
  */
 export const writeFields = {
   profileId,

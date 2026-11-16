@@ -7,7 +7,9 @@ import {
   conflictDetail,
   ejsonArray,
   ejsonDocument,
+  ejsonDocumentOrArray,
   ejsonSchemas,
+  hasPassword,
   ejsonValue,
   errorInfo,
   errorSummary,
@@ -90,6 +92,10 @@ const RESULTS: { [M in MethodName]: { valid: ResultOf<M>; invalid: unknown } } =
   'profiles.export': {
     valid: { path: null, exported: 0 },
     invalid: { path: '/tmp/x.json', exported: -1 },
+  },
+  'profiles.chooseFile': {
+    valid: { path: '/home/user/certs/ca.pem' },
+    invalid: { path: '' },
   },
   'profiles.setSecret': { valid: { secureStorage: false }, invalid: { secureStorage: 'no' } },
   'profiles.clearSecret': { valid: {}, invalid: 'done' },
@@ -520,6 +526,87 @@ describe('readable params messages', () => {
     expect(parseParams('docs.updateMany', { ...base, update: '[{"$set":{"a":1}}]' }).ok).toBe(true);
     expect(parseParams('docs.updateMany', { ...base, update: { $set: { a: 1 } } }).ok).toBe(false);
   });
+
+  it('docs.find rejects after together with before', () => {
+    const base = { ...NS, filter: '{}' };
+    expect(parseParams('docs.find', { ...base, after: '{"_id":1}' }).ok).toBe(true);
+    expect(parseParams('docs.find', { ...base, before: '{"_id":1}', limit: 20 }).ok).toBe(true);
+    const parsed = parseParams('docs.find', { ...base, after: '{"_id":1}', before: '{"_id":9}' });
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error.message).toContain('at most one of after or before');
+  });
+
+  it('docs.find rejects skip together with range paging', () => {
+    const base = { ...NS, filter: '{}' };
+    expect(parseParams('docs.find', { ...base, skip: 40, limit: 20 }).ok).toBe(true);
+    for (const range of [{ after: '{"_id":1}' }, { before: '{"_id":1}' }]) {
+      const parsed = parseParams('docs.find', { ...base, skip: 20, ...range });
+      expect(parsed.ok).toBe(false);
+      if (!parsed.ok) {
+        expect(parsed.error.message).toContain('skip or range paging (after/before), not both');
+      }
+    }
+  });
+});
+
+describe('profile connection strings', () => {
+  const save = (connectionString: string) =>
+    parseParams('profiles.save', { profile: { ...PROFILE, connectionString } });
+
+  it('accepts connection strings without userinfo or with a username only', () => {
+    for (const uri of [
+      'mongodb://db.example.test:27017',
+      'mongodb://alice@db.example.test:27017/?authSource=admin',
+      'mongodb://alice@h1.example.test:27017,h2.example.test:27018/shop?replicaSet=rs0',
+      'mongodb+srv://alice@cluster0.example.test/?retryWrites=true',
+      'mongodb+srv://cluster0.example.test',
+      'mongodb://h1.example.test:27017,h2.example.test:27018?w=majority',
+      'mongodb://db.example.test/?authMechanismProperties=SERVICE_NAME:mongodb',
+    ]) {
+      expect([uri, hasPassword(uri), save(uri).ok]).toEqual([uri, false, true]);
+    }
+  });
+
+  it('rejects a password in the userinfo with a readable message', () => {
+    for (const uri of [
+      'mongodb://alice:pw@db.example.test:27017',
+      'mongodb://alice:@db.example.test',
+      'mongodb://alice:pw@h1.example.test:27017,h2.example.test:27018/shop?replicaSet=rs0',
+      'mongodb+srv://alice:pw@cluster0.example.test/?retryWrites=true',
+      'mongodb://alice:p%40w@db.example.test?tls=true',
+    ]) {
+      expect([uri, hasPassword(uri)]).toEqual([uri, true]);
+      const parsed = save(uri);
+      expect([uri, parsed.ok]).toEqual([uri, false]);
+      if (parsed.ok) continue;
+      expect(parsed.error.message).toContain('connectionString must not contain a password');
+      expect(parsed.error.message).toContain('→ at profile.connectionString');
+      expect(parsed.error.message).not.toContain(':pw@');
+    }
+  });
+
+  it('rejects a password in results and drafts too', () => {
+    const leaked = { ...PROFILE, connectionString: 'mongodb://alice:pw@db.example.test' };
+    expect(parseResult('profiles.list', { profiles: [leaked] }).ok).toBe(false);
+    expect(parseResult('profiles.importUris', { imported: [leaked], skipped: [] }).ok).toBe(false);
+    expect(parseParams('conn.test', { profile: { ...leaked, id: undefined } }).ok).toBe(false);
+  });
+});
+
+describe('profiles.chooseFile', () => {
+  it('is served by main and takes a known purpose', () => {
+    expect(route('profiles.chooseFile')).toBe('main');
+    for (const purpose of ['tlsCaFile', 'tlsCertificateKeyFile', 'sshPrivateKeyFile']) {
+      expect(parseParams('profiles.chooseFile', { purpose }).ok).toBe(true);
+    }
+    expect(parseParams('profiles.chooseFile', {}).ok).toBe(false);
+    expect(parseParams('profiles.chooseFile', { purpose: 'tlsCaFile', path: '/x' }).ok).toBe(false);
+  });
+
+  it('returns null as the path when the dialog was cancelled', () => {
+    expect(parseResult('profiles.chooseFile', { path: null }).ok).toBe(true);
+    expect(parseResult('profiles.chooseFile', {}).ok).toBe(false);
+  });
 });
 
 describe('EJSON text helpers', () => {
@@ -547,6 +634,33 @@ describe('EJSON text helpers', () => {
     expect(schema.safeParse('{}').error?.issues[0]?.message).toBe(
       'probe must be canonical EJSON text of an array (starting with "[")',
     );
+  });
+
+  it('ejsonDocumentOrArray accepts text starting with "{" or "["', () => {
+    const schema = ejsonDocumentOrArray('probe');
+    expect(ejsonSchemas.get(schema)).toBe('documentOrArray');
+    for (const value of ['{}', ' [1]', '\n{"$set":{}}']) {
+      expect([value, schema.safeParse(value).success]).toEqual([value, true]);
+    }
+    for (const value of ['', '   ', '"x"', 'null', {}, [], null]) {
+      expect([value, schema.safeParse(value).success]).toEqual([value, false]);
+    }
+    expect(schema.safeParse('x').error?.issues[0]?.message).toBe(
+      'probe must be canonical EJSON text of a document (starting with "{") or an array (starting with "[")',
+    );
+    expect(ejsonDocumentOrArray().safeParse('x').error?.issues[0]?.message).toContain(
+      'EJSON document or array',
+    );
+  });
+
+  it('ejsonValue rejects whitespace-only text with a readable message', () => {
+    const schema = ejsonValue('probe');
+    for (const value of ['   ', '\n\t']) {
+      expect(schema.safeParse(value).error?.issues[0]?.message).toBe(
+        'probe must be non-empty canonical EJSON text',
+      );
+    }
+    expect(parseParams('docs.get', { ...NS, id: '  ' }).ok).toBe(false);
   });
 
   it('ejsonValue accepts any non-empty text and nothing else', () => {

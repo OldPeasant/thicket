@@ -51,9 +51,16 @@ export type StreamEnd = z.infer<typeof streamEnd>;
 export const streamError = errorInfo;
 
 /**
- * Cancels a running request or stream: `target` is a request `id` or a `streamId`. The backend
+ * Cancels a running request or stream: `cancel` is a request `id` or a `streamId`. The backend
  * kills the server-side operation (`killCursors`/`killOp`); the request answers `CANCELLED`, a
  * stream ends with an `error` event of code `CANCELLED`. Unknown or finished targets are ignored.
+ *
+ * Routing: a request and the stream it returns belong to the process that served the request,
+ * `route(method)`. The preload/main delivers a cancel to the process that owns the target: for a
+ * request id it uses the route of that request's method; for a stream id `main` keeps a map
+ * streamId → owner, filled from the responses that returned a `streamId`. Streams of main-routed
+ * `io.*` methods are run by the backend on `main`'s behalf, so `main` forwards their cancel to the
+ * backend over its privileged port.
  */
 export const cancel = z.object({
   cancel: z.string().min(1),

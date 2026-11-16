@@ -61,6 +61,7 @@ const SAMPLES: { [M in MethodName]: { valid: ParamsOf<M>; invalid: unknown } } =
   'profiles.importCompass': { valid: {}, invalid: { path: '/etc/passwd' } },
   'profiles.importUris': { valid: { uris: ['mongodb://a:27017'] }, invalid: { uris: [] } },
   'profiles.export': { valid: { profileIds: [P] }, invalid: { profileIds: P } },
+  'profiles.chooseFile': { valid: { purpose: 'tlsCaFile' }, invalid: { purpose: 'anyFile' } },
   'profiles.setSecret': {
     valid: { profileId: P, kind: 'password', value: 's3cret' },
     invalid: { profileId: P, kind: 'pin', value: 'x' },

@@ -41,6 +41,18 @@ export const READ_PREFERENCES = [
 
 const optionalString = z.string().min(1).optional();
 
+/**
+ * Whether a `mongodb://` / `mongodb+srv://` URI has a password in its userinfo. The authority
+ * (userinfo and the host list, e.g. `u:p@h1:27017,h2:27017`) ends at the first `/`, `?` or `#`;
+ * the userinfo is everything before its last `@`, and a `:` in it separates user and password.
+ */
+export function hasPassword(uri: string): boolean {
+  const rest = uri.replace(/^mongodb(\+srv)?:\/\//, '');
+  const authority = rest.split(/[/?#]/, 1)[0] ?? '';
+  const at = authority.lastIndexOf('@');
+  return at >= 0 && authority.slice(0, at).includes(':');
+}
+
 export const profileAuth = z.strictObject({
   mechanism: z.enum(AUTH_MECHANISMS),
   username: optionalString,
@@ -49,9 +61,20 @@ export const profileAuth = z.strictObject({
   secretMode: z.enum(['saved', 'ask', 'none']),
 });
 
+/**
+ * File paths in a profile (`tls.caFile`, `tls.certificateKeyFile`, `ssh.privateKeyFile`) are the
+ * deliberate exception to "the renderer never sends file paths": they are part of the stored
+ * profile. The renderer gets them from `profiles.chooseFile` (native dialog in `main`).
+ */
+export const FILE_PURPOSES = ['tlsCaFile', 'tlsCertificateKeyFile', 'sshPrivateKeyFile'] as const;
+
+export type FilePurpose = (typeof FILE_PURPOSES)[number];
+
 export const profileTls = z.strictObject({
   enabled: z.boolean(),
+  /** Path from `profiles.chooseFile({ purpose: 'tlsCaFile' })`. */
   caFile: optionalString,
+  /** Path from `profiles.chooseFile({ purpose: 'tlsCertificateKeyFile' })`. */
   certificateKeyFile: optionalString,
   allowInvalidHostnames: z.boolean().optional(),
   allowInvalidCertificates: z.boolean().optional(),
@@ -62,6 +85,7 @@ export const profileSsh = z.strictObject({
   port: z.number().int().min(1).max(65535),
   username: z.string().min(1),
   method: z.enum(['password', 'privateKey', 'agent']),
+  /** Path from `profiles.chooseFile({ purpose: 'sshPrivateKeyFile' })`. */
   privateKeyFile: optionalString,
 });
 
@@ -73,10 +97,20 @@ export const profile = z.strictObject({
   color: optionalString,
   /** Folder/group path, `/`-separated. */
   folder: optionalString,
-  /** Connection string without password (`mongodb://` or `mongodb+srv://`). */
-  connectionString: z.string().regex(/^mongodb(\+srv)?:\/\//, {
-    message: 'connectionString must start with mongodb:// or mongodb+srv://',
-  }),
+  /**
+   * Connection string without password (`mongodb://` or `mongodb+srv://`, one or more hosts).
+   * A username in the userinfo (`user@host`) is allowed; a password (`user:pass@host`) is rejected
+   * in params and results, so it can neither be stored in `connections.json` nor reach the renderer.
+   */
+  connectionString: z
+    .string()
+    .regex(/^mongodb(\+srv)?:\/\//, {
+      message: 'connectionString must start with mongodb:// or mongodb+srv://',
+    })
+    .refine((uri) => !hasPassword(uri), {
+      message:
+        'connectionString must not contain a password (user:password@); store it with profiles.setSecret',
+    }),
   auth: profileAuth.optional(),
   tls: profileTls.optional(),
   ssh: profileSsh.optional(),
@@ -159,6 +193,13 @@ export const profilesMethods = defineMethods({
     params: z.strictObject({ profileIds: z.array(profileId).optional() }),
     /** `path` is `null` when the dialog was cancelled. */
     result: z.object({ path: z.string().nullable(), exported: z.number().int().nonnegative() }),
+  },
+  'profiles.chooseFile': {
+    summary: 'Choose a TLS CA, client certificate/key or SSH key file with a native open dialog',
+    route: 'main',
+    params: z.strictObject({ purpose: z.enum(FILE_PURPOSES) }),
+    /** `path` is `null` when the dialog was cancelled. */
+    result: z.object({ path: z.string().min(1).nullable() }),
   },
   'profiles.setSecret': {
     summary: 'Store a secret in the OS keychain',

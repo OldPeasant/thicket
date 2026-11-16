@@ -7,6 +7,7 @@ import {
   dbName,
   ejsonArray,
   ejsonDocument,
+  ejsonDocumentOrArray,
   ejsonValue,
   maxTimeMS,
   streamResult,
@@ -50,20 +51,28 @@ export const docsMethods = defineMethods({
   'docs.find': {
     summary: 'Run a query; documents arrive as batches on the returned stream',
     route: 'backend',
-    params: z.strictObject({
-      ...collTarget,
-      ...queryFields,
-      skip: count.optional(),
-      limit: count.optional(),
-      /**
-       * Range paging: the sort-key values of the last row of the previous page (EJSON document,
-       * e.g. `{"_id":{"$oid":"..."}}`); the backend continues after them in sort order.
-       */
-      after: ejsonDocument('range start').optional(),
-      /** Range paging backwards: continue before these sort-key values. */
-      before: ejsonDocument('range end').optional(),
-      batchSize: z.number().int().positive().optional(),
-    }),
+    /** Paging is either `skip`/`limit` or range paging with one of `after`/`before` (+ `limit`). */
+    params: z
+      .strictObject({
+        ...collTarget,
+        ...queryFields,
+        skip: count.optional(),
+        limit: count.optional(),
+        /**
+         * Range paging: the sort-key values of the last row of the previous page (EJSON document,
+         * e.g. `{"_id":{"$oid":"..."}}`); the backend continues after them in sort order.
+         */
+        after: ejsonDocument('range start').optional(),
+        /** Range paging backwards: continue before these sort-key values. */
+        before: ejsonDocument('range end').optional(),
+        batchSize: z.number().int().positive().optional(),
+      })
+      .refine((p) => p.after === undefined || p.before === undefined, {
+        message: 'docs.find takes at most one of after or before',
+      })
+      .refine((p) => p.skip === undefined || (p.after === undefined && p.before === undefined), {
+        message: 'docs.find takes skip or range paging (after/before), not both',
+      }),
     result: streamResult,
     stream: docsBatch,
   },
@@ -186,7 +195,7 @@ export const docsMethods = defineMethods({
       ...collWrite,
       filter: queryFields.filter,
       /** Update document, or an update pipeline as an EJSON array. */
-      update: z.union([ejsonDocument('update'), ejsonArray('update pipeline')]),
+      update: ejsonDocumentOrArray('update'),
       collation: queryFields.collation,
       /** Matched count shown in the preview; the backend may refuse when it changed a lot. */
       expectedCount: count.optional(),

@@ -7,6 +7,8 @@ export type Route = 'main' | 'backend';
  * Whether a method writes to the server.
  * - `always`: the backend refuses it on read-only profiles and needs `confirmed: true` on production ones.
  * - `conditional`: writes only for some params (e.g. `agg.run` with `$out`/`$merge`); then the same rules apply.
+ * The bulk writes `docs.updateMany` and `docs.deleteMany` need `confirmed: true` on every profile,
+ * not only on production ones (SPEC.md M1 "Safety").
  */
 export type WriteKind = 'always' | 'conditional';
 
