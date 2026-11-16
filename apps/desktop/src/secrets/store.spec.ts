@@ -222,6 +222,41 @@ describe('SecretsStore with a corrupt file', () => {
     expect(await reopened.get('p')).toEqual({ password: 'fresh' });
   });
 
+  // The keyring prefix must be exactly `v11` at offset 0; everything near it is corrupt.
+  it.each([
+    ['an empty file', Buffer.alloc(0)],
+    ['a file shorter than the prefix (v1)', Buffer.from('v1')],
+    ['an upper-case prefix (V11)', Buffer.from('V11-ciphertext')],
+    ['v11 not at the start', Buffer.from('xv11-ciphertext')],
+    ['another version (v12)', Buffer.from('v12-ciphertext')],
+  ])('weak backend, %s: moved aside, not locked', async (_name, bytes) => {
+    await writeFile(file, bytes);
+    const { store, log } = makeStore(new FakeSafeStorage({ backend: 'basic_text' }));
+    expect(await store.get('p')).toBeNull();
+    expect(await readdir(dir)).toEqual(['secrets.bin.corrupt-2026-11-16T10-20-30-456Z']);
+    expect(log).not.toHaveBeenCalledWith(expect.stringContaining('OS keyring'));
+    await store.set('p', 'password', 'fresh');
+    expect(await store.get('p')).toEqual({ password: 'fresh' });
+  });
+
+  it.each([
+    ['just the prefix (v11)', 'basic_text', Buffer.from('v11')],
+    ['before ready (unknown backend)', 'unknown', Buffer.from('v11-keyring-ciphertext')],
+  ])(
+    'weak backend, undecryptable keyring file, %s: locked and kept',
+    async (_n, backend, bytes) => {
+      await writeFile(file, bytes);
+      const { store } = makeStore(new FakeSafeStorage({ backend }));
+      expect((await store.status()).level).toBe('weak');
+      expect(await store.get('p')).toBeNull();
+      await expect(store.set('p', 'password', 'x')).rejects.toBeInstanceOf(
+        SecretStorageUnavailableError,
+      );
+      expect(await readFile(file)).toEqual(bytes);
+      expect(await readdir(dir)).toEqual(['secrets.bin']);
+    },
+  );
+
   it('a file from another keychain key (decrypt throws) on a secure backend is moved aside', async () => {
     await writeFile(file, Buffer.from('v11-other-key-ciphertext'));
     const { store } = makeStore();

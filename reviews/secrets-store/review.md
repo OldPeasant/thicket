@@ -4,37 +4,36 @@ Date: 2026-11-16
 
 Task: secrets-store - M1: Secrets in the OS keychain via safeStorage
 
-Scope: second pass over the whole task diff at the final revision, `git diff 516f407..e5b36ac -- . ':!reviews' ':!tasks'`, restricted to the task's own commits (b7fbbdb implementation, 1a34c24 tests, e5b36ac fixes for CR-1/CR-2). Other files in that range come from other tasks merged into main and are out of scope. Committed changes only; the working tree was clean.
+Scope: third pass over the task's code at the final revision, `git diff 516f407..4ca6a19 -- apps packages docs`, restricted to the task's own commits (32980b6 implementation, 495019c tests, 293ff55 first fixes, 01d5d3e second-pass tests, 4ca6a19 fix for the second-pass P2). Other commits in that range belong to other tasks merged into main and are out of scope. Committed changes only. At review time the working tree had an uncommitted edit to `apps/desktop/src/secrets/store.spec.ts` (+32 lines of extra prefix edge-case tests, apparently from the concurrent test-writer pass). It was not reviewed as part of the revision.
 
-Reviewed revision: e5b36ac5b7a0ab7f8652a5ce8c09f75b046255bd
+Reviewed revision: 4ca6a194051c7731c2a1fc22ddd5a4ff2853b00b
 
 Requirements:
-- tasks/secrets-store.md acceptance criteria and recorded assumptions, including the 19:52 refinement of the move-aside assumption
+- tasks/secrets-store.md acceptance criteria and recorded assumptions, including the 19:52 lock refinement and the 19:56 `v11`/`v10` prefix assumption
 - SPEC.md (secrets in `safeStorage`, `basic_text` warning and "don't save password" default, `secrets.bin` keyed by profile id, secrets never leave backend/main)
 - docs/ARCHITECTURE.md ("Secrets" bullet, privileged port)
 - docs/QUALITY.md (report contract), AGENTS.md
-- First-pass review (CR-1, CR-2) and reviews/secrets-store/fixes.md
+- Earlier review passes (first pass CR-1, CR-2; second pass CR-1)
 
 Git range:
 - Branch: main
-- HEAD: e5b36ac5b7a0ab7f8652a5ce8c09f75b046255bd
+- HEAD: 4ca6a194051c7731c2a1fc22ddd5a4ff2853b00b
 - Base/start: 516f40781da5bbfce69b7a1f897c8e25b8824aec
-- Commits reviewed: 3 task code commits (b7fbbdb, 1a34c24, e5b36ac); the rest of the range is task-state commits and other tasks
+- Commits reviewed: 5 task code commits (32980b6, 495019c, 293ff55, 01d5d3e, 4ca6a19). The rest of the range is task-state commits and other tasks.
 
-Summary: 0 P0, 0 P1, 1 P2, 0 P3
+Summary: 0 P0, 0 P1, 0 P2, 0 P3
 
 Commands run (read-only):
-- `npx vitest run apps/desktop/src/secrets apps/desktop/src/main/handlers.spec.ts packages/contract/src` -> 8 files, 780 tests passed
+- `npx vitest run apps/desktop/src/secrets apps/desktop/src/main/handlers.spec.ts` -> 4 files, 78 tests passed (this run includes the uncommitted spec edit)
 
-Status of first-pass findings:
-- CR-1 (clearSecret reported success while encryption was unavailable): resolved. `delete()` (`apps/desktop/src/secrets/store.ts:219`) now throws `SecretStorageUnavailableError` when the level is `unavailable` and `secrets.bin` exists. It is still a no-op when there is no file. `profiles.clearSecret` maps the error to `UNSUPPORTED` (`apps/desktop/src/secrets/handlers.ts:29`). The store and handler tests cover the refusal, the unchanged file, a later read of the secret once encryption works, and the no-file no-op.
-- CR-2 (keyring-encrypted file moved aside on a weak backend): resolved as written. On a `weak` backend, a decrypt failure leaves the file in place and locks the store (`store.ts:276`). Invalid content that does decrypt is still moved aside. The assumption was refined to match, and ARCHITECTURE.md was updated. The fix introduces CR-1 below.
+Status of the second-pass finding:
+- Second-pass CR-1 (on a weak backend any decrypt failure locked the store permanently): resolved. `load()` now locks only when decryption fails, the file starts with the `v11` keyring prefix and the level is `weak` (`apps/desktop/src/secrets/store.ts:288`, `isKeyringCiphertext` at `store.ts:85`). Any other undecryptable file is moved aside to a timestamped `secrets.bin.corrupt-...` file and the store starts empty, as it does on a secure backend. This includes garbage bytes, a damaged `v10` basic_text file and plaintext. So criterion 1 ("file corruption handled") again holds on weak backends. Committed tests cover these cases. `store.spec.ts:211` checks that garbage, `v10-truncated` and plain JSON are moved aside, not locked, and that a later `set` persists across a reopen. `store.spec.ts:183` and `handlers.spec.ts:122` still cover the `v11` lock. The real-Electron test (`apps/desktop/test/secrets.electron.spec.ts:68`) asserts that basic_text writes `v10`, which guards the premise the check relies on. The FakeSafeStorage now writes `v10`/`v11` prefixes by backend, so its files match the real format. The assumption and the ARCHITECTURE "Secrets" bullet describe the new behavior accurately.
 
 Checked without new findings:
-- The lock is set only inside `load()`, after the result is cached in `this.data`, so it lasts for the whole session and is logged once. `set` and `delete` check the lock after `load()`, and `get`/`kinds` read empty, as documented.
-- Before the `fileExists()` probe, `delete()` checks whether the level is `unavailable`, so it never decrypts or moves anything aside in that state. Read errors other than ENOENT still propagate.
-- The handlers still return no secret values. `secrets.get` remains privileged-only, so criterion 3's evidence is unaffected.
-- The secure-backend move-aside path and the re-encryption path are unchanged apart from the refactor into `decrypted`/`parsed`. Their existing tests still pass.
+- Residual risk accepted by the recorded 19:56 assumption: a `v11` file that is itself corrupt cannot be told apart from a healthy keyring file while no keyring is reachable, so it still locks the store on a weak backend. This is inherent to the design and documented, not a defect of the fix. The `v11` meaning comes from Chromium source and is not verifiable here without a keyring, which the assumption states.
+- The prefix check is reached only after a decrypt failure on a `weak` level. The weak level is only ever reported on Linux, so platforms whose os_crypt also uses `v10` (macOS, Windows) are unaffected.
+- The check compares a zero-length subarray for empty or short files without error, so those files are moved aside.
+- Secure-backend move-aside, the `unavailable` refusal for `delete`/`set`, re-encryption, operation serialization and the handlers' `UNSUPPORTED` mapping are unchanged by the fix. Handlers still return no secret values, and `secrets.get` remains privileged-only (criterion 3).
 
 ## P0 Critical
 
@@ -46,12 +45,7 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | On a weak backend a genuinely corrupt secrets.bin now locks the store permanently, with no recovery in the app**
-    - File: `apps/desktop/src/secrets/store.ts:276`
-    - Category: Correctness
-    - Problem: The fix treats every `decryptStringAsync` failure on a `weak` backend as "written with a keyring not available now". The store then locks: `set`/`delete` throw, and `setSecret`/`clearSecret` answer `UNSUPPORTED` with the message "secrets.bin was encrypted with an OS keyring that is not available now". Some failures have another cause: a file written with the `basic_text` key that was later damaged (truncated or bit-flipped on disk, partial copy during a backup restore), or any non-ciphertext bytes. On a machine that only ever has `basic_text`, such as a Linux desktop without a keyring (the configuration the Electron tests run in), the keyring never "comes back". So the store stays locked in every later session, and the user can never save a password again unless they find and delete `secrets.bin` by hand. The error message also points them at the wrong cause. Before the fix, criterion 1 ("file corruption handled") was met on every level by moving the file aside. Now it is met only on `secure` backends and for files that decrypt but hold invalid content. The new tests (`store.spec.ts:183`, `handlers.spec.ts:122`) cover only the keyring-ciphertext case. No test covers corrupt bytes on a weak backend.
-    - Why it matters: A one-off file corruption becomes a permanent loss of the "save password" feature on weak-backend Linux installations. The app shows a misleading explanation and offers no way out.
-    - Suggested fix: Lock only when the file plausibly comes from a keyring. For example, check the ciphertext's version prefix: on Linux, Chromium's OS-crypt marks keyring-key data `v11` and hard-coded-key data `v10`. Verify this against the Electron 45 behavior before relying on it. Move anything else aside, as on a secure backend. Alternatively, keep the lock but give `set` an explicit recovery path that moves the locked file aside (for example, a confirmed "reset saved secrets" action). Either way, add a weak-backend test with corrupt, non-keyring bytes, and update the assumption and the ARCHITECTURE "Secrets" bullet to describe the chosen behavior.
+None.
 
 ## P3 Low
 
@@ -59,4 +53,4 @@ None.
 
 ## Review conclusion
 
-Material issues found; fix before completing the task.
+No material issues found.
