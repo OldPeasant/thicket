@@ -9,7 +9,12 @@ const SECRET_OPTIONS = new Set(['proxypassword', 'tlscertificatekeyfilepassword'
 const SECRET_MECHANISM_PROPERTIES = new Set(['aws_session_token']);
 
 const SCHEME = /^mongodb(?:\+srv)?:\/\//i;
-const URI_IN_TEXT = /mongodb(?:\+srv)?:\/\/[^\s"'<>`]+/gi;
+/**
+ * A connection string inside free text: up to the next whitespace or the next connection string.
+ * Quotes, `<`, `>` and backticks may appear unencoded in a password, so they don't end the match;
+ * a quote after the hosts just stays in the token and `mask()` keeps it as it is.
+ */
+const URI_IN_TEXT = /mongodb(?:\+srv)?:\/\/(?:(?!mongodb(?:\+srv)?:\/\/)\S)+/gi;
 
 function tryDecode(s: string): string | undefined {
   try {

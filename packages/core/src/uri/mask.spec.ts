@@ -121,6 +121,25 @@ describe('maskText', () => {
     expect(maskText('nothing to see: password=x')).toBe('nothing to see: password=x');
   });
 
+  it('masks passwords with unencoded quotes, "<", ">" and backticks', () => {
+    for (const secret of ["ab'cdSecret", 'ab"cdSecret', 'a<b>cSecret', 'ab`cdSecret']) {
+      for (const text of [
+        `connect mongodb://u:${secret}@host.example.com failed`,
+        `connect 'mongodb://u:${secret}@host.example.com' failed`,
+        `connect "mongodb://u:${secret}@h/db?tls=true" failed`,
+      ]) {
+        expectNoLeak(maskText(text), [secret]);
+      }
+    }
+    expect(maskText("x 'mongodb://u:ab'cdSecret@h' y")).toBe(`x 'mongodb://u:${MASK}@h' y`);
+  });
+
+  it('masks several connection strings not separated by whitespace', () => {
+    expect(maskText('"mongodb://a@h1","mongodb://b:joinedSecret@h2/db"')).toBe(
+      `"mongodb://a@h1","mongodb://b:${MASK}@h2/db"`,
+    );
+  });
+
   it('masks connection strings with an upper-case scheme and followed by punctuation', () => {
     expect(maskText('see MONGODB://u:upTxtSecret@h, and mongodb://v:pw2Secret@h2.')).toBe(
       `see MONGODB://u:${MASK}@h, and mongodb://v:${MASK}@h2.`,

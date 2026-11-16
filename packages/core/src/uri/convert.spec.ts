@@ -197,9 +197,35 @@ describe('toConnectionString', () => {
     expect(toConnectionString(m)).toBe('mongodb://localhost:27017');
   });
 
-  it('writes a password without a user name', () => {
-    const m = { ...emptyConnectionModel(), password: 'onlyPass' };
-    expect(toConnectionString(m)).toBe('mongodb://:onlyPass@localhost:27017');
+  it('rejects a password without a user name (the driver rejects empty user info)', () => {
+    const base = emptyConnectionModel();
+    expect(() => toConnectionString({ ...base, password: 'onlyPass' })).toThrow(
+      ConnectionStringError,
+    );
+    expect(() => toConnectionString({ ...base, username: '', password: 'onlyPass' })).toThrow(
+      ConnectionStringError,
+    );
+  });
+
+  it('treats an empty user name as none', () => {
+    const uri = toConnectionString({ ...emptyConnectionModel(), username: '' });
+    expect(uri).toBe('mongodb://localhost:27017');
+    expect(parseConnectionString(uri).username).toBeUndefined();
+  });
+
+  it('encodes an apostrophe in the user info', () => {
+    const m = { ...emptyConnectionModel(), username: "o'neil", password: "it's" };
+    const uri = toConnectionString(m);
+    expect(uri).toBe('mongodb://o%27neil:it%27s@localhost:27017');
+    expect(parseConnectionString(uri)).toEqual(m);
+  });
+
+  it('writes a Unix socket path containing ":" percent-encoded, not in brackets', () => {
+    const uri = 'mongodb://%2Ftmp%2Fa%3Ab.sock';
+    const m = parseConnectionString(uri);
+    expect(m.hosts).toEqual([{ host: '/tmp/a:b.sock' }]);
+    expect(toConnectionString(m)).toBe(uri);
+    expect(parseConnectionString(toConnectionString(m))).toEqual(m);
   });
 
   it('rejects models the driver would reject', () => {

@@ -50,6 +50,14 @@ function parseBool(value: string): boolean | undefined {
   return value === 'true' ? true : value === 'false' ? false : undefined;
 }
 
+/**
+ * Sets an own property even for keys like `__proto__` (keys come from user input; a plain
+ * assignment would change the prototype instead of storing an entry).
+ */
+function setOwn<T>(obj: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(obj, key, { value, enumerable: true, writable: true, configurable: true });
+}
+
 /** `KEY:value,KEY2:value2` (authMechanismProperties, readPreferenceTags). */
 function parsePairs(value: string): Record<string, string> | undefined {
   const out: Record<string, string> = {};
@@ -59,7 +67,7 @@ function parsePairs(value: string): Record<string, string> | undefined {
     if (colon <= 0) return undefined;
     const k = entry.slice(0, colon);
     if (Object.hasOwn(out, k)) return undefined;
-    out[k] = entry.slice(colon + 1);
+    setOwn(out, k, entry.slice(colon + 1));
   }
   return out;
 }
@@ -318,10 +326,10 @@ for (const spec of OPTIONS) {
 }
 
 function addExtra(m: Model, key: string, value: string): void {
-  const prev = m.extra[key];
-  if (prev === undefined) m.extra[key] = value;
+  const prev = Object.hasOwn(m.extra, key) ? m.extra[key] : undefined;
+  if (prev === undefined) setOwn(m.extra, key, value);
   else if (Array.isArray(prev)) prev.push(value);
-  else m.extra[key] = [prev, value];
+  else setOwn(m.extra, key, [prev, value]);
 }
 
 function decode(part: string, what: string): string {
@@ -393,7 +401,9 @@ function encodeQuery(s: string): string {
 
 function formatHost({ host, port }: UriHost): string {
   if (host === '') throw new ConnectionStringError('Empty host name');
-  const name = host.includes(':') ? `[${host}]` : encodeURIComponent(host);
+  // A Unix socket path (contains '/') is percent-encoded even if it contains ':'; only an IPv6
+  // address goes in brackets.
+  const name = host.includes(':') && !host.includes('/') ? `[${host}]` : encodeURIComponent(host);
   if (port === undefined) return name;
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new ConnectionStringError(`Invalid port ${String(port)} for host ${host}`);
@@ -402,9 +412,18 @@ function formatHost({ host, port }: UriHost): string {
 }
 
 /**
+ * Percent-encodes user info. Unlike `encodeURIComponent`, also encodes `'`, so a password in a
+ * written URI never contains a quote that could end it early in log scanners.
+ */
+function encodeUserinfo(s: string): string {
+  return encodeURIComponent(s).replace(/'/g, '%27');
+}
+
+/**
  * Writes the model as a connection string: known options in a fixed order, then `extra` in its
  * own order. Throws `ConnectionStringError` for a model the driver would reject (no host, SRV
- * with several hosts or a port).
+ * with several hosts or a port, a password without a user name). An empty user name counts as
+ * none.
  */
 export function toConnectionString(model: ConnectionUriModel): string {
   if (model.hosts.length === 0) throw new ConnectionStringError('At least one host is required');
@@ -414,10 +433,14 @@ export function toConnectionString(model: ConnectionUriModel): string {
       throw new ConnectionStringError('mongodb+srv needs exactly one host name and no port');
     }
   }
+  const username = model.username === '' ? undefined : model.username;
+  if (username === undefined && model.password !== undefined) {
+    throw new ConnectionStringError('A password needs a user name');
+  }
   let out = `${model.scheme}://`;
-  if (model.username !== undefined || model.password !== undefined) {
-    out += encodeURIComponent(model.username ?? '');
-    if (model.password !== undefined) out += `:${encodeURIComponent(model.password)}`;
+  if (username !== undefined) {
+    out += encodeUserinfo(username);
+    if (model.password !== undefined) out += `:${encodeUserinfo(model.password)}`;
     out += '@';
   }
   out += model.hosts.map(formatHost).join(',');
