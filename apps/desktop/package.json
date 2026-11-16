@@ -1,9 +1,16 @@
 {
   "name": "@thicket/desktop",
+  "productName": "Thicket",
+  "desktopName": "thicket.desktop",
   "version": "0.0.0",
   "private": true,
   "description": "Electron main process, preload script and packaging",
   "license": "Apache-2.0",
+  "author": {
+    "name": "Thicket contributors",
+    "email": "thicket@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/oldpeasant/thicket",
   "type": "module",
   "main": "dist/main.cjs",
   "exports": {
@@ -16,14 +23,16 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "test:electron": "node scripts/build.mjs && vitest run --config vitest.electron.config.ts",
-    "coverage": "vitest run --coverage"
-  },
-  "dependencies": {
-    "@thicket/backend": "0.0.0",
-    "@thicket/contract": "0.0.0"
+    "coverage": "vitest run --coverage",
+    "icon": "node scripts/make-icon.mjs",
+    "dist": "node scripts/build.mjs && electron-builder --config electron-builder.yml --publish never",
+    "dist:dir": "node scripts/build.mjs && electron-builder --config electron-builder.yml --publish never --dir"
   },
   "devDependencies": {
-    "electron": "^45.3.3",
+    "@thicket/backend": "0.0.0",
+    "@thicket/contract": "0.0.0",
+    "electron": "45.3.3",
+    "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
     "playwright-core": "^1.65.1"
   }

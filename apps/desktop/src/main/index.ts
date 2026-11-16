@@ -4,7 +4,8 @@
  *
  * Environment:
  * - `THICKET_DEV_SERVER`: load the renderer from this URL (the `ng serve` origin) instead.
- * - `THICKET_RENDERER_DIR`: folder of the built renderer (default `packages/renderer/dist`).
+ * - `THICKET_RENDERER_DIR`: folder of the built renderer (default `packages/renderer/dist`, or
+ *   `resources/renderer` in a packaged app).
  * - `THICKET_USER_DATA`: use this folder as Electron's `userData` (settings.json ...), for tests.
  */
 import { fromMainPort, serve } from '@thicket/backend';
@@ -46,9 +47,12 @@ const log = (message: string) => console.log(`[main] ${message}`);
 
 const distDir = __dirname;
 const devServer = process.env['THICKET_DEV_SERVER'] || undefined;
+// Packaged (electron-builder): the renderer is an extra resource next to app.asar.
 const rendererDir =
   process.env['THICKET_RENDERER_DIR'] ||
-  path.resolve(distDir, '..', '..', '..', 'packages', 'renderer', 'dist');
+  (app.isPackaged
+    ? path.join(process.resourcesPath, 'renderer')
+    : path.resolve(distDir, '..', '..', '..', 'packages', 'renderer', 'dist'));
 const csp = contentSecurityPolicy(devServer);
 
 const userDataOverride = process.env['THICKET_USER_DATA'];

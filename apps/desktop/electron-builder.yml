@@ -1,0 +1,69 @@
+# electron-builder configuration: `npm run dist` (root) builds unsigned installers for the
+# current OS into apps/desktop/release/. CI builds the other OSes on their own runners.
+appId: io.github.oldpeasant.thicket
+productName: Thicket
+copyright: Copyright © Thicket contributors
+directories:
+  buildResources: build
+  output: release
+
+# main, preload and backend are esbuild bundles (scripts/build.mjs): only `electron` stays
+# external, so the workspace packages need not be copied. Native modules added later must be
+# marked external in build.mjs and listed in `dependencies`; electron-builder then rebuilds them
+# for Electron's ABI (npmRebuild) and unpacks *.node files from the asar.
+files:
+  - dist/**/*
+  - '!dist/**/*.map'
+  - package.json
+asarUnpack:
+  - '**/*.node'
+npmRebuild: true
+# The built Angular app (npm run build -w packages/renderer), read by main from resources/renderer.
+extraResources:
+  - from: ../../packages/renderer/dist
+    to: renderer
+    filter:
+      - '**/*'
+
+artifactName: thicket-${version}-${os}-${arch}.${ext}
+
+linux:
+  target: [AppImage, deb, rpm]
+  category: Development
+  executableName: thicket
+  # WM_CLASS / Wayland app id matches thicket.desktop (package.json desktopName).
+  syncDesktopName: true
+  synopsis: Desktop client for MongoDB
+  description: Thicket is a desktop client for MongoDB.
+  icon: build/icon.png
+  maintainer: Thicket contributors <thicket@users.noreply.github.com>
+  vendor: Thicket contributors
+deb:
+  packageName: thicket
+rpm:
+  packageName: thicket
+
+mac:
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  category: public.app-category.developer-tools
+  icon: build/icon.png
+  # Unsigned for now (SPEC: signing and notarization later).
+  identity: null
+  hardenedRuntime: false
+dmg:
+  sign: false
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: zip
+      arch: [x64]
+  icon: build/icon.png
+  signAndEditExecutable: true
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false

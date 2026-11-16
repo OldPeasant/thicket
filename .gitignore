@@ -2,6 +2,7 @@
 node_modules/
 dist/
 out/
+release/
 coverage/
 # Playwright e2e artifacts (failure screenshots, app output)
 test-results/
