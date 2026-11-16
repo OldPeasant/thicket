@@ -13,7 +13,8 @@ Query bar (filter, projection, sort, collation, limit in shell syntax with valid
 ## Acceptance criteria
 - [x] Component tests with the fake API: invalid filter shows the parse error and does not run
   - verified (2026-11-17 00:01+0100 by felix/agent-1): npm run test -w packages/renderer -- --include='src/app/collection/**/*.spec.ts' (fake API) -> 111 passed, incl. collection-view.spec.ts 'shows the parse error of an invalid filter and does not run the query'
-- [ ] e2e against a 10 000-doc fixture: filter + sort, go to page 3, jump to last, exact count
+- [x] e2e against a 10 000-doc fixture: filter + sort, go to page 3, jump to last, exact count
+  - verified (2026-11-17 00:01+0100 by felix/agent-1): npm run test:e2e -- test/e2e/collection.e2e.ts (Electron app against MongoDB container via Podman, 10 000-doc fixture) -> 1 passed: 'filter and sort 10 000 documents, page, jump to the last page, count exactly'
 - [ ] Cancel button stops a slow query (e2e or component test with fake stream)
 
 ## Notes
