@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "task": "x509-proxy",
+  "reviewed_revision": "874a4c38028b219927165194df978f8c92b5cbe7",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/x509-proxy/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/x509-proxy/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/x509-proxy/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "unit tests for UserNotFound/connecting split, ERR_OSSL_* as TLS_ERROR and proxy in matchesSaved added in 5d48082; round-2 review and fixer confirm resolved"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "P3: backend keeps ignoring tls.keyFile without tls.certificateKeyFile (X.509 still gives AUTH_FAILED); the form rule is recorded in tasks/conn-ui-m2.md, the planned place for field validation"},
+    {"id": "CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "P3: no wrong data is written, reads only go to the primary instead of the tagged member; rejecting tags without a non-primary read preference is recorded in tasks/conn-ui-m2.md form validation"},
+    {"id": "CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "SOCKS image is used only by the integration fixture, does not ship and is not in .taskcheck; latest was the only tag verified"}
+  ],
+  "validation": [
+    {"command": "npx vitest run --config test/integration/vitest.config.ts x509 proxy", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}
