@@ -194,6 +194,67 @@ describe('TabBar', () => {
       expect(focused()).toBe('home');
     });
 
+    it('Delete on a focused background tab closes it and keeps the selection', async () => {
+      selectEl('a').focus();
+      press(selectEl('a'), 'Delete');
+      await render();
+      expect(ids()).toEqual(['b', 'c']);
+      expect(ws.activeId()).toBe('c');
+      // Focus was in the strip: it goes to the selected tab, not to <body>.
+      expect(focused()).toBe('c');
+    });
+
+    it('with no tab open, the arrow keys, Home and End stay on Start', async () => {
+      ['a', 'b', 'c'].forEach((id) => ws.close(id));
+      await render();
+      homeTab().focus();
+      for (const key of ['ArrowRight', 'ArrowLeft', 'Home', 'End']) {
+        expect(press(homeTab(), key).defaultPrevented).toBe(true);
+        await render();
+        expect(ws.activeId()).toBeNull();
+        expect(focused()).toBe('home');
+      }
+    });
+
+    it('Shift, Alt and Meta with the arrow keys or Delete are left alone', async () => {
+      for (const init of [{ shiftKey: true }, { altKey: true }, { metaKey: true }]) {
+        expect(press(selectEl('c'), 'ArrowLeft', init).defaultPrevented).toBe(false);
+        expect(press(selectEl('c'), 'Delete', init).defaultPrevented).toBe(false);
+      }
+      await render();
+      expect(ws.activeId()).toBe('c');
+      expect(ids()).toEqual(['a', 'b', 'c']);
+    });
+
+    it('ArrowRight from a tab that is focused but not selected moves from that tab', async () => {
+      // A click elsewhere can leave focus on a tab other than the selected one.
+      ws.activate('a');
+      await render();
+      selectEl('b').focus();
+      press(selectEl('b'), 'ArrowRight');
+      await render();
+      expect(ws.activeId()).toBe('c');
+      expect(focused()).toBe('c');
+    });
+
+    it('a tab id that needs encoding is found again by its DOM id', async () => {
+      ws.open(tab('local / shop "orders"'));
+      await render();
+      const select = must(el.ownerDocument.getElementById(tabDomId('local / shop "orders"')));
+      expect(select.getAttribute('aria-controls')).toBe(tabPanelDomId('local / shop "orders"'));
+      // Arrow navigation and Delete work for it like for any other tab.
+      select.focus();
+      press(select, 'ArrowLeft');
+      await render();
+      expect(focused()).toBe('c');
+      press(selectEl('c'), 'ArrowRight');
+      await render();
+      expect(ws.activeId()).toBe('local / shop "orders"');
+      press(must(el.ownerDocument.getElementById(tabDomId('local / shop "orders"'))), 'Delete');
+      await render();
+      expect(ids()).not.toContain('local / shop "orders"');
+    });
+
     it('Delete on the Start tab closes nothing', async () => {
       ws.showHome();
       await render();

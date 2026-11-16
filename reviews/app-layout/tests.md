@@ -4,79 +4,82 @@ Date: 2026-11-16
 
 Task: app-layout (M0: Application layout: sidebar, tabs, status bar, welcome screen)
 
-Scope: `git diff bb928680cc4d76df66a7e2d239b2ceb368ef23ef..81c219e0bf8c8d8ea31b19fece85b6e35db79487`
-(task commits cedff49 "main window layout ..." and 81c219e "e2e for welcome navigation ...", branch
-`main`, HEAD 81c219e0bf8c8d8ea31b19fece85b6e35db79487). Base and commits supplied by the parent worker
-and confirmed with `git log --oneline bb92868..HEAD`. The working tree was clean at the start; the only
-uncommitted changes are the test-writer's test edits listed below.
+Scope: `git diff e22e728c6dd49cccef7ced082fc77f44b64dc05d..1f564b567f9f8994a1661862093e84c18eb2f759`,
+branch `main`, task commits 36a39bf, 181af61, ea8451a, 1f564b5 (base and commit list supplied by the
+parent worker, confirmed with `git log --oneline e22e728..HEAD`: only these four commits). Re-run after
+the fixer commit 1f564b5 (findings CR-1..CR-4 in `reviews/app-layout/review.md`, fixes in
+`reviews/app-layout/fixes.md`). The previous report described revision 81c219e and is replaced.
+Uncommitted inputs: three spec files left by an interrupted earlier test-writer run (reviewed, kept,
+listed below); no production file differs from HEAD.
 
 Requirements:
-- `tasks/app-layout.md` acceptance criteria and recorded assumptions (sidebarWidth 180..560, default 260;
-  welcome routes `/connections/new` and `/connections/import/compass`; Ctrl/Cmd+W always consumed;
-  Ctrl+PageUp/PageDown cycle, Ctrl+Shift+PageUp/PageDown move)
+- `tasks/app-layout.md` acceptance criteria and recorded assumptions (sidebarWidth 180..560, default
+  260; welcome routes `/connections/new`, `/connections/import/compass`; Ctrl/Cmd+W always consumed;
+  physical W key (`code: 'KeyW'`) counts only when the typed character is not a Latin letter, AZERTY
+  Ctrl+Z stays undo; drag and drop plus Ctrl+Shift+PageUp/PageDown reorder; Ctrl+PageUp/PageDown cycle)
+- `reviews/app-layout/review.md` findings CR-1..CR-4 (approved by the parent) and the fixed behavior
+  described in `reviews/app-layout/fixes.md`
 - `docs/ARCHITECTURE.md` "Coverage", `docs/QUALITY.md`, `AGENTS.md`
-- Parent worker instructions (SidebarWidthService edge cases, StatusService.track, store and contract
-  validation of sidebarWidth)
+- Parent worker instructions for this run
 
 ## Test files changed
 
-- `packages/renderer/src/app/layout/sidebar-width.service.spec.ts` (new)
-- `packages/renderer/src/app/layout/status.service.spec.ts` (new)
-- `packages/renderer/src/app/layout/status-bar.spec.ts` (new)
-- `packages/renderer/src/app/layout/tab-bar.spec.ts` (new)
-- `packages/renderer/src/app/layout/app-shell.spec.ts` (tests added; existing tests unchanged)
-- `apps/desktop/src/settings/store.spec.ts` (tests added)
-- `packages/contract/src/index.spec.ts` (tests added)
-- `test/e2e/layout.e2e.ts` (type error fixed, see TW-1; no assertion changed)
+Uncommitted, relative to HEAD 1f564b5 (all from the interrupted earlier run, reviewed in this run):
+
+- `packages/renderer/src/app/layout/app-shell.spec.ts` (+61 lines, 4 tests)
+- `packages/renderer/src/app/layout/sidebar-width.service.spec.ts` (+97 lines, 7 tests)
+- `packages/renderer/src/app/layout/tab-bar.spec.ts` (+61 lines, 5 tests)
+
+Review of the leftover edits: every test was read against the production code and the fix intent.
+All 16 are correct, deterministic (saves are controlled with deferred promises, no real delays) and
+not redundant with the tests committed in 1f564b5; all were kept unchanged. 15 pass; 1 fails because
+of a production defect (TW-1) and is kept as a legitimate failing test. No existing test was changed,
+weakened, skipped or deleted.
 
 ## Tests added or updated
 
-Count: 86 new test cases (68 renderer, 16 settings store, 2 contract) plus 1 updated e2e test
-(`screenshot: layout in ${style} ${mode}`, type fix only).
+Count: 16 (added, uncommitted)
 
-- `sidebar-width.service.spec.ts` (22): `clampSidebarWidth` range ends, just outside, far outside,
-  rounding, NaN/Infinity -> default; `init` loads once, keeps default when main is unavailable or
-  sends no `sidebarWidth`, clamps an out-of-range stored width, unsubscribes on injector destroy;
-  broadcasts followed, ignored without `sidebarWidth`, ignored for display during a drag (the drag's
-  width is still saved), a drag ending on the broadcast width sends no save, followed again after the
-  drag; `preview` clamps without saving; `commit` saves shown/given width clamped and rounded, skips an
-  unchanged width; failed save reverts to the stored width and rejects, retry sends again; a failed
-  save does not undo a newer preview shown meanwhile (deferred response); failure after a success
-  reverts to the last saved width.
-- `status.service.spec.ts` (9): initial state, set/clear connection, newest operation is current,
-  unique ids for equal labels, `update` touches only its operation, `done` idempotent and `update`
-  after `done` does not resurrect; `track` shows the label while pending and resolves with the value,
-  removes on rejection and rejects, overlapping tracked work finishing in reverse order.
-- `status-bar.spec.ts` (10): idle state, the four connection state texts, production/read-only flags,
-  indeterminate bar, percentage with clamping (>1, <0), "+N more", `role=status` / `aria-live`.
-- `tab-bar.spec.ts` (11): `aria-selected` on tab/home, detail and tooltip, close-button label,
-  non-middle auxclick ignored, `dragstart` dataTransfer, drop on right half places after, drop-after
-  marker on last tab, drop onto itself keeps order, dragend clears markers / stray drop ignored, drop
-  without dragover ignored, closing the active tab via button.
-- `app-shell.spec.ts` (16): separator range attributes; splitter ignores other keys, non-primary
-  button, foreign pointer ids and moves without a drag; pointercancel saves; click without move saves
-  nothing; failed save logs and shows the stored width again; Ctrl+Shift+PageUp/Down on the start page
-  and at the ends; Cmd+PageDown not consumed; Ctrl+Tab without tabs; Ctrl+W on the start page closes
-  nothing; closing the last tab shows the welcome screen; placeholder detail and tabpanel labelling;
-  background tab views stay alive; sidebar "New connection" link navigates and shows the routed page.
-- `store.spec.ts` (16): default 260; a pre-sidebarWidth settings.json keeps its other settings;
-  save, listener notification, file content and reload after restart; both range ends accepted;
-  179, 561, 300.5, 0, -1, NaN refused with nothing written; stored 179, 561, 300.5, "300", null replaced
-  by the default; `undefined` keeps the width.
-- `index.spec.ts` (2): `settings.sidebarWidth` accepts 180/181/260/559/560, refuses 179, 561, 260.5,
-  "260", null, NaN, Infinity and a missing key; `app.settings.set` accepts `sidebarWidth` alone and
-  refuses 100, 600, 300.5.
+- `sidebar-width.service.spec.ts`, new block "overlapping saves settling out of order" (CR-1):
+  - the newer save fails first, the older one lands: the older width is shown
+  - the older save lands, then the newer one fails: back to the older width
+  - the older save fails after the newer one landed: the newer width stays
+  - both saves fail: the width stored before them is shown again
+  - an answer arriving during a drag does not move the splitter
+  - a failure arriving during a drag does not move the splitter
+  - an answer with an out-of-range width (older main) is clamped
+- `tab-bar.spec.ts`, "ARIA tabs pattern" (CR-3):
+  - Delete on a focused background tab closes it and keeps the selection
+  - with no tab open, the arrow keys, Home and End stay on Start
+  - Shift, Alt and Meta with the arrow keys or Delete are left alone
+  - ArrowRight from a tab that is focused but not selected moves from that tab
+  - a tab id that needs encoding is found again by its DOM id
+- `app-shell.spec.ts`:
+  - keyboard (CR-4): the physical W key with Shift or Alt is left alone, like Latin W
+  - keyboard (CR-4): a Latin W typed on another physical key still closes the tab (Dvorak)
+  - keyboard (CR-3 d): Ctrl+W with focus on the closed tab moves focus to the newly selected tab
+    (FAILS, TW-1)
+  - tab views (CR-3 b): tab and panel point at each other also for ids that need encoding
 
 ## Requirement coverage
 
+Focused command (F): `cd packages/renderer && npx ng test --include='src/app/layout/**/*.spec.ts'`.
+Check command (C): `npm run check` from the repo root. E2E (E):
+`npm run test:e2e -- test/e2e/layout.e2e.ts` (built Electron app, Playwright `_electron`, Linux).
+
 | Requirement | Tests | Command | Result |
 |---|---|---|---|
-| AC1 Tabs open/close/reorder (component tests) | `AppShell › tabs` (existing 8), `TabBar` (11 new), `WorkspaceService` (existing 9), new AppShell keyboard/view edge cases | `cd packages/renderer && npx ng test --include='src/app/layout/**/*.spec.ts'` | Pass (final run: layout specs + `app.spec.ts`, 8 files, 106 tests) |
-| AC1 Sidebar width persists in settings (component tests) | `AppShell › sidebar width` (existing 6) + `sidebar width edge cases` (7 new), `SidebarWidthService` (22 new), `SettingsStore sidebarWidth` (15 new + 1), contract `settings.sidebarWidth ...` (2 new) | renderer command above; `npx vitest run packages/contract apps/desktop/src/settings` | Pass (renderer as above; 782 passed) |
-| AC2 Ctrl/Cmd+W closes a tab, Ctrl/Cmd+Tab cycles (test) | `AppShell › keyboard` (existing 5), `keyboard edge cases` (6 new) | renderer command above | Pass |
-| AC2 Ctrl+W does not close the window (running app) | e2e `Ctrl+W does not close the window` | `npm run test:e2e -- test/e2e/layout.e2e.ts` (headless Ozone, no xvfb) | Pass |
-| AC3 Welcome buttons emit the right navigation (test) | `Welcome` (existing 4), new `the sidebar "New connection" link ...` | renderer command above | Pass |
-| AC3 e2e screenshot in Business light and Tron dark | e2e `screenshot: layout in business light`, `screenshot: layout in tron dark` | `npm run test:e2e -- test/e2e/layout.e2e.ts` | Pass (6 passed, 13.0 s) after the TW-1 type fix |
+| AC1 tabs open/close/reorder | `workspace.service.spec.ts` (all), `tab-bar.spec.ts` drag/drop + close tests, `app-shell.spec.ts` "tabs" (open, close by button and middle click, reorder by drag and drop), Ctrl+Shift+PageUp/PageDown move | F, C | Pass |
+| AC1 sidebar width persists in settings | `sidebar-width.service.spec.ts` (init/broadcasts/commit), `app-shell.spec.ts` "sidebar width" incl. "persists across a new window", desktop `store.spec.ts` "SettingsStore sidebarWidth", contract `index.spec.ts`; e2e "the sidebar width is dragged, saved and restored after a restart" | F, C, E | Pass |
+| CR-1 save races (overlapping saves, stale broadcasts/answers) | committed: "overlapping saves: answers and broadcasts of earlier saves do not undo newer widths", "a save back to the stored width while another save is in flight is still sent", "a late answer to the initial load does not undo a width saved meanwhile", app-shell "quick arrow presses with saves in flight all count"; added: the 7 "overlapping saves settling out of order" tests | F, C | Pass |
+| AC2 Ctrl/Cmd+W closes a tab, always consumed | "Ctrl+W and Cmd+W close the active tab and are always consumed", "Ctrl+W on the start page with tabs open closes none of them", "closing the last tab with Ctrl+W shows the welcome screen again"; e2e "Ctrl+W does not close the window" | F, C, E | Pass |
+| CR-4 W by key code, AZERTY rule | "Ctrl+W on the physical W key of a non-Latin layout closes the tab too", "a Latin letter on the W key (AZERTY Ctrl+Z) is not taken for Ctrl+W", added "the physical W key with Shift or Alt is left alone", "a Latin W typed on another physical key still closes the tab (Dvorak)" | F, C | Pass |
+| AC2 Ctrl/Cmd+Tab cycles | "Ctrl+Tab cycles forward, Ctrl+Shift+Tab backward, with wrap-around", "Ctrl+PageDown/PageUp cycle ...", "Ctrl+Tab with no tab open stays on the start page", "a plain Tab keeps moving focus" | F, C | Pass |
+| AC3 welcome buttons navigate | `welcome.spec.ts` ("New connection" / "Import from Compass" navigate); e2e "welcome buttons navigate to the connection editor and the Compass import" | F, C, E | Pass |
+| AC3 e2e screenshot Business light and Tron dark | e2e "screenshot: layout in business light", "screenshot: layout in tron dark" (screenshots not re-inspected visually in this run) | E | Pass |
+| CR-2 same-URL sidebar link | "the sidebar link shows its page again when its URL is already the current one", "the sidebar \"New connection\" link opens the connection editor page" | F, C | Pass |
+| CR-3 tabs a11y (structure, ids, roving tabindex, arrows/Home/End/Delete) | `tab-bar.spec.ts` "ARIA tabs pattern" (committed + 5 added), app-shell "tab and panel point at each other also for ids that need encoding", "the routed start page is the tab panel of the Start tab" | F, C | Pass |
+| CR-3 (d) focus not lost when the focused active tab is closed | button / middle click / Delete: committed tab-bar tests (Pass); Ctrl+W: "Ctrl+W with focus on the closed tab moves focus to the newly selected tab" | F, C | Fail (TW-1) |
 
 ## Focused test execution
 
@@ -86,39 +89,35 @@ Command:
 
 Result:
 
-Pass (7 files / 86 tests on the first run with the new renderer specs; app-shell additions then
-`--include='src/app/layout/app-shell.spec.ts'` -> 37 passed). Final layout + app.spec run: 8 files,
-106 tests passed (coverage run below).
-
-`npx vitest run packages/contract/src/index.spec.ts apps/desktop/src/settings/store.spec.ts` -> 2 files,
-393 passed; final `npx vitest run packages/contract apps/desktop/src/settings` -> 5 files, 782 passed.
-
-`npm run test:e2e -- test/e2e/layout.e2e.ts` -> 6 passed (13.0 s).
+Fail: 7 files, 139 tests, 138 passed, 1 failed (`AppShell > keyboard > Ctrl+W with focus on the
+closed tab moves focus to the newly selected tab`, TW-1). All other layout tests pass.
 
 ## Full test execution
 
 Command:
 
-`npm run check` (repository root; lint + Prettier + typecheck + vitest + ng test)
+`npm run check` (repo root; lint, Prettier, type checks, unit tests), 21:24:05-21:24:56 +0100
 
 Result:
 
-First run: Fail at lint on the test-writer's own new specs (unused `_omit` destructuring); fixed in
-the specs. Second run: Fail at `typecheck`:
-`test/e2e/layout.e2e.ts(108,33): error TS2584: Cannot find name 'document'` (TW-1, present at HEAD
-81c219e, independent of the new tests). After fixing that test file: Pass (lint and Prettier clean,
-all workspace typechecks, vitest 37 files / 2335 tests, renderer ng test 37 files / 626 tests).
+Fail, only because of TW-1: backend/contract/desktop 42 files / 2551 tests passed; renderer 37 files,
+663 tests, 662 passed, 1 failed (the same TW-1 test). `npm run lint` separately: Pass (eslint
+`--max-warnings 0`, Prettier check clean, including the edited specs).
+
+E2E: `npm run test:e2e -- test/e2e/layout.e2e.ts` (21:25:11-21:25:36 +0100) -> Pass, 6 passed
+(layout + welcome screen, welcome navigation, Ctrl+W does not close the window, sidebar width
+restored after restart, screenshots Business light / Tron dark).
 
 ## .taskcheck
 
 Result:
 
-Pass: `.taskcheck` runs `npm run check`, which passed on the final working tree (see above). At the
-committed HEAD 81c219e without the TW-1 fix it fails at typecheck.
+Fail (`.taskcheck` runs `npm run check`; same single failure TW-1). It passes at committed HEAD
+without the uncommitted test; it will pass with the kept test once TW-1 is fixed.
 
 ## Bugs found
 
-### The e2e layout spec breaks the project typecheck (`npm run check` / `.taskcheck` fails at HEAD)
+### Ctrl/Cmd+W with focus on the closed tab drops focus to `document.body`
 
 Finding ID:
 
@@ -126,136 +125,138 @@ Finding ID:
 
 Test:
 
-`npm run typecheck` (root `tsc -p tsconfig.json`), file `test/e2e/layout.e2e.ts`, test
-`screenshot: layout in ${style} ${mode}`
+`AppShell > keyboard > Ctrl+W with focus on the closed tab moves focus to the newly selected tab`
+(`packages/renderer/src/app/layout/app-shell.spec.ts:280`)
 
 Production source:
 
-`test/e2e/layout.e2e.ts:108` (test code committed in 81c219e, not production code)
+`packages/renderer/src/app/layout/app-shell.ts` `onKeydown` (Ctrl/Cmd+W branch calls
+`this.workspace.close()` directly); compare `packages/renderer/src/app/layout/tab-bar.ts` `closeTab`
+/ `focusSelected`, which only the close button, middle click and Delete use.
 
 Requirement:
 
-AGENTS.md: `tasks.py done` runs `.taskcheck` (`npm run check`) and refuses the task when it fails.
+Review finding CR-3 (d), accepted and fixed in 1f564b5: closing the focused active tab must move focus
+to the newly active tab instead of losing it with the removed element. The fix covers the close
+button, middle click and Delete, but not the task's own keyboard close shortcut (AC2 Ctrl/Cmd+W).
 
 Expected behavior:
 
-`npm run check` passes.
+With tabs a, b open, b selected and its tab element focused, Ctrl+W closes b and focus moves to the
+newly selected tab a (or to the Start tab when no tab is left), as it does for Delete.
 
 Actual behavior:
 
-`window.evaluate(() => document.fonts.ready)` does not compile under the root tsconfig (no DOM lib):
-`TS2584: Cannot find name 'document'`. Playwright's own TS transform does not type-check, so the e2e
-run passed while the project check failed.
+The tab is closed (`tabIds()` is `['a']`), but `document.activeElement` is `document.body`: the focused element
+was removed and focus is lost; keyboard and screen reader users must start over from the top.
 
 Severity:
 
-High (blocks `tasks.py done`)
+Low (accessibility; the close itself works, no data loss).
 
 Fix required:
 
-Applied by the test-writer in the working tree, because it is a test file: the call now reads
-`document` through `globalThis` with a minimal structural type and awaits `fonts.ready` without
-returning it. Behavior is unchanged; `npm run check` passes and the e2e file re-ran with 6 passed.
-The parent worker must review and commit this change. No production code fix is needed.
-
-No production defects were found: every new test passed against the unchanged production code.
-
-Observations (not defects, no fix requested):
-- `SidebarWidthService.commit` records the width main returns in `stored` but keeps showing the
-  requested width; main echoes the requested value, so the two cannot differ in practice.
-- The welcome screenshot test waits a fixed 400 ms for the theme transition
-  (`waitForTimeout(400)`); it passed reliably here, but it is time-based.
+`Yes — production code must be fixed by the parent worker / fixer.`
 
 ## Coverage
 
-Status: verified (whole-file coverage of the task-changed production files; all runs exited 0 with
-fresh reports).
+Status: partial (diagnostic). The coverage run with the full suite exits nonzero because of TW-1 and
+writes no report, so the renderer numbers below come from a second run that excludes only the TW-1
+test via `--filter`; they are not a passing-suite measurement. Desktop and contract runs are clean.
 
 Metric: whole-file coverage of task-changed production files.
-Changed-line coverage: not measured (the tooling has no changed-line report; every scoped renderer file
-except `app.routes.ts` is a file new in this task, so whole-file equals changed-file coverage there).
+Changed-line coverage: not measured (the configured tooling has no changed-line mode).
 
 Evidence:
 - Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: app-layout; base
-  bb928680cc4d76df66a7e2d239b2ceb368ef23ef; HEAD 81c219e0bf8c8d8ea31b19fece85b6e35db79487; commits
-  cedff49 and 81c219e named by the parent and confirmed with `git log bb92868..HEAD` and
-  `git diff --stat bb92868..HEAD`.
-- Source/test snapshot identifier (including uncommitted inputs): production code = HEAD 81c219e
-  (no production file modified; `git status` shows only the test files listed above). Test snapshot:
-  sha256 over `sha256sum packages/renderer/src/app/layout/*.spec.ts apps/desktop/src/settings/store.spec.ts packages/contract/src/index.spec.ts test/e2e/layout.e2e.ts`
-  = `b7a0f7e5f091ce8f234d9c77be92f9e1305100cd00e014b64e2bb830e20107db`, taken after the last edit
-  and unchanged through the final coverage runs.
-- Exact included files: `packages/renderer/src/app/layout/{app-shell,navigation,planned-page,sidebar-width.service,status-bar,status.service,tab-bar,tab-placeholder,tab-views,welcome,workspace.service,index}.ts`,
-  `packages/renderer/src/app/app.routes.ts`, `apps/desktop/src/settings/store.ts`,
-  `packages/contract/src/app.ts`. Excluded: `*.css` (styles, no executable behavior),
-  `docs/ARCHITECTURE.md` (documentation), all `*.spec.ts` and `test/e2e/layout.e2e.ts` (tests).
-  Deleted: `packages/renderer/src/app/home.ts` (removed by the task; cannot be instrumented at HEAD).
-  No renames.
-- Provider/version, command, working directory, and test selection: `@vitest/coverage-v8` 5.1.0
-  (vitest 5.1.0).
-  1. `packages/renderer`: `npx ng test --coverage --include='src/app/layout/**/*.spec.ts' --include='src/app/app.spec.ts' --coverage-include='src/app/layout/**/*.ts' --coverage-include='src/app/app.routes.ts' --coverage-reporters=json-summary`
-  2. `apps/desktop`: `npx vitest run --coverage --coverage.include='src/settings/store.ts' --coverage.reporter=json-summary --coverage.reporter=text-summary src/settings`
-  3. `packages/contract`: `npx vitest run --coverage --coverage.include='src/app.ts' --coverage.reporter=json-summary --coverage.reporter=text-summary`
-- Run start/completion time and exit status: (1) bundle 2026-11-16T20:06:24Z, tests 21:06:24 local,
-  report written 21:06:27 local, 8 files / 106 tests passed, exit 0; (2) and (3) run right after
-  (about 21:07 local), passed, exit 0.
+  e22e728c6dd49cccef7ced082fc77f44b64dc05d; HEAD 1f564b567f9f8994a1661862093e84c18eb2f759; commits
+  36a39bf, 181af61, ea8451a, 1f564b5 from the parent, file list from
+  `git diff --name-only e22e728..HEAD -- '*.ts' '*.css'`.
+- Source/test snapshot identifier (including uncommitted inputs): HEAD 1f564b5 plus sha256
+  `app-shell.spec.ts` 2f0279f5cbdd8fae5448e01677747181d3ce433c08e1153d56a7e975cea5e83f,
+  `sidebar-width.service.spec.ts` 8c8c71a6973a56b017f5b97f4a46ccc1e62be34dc6c69f2651291846f108e219,
+  `tab-bar.spec.ts` f81e5390eaec40b7c30856890c9f4e9106b0d78c4dfb8d79fa4b4518bfe07536 (same before and
+  after all runs); no production file modified.
+- Exact included files: renderer `src/app/app.routes.ts`, `src/app/layout/{app-shell,index,navigation,
+  planned-page,sidebar-width.service,status-bar,status.service,tab-bar,tab-placeholder,tab-views,
+  welcome,workspace.service}.ts`; desktop `src/settings/store.ts`; contract `src/app.ts`. Excluded:
+  `packages/renderer/src/app/home.ts` (deleted by the task, nothing to instrument),
+  `layout/app-shell.css` and `layout/tab-bar.css` (styles, no executable code), `test/e2e/layout.e2e.ts`
+  and all `*.spec.ts` (tests), `docs/`, `reviews/`. No scoped file is missing from the reports.
+- Provider/version, command, working directory, and test selection: Vitest 5.1.0 +
+  `@vitest/coverage-v8` 5.1.0.
+  Renderer (`packages/renderer`): `npx ng test --coverage --include='src/app/**/*.spec.ts'
+  --coverage-include=src/app/... (one per renderer file above) --coverage-reporters=json-summary
+  --coverage-reporters=text` -> exit nonzero (TW-1), no report written (fresh empty `coverage/`); rerun
+  with `--filter='^(?!.*with focus on the closed tab)'` -> 33 files, 516 passed, 1 skipped (TW-1).
+  Desktop (`apps/desktop`): `npx vitest run --coverage --coverage.include='src/settings/store.ts'
+  src/settings` -> 72 passed. Contract (`packages/contract`): `npx vitest run --coverage
+  --coverage.include='src/app.ts'` -> 711 passed.
+- Run start/completion time and exit status: renderer failing run 21:23:14 (exit nonzero); renderer
+  filtered run 21:23:29-21:23:37 +0100, all selected tests passed; desktop 21:23:58, contract
+  21:23:59, both passed.
 - Generated report paths and report hashes/run identifier:
-  `packages/renderer/coverage/renderer/coverage-summary.json` sha256 `3290e1ebd4fb428597c7f737d3afe2a80e2eee6973884bda23ba64f43579bf4e`
-  (mtime 2026-11-16 21:06:27 +0100; the earlier run at 21:04 on a spec snapshot before a lint-only
-  refactor produced the same hash, as expected for identical counters);
-  `apps/desktop/coverage/coverage-summary.json` sha256 `eecc73958cb6adbbd72027e8b8bc0dfc9a1fb73dc6952df8bee98d18c166dc9f`;
-  `packages/contract/coverage/coverage-summary.json` sha256 `8245f4145c2340f85fd3c7147c17d184247c7d50d33d3d96142015d00a6625a2`.
-- Evidence outputs are fresh and inputs stayed unchanged: yes; the renderer report mtime is the run
-  time, the snapshot hash above was taken after the run and no file was edited afterwards.
-- Final run after latest test additions and production fixes: yes (no production fixes were made).
+  `packages/renderer/coverage/renderer/coverage-summary.json` sha256
+  e847d5dffb45c5c4adcafc2adfc6d5c3ae3028b26461d924003b7ae13cb0e154;
+  `apps/desktop/coverage/coverage-summary.json` sha256
+  eecc73958cb6adbbd72027e8b8bc0dfc9a1fb73dc6952df8bee98d18c166dc9f;
+  `packages/contract/coverage/coverage-summary.json` sha256
+  8245f4145c2340f85fd3c7147c17d184247c7d50d33d3d96142015d00a6625a2.
+- Evidence outputs are fresh and inputs stayed unchanged: the renderer report directory was created
+  by the filtered run (timestamp 21:23:33-21:23:37, after the failing run left it empty); snapshot
+  hashes identical before and after.
+- Final run after latest test additions and production fixes: yes for the tests (no tests changed
+  after the runs); no production fix for TW-1 exists yet, so coverage must be re-measured after it.
 
-Values below use covered/total (percentage); zero-denominator or unsupported metrics are N/A.
+Values below use covered/total (percentage); zero-denominator metrics are N/A.
 
 | Changed file | Statements | Branches | Functions | Lines |
 |---|---:|---:|---:|---:|
-| `packages/renderer/src/app/layout/app-shell.ts` | 101/101 (100%) | 58/58 (100%) | 22/22 (100%) | 74/74 (100%) |
-| `packages/renderer/src/app/layout/sidebar-width.service.ts` | 42/42 (100%) | 18/18 (100%) | 7/7 (100%) | 32/32 (100%) |
+| `packages/renderer/src/app/app.routes.ts` | 3/3 (100%) | N/A | 2/2 (100%) | 2/2 (100%) |
+| `packages/renderer/src/app/layout/app-shell.ts` | 107/107 (100%) | 64/64 (100%) | 22/22 (100%) | 79/79 (100%) |
+| `packages/renderer/src/app/layout/index.ts` | N/A | N/A | N/A | N/A |
+| `packages/renderer/src/app/layout/navigation.ts` | 1/1 (100%) | N/A | N/A | 1/1 (100%) |
+| `packages/renderer/src/app/layout/planned-page.ts` | 18/18 (100%) | 11/12 (91.67%) | 2/2 (100%) | 8/8 (100%) |
+| `packages/renderer/src/app/layout/sidebar-width.service.ts` | 49/49 (100%) | 30/31 (96.77%) | 7/7 (100%) | 39/39 (100%) |
+| `packages/renderer/src/app/layout/status-bar.ts` | 51/51 (100%) | 23/24 (95.83%) | 4/4 (100%) | 31/31 (100%) |
 | `packages/renderer/src/app/layout/status.service.ts` | 26/26 (100%) | 9/9 (100%) | 11/11 (100%) | 18/18 (100%) |
-| `packages/renderer/src/app/layout/status-bar.ts` | 51/51 (100%) | 23/24 (95.8%) | 4/4 (100%) | 31/31 (100%) |
-| `packages/renderer/src/app/layout/tab-bar.ts` | 83/83 (100%) | 35/35 (100%) | 15/15 (100%) | 54/54 (100%) |
-| `packages/renderer/src/app/layout/workspace.service.ts` | 55/55 (100%) | 37/38 (97.4%) | 16/16 (100%) | 38/38 (100%) |
+| `packages/renderer/src/app/layout/tab-bar.ts` | 131/131 (100%) | 64/64 (100%) | 22/22 (100%) | 95/95 (100%) |
+| `packages/renderer/src/app/layout/tab-placeholder.ts` | 16/16 (100%) | 11/12 (91.67%) | 1/1 (100%) | 7/7 (100%) |
+| `packages/renderer/src/app/layout/tab-views.ts` | 3/3 (100%) | N/A | 2/2 (100%) | 3/3 (100%) |
 | `packages/renderer/src/app/layout/welcome.ts` | 35/35 (100%) | 10/10 (100%) | 4/4 (100%) | 19/19 (100%) |
-| `packages/renderer/src/app/layout/planned-page.ts` | 18/18 (100%) | 11/12 (91.7%) | 2/2 (100%) | 8/8 (100%) |
-| `packages/renderer/src/app/layout/tab-placeholder.ts` | 16/16 (100%) | 11/12 (91.7%) | 1/1 (100%) | 7/7 (100%) |
-| `packages/renderer/src/app/layout/tab-views.ts` | 3/3 (100%) | N/A (0/0) | 2/2 (100%) | 3/3 (100%) |
-| `packages/renderer/src/app/layout/navigation.ts` | 1/1 (100%) | N/A (0/0) | N/A (0/0) | 1/1 (100%) |
-| `packages/renderer/src/app/layout/index.ts` | N/A (0/0, re-exports only) | N/A | N/A | N/A |
-| `packages/renderer/src/app/app.routes.ts` | 1/3 (33.3%) | N/A (0/0) | 0/2 (0%) | 1/2 (50%) |
+| `packages/renderer/src/app/layout/workspace.service.ts` | 55/55 (100%) | 37/38 (97.37%) | 16/16 (100%) | 38/38 (100%) |
 | `apps/desktop/src/settings/store.ts` | 101/101 (100%) | 50/50 (100%) | 25/25 (100%) | 87/87 (100%) |
-| `packages/contract/src/app.ts` | 8/8 (100%) | N/A (0/0) | N/A (0/0) | 8/8 (100%) |
+| `packages/contract/src/app.ts` | 8/8 (100%) | N/A | N/A | 8/8 (100%) |
+| Aggregate (all 15 measured files, summed counters) | 604/604 (100%) | 309/314 (98.41%) | 118/118 (100%) | 435/435 (100%) |
 
-Aggregate over all 15 scoped files (summed counters from the three reports): statements 541/543
-(99.6%), branches 262/266 (98.5%), functions 109/111 (98.2%), lines 381/382 (99.7%). No scoped file is
-missing from the reports; excluded: `*.css`, docs, tests; deleted `home.ts` not measurable.
+Aggregate excludes only the files listed as excluded above (deleted `home.ts`, CSS, tests); none is
+missing. Renderer figures are from the filtered (TW-1-excluded) run.
 
 | File and uncovered lines/branch locations | Required behavior or risk | Action/test added or reason left uncovered |
 |---|---|---|
-| `packages/renderer/src/app/app.routes.ts:17` (2 functions) | `loadComponent` of the pre-existing `dev/explorer` route; the task only moved it | Not task behavior; the task-owned routes (`''`, `connections/new`, `connections/import/compass`) are covered by the Welcome and AppShell specs |
-| `packages/renderer/src/app/layout/status-bar.ts:155` (1 branch) | `stateText` returning `''` with no connection; the template only reads it inside `@if (connection)` | Unreachable from the template; idle rendering is tested (`shows "No connection" ...`) |
-| `packages/renderer/src/app/layout/workspace.service.ts:85` (1 branch) | `tabs[next]?.id ?? null` fallback; `next` is always a valid index when tabs exist | Defensive for `noUncheckedIndexedAccess`; not reachable |
-| `packages/renderer/src/app/layout/planned-page.ts:46` (1 branch) | `data['heading'] ?? ''` for a route without `heading` | Defensive; both task routes set `heading`, and both are tested |
-| `packages/renderer/src/app/layout/tab-placeholder.ts:12` (1 branch) | Compiled template branch at the `<h1>` binding; both `@if (tab().detail)` cases are tested | Compiler-generated branch, no behavior left untested |
+| `sidebar-width.service.ts:70` (`typeof settings.sidebarWidth === 'number'` false) | save answer without `sidebarWidth`; main and contract ship together in this task, so the answer always carries it | justified gap, defensive |
+| `workspace.service.ts:85` (`tabs[next]?.id ?? null` fallback) | unreachable: `next` is always a valid index for a non-empty list | justified gap, defensive |
+| `planned-page.ts:46` (`data['heading'] ?? ''`) | route without heading data; every planned route sets one | justified gap, defensive |
+| `status-bar.ts:155` (`conn ? ... : ''`, empty branch of a computed not rendered without a connection) | template only shows the text when a connection exists | justified gap, non-material |
+| `tab-placeholder.ts:12` (`@if (tab().detail)` branch) | placeholder without detail; a template branch | justified gap, non-material |
+| `app-shell.ts` Ctrl+W branch (covered, but behavior wrong) | CR-3 (d) focus after keyboard close | TW-1 test kept failing |
 
 ## Unable to test
 
-- Native drag-and-drop in a real browser (pointer layout, `DataTransfer`): jsdom has no layout or
-  `DragEvent`; the component tests stub `getBoundingClientRect` and `dataTransfer`. The real
-  splitter drag and restart persistence are covered by the e2e test
-  `the sidebar width is dragged, saved and restored after a restart` (Pass). Tab drag-and-drop is not
-  exercised end to end; no follow-up required by the criteria (component tests are what AC1 names).
-- Cmd+Tab on macOS is usually taken by the OS before the renderer; only the renderer handler is
-  tested. No macOS available here; not required by the criteria beyond "(test)".
-- The screenshots are produced and written but not compared against a baseline (the criterion asks
-  for the screenshots, not visual regression); a human must look at
-  `test-results/screenshots/layout-business-light.png` and `layout-tron-dark.png`.
+- Cmd+W against the macOS default application menu (Electron `role: 'close'` accelerator): no macOS
+  here; covered at unit level with `metaKey` only. Needs a macOS run if required.
+- Actual non-Latin keyboard layouts (Cyrillic/Greek) and AZERTY in the real Electron app: simulated in
+  unit tests through `key`/`code` pairs; the e2e Ctrl+W test uses the US layout.
+- Screen reader behavior of the tab strip: only the ARIA structure is asserted; no axe or screen
+  reader run is configured in the project.
+- The Business light / Tron dark screenshots were regenerated by the e2e run but not visually
+  re-inspected in this run.
 
 ## Summary
 
-Tests added and all validation passed: 86 new tests, no production defects found. One test-code
-defect (TW-1, the e2e file broke `npm run check` typecheck) was fixed in the test file and must be
-reviewed and committed by the parent worker; with it `npm run check` and the layout e2e suite pass.
+Tests added; production defects were discovered and must be passed to the `fixer` before task
+completion. All acceptance criteria and the CR-1, CR-2, CR-4 fixes are covered by passing tests
+(unit, `npm run check` apart from TW-1, and 6/6 e2e). TW-1 (Low): Ctrl/Cmd+W with focus on the closed
+tab loses focus to `document.body`, the CR-3 (d) gap left for the keyboard shortcut; its failing test is kept
+and makes `npm run check` / `.taskcheck` fail until fixed. Coverage after the fix must be re-measured
+on a passing suite.

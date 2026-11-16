@@ -253,6 +253,49 @@ describe('AppShell', () => {
       expect(tabIds()).toEqual([]);
     });
 
+    it('the physical W key with Shift or Alt is left alone, like Latin W', async () => {
+      await start();
+      ws.open(tab('a'));
+      await settle();
+      expect(key({ key: 'Ц', code: 'KeyW', ctrlKey: true, shiftKey: true }).defaultPrevented).toBe(
+        false,
+      );
+      expect(key({ key: 'ц', code: 'KeyW', ctrlKey: true, altKey: true }).defaultPrevented).toBe(
+        false,
+      );
+      expect(key({ key: 'ц', code: 'KeyW' }).defaultPrevented).toBe(false);
+      await settle();
+      expect(tabIds()).toEqual(['a']);
+    });
+
+    it('a Latin W typed on another physical key still closes the tab (Dvorak)', async () => {
+      await start();
+      ws.open(tab('a'));
+      await settle();
+      expect(key({ key: 'w', code: 'Comma', ctrlKey: true }).defaultPrevented).toBe(true);
+      await settle();
+      expect(tabIds()).toEqual([]);
+    });
+
+    it('Ctrl+W with focus on the closed tab moves focus to the newly selected tab', async () => {
+      await start();
+      ['a', 'b'].forEach((id) => ws.open(tab(id)));
+      await settle();
+      const selectOf = (id: string) =>
+        must(
+          el.querySelector<HTMLElement>(`[data-testid="tab"][data-tab-id="${id}"] [role="tab"]`),
+        );
+      selectOf('b').focus();
+      expect(document.activeElement).toBe(selectOf('b'));
+      selectOf('b').dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'w', ctrlKey: true, bubbles: true, cancelable: true }),
+      );
+      await settle();
+      expect(tabIds()).toEqual(['a']);
+      // Focus must not fall back to <body> with the removed tab (as for Delete and the × button).
+      expect(document.activeElement).toBe(selectOf('a'));
+    });
+
     it('a Latin letter on the W key (AZERTY Ctrl+Z) is not taken for Ctrl+W', async () => {
       await start();
       ws.open(tab('a'));
@@ -631,6 +674,24 @@ describe('AppShell', () => {
       expect(panel?.querySelector('app-tab-placeholder .detail')?.textContent).toBe(
         'local / admin',
       );
+    });
+
+    it('tab and panel point at each other also for ids that need encoding', async () => {
+      await start();
+      const id = 'local / shop "orders"';
+      ws.open(tab(id));
+      await settle();
+      const doc = el.ownerDocument;
+      const select = must(
+        el.querySelector<HTMLElement>('[data-testid="tab"] [role="tab"][aria-controls]'),
+      );
+      const panel = must(doc.getElementById(must(select.getAttribute('aria-controls'))));
+      expect(panel.getAttribute('role')).toBe('tabpanel');
+      expect(panel.dataset['tabId']).toBe(id);
+      expect(doc.getElementById(must(panel.getAttribute('aria-labelledby')))).toBe(select);
+      // DOM ids are unique across the strip and the panes.
+      const ids = [...el.querySelectorAll('[id]')].map((e) => e.id);
+      expect(new Set(ids).size).toBe(ids.length);
     });
 
     it('the routed start page is the tab panel of the Start tab', async () => {

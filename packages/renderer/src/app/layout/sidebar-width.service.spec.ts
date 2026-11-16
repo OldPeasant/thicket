@@ -317,6 +317,103 @@ describe('SidebarWidthService', () => {
       expect(service.width()).toBe(350);
     });
 
+    describe('overlapping saves settling out of order', () => {
+      /** Each save waits for the test; `settle(i, width | Error)` answers save `i` (0-based). */
+      let pending: ReturnType<typeof deferred<{ settings: Settings }>>[];
+
+      beforeEach(async () => {
+        await service.init();
+        pending = [];
+        fake.handle('app.settings.set', () => {
+          const d = deferred<{ settings: Settings }>();
+          pending.push(d);
+          return d.promise;
+        });
+      });
+
+      const settle = async (index: number, outcome: number | Error) => {
+        await vi.waitFor(() => expect(pending.length).toBeGreaterThan(index));
+        const d = pending[index];
+        if (!d) throw new Error('no such save');
+        if (outcome instanceof Error) d.reject(outcome);
+        else d.resolve({ settings: { ...stored, sidebarWidth: outcome } });
+      };
+
+      it('the newer save fails first, the older one lands: the older width is shown', async () => {
+        const older = service.commit(350);
+        const newer = service.commit(400);
+        await settle(1, new Error('disk full'));
+        await expect(newer).rejects.toThrow('disk full');
+        // The older save is still in flight: nothing is reverted yet.
+        expect(service.width()).toBe(400);
+        await settle(0, 350);
+        await older;
+        expect(service.width()).toBe(350);
+      });
+
+      it('the older save lands, then the newer one fails: back to the older width', async () => {
+        const older = service.commit(350);
+        const newer = service.commit(400);
+        await settle(0, 350);
+        await older;
+        expect(service.width()).toBe(400);
+        await settle(1, new Error('locked'));
+        await expect(newer).rejects.toThrow('locked');
+        expect(service.width()).toBe(350);
+      });
+
+      it('the older save fails after the newer one landed: the newer width stays', async () => {
+        const older = service.commit(350);
+        const newer = service.commit(400);
+        await settle(1, 400);
+        await newer;
+        await settle(0, new Error('timeout'));
+        await expect(older).rejects.toThrow('timeout');
+        expect(service.width()).toBe(400);
+      });
+
+      it('both saves fail: the width stored before them is shown again', async () => {
+        const older = expect(service.commit(350)).rejects.toThrow('a');
+        const newer = expect(service.commit(400)).rejects.toThrow('b');
+        await settle(0, new Error('a'));
+        await settle(1, new Error('b'));
+        await older;
+        await newer;
+        expect(service.width()).toBe(300);
+      });
+
+      it('an answer arriving during a drag does not move the splitter', async () => {
+        const saved = service.commit(350);
+        service.preview(420);
+        await settle(0, 350);
+        await saved;
+        expect(service.width()).toBe(420);
+        const dropped = service.commit();
+        await settle(1, 420);
+        await dropped;
+        expect(service.width()).toBe(420);
+        expect(saves()).toEqual([
+          { settings: { sidebarWidth: 350 } },
+          { settings: { sidebarWidth: 420 } },
+        ]);
+      });
+
+      it('a failure arriving during a drag does not move the splitter', async () => {
+        const saved = service.commit(350);
+        service.preview(420);
+        await settle(0, new Error('locked'));
+        await expect(saved).rejects.toThrow('locked');
+        expect(service.width()).toBe(420);
+      });
+
+      it('an answer with an out-of-range width (older main) is clamped', async () => {
+        const saved = service.commit(400);
+        await settle(0, 9999);
+        await saved;
+        expect(service.width()).toBe(560);
+      });
+    });
+
     it('a failed save after a successful one reverts to the last saved width', async () => {
       await service.init();
       await service.commit(350);
