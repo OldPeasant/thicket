@@ -11,6 +11,8 @@ import {
   type BsonValue,
 } from '@thicket/core/bson';
 
+import { objectFromEntries, orderedEntries } from './key-order.util';
+
 // The explorer walks plain JS trees (objects, arrays, strings, numbers,
 // booleans, null). A BSON document is shown by turning it into such a tree
 // whose containers are plain objects/arrays, whose strings, booleans and nulls
@@ -46,25 +48,15 @@ export function isContainer(value: unknown): value is object {
 }
 
 /**
- * The explorer tree for a BSON value. Documents become plain objects: keys
- * keep their order except integer-like ones, which JS objects always list
- * first, and a repeated key keeps its last value.
+ * The explorer tree for a BSON value. Documents become plain objects that
+ * keep their field order (see key-order.util: integer-like keys, which JS
+ * objects list first, keep their place through a hidden key list); a
+ * repeated key keeps its last value at its first position.
  */
 export function toExplorerValue(value: BsonValue): unknown {
   switch (value.type) {
-    case 'object': {
-      const out: Record<string, unknown> = {};
-      for (const f of value.fields) {
-        // defineProperty, so a "__proto__" key stays a key.
-        Object.defineProperty(out, f.key, {
-          value: toExplorerValue(f.value),
-          enumerable: true,
-          writable: true,
-          configurable: true,
-        });
-      }
-      return out;
-    }
+    case 'object':
+      return objectFromEntries(value.fields.map((f) => [f.key, toExplorerValue(f.value)]));
     case 'array':
       return value.items.map(toExplorerValue);
     case 'string':
@@ -93,7 +85,7 @@ export function fromExplorerValue(value: unknown): BsonValue {
   if (typeof value === 'object') {
     return {
       type: 'object',
-      fields: Object.entries(value).map(([key, v]) => ({ key, value: fromExplorerValue(v) })),
+      fields: orderedEntries(value).map(([key, v]) => ({ key, value: fromExplorerValue(v) })),
     };
   }
   throw new TypeError(`Not an explorer value: ${typeof value}`);
@@ -281,7 +273,7 @@ export function formatDate(ms: bigint, dates: DateDisplay): string {
 let systemZone: string | undefined;
 
 /** The system time zone, resolved once. */
-function systemTimeZone(): string {
+export function systemTimeZone(): string {
   systemZone ??= Intl.DateTimeFormat().resolvedOptions().timeZone;
   return systemZone;
 }
@@ -308,7 +300,8 @@ function zoneFormat(timeZone: string): Intl.DateTimeFormat {
   return format;
 }
 
-function zoneOffsetMs(t: number, timeZone: string): number {
+/** Offset of `timeZone`'s wall clock from UTC at epoch ms `t` (whole seconds). */
+export function zoneOffsetMs(t: number, timeZone: string): number {
   const parts = zoneFormat(timeZone).formatToParts(new Date(t));
   const get = (type: Intl.DateTimeFormatPartTypes): number =>
     Number(parts.find((p) => p.type === type)?.value ?? 0);

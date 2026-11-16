@@ -160,6 +160,31 @@
   color: var(--danger);
 }
 
+.move {
+  display: inline-flex;
+  margin-left: auto;
+}
+
+.move-btn {
+  padding: 0 0.2rem;
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  font-size: 0.75rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.move-btn:hover:not(:disabled),
+.move-btn:focus-visible {
+  color: var(--accent);
+}
+
+.move-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 .add-row {
   display: inline-flex;
   align-items: center;

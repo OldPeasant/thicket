@@ -9,7 +9,8 @@ import {
 import { EditableValueComponent } from '../editable-value/editable-value.component';
 import { type FormField, formFields } from '../form-fields.util';
 import { estimateAvgItemBytes, formRevealKey, initialFormRevealCount } from '../reveal.util';
-import { type JsonType, typeOf, withEntry, withoutEntry } from '../json-edit.util';
+import { type JsonType, moveEntry, typeOf, withEntry, withoutEntry } from '../json-edit.util';
+import { orderedKeys } from '../key-order.util';
 import { HighlightComponent } from '../highlight/highlight.component';
 import { JsonTableComponent } from '../json-table/json-table.component';
 import { SchemaInfoComponent } from '../schema-info/schema-info.component';
@@ -315,6 +316,25 @@ export class JsonFormComponent {
 
   cancelSwitch(): void {
     this.pending = undefined;
+  }
+
+  // --- field order ---
+  // Where a field stands among the object's own keys (document order).
+  fieldIndex(key: string): number {
+    return orderedKeys(this.value as object).indexOf(key);
+  }
+
+  get fieldCount(): number {
+    return Object.keys(this.value as object).length;
+  }
+
+  // Moves a field one place up (-1) or down (+1) in the document.
+  moveField(key: string, by: -1 | 1): void {
+    const obj = this.value as Record<string, unknown>;
+    const from = this.fieldIndex(key);
+    if (from < 0) return;
+    const next = moveEntry(obj, key, from + by);
+    if (next !== obj) this.valueChange.emit(next);
   }
 
   onFieldDelete(key: string): void {

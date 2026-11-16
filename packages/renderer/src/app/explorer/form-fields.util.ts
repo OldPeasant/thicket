@@ -1,4 +1,5 @@
 import type { GhostKey } from '../schema';
+import { orderedKeys } from './key-order.util';
 
 export interface FormField {
   key: string;
@@ -34,7 +35,7 @@ export function formFields(
     }
     placed.add(key);
   }
-  for (const key of Object.keys(value)) {
+  for (const key of orderedKeys(value)) {
     if (!placed.has(key)) fields.push({ key, required: required.has(key) });
   }
   return fields;

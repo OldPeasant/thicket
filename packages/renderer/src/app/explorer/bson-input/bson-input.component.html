@@ -1,0 +1,148 @@
+<span class="bi" [style.--type-color]="color" [attr.data-bson-input]="value.type">
+  @switch (value.type) {
+    @case ('binary') {
+      @if (isUuid) {
+        <input
+          #uuid
+          class="bi-input wide"
+          aria-label="UUID"
+          [value]="text"
+          [class.invalid]="error"
+          (click)="$event.stopPropagation()"
+          (blur)="commit('text', uuid)"
+          (keydown.enter)="uuid.blur()"
+          (keydown.escape)="revert(uuid, 'text')"
+        />
+      } @else {
+        <input
+          #sub
+          class="bi-input tiny"
+          aria-label="Binary subtype"
+          title="Subtype (0 … 255 or 0x00 … 0xff)"
+          [value]="subtype"
+          [class.invalid]="error"
+          (click)="$event.stopPropagation()"
+          (blur)="commit('subtype', sub)"
+          (keydown.enter)="sub.blur()"
+          (keydown.escape)="revert(sub, 'subtype')"
+        />
+        <input
+          #b64
+          class="bi-input wide"
+          aria-label="Binary data (base64)"
+          placeholder="base64"
+          [value]="text"
+          [class.invalid]="error"
+          (click)="$event.stopPropagation()"
+          (blur)="commit('text', b64)"
+          (keydown.enter)="b64.blur()"
+          (keydown.escape)="revert(b64, 'text')"
+        />
+      }
+    }
+    @case ('regex') {
+      <span class="bi-delim">/</span>
+      <input
+        #pat
+        class="bi-input"
+        aria-label="Regex pattern"
+        [value]="pattern"
+        [class.invalid]="error"
+        (click)="$event.stopPropagation()"
+        (blur)="commit('pattern', pat)"
+        (keydown.enter)="pat.blur()"
+        (keydown.escape)="revert(pat, 'pattern')"
+      />
+      <span class="bi-delim">/</span>
+      <input
+        #opt
+        class="bi-input tiny"
+        aria-label="Regex options"
+        [title]="'Options: ' + regexOptions"
+        [value]="options"
+        [class.invalid]="error"
+        (click)="$event.stopPropagation()"
+        (blur)="commit('options', opt)"
+        (keydown.enter)="opt.blur()"
+        (keydown.escape)="revert(opt, 'options')"
+      />
+    }
+    @case ('timestamp') {
+      <span class="bi-delim">t</span>
+      <input
+        #ts
+        class="bi-input num"
+        aria-label="Timestamp seconds"
+        inputmode="numeric"
+        [value]="seconds"
+        [class.invalid]="error"
+        (click)="$event.stopPropagation()"
+        (blur)="commit('t', ts)"
+        (keydown.enter)="ts.blur()"
+        (keydown.escape)="revert(ts, 't')"
+      />
+      <span class="bi-delim">i</span>
+      <input
+        #ti
+        class="bi-input num"
+        aria-label="Timestamp increment"
+        inputmode="numeric"
+        [value]="increment"
+        [class.invalid]="error"
+        (click)="$event.stopPropagation()"
+        (blur)="commit('i', ti)"
+        (keydown.enter)="ti.blur()"
+        (keydown.escape)="revert(ti, 'i')"
+      />
+    }
+    @case ('minKey') {
+      <span class="bi-fixed">MinKey</span>
+    }
+    @case ('maxKey') {
+      <span class="bi-fixed">MaxKey</span>
+    }
+    @default {
+      <input
+        #txt
+        class="bi-input"
+        [class.num]="numeric"
+        [class.wide]="wide"
+        [attr.aria-label]="label"
+        [attr.inputmode]="value.type === 'int' || value.type === 'long' ? 'numeric' : null"
+        [placeholder]="placeholder"
+        [value]="text"
+        [class.invalid]="error"
+        (click)="$event.stopPropagation()"
+        (blur)="commit('text', txt)"
+        (keydown.enter)="txt.blur()"
+        (keydown.escape)="revert(txt, 'text')"
+      />
+      @if (value.type === 'objectId') {
+        <button
+          type="button"
+          class="bi-btn"
+          title="Generate a new ObjectId"
+          aria-label="Generate a new ObjectId"
+          (click)="$event.stopPropagation(); generate()"
+        >
+          ⟳
+        </button>
+      } @else if (value.type === 'date' && wallTime) {
+        <input
+          #picker
+          class="bi-input picker"
+          type="datetime-local"
+          step="0.001"
+          [attr.aria-label]="utc ? 'Date and time (UTC)' : 'Date and time (local)'"
+          [title]="utc ? 'Date and time in UTC' : 'Date and time in local time'"
+          [value]="wallTime"
+          (click)="$event.stopPropagation()"
+          (change)="commitWallTime(picker.value)"
+        />
+      }
+    }
+  }
+  @if (error) {
+    <span class="bi-error" role="alert">{{ error }}</span>
+  }
+</span>

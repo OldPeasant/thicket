@@ -1,4 +1,4 @@
-@if (editMode.enabled() && !locked && type !== 'bson') {
+@if (editMode.enabled() && !locked && !deprecated) {
   <span class="ev">
     @if (choices; as options) {
       <select
@@ -18,16 +18,28 @@
       @if (typeOptions.length > 1) {
         <select
           class="type-select"
+          aria-label="Type"
+          [attr.data-bson-type]="current"
+          [style.--badge-color]="badgeColor"
           (change)="onTypeChange($event)"
           (click)="$event.stopPropagation()"
         >
-          @for (t of typeOptions; track t) {
-            <option [value]="t" [selected]="t === type">{{ t }}</option>
+          @for (o of typeOptions; track o.target) {
+            <option
+              [value]="o.target"
+              [selected]="o.target === current"
+              [disabled]="!o.enabled"
+              [title]="o.reason ?? ''"
+            >
+              {{ o.label }}
+            </option>
           }
         </select>
       }
 
-      @if (type === 'string') {
+      @if (leaf; as v) {
+        <app-bson-input [value]="v" (valueChange)="commitBson($event)" />
+      } @else if (type === 'string') {
         <input
           #input
           class="val-input str"

@@ -94,6 +94,31 @@
             />
           }
           @if (canEdit && !f.ghost) {
+            @let at = fieldIndex(f.key);
+            <span class="move" role="group" aria-label="Move field">
+              <button
+                type="button"
+                class="move-btn"
+                data-move="up"
+                [disabled]="at <= 0"
+                (click)="moveField(f.key, -1)"
+                [attr.aria-label]="'Move ' + f.key + ' up'"
+                title="Move up"
+              >
+                ▴
+              </button>
+              <button
+                type="button"
+                class="move-btn"
+                data-move="down"
+                [disabled]="at >= fieldCount - 1"
+                (click)="moveField(f.key, 1)"
+                [attr.aria-label]="'Move ' + f.key + ' down'"
+                title="Move down"
+              >
+                ▾
+              </button>
+            </span>
             <button type="button" class="del-btn" (click)="onFieldDelete(f.key)" title="Delete key">
               &times;
             </button>

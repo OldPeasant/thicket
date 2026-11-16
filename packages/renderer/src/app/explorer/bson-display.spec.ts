@@ -211,18 +211,23 @@ describe('Explorer with BSON values', () => {
     expect(TestBed.inject(EditModeService).enabled()).toBe(true);
   };
 
-  it('keeps BSON values read-only in edit mode and locks deprecated types', async () => {
+  it('gives BSON values typed editors in edit mode and locks deprecated types', async () => {
     await render(ALL_TYPES_EJSON, 'form');
     await goToEditMode();
-    // Plain JSON values become editable...
     expect(field('string')?.querySelector('input, textarea')).not.toBeNull();
-    // ...BSON leaves keep their badge and exact text, with no editor.
-    for (const key of ['int64', 'decimalMax', 'date', 'uuid', '_id', 'symbol', 'codeWithScope']) {
+    // BSON values get a typed input (bson-input.spec.ts) showing the exact value...
+    for (const key of ['int64', 'decimalMax', 'date', 'uuid', '_id']) {
+      const ev = field(key)?.querySelector('app-editable-value');
+      expect(ev?.querySelector('app-bson-input input'), key).not.toBeNull();
+    }
+    const int64 = field('int64')?.querySelector<HTMLInputElement>('app-bson-input input');
+    expect(int64?.value).toBe('9007199254740993');
+    // ...deprecated ones keep their badge and text, with no editor.
+    for (const key of ['symbol', 'codeWithScope']) {
       const ev = field(key)?.querySelector('app-editable-value');
       expect(ev?.querySelector('input, textarea, select'), key).toBeNull();
       expect(ev?.querySelector('.badge')?.textContent?.trim(), key).toBe(EXPECTED_BADGES[key]);
     }
-    expect(valueOf('int64')).toBe('9007199254740993');
     for (const key of ['undefined', 'symbol', 'dbPointer', 'codeWithScope']) {
       expect(field(key)?.querySelector('app-editable-value .lock'), key).not.toBeNull();
     }
@@ -244,11 +249,14 @@ describe('Explorer with BSON values', () => {
     );
     await goToEditMode();
     const badges = [...el().querySelectorAll<HTMLElement>('.badge')];
-    expect(badges.map((b) => b.textContent?.trim())).toEqual(['Symbol', 'Undefined', 'Int64']);
-    expect(badges.map((b) => b.classList.contains('deprecated'))).toEqual([true, true, false]);
+    expect(badges.map((b) => b.textContent?.trim())).toEqual(['Symbol', 'Undefined']);
+    expect(badges.map((b) => b.classList.contains('deprecated'))).toEqual([true, true]);
     expect(el().querySelectorAll('app-editable-value .lock').length).toBe(2);
     const bsonVals = [...el().querySelectorAll('.val.bson')].map((v) => v.textContent?.trim());
-    expect(bsonVals).toEqual(['sym', 'undefined', '7']);
+    expect(bsonVals).toEqual(['sym', 'undefined']);
+    // The Int64 is editable, as an Int64.
+    const n = el().querySelector<HTMLInputElement>('app-bson-input input');
+    expect(n?.value).toBe('7');
   });
 
   it('shows no badge for the document root', async () => {

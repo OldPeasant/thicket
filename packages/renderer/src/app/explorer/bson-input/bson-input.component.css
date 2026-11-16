@@ -1,0 +1,83 @@
+:host {
+  display: inline-flex;
+  min-width: 0;
+}
+
+.bi {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.bi-input {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--type-color, var(--border));
+  border-radius: 3px;
+  padding: 2px 5px;
+  color: var(--text);
+  width: 14ch;
+}
+
+.bi-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--glow);
+}
+
+.bi-input.num {
+  color: var(--val-num);
+  width: 12ch;
+}
+
+.bi-input.wide {
+  width: 28ch;
+}
+
+.bi-input.tiny {
+  width: 6ch;
+}
+
+.bi-input.picker {
+  width: auto;
+  border-left-width: 1px;
+  color: var(--text-muted);
+}
+
+.bi-input.invalid {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.bi-delim,
+.bi-fixed {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.bi-btn {
+  font-size: 0.75rem;
+  line-height: 1;
+  color: var(--text-muted);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 5px;
+  cursor: pointer;
+}
+
+.bi-btn:hover,
+.bi-btn:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.bi-error {
+  flex-basis: 100%;
+  font-size: 0.75rem;
+  color: var(--danger);
+}

@@ -1,4 +1,6 @@
-import { isBsonLeaf } from './bson-value.util';
+import { BsonLeaf, isBsonLeaf } from './bson-value.util';
+import { blankBson } from './bson-input.util';
+import { objectFromEntries, orderedKeys } from './key-order.util';
 
 // 'bson': a BSON value other than a string, boolean, null, document or array
 // (see bson-value.util), shown as one scalar.
@@ -30,20 +32,20 @@ export function defaultForType(type: JsonType): unknown {
 }
 
 // Recursively rebuilds a value's shape (object keys, array length) with
-// every leaf reset to its type's default — used to give the user a
+// every leaf reset to its type's default (BSON values keep their type) — used to give the user a
 // ready-to-fill starting point that matches what a given column looks like
 // elsewhere, without literally copying another row's data.
 export function blankLike(value: unknown): unknown {
   const type = typeOf(value);
   if (type === 'object') {
     const src = value as Record<string, unknown>;
-    const out: Record<string, unknown> = {};
-    for (const k of Object.keys(src)) out[k] = blankLike(src[k]);
-    return out;
+    return objectFromEntries(orderedKeys(src).map((k) => [k, blankLike(src[k])]));
   }
   if (type === 'array') {
     return (value as unknown[]).map(blankLike);
   }
+  // A BSON value keeps its type: an Int64 column gets an Int64 0, not null.
+  if (isBsonLeaf(value)) return new BsonLeaf(blankBson(value.bson));
   return defaultForType(type);
 }
 
@@ -68,17 +70,7 @@ export function blankItemLike(arr: unknown[]): unknown {
   return arr.length > 0 ? blankLike(arr[arr.length - 1]) : '';
 }
 
-export function withEntry(
-  obj: Record<string, unknown>,
-  key: string,
-  value: unknown,
-): Record<string, unknown> {
-  return { ...obj, [key]: value };
-}
-
-export function withoutEntry(obj: Record<string, unknown>, key: string): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(obj).filter(([k]) => k !== key));
-}
+export { moveEntry, withEntry, withoutEntry } from './key-order.util';
 
 export function withItem(arr: unknown[], index: number, value: unknown): unknown[] {
   const copy = arr.slice();
