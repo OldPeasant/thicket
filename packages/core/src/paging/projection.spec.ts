@@ -1,10 +1,42 @@
 import { describe, expect, it } from 'vitest';
 
-import { projectionWithSortKeys } from './projection';
+import { isIncluded, isInclusion, projectionWithSortKeys } from './projection';
 import { DEFAULT_SORT, type SortSpec } from './sort';
 
 const asc = (field: string) => ({ field, direction: 1 as const });
 const desc = (field: string) => ({ field, direction: -1 as const });
+
+describe('isIncluded / isInclusion', () => {
+  it('isIncluded: true, 1 and any non-zero number include a field', () => {
+    for (const v of [true, 1, -1, 2]) expect(isIncluded(v)).toBe(true);
+    for (const v of [false, 0, null, undefined, '1', { $slice: 1 }])
+      expect(isIncluded(v)).toBe(false);
+  });
+
+  it('a field included or given an expression makes an inclusion projection', () => {
+    expect(isInclusion({ items: 1 })).toBe(true);
+    expect(isInclusion({ _id: 0, items: true })).toBe(true);
+    expect(
+      isInclusion({
+        items: { $cond: [{ $isArray: '$items' }, { $slice: ['$items', 5] }, '$items'] },
+      }),
+    ).toBe(true);
+  });
+
+  it('$slice / $meta alone and exclusions do not make an inclusion projection', () => {
+    expect(isInclusion({ items: { $slice: 5 } })).toBe(false);
+    expect(isInclusion({ _id: 0, items: { $slice: 5 } })).toBe(false);
+    expect(isInclusion({ score: { $meta: 'textScore' } })).toBe(false);
+    expect(isInclusion({ tags: 0 })).toBe(false);
+    expect(isInclusion({ _id: 0 })).toBe(false);
+    expect(isInclusion({})).toBe(false);
+  });
+
+  it('_id included alone (nothing excluded) is an inclusion projection', () => {
+    expect(isInclusion({ _id: 1 })).toBe(true);
+    expect(isInclusion({ _id: 1, tags: 0 })).toBe(false);
+  });
+});
 
 describe('projectionWithSortKeys', () => {
   it('returns undefined, empty projections and opaque or empty sorts unchanged', () => {
