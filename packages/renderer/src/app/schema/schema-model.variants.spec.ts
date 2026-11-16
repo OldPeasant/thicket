@@ -419,6 +419,75 @@ describe('document keys named like Object.prototype members', () => {
     expect(Object.keys(seeded)).toEqual(['__proto__']);
     expect(Object.getOwnPropertyDescriptor(seeded, '__proto__')?.value).toEqual({ x: 1 });
   });
+
+  it('offers a declared inherited name as a ghost key while the document lacks it', () => {
+    const m = new SchemaModel({
+      type: 'object',
+      properties: { a: { type: 'string' }, constructor: { type: 'string' } },
+    });
+    expect(m.ghostKeysAt([], { a: 'x' }).map((g) => g.key)).toEqual(['constructor']);
+    expect(m.ghostKeysAt([], { a: 'x', constructor: 'y' })).toEqual([]);
+  });
+
+  it('does not count an inherited name as present when telling variants apart', () => {
+    // Strict pass: `toString` is required but missing, so only the second variant fits.
+    const required = new SchemaModel({
+      oneOf: [
+        { required: ['toString'], properties: { toString: { type: 'string' } } },
+        { required: ['other'], properties: { other: { type: 'integer' } } },
+      ],
+    });
+    expect(required.variantIndex(required.root, { other: 1 })).toBe(1);
+
+    // A missing `constructor` is not compared with Object.prototype.constructor.
+    const constant = new SchemaModel({
+      oneOf: [{ properties: { constructor: { const: 'a' } } }, { required: ['kind'] }],
+    });
+    expect(constant.variantIndex(constant.root, {})).toBe(0);
+  });
+
+  it('adds a required inherited name when switching variants', () => {
+    const m = new SchemaModel({
+      type: 'object',
+      oneOf: [
+        { properties: { kind: { const: 'plain' } } },
+        {
+          required: ['constructor'],
+          properties: { kind: { const: 'built' }, constructor: { type: 'string' } },
+        },
+      ],
+    });
+    expect(m.switchVariant([], { kind: 'plain' }, 'built')).toEqual({
+      value: { kind: 'built', constructor: '' },
+      dropped: [],
+      reset: [],
+      added: ['constructor'],
+    });
+  });
+
+  it('switches on a __proto__ discriminator without changing the prototype', () => {
+    const m = new SchemaModel(
+      JSON.parse(
+        '{"oneOf":[{"properties":{"__proto__":{"const":"a"}}},{"properties":{"__proto__":{"const":"b"}}}]}',
+      ) as JsonSchema,
+    );
+    expect(m.variantsAt([])?.property).toBe('__proto__');
+    const result = m.switchVariant([], JSON.parse('{"__proto__":"a","n":1}'), 'b');
+    const value = result?.value ?? {};
+    expect(Object.getPrototypeOf(value)).toBe(Object.prototype);
+    expect(Object.keys(value)).toEqual(['__proto__', 'n']);
+    expect(Object.getOwnPropertyDescriptor(value, '__proto__')?.value).toBe('b');
+  });
+
+  it('skips an inherited name that only some variants declare when choosing a discriminator', () => {
+    const m = new SchemaModel({
+      oneOf: [
+        { properties: { toString: { const: 1 }, kind: { const: 'a' } } },
+        { properties: { kind: { const: 'b' } } },
+      ],
+    });
+    expect(m.variantsAt([])?.property).toBe('kind');
+  });
 });
 
 describe('errors for alternatives (inline schemas)', () => {

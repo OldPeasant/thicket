@@ -4,47 +4,49 @@ Date: 2026-11-16
 
 Task: explorer-copy - M0: Copy the JSON Canopy explorer into the renderer
 
-Scope: `git diff 5c13e8ab9c70388cbd7c7018bb83237d8b0871b3..f7c02aab97e33cad41ea075f1d8f8aadff5f1a2b` (committed changes only). Moved files were compared with their originals at `c0d4dca` (`vendor/json-canopy/src/app/...`) using `git diff -M c0d4dca f7c02aa -- <old> <new>`, `git diff -M -w`, and a whitespace-normalised comparison of every component template, so that only real edits were reviewed and Prettier reformatting was set aside.
+Scope: final review after two fix rounds. Committed changes only: `git diff 0f9b769fb2cda1eaa202c0a12bff695444d181fa..14e79e9e012a871faa0829b5ee7ebe548ae8683f` (the task's 7 commits on top of `git merge-base HEAD origin/main`). Moved files were compared with the originals at `c0d4dca` (`vendor/json-canopy/...`) using rename detection, and reformatting was set aside. While this review was running, the parent rebased the task onto a newer main: HEAD moved from `4fef12e` (base `6a69dda`) to `14e79e9` (base `0f9b769`). `git diff --stat 4fef12e 14e79e9` shows only `tasks/explorer-copy.md` and `tasks/shell-syntax.md`, so the reviewed code is identical in both revisions.
+
+Reviewed revision: `14e79e9e012a871faa0829b5ee7ebe548ae8683f` (code-identical to `4fef12ed5c3b2980dae0f6070dfdb08a332bdc94`)
 
 Requirements:
-- `tasks/explorer-copy.md` (goal and 4 acceptance criteria) and the 5 recorded assumptions (`python tasks.py assumptions`)
-- `SPEC.md` (M0 explorer requirement, themes, renderer security), `docs/ARCHITECTURE.md` (renderer, no-network rule, CSP), `docs/QUALITY.md`, `AGENTS.md`
-- Parent instructions (focus list, TW-1 in `reviews/explorer-copy/tests.md`)
+- `tasks/explorer-copy.md` (goal, 4 acceptance criteria, 5 recorded assumptions)
+- `SPEC.md`, `docs/ARCHITECTURE.md` (renderer, no-network rule, CSP), `docs/QUALITY.md`, `AGENTS.md`
+- Earlier reports `reviews/explorer-copy/review.md` (CR-1..CR-4), `tests.md` (TW-1, TW-2) and `fixes.md`
+- Parent instructions (final review, verify that earlier findings are resolved)
 
 Git range:
 - Branch: main
-- HEAD: f7c02aab97e33cad41ea075f1d8f8aadff5f1a2b
-- Base/start: 5c13e8ab9c70388cbd7c7018bb83237d8b0871b3
-- Commits reviewed: 4 (754fd20 move, 06b52ad strict-mode fixes, 073258c dev route/NOTICE/docs, f7c02aa tests)
-- Uncommitted changes: none at review time (working tree clean)
+- HEAD: 14e79e9e012a871faa0829b5ee7ebe548ae8683f (code-identical to 4fef12ed5c3b2980dae0f6070dfdb08a332bdc94)
+- Base/start: 0f9b769fb2cda1eaa202c0a12bff695444d181fa (was 6a69ddaa7b6191e1207cc35797e029d7e889beb5 before the rebase)
+- Commits reviewed: 7 (8dff140 move, 6e48533 strict-mode fixes, c2812e5 dev route/NOTICE/docs, 04a0655 tests, d118053 fonts/NOTICE/mergeTwo fix, b78656b font/NOTICE/prototype-key tests, 14e79e9 own-property lookups). Before the rebase these were e870ea1, 737bd4d, 6e1ad98, 0b68061, 36d2e1e, 299d287 and 4fef12e.
+- Uncommitted changes: at the end of the review, `packages/renderer/src/app/schema/schema-model.variants.spec.ts` was modified in the working tree, presumably by a concurrently running helper. This change is outside the committed scope and was not reviewed.
 
-Commands run:
-- `npm run check` (repo root) -> pass: eslint `--max-warnings 0` and `prettier --check` clean; typecheck (root tsc, every workspace, renderer `ngc` + spec `tsc`) clean; root Vitest 5 files / 599 tests passed; renderer `ng test` 22 files / 275 tests passed.
-- `git grep -n "vendor/\|json-master-plugin" -- ':!tasks' ':!reviews'` -> no matches; `ls vendor` -> does not exist.
-- `python tasks.py verify explorer-copy` -> all 4 criteria still unticked (the parent records evidence later; not a finding).
-- Not run: `npm run build -w packages/renderer` and any browser/Electron run (no browser binary available in this clone; outside the commands the parent allowed).
+Commands run (read-only):
+- `git log`, `git diff -M --stat`, `git show` on the fix commits, `git diff --stat 4fef12e 14e79e9`
+- `git grep -n -i "intellij|jbcolor|themesync|host bridge|host-bridge|IDE settings|cefQuery|jcef" -- packages/renderer` returned only the expected `notice.spec.ts:32` assertion.
+- `git grep -n "vendor/\|json-master-plugin" -- ':!tasks' ':!reviews'` returned only `packages/renderer/src/notice.spec.ts:59` (see CR-3). `ls vendor` reports that the folder does not exist.
+- `git grep -il "open font license|OFL|Reserved Font Name" HEAD` found no OFL licence text in the repository (see CR-1).
+- `python tasks.py verify explorer-copy` shows all 4 criteria still unticked. The parent records the evidence later, so this is not a finding.
+- Not run: `npm run check`, the build and a browser. The working tree contained another helper's uncommitted spec change, so a run would not have tested the committed revision. The parent has to run the final validation.
 
-Summary: 0 P0, 0 P1, 1 P2, 3 P3
+Summary: 0 P0, 0 P1, 0 P2, 3 P3
+
+## Earlier findings: resolution check
+
+- CR-1 (CSP `font-src 'self'` blocked the inlined `data:` fonts): **resolved.** `styles.css:7-21` loads `url('./assets/fonts/orbitron.woff2')` and `url('./assets/fonts/share-tech-mono.woff2')`. No `data:` URL remains. The CSP in `src/index.html:12` is unchanged (`font-src 'self'`). The file sizes (11800 and 13500 bytes) match the WOFF2 length fields in the headers of the original base64 payloads at `c0d4dca` (`0x2E18` for Orbitron, `0x34BC` for Share Tech Mono), so the fonts were extracted without truncation. `styles.spec.ts` covers the relative URLs, the existence of the files and the `wOF2` signature. Only one leftover remains: the ARCHITECTURE wording (CR-2 below).
+- CR-2 (stale IntelliJ/IDE host comments): **resolved.** `edit-mode.service.ts:28-31` and `schema.service.ts:49` were reworded, and the `styles.css` theme comment no longer mentions JBColor or ThemeSync. The grep above finds no remaining host references.
+- CR-3 (NOTICE copyright line, modifications not stated): **resolved.** `NOTICE:1-16` no longer claims a Thicket copyright holder. It names JSON Canopy 0.4.0 (Apache-2.0, Copyright 2026 Sonensei.ch) as the origin and lists the modifications (Apache-2.0 §4(b)). It also keeps the original JSON Canopy NOTICE text. `notice.spec.ts` covers this.
+- CR-4 / TW-1 (`mergeTwo` treated inherited names and `__proto__` as existing properties): **resolved.** `schema-model.ts:566-577` uses `Object.hasOwn` and `Object.defineProperty`. `schema-model.spec.ts:31-47` and `schema-model.variants.spec.ts:277-383` cover it.
+- TW-2 (document keys such as `constructor`, `toString` and `__proto__` resolved to `Object.prototype` members): **resolved.** `ownEntry` and `setOwn` (`schema-model.ts:586-599`) are used in `ownChild` (and so in `permits`, `childrenOf`, `nodesAt`, `typesAt` and `permitsKey`), `seed`, `switchVariant` and `selectorValues`. The `in` checks in `ghostKeys` and `fits` became `Object.hasOwn`. I checked the remaining sites. `declaredKeysAt`, `ghostKeys`, `patternProperties` and `discriminatorOf` iterate with `Object.entries`/`Object.keys` and so see only own keys. `'default' in schema` checks a key that `Object.prototype` does not define. The object literal `{ [info.property]: to }` in `switchVariant` uses a computed key, which creates an own property even for `__proto__`. The `$ref` walk in `lookup` was deliberately left alone (`fixes.md`), and an inherited function there already ends as "unresolved $ref". The fix leaves the behaviour for ordinary keys unchanged.
 
 ## Acceptance criteria
 
-- AC1 (copied specs pass in `npm run check`): met. All copied specs run in `ng test` and pass. The samples-based cases of `schema-model.spec.ts` (and some of `layout.util.spec.ts` / `form-fields.util.spec.ts`) were dropped or switched to inline fixtures because only `canopy-demo.json` was vendored; this is recorded as assumption #1 and partly compensated by the new `schema-model.variants.spec.ts`.
-- AC2 (dev route, tables/form toggle, strict/context search, collapse, edit): met by component test. `dev/explorer-demo.spec.ts` drives the real router (`appConfig.providers`, `RouterTestingHarness`) to `/dev/explorer` and checks render, toggle, strict and context search, collapse/expand, column hiding and an edit that reaches the page's document. The criterion allows a component test.
-- AC3 (root NOTICE lists JSON Canopy, Apache-2.0, Sonensei.ch): met (`NOTICE:6-11`). See CR-3 for two small wording points.
-- AC4 (`vendor/` deleted, no references outside tasks/ and reviews/): met. `vendor/**` entries were removed from `eslint.config.mjs` and `.prettierignore`; BRIEF.md and the AGENTS.md project note were updated (assumption #5).
+- AC1 (copied specs pass in `npm run check`): the code supports it. All copied specs are present at `packages/renderer/src/app/explorer/**` and `src/app/schema/**`. Assumption #1 records the cases dropped because JSON Canopy's `samples/` were not vendored. I did not run `npm run check` (see Commands run). The parent must record that run as the evidence.
+- AC2 (dev route, tables/form toggle, strict/context search, collapse, edit): met by a component test. `dev/explorer-demo.spec.ts` drives the real router (`appConfig.providers`, `RouterTestingHarness`) to `/dev/explorer`. It checks the rendering, the layout toggle, strict and context search, collapse/expand, column hiding, and an edit that reaches the page's document. The criterion allows a component test.
+- AC3 (root NOTICE lists JSON Canopy, Apache-2.0, Sonensei.ch): met (`NOTICE:3-16`).
+- AC4 (`vendor/` deleted, no references outside tasks/ and reviews/): `vendor/` is gone, its entries in `eslint.config.mjs` and `.prettierignore` were removed, and `AGENTS.md` and `BRIEF.md` were updated (assumption #5). The literal grep still has one match in a test (CR-3).
 
-## Behaviour preservation of the strict-mode edits
-
-Checked against the originals at `c0d4dca`; no regression found:
-- `schema.service.ts` `memo()`: same has/get/set semantics as the former `if (!m.has(k)) m.set(...); return m.get(k)!`, including cached `false`/empty answers.
-- `schema-model.ts` index guards (`narrow`, `discriminatorOf`, `metaAt`, `seedItem`, `variantsAt`, `switchVariant`, `seed`, `closestVariantProblems`): each new guard only triggers where the original indexed `undefined` (and would have thrown or produced `undefined`); `fits = !declared || ...` matches the original, where `allowed` was already falsy when `declared` was missing; the `reduce` with `?? Infinity` picks the same index. `mergeTwo` `existing ?` versus `name in merged`: equivalent for every value a schema property can hold (see CR-4 for the pre-existing inherited-key quirk).
-- `json-edit.util.ts` `withoutEntry`: `Object.fromEntries(Object.entries(...).filter(...))` keeps key order and copies an own `__proto__` key as data, like spread + `delete`.
-- `json-lines.component`: `EMPTY_DOC` fallback only replaces a non-null assertion; `@if (lines[i]; as line)` is always true for a real `JsonLine` object, so rendering is unchanged.
-- `problem-index.ts` `seg === undefined` guard and `column-sync.service.ts` `?? ''`: unreachable for valid input, no behaviour change.
-- Templates: whitespace-normalised comparison shows only reformatting, plus `rootProblems[0]?.message ?? ''` in `json-form` and the `json-lines` `@if`. `highlight.component` was reformatted over several lines; Angular's default whitespace removal keeps `<mark>`/`<span>` adjacent (the demo spec's `'Grace Hopper'` assertion confirms no gap is inserted).
-- `host-bridge.service.ts` had no uses in the vendored copy; deleting it removed nothing else.
-
-Router: `provideRouter(routes, withHashLocation())`, `<base href="./">` unchanged, lazy `loadComponent` for the dev page, `**` redirects to `''`. Fine for Electron `loadFile` (assumption #2). The demo JSON is a static module import, so no fetch and nothing for the CSP to block. `@angular/router` matches the other Angular pins (`~22.2.6`); `ajv`/`ajv-formats` are MIT and listed in NOTICE; `allowedCommonJsDependencies` only silences the CJS warning for those three entry points. The new eslint rule (`no-extraneous-class` with `allowWithDecorator`) is scoped to `packages/renderer/**/*.ts`.
+Architecture and integration (unchanged since the first review, re-checked): the router uses `provideRouter(routes, withHashLocation())` and lazy-loads the dev page. The demo JSON is a static import, so nothing is fetched. `@angular/router` is pinned like the other Angular packages (`~22.2.6`). `ajv`/`ajv-formats` are MIT licensed and listed in NOTICE. `allowedCommonJsDependencies` is limited to the three ajv entry points. The `no-extraneous-class` rule change applies only to `packages/renderer/**/*.ts`. No secrets or credentials are in the diff.
 
 ## P0 Critical
 
@@ -56,36 +58,31 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | The inlined Tron fonts are blocked by the renderer CSP**
-    - File: `packages/renderer/src/styles.css:6-22`, `packages/renderer/src/index.html:12`
-    - Category: Integration
-    - Problem: the copied `@font-face` rules load Orbitron and Share Tech Mono from `url(data:font/woff2;base64,...)`. The renderer CSP is `... font-src 'self'`, and `no-network.spec.ts:107` requires exactly that. Under CSP, `'self'` does not match the `data:` scheme, so Chromium (Electron and `ng serve`) refuses both fonts, logs a CSP violation for each, and falls back to other fonts. The header comment added at `styles.css:1-5` says the fonts are inlined "so the app works fully offline", but with this CSP they never load. `docs/ARCHITECTURE.md:41` also says fonts "come from npm packages bundled into `dist/`", which `'self'` would allow. This is derived from CSP semantics and the committed files; it was not observed in a browser, because none is available in this clone.
-    - Why it matters: the task moves "the Tron tokens and inlined fonts", and SPEC.md defines the Tron style by Orbitron and Share Tech Mono. As committed, the fonts are dead weight (about 37 KB of base64 in the initial global stylesheet), and the comment tells the next task (themes) that they work.
-    - Suggested fix: serve the two woff2 files from the app's own origin (for example from an npm font package or files under `public/`, referenced by a relative `url()`), so `font-src 'self'` matches, as ARCHITECTURE.md says. Alternatively, add `data:` to `font-src` and update `no-network.spec.ts` and the ARCHITECTURE CSP text in the same change. If it is left for the themes task, correct the comment and record the deferral with `tasks.py assume`.
+None.
 
 ## P3 Low
 
-- [ ] **CR-2 | Stale IntelliJ/IDE host comments in the copied code**
-    - File: `packages/renderer/src/styles.css:28-34`, `packages/renderer/src/app/explorer/services/edit-mode.service.ts:28-31`, `packages/renderer/src/app/explorer/services/schema.service.ts:49`
+- [ ] **CR-1 | The extracted font files ship without the SIL OFL 1.1 licence text**
+    - File: `packages/renderer/src/assets/fonts/orbitron.woff2`, `packages/renderer/src/assets/fonts/share-tech-mono.woff2`, `NOTICE:30-31`
     - Category: Quality
-    - Problem: the comments still describe the IntelliJ host (`JBColor.isBright()`, `ThemeSync.kt`, "Called by the IntelliJ host bridge", origin `'IDE settings'`). The task removed the host bridge, so these callers no longer exist.
-    - Why it matters: future tasks that wire theming, read-only files and schema loading into Thicket will look for callers that are not there.
-    - Suggested fix: rewrite the three comments to describe Thicket's situation (for example, "set by the host when the document is read-only"; theme set by the themes task), or remove the host-specific parts.
+    - Problem: NOTICE says Orbitron and Share Tech Mono are under the SIL Open Font License 1.1. However, no OFL licence text or font copyright line exists anywhere in the repository (`git grep -il "open font license|OFL"` finds only NOTICE, the specs, `styles.css` comments and lockfiles). Angular's `3rdpartylicenses.txt` only covers npm packages, so the built `dist/` does not contain the OFL either. OFL 1.1 condition 2 requires every distributed copy of the font software to include the copyright notice and the licence. This gap already existed in JSON Canopy, which inlined the fonts. This task turned them into standalone font files (`dist/media/*.woff2`), which makes the gap more visible.
+    - Why it matters: `main` is published, and the packaged app will redistribute these files. The licence obligation is cheap to meet now and easy to forget later.
+    - Suggested fix: add `packages/renderer/src/assets/fonts/OFL.txt` with the OFL 1.1 text and each font's copyright line from its upstream release, and reference it from NOTICE. Alternatively, record a deferral to the themes task (which may switch to npm font packages that bring their own licence files) with `tasks.py assume`.
 
-- [ ] **CR-3 | NOTICE wording: unsourced Thicket copyright line, and modifications not stated**
-    - File: `NOTICE:1-4`, `NOTICE:6-11`
+- [ ] **CR-2 | ARCHITECTURE still says fonts come from npm packages**
+    - File: `docs/ARCHITECTURE.md:41`, `packages/renderer/src/styles.css:1-5`
     - Category: Quality
-    - Problem: (a) `Thicket / Copyright 2026 Sonensei.ch` names a copyright holder for the whole project. Nothing else in the repository (README, package.json, LICENSE, SPEC, BRIEF) states that, and no assumption records it. (b) The NOTICE says the explorer code "originate[s] from JSON Canopy", but this task modified those files (strict-mode rewrites, removed host bridge, dropped spec cases). Apache-2.0 section 4(b) asks that modified files carry a notice that they were changed.
-    - Why it matters: attribution and licence text are what the AC is about, and a human will rely on it when publishing. Both points are cheap to settle now.
-    - Suggested fix: record the project copyright holder as an assumption, or confirm it with the human. Add one sentence such as "modified for Thicket (strict TypeScript/lint fixes, IDE host bridge removed)" to the JSON Canopy paragraph.
+    - Problem: `docs/ARCHITECTURE.md:41` says "fonts come from npm packages bundled into `dist/`". After the CR-1 fix, the fonts are committed woff2 files under `src/assets/fonts/`. The `styles.css` header comment says this, and that "the themes task may switch to npm font packages". No assumption records the deviation from the documented approach (the five recorded assumptions predate the fix).
+    - Why it matters: ARCHITECTURE is the reference that later tasks (themes, packaging) read for the font source. It now describes a setup that does not exist.
+    - Suggested fix: change the line to say that fonts are bundled from files in the app (currently `src/assets/fonts/`) or from npm packages, never from a CDN. Alternatively, record the choice with `python tasks.py assume explorer-copy "..."`.
 
-- [ ] **CR-4 | `mergeTwo` treats inherited `Object.prototype` names as existing properties (pre-existing, TW-1)**
-    - File: `packages/renderer/src/app/schema/schema-model.ts:566-570`
-    - Category: Correctness
-    - Problem: I confirmed the test-writer's TW-1. `merged` is a plain object, so `merged[name]` is truthy for `toString`, `constructor` and similar, and the result is `{ allOf: [<function>, schema] }`. The original `name in merged` behaved the same, so this is not a regression. One case goes beyond TW-1: when only `b` declares a property named `__proto__` (possible with `JSON.parse`d schemas), the assignment `merged['__proto__'] = { allOf: [Object.prototype, schema] }` changes the prototype of `merged` and does not create the property, so that property silently disappears. Only that local object is affected (no global prototype pollution). Schema support is not wired to anything yet (assumption #4).
-    - Why it matters: low today. It becomes a real defect once user-loaded schemas reach `resolve`.
-    - Suggested fix: use `Object.hasOwn(merged, name)` and build `merged` with `Object.create(null)` (or `Object.fromEntries`), when schema support is wired up or now, as a one-line change with a test. Deferring it to the task that enables schema validation is acceptable.
+- [ ] **CR-3 | The AC4 grep still finds `json-master-plugin` in a test**
+    - File: `packages/renderer/src/notice.spec.ts:59`
+    - Category: Tests
+    - Problem: AC4 says "grep shows none outside tasks/ and reviews/". `git grep -n "vendor/\|json-master-plugin" -- ':!tasks' ':!reviews'` returns one match: the negative assertion `expect(notice).not.toMatch(/vendor\/|json-master-plugin/)`, added in b78656b after the first review. This line is a guard, not a reference to the path, but it makes the literal grep that the criterion names non-empty.
+    - Why it matters: evidence for AC4 that claims "grep -> no matches" would be wrong. A human repeating the grep would see a hit and have to work out whether it matters.
+    - Suggested fix: either build the pattern without the literal token (for example `new RegExp(['json', 'master', 'plugin'].join('-'))`), or keep the line and record the evidence as "one match, the negative assertion in notice.spec.ts:59".
 
 ## Review conclusion
 
-Material issues found; fix before completing the task. All four acceptance criteria are met and `npm run check` passes. The strict-mode rewrites keep JSON Canopy's behaviour. There are no P0/P1 findings. The one P2 (CR-1: the CSP blocks the inlined fonts that this task moved in) should be fixed, or explicitly deferred to the themes task with a corrected comment and a recorded assumption, before `done`. The P3s can be accepted or deferred.
+No material issues found. All earlier findings (CR-1 to CR-4, TW-1, TW-2) are resolved in the final code. The strict-mode rewrites keep JSON Canopy's behaviour, and the acceptance criteria are supported by the code and the tests. The three P3 findings (missing OFL licence text, a stale ARCHITECTURE line, and the literal AC4 grep hit in a test) can be fixed or accepted by the parent. The parent still has to run `npm run check` on the committed revision and record the evidence for each criterion.
