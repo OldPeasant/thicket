@@ -1,6 +1,6 @@
 import type { ParamsOf } from '@thicket/contract';
 import { parseEJson } from '@thicket/core/bson';
-import { printShellSyntax } from '@thicket/core';
+import { printShellSyntax } from '@thicket/core/shellsyntax';
 
 import type { WriteMethodName } from './safety.types';
 

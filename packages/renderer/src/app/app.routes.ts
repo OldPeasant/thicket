@@ -21,6 +21,12 @@ export const routes: Routes = [
     component: AppShell,
     children: [
       { path: '', pathMatch: 'full', component: Welcome, title: 'Thicket' },
+      // Development page: production accent and the write confirm dialog (safety-ui screenshots).
+      {
+        path: 'dev/safety',
+        title: 'Safety demo · Thicket',
+        loadComponent: () => import('./dev/safety-demo').then((m) => m.SafetyDemo),
+      },
       // Placeholders until connection-ui and profiles-import-export build these pages.
       {
         path: 'connections/new',

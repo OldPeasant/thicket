@@ -276,6 +276,25 @@ Contract layout (`packages/contract/src/`):
 - Status bar: `StatusService.setConnection({ name, state, production?, readonly? })` and
   `begin(label, progress?) → { update, done }` / `track(label, promise)` for running operations.
 
+## Write safety in the renderer (`packages/renderer/src/app/safety`)
+- Every write UI sends writes through `WriteGuard.run(method, params, options)` (or `approve()`,
+  which returns the params to send, e.g. for `agg.run` with `$out` over `ApiService.stream`).
+  Read-only profiles reject with `READ_ONLY` before anything is sent; production profiles,
+  `docs.updateMany` / `docs.deleteMany` and `alwaysConfirm` open the confirm dialog, and only after
+  the user confirms is the request sent with `confirmed: true` (a caller's own `confirmed` is
+  dropped). Cancel rejects with `CANCELLED`. `docs.deleteMany` over `TYPE_TO_CONFIRM_ABOVE` (1 000)
+  documents (`count` option or `expectedCount`) needs the collection name typed.
+- `describeWrite(method, params)` prints the exact operation in mongosh shell syntax
+  (`printShellSyntax` from `@thicket/core/shellsyntax`; don't import the `@thicket/core` root in
+  the renderer, it pulls in Node-only code).
+- `ProfileSafetyService`: the connection UI registers each profile's flags (`set({ id, name,
+  readOnly, production })`); `readOnly(id)` / `production(id)` are signals. Write controls use
+  `[appWriteControl]="profileId"` (+ `disabledWhen`), which disables them on read-only profiles.
+- `ConfirmService.confirm(request) → Promise<boolean>`; `ConfirmDialog` (in `AppShell`) shows one
+  request at a time. Production accent: `.tab.production`, `AppShell` host class `production`
+  (red sidebar edge; active tab's `production`, else the status bar's connection) and the status
+  bar's `production` class. Dev page `#/dev/safety`; screenshots in `test/e2e/safety.e2e.ts`.
+
 ## Install (development)
 All OSes: Node 24 LTS, 24.15.0 or newer (Angular 22 and jsdom require it), with npm, git, Python 3
 (for TFP and native module builds). Then `npm ci` in the repo root.
