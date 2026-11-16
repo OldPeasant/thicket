@@ -19,7 +19,8 @@ Electron app that opens a sandboxed window with the renderer build, starts the b
   - verified (2026-11-16 19:34+0100 by dell26/agent-2): npm run test:electron -w apps/desktop -> 'restarts a killed backend and tells the renderer' passed: SIGKILL of the backend pid, renderer gets backend.restarted {restarts:1}, next backend.ping has a new pid; unit tests backend-host.spec.ts (restart, back-off, stop) and bridge.spec.ts (fail old requests, emit event) pass in npm run check
 - [x] Cancel: a long dummy backend request is cancelled via `thicket.cancel(id)` and answers `CANCELLED` (test)
   - verified (2026-11-16 19:34+0100 by dell26/agent-2): npm run test:electron -w apps/desktop -> 'cancels a long backend request with CANCELLED' passed (backend.sleep 30000 ms cancelled via thicket.cancel after 200 ms -> {ok:false, error.code CANCELLED}); rpc.spec.ts cancel races pass in npm run check
-- [ ] Main ↔ backend privileged port exists for secrets (stub handler) and is not reachable from the renderer
+- [x] Main ↔ backend privileged port exists for secrets (stub handler) and is not reachable from the renderer
+  - verified (2026-11-16 19:34+0100 by dell26/agent-2): npm run test:electron -w apps/desktop -> backend.ping returns mainReachable:true (backend reaches main over the privileged port), and renderer thicket.request for secrets.get/main.ping -> UNKNOWN_METHOD; window.thicket keys only cancel/on/request. Unit: contract backend.spec (privileged methods not in methods/route), backend.spec + handlers.spec (renderer port refuses privileged methods, secrets.get stub returns null) pass in npm run check
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
