@@ -287,6 +287,88 @@ describe('mask and maskText on passwords with special characters', () => {
   });
 });
 
+// Third test pass: the rules of the maskText scanner that decide whether an embedded scheme
+// starts a new connection string or belongs to a secret before it.
+describe('maskText scanner boundaries', () => {
+  it('splits at a scheme after an IPv6 host with a port', () => {
+    expect(maskText('mongodb://[::1]:27017,mongodb://b:ip6Secret@h2')).toBe(
+      `mongodb://[::1]:27017,mongodb://b:${MASK}@h2`,
+    );
+  });
+
+  it('splits at a scheme after a fragment that follows the query', () => {
+    expect(maskText('mongodb://h/?appName=a#frag,mongodb://b:fragSecret@h2')).toBe(
+      `mongodb://h/?appName=a#frag,mongodb://b:${MASK}@h2`,
+    );
+  });
+
+  it('splits at a scheme after an option without a value', () => {
+    expect(maskText('"mongodb://h/?tls","mongodb://b:flagSecret@h2"')).toBe(
+      `"mongodb://h/?tls","mongodb://b:${MASK}@h2"`,
+    );
+  });
+
+  it('splits at a scheme after a non-secret authMechanismProperties entry', () => {
+    expect(
+      maskText(
+        '"mongodb://h/?authMechanismProperties=SERVICE_NAME:svc","mongodb://b:svcSecret@h2"',
+      ),
+    ).toBe(`"mongodb://h/?authMechanismProperties=SERVICE_NAME:svc","mongodb://b:${MASK}@h2"`);
+    expect(maskText('mongodb://h/?authMechanismProperties=FLAG,mongodb://b:flag2Secret@h2')).toBe(
+      `mongodb://h/?authMechanismProperties=FLAG,mongodb://b:${MASK}@h2`,
+    );
+  });
+
+  it('keeps a scheme inside the value of an option key that cannot be decoded', () => {
+    expect(maskText('x mongodb://h/?%ZZ=v-mongodb://undecTailSecret y')).toBe(
+      `x mongodb://h/?%ZZ=${MASK} y`,
+    );
+  });
+
+  it('keeps a scheme inside an authMechanismProperties value that cannot be decoded', () => {
+    const masked = maskText(
+      'x mongodb://h/?authMechanismProperties=AWS_SESSION_TOKEN:%ZZ-mongodb://awsUndecSecret y',
+    );
+    expectNoLeak(masked, ['awsUndecSecret']);
+    expect(masked).toBe(`x mongodb://h/?authMechanismProperties=${MASK} y`);
+  });
+
+  it('keeps a scheme inside a secret option value given in any case', () => {
+    expectNoLeak(maskText('x mongodb://h/?PROXYPASSWORD=a-MONGODB://upperTailSecret y'), [
+      'upperTailSecret',
+    ]);
+  });
+
+  // Invalid for the driver (unencoded "/" in the password), like the "amongodb" case above, but
+  // mask() hides it, so maskText must not split it: "123-" looks like a port to the scanner.
+  it('does not start a new connection string at a scheme after a digits-only password prefix', () => {
+    const uri = 'mongodb://u:123-mongodb://digitTailSecret@h';
+    expectNoLeak(mask(uri), ['digitTailSecret']);
+    expectNoLeak(maskText(`x ${uri} y`), ['digitTailSecret']);
+  });
+
+  // CR-5 counterpart for option values: the driver keeps a raw space in a secret option value.
+  it('accepts a raw space in a secret option value, like the driver', () => {
+    expect(
+      parseConnectionString('mongodb://h/?proxyHost=p&proxyPassword=my spaceOptSecret').proxy
+        .password,
+    ).toBe('my spaceOptSecret');
+  });
+
+  it.each([
+    ['mongodb://h/?proxyHost=p&proxyPassword=my spaceOptSecret', 'spaceOptSecret'],
+    [
+      'mongodb://h/?authMechanism=MONGODB-AWS&authMechanismProperties=AWS_SESSION_TOKEN:to spaceTokSecret',
+      'spaceTokSecret',
+    ],
+    ['mongodb://h/?tlsCertificateKeyFilePassword=k spaceKeySecret&tls=true', 'spaceKeySecret'],
+  ])('masks a secret option value containing a raw space: %s', (uri, secret) => {
+    expect(() => parseConnectionString(uri)).not.toThrow();
+    expectNoLeak(mask(uri), [secret]);
+    expectNoLeak(maskText(`log: ${uri} failed`), [secret]);
+  });
+});
+
 describe('mask edge cases', () => {
   it('keeps leading whitespace and masks the password after it', () => {
     expect(mask('  mongodb://u:wsSecret@h')).toBe(`  mongodb://u:${MASK}@h`);
