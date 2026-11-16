@@ -17,7 +17,8 @@ Edit session per document: modified marker and change count, undo/redo within un
   - verified (2026-11-17 00:43+0100 by felix/agent-1): npm run test:e2e -- test/e2e/document-edit.e2e.ts (Electron app + MongoDB container fixture) -> 'edit two fields and save: the server document matches' passed (MongoClient findOne asserts stored doc); 3 passed
 - [x] e2e: production profile shows the confirm dialog with the `$set` operation before saving
   - verified (2026-11-17 00:43+0100 by felix/agent-1): npm run test:e2e -- test/e2e/document-edit.e2e.ts -> 'production profile: Save shows the confirm dialog with the $set operation first' passed
-- [ ] Read-only profile: edit controls disabled (test)
+- [x] Read-only profile: edit controls disabled (test)
+  - verified (2026-11-17 00:43+0100 by felix/agent-1): npm run test:e2e -- test/e2e/document-edit.e2e.ts -> 'read-only profile: edit controls are disabled' passed; plus unit read-only tests in table-editing/edit-bar specs (218 passed)
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
