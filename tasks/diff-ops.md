@@ -5,7 +5,7 @@ owner: felix/agent-2
 deps: [bson-model]
 touches: [packages/core/src/diff]
 prio: 1
-lease_until: 2026-11-16T19:10:40Z
+lease_until: 2026-11-16T19:14:28Z
 ---
 ## Goal
 From original and edited documents compute the minimal update (`$set`/`$unset`, `$push` for pure appends, whole-array replace otherwise) and the conflict filter (`_id` + original values of changed top-level fields).
