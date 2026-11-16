@@ -18,3 +18,4 @@ listDatabases, list collections/views/time series, stats on demand, create/drop/
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 21:32+0100 by felix/agent-2): coll.validator.get/set are left to the validator task (its touches name browse/validator); this task implements db.listDatabases/create/drop/stats and coll.list/create/drop/rename/stats.
+- ASSUMPTION (2026-11-16 21:32+0100 by felix/agent-2): The authorizedDatabases test runs against its own mongo:8.2 standalone with --auth (startFixture gains an 'auth' option; root user via the image's MONGO_INITDB_* env, passwords generated per run): the shared 8.x replica set fixture runs without access control, where privileges aren't enforced, and an auth replica set would need a key file.
