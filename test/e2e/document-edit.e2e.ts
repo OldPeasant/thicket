@@ -63,13 +63,21 @@ async function seed(uri: string, coll: string): Promise<void> {
   }
 }
 
+/** A seeded order as stored, with BSON types kept. */
+interface StoredOrder {
+  _id: number;
+  status?: string;
+  total?: Decimal128;
+  qty?: Int32;
+}
+
 /** The stored document `_id` of `coll`, with BSON types kept (no promotion to JS numbers). */
 async function stored(uri: string, coll: string, id: number) {
   const client = new MongoClient(uri, { serverSelectionTimeoutMS: 10_000 });
   try {
     return await client
       .db(DB)
-      .collection<{ _id: number }>(coll)
+      .collection<StoredOrder>(coll)
       .findOne({ _id: id }, { promoteValues: false });
   } finally {
     await client.close();

@@ -1231,4 +1231,39 @@ describe('CollectionResults', () => {
       expect(results.paging().pageIndex).toBe(0);
     });
   });
+
+  describe('patchDocument', () => {
+    it('does nothing before a page was read', () => {
+      results.patchDocument(0, docs(9, 1)[0] ?? '');
+      expect(results.page()).toBeNull();
+    });
+
+    it('replaces the document at an index of the shown page, keeping paging and counts', async () => {
+      await runAndLoad(query({}), docs(1, 3));
+      const before = results.page();
+      const paging = results.paging();
+      const replacement = '{"_id":{"$numberInt":"2"},"name":"saved"}';
+      results.patchDocument(1, replacement);
+      expect(results.page()?.docs).toEqual([docs(1, 1)[0], replacement, docs(3, 1)[0]]);
+      expect(results.page()?.firstRow).toBe(before?.firstRow);
+      expect(results.paging()).toEqual(paging);
+      // A new page object (signals see the change); the old one is left alone.
+      expect(before?.docs).toEqual(docs(1, 3));
+      expect(finds()).toHaveLength(1);
+    });
+
+    it('removes the document for null', async () => {
+      await runAndLoad(query({}), docs(1, 3));
+      results.patchDocument(0, null);
+      expect(results.page()?.docs).toEqual(docs(2, 2));
+    });
+
+    it('ignores an index outside the page', async () => {
+      await runAndLoad(query({}), docs(1, 3));
+      const before = results.page();
+      results.patchDocument(3, null);
+      results.patchDocument(-1, null);
+      expect(results.page()).toBe(before);
+    });
+  });
 });
