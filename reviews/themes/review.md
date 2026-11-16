@@ -4,45 +4,51 @@ Date: 2026-11-16
 
 Task: themes - M0: Business and Tron styles, each light and dark
 
-Scope: `git diff 5f94685d0a60701a9dc0705b26f94243a3a317b1..HEAD -- packages apps .gitignore`. The theme work is in commits 644bd62 and bbe4089, plus the committed screenshots in `reviews/themes/screenshots`. The range also pulls in `packages/core/src/diff/*` from the merged `diff-ops` task. That code belongs to another task and was not reviewed here.
+Scope: second review of the final revision. `git diff e9d447f1c2d444ee4e3b82420101e7b5501f39d7..b7d29c1 -- packages apps .gitignore`, plus the four PNGs in `reviews/themes/screenshots/`. The focus is the reworked `ThemeService` and the screenshot wait in the Electron test, and the full task diff was re-checked against the final code. Only committed code was reviewed. The working tree holds uncommitted additions to `theme.service.spec.ts` from a parallel test-writer run. Those additions were not reviewed. One of them is cited only because it reproduces CR-3 against the committed production code, which is unchanged in the working tree.
 
 Requirements:
 - tasks/themes.md acceptance criteria and recorded assumptions (Notes)
-- SPEC.md M0 "Two visual styles" (lines 60-69)
+- SPEC.md M0 "Two visual styles"
 - docs/ARCHITECTURE.md (renderer conventions, CSP `font-src 'self'`)
 - AGENTS.md (Evidence rules, project notes)
-- packages/contract/src/app.ts (`Settings`, `STYLES`, `THEME_MODES`, `app.settings.get/set`, `app.settings.changed`)
+- Previous round: reviews/themes/review.md (CR-1, CR-2), reviews/themes/tests.md (TW-1..3), reviews/themes/fixes.md
+- apps/desktop/src/main/index.ts, apps/desktop/src/settings/store.ts, apps/desktop/src/main/broadcast.ts (how main answers and broadcasts settings)
 
 Git range:
 - Branch: main
-- HEAD: bbe40893b0b1252222b095252587c10a767ef507
-- Base/start: 5f94685d0a60701a9dc0705b26f94243a3a317b1
-- Commits reviewed: 2 theme commits (644bd62, bbe4089). The other commits in the range are task-state commits or belong to other tasks.
+- HEAD: b7d29c1
+- Base/start: e9d447f1c2d444ee4e3b82420101e7b5501f39d7
+- Commits reviewed: 4 (1162e28, 3cb2fae, 957882d, b7d29c1)
 
-Summary: 0 P0, 0 P1, 1 P2, 1 P3
+Summary: 0 P0, 0 P1, 0 P2, 1 P3
+
+## Status of earlier findings
+
+- **CR-1 (screenshots taken mid-transition): resolved.**
+    - `apps/desktop/test/theme.electron.spec.ts:115-122` now waits for `document.getAnimations()` to finish before each screenshot and passes `animations: 'disabled'`.
+    - The renderer has no infinite CSS animations (the only one is the finite `jump-flash` in `styles.css:92`), so the wait cannot hang.
+    - I viewed all four committed PNGs. In Tron light, the Strict, Context and "Go to edit mode" controls now use the white input background with readable text. Business dark and Tron dark show their final dark controls. Business light is unchanged.
+- **CR-2 (failed save rolls back to an unsaved snapshot): resolved.**
+    - `theme.service.ts:113-119` now reverts only the keys the failed call changed. It reverts a key only while that call is still the latest choice for it and the key still shows the value the call set. The value it reverts to is `confirmed`.
+    - The regression test `two overlapping failed saves end on the stored values, not an unsaved one` covers the exact sequence.
+- **TW-1, TW-2, TW-3: resolved for the sequences they describe.**
+    - The generation and in-flight gate in `takeAnswer` (`theme.service.ts:131-139`) drops stale `get` and `set` answers.
+    - The committed tests for these sequences pass.
+    - CR-3 below is a remaining edge case of the TW-1 fix.
 
 ## Checks
 
-- AC1 (four combinations, screenshots): `apps/desktop/test/theme.electron.spec.ts` switches through the UI on `#/dev/explorer` and saves four screenshots. All four PNGs are committed under `reviews/themes/screenshots/` and I viewed each one. Each shows the explorer demo in the expected style and mode. See CR-1 about when the screenshots are taken.
-- AC2 (Business WCAG AA): `theme-tokens.spec.ts` computes WCAG 2.x contrast ratios (it also checks known values such as 21:1 and #777 on white = 4.48). It requires at least 4.5:1 for text, muted, faint, accent, danger, production, read-only and all 20 BSON colors on page, elevated, panel and input backgrounds, plus the hover, accent-bg, danger, production and read-only pairs. It requires at least 3:1 for the focus color.
-- AC3 (Tron look, local fonts, effects only in Tron):
-  - The Tron dark and light colors match the removed Canopy blocks in `styles.css` value for value.
-  - The fonts are loaded with `@font-face` from `src/assets/fonts/*.woff2`. Both files exist and nothing is loaded from a CDN.
-  - Business sets `--glow`, `--glow-strong`, `--grid-overlay`, `--scanline-overlay` and `--scrollbar-glow` to `none`. The scrollbar glow, which was hard-coded before, is now a token.
-  - A grep of `src/app` found no literal colors and no literal glow or text-shadow outside `tokens.css`.
-  - The Electron test confirms Orbitron and Share Tech Mono load (`document.fonts` status `loaded`) and that Business has no overlay.
-- AC4 (switching without reload, `system` follows the OS): `ThemeService` sets `data-style` and `data-theme` on `<html>`. It listens to `matchMedia('(prefers-color-scheme: dark)')` change events and removes the listener on destroy. This is tested in two places:
-  - unit tests in `theme.service.spec.ts`, using a fake MediaQueryList;
-  - the Electron test, using `emulateMedia`. It checks no reload happened by setting a marker on `window` and finding it still there afterwards.
-- AC5 (tokens in all four sets): the test enumerates all four sets, compares token names across them, and checks that the production, read-only and 20 `--bson-*` tokens resolve to opaque hex colors in each set.
-- Integration:
-  - `app.settings.get` and `app.settings.set` match the contract: `settings.partial()` is the input and the full `settings` object comes back.
-  - Main emits `app.settings.changed` from `SettingsStore.onChange` (`apps/desktop/src/main/index.ts:139`).
-  - Adding `settingsChanged` to `BroadcastPayloads` in `api.service.ts` lines up with `BROADCAST_STREAMS`.
-  - Values outside `STYLES` and `THEME_MODES` are ignored.
-  - A missing desktop bridge leaves the defaults in place.
-  - `provideTheme` does not block the first paint.
-- Security: no new IPC surface, no secrets, no unsafe HTML. Fonts stay inside `font-src 'self'`.
+- AC1: the Electron test switches through the UI on `#/dev/explorer` and writes four screenshots after transitions finish. The committed PNGs show the explorer demo in each combination (see CR-1).
+- AC2: `theme-tokens.spec.ts` computes WCAG ratios for Business light and dark: at least 4.5:1 for the text pairs and at least 3:1 for focus. Unchanged since the first review.
+- AC3: Tron values match the former Canopy blocks. The fonts are bundled `woff2` files loaded through `@font-face`. In Business, every effect token is `none`. The Electron test checks that Orbitron and Share Tech Mono are loaded. Unchanged.
+- AC4: `data-style` and `data-theme` are set on `<html>`, and the `matchMedia` change listener is removed on destroy. Unit and Electron tests cover switching without reload and `system` following the OS. Unchanged.
+- AC5: the test enumerates all four sets and checks the production, read-only and 20 BSON tokens in each. Unchanged.
+- Reworked `ThemeService`:
+    - The public API is unchanged.
+    - Broadcasts (`app.settings.changed`) are still applied unconditionally and update `confirmed`. In the real app, main's `SettingsStore` serializes writes and broadcasts after each saved change to every window, including the sender. So the last broadcast always carries what was written last, and the window ends on the stored values after quick successive saves.
+    - The `inFlight` counters are decremented in `finally`, so they cannot leak on failure.
+- Integration and security: no change since the first review. There is no new IPC surface and no secrets. The fonts stay within `font-src 'self'`.
+- Validation I ran: `cd packages/renderer && npx ng test --include='src/app/theme/*.spec.ts'`. Result: 48 of 49 tests passed. The run included the uncommitted test additions. The one failure is the uncommitted test cited in CR-3. All committed tests passed.
 
 ## P0 Critical
 
@@ -54,32 +60,25 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | Evidence screenshots are taken during the 0.15 s CSS transitions, so 3 of 4 do not show the final theme**
-    - File: `apps/desktop/test/theme.electron.spec.ts:97-115`
-    - Category: Tests
-    - Problem: `pick()` waits only until the `data-style` and `data-theme` attributes change. The test then awaits `document.fonts.ready`, which resolves at once when the fonts are already loaded, and takes the screenshot right away. The explorer's controls fade from the previous theme's colors over 0.15 s:
-        - `.filter-mode-btn` uses `transition: background 0.15s, color 0.15s` (`packages/renderer/src/app/explorer/json-explorer.component.css:81-83`);
-        - `.mode-toggle` transitions background, color and border-color (lines 110-114).
-
-      The committed screenshots show this. In `explorer-tron-light.png`, the "Strict", "Context" and "Go to edit mode" buttons have a grey background with near-unreadable text, but Tron light's `--bg-input` is `#ffffff`. They are partway between Business dark's `#16191c` and white. `explorer-business-dark.png` and `explorer-tron-dark.png` show the same grey buttons. Only `explorer-business-light.png` is correct, because it is the first combination and nothing was transitioning.
-    - Why it matters: AC1's screenshots are the visual evidence a human uses to judge the four combinations. As committed, they suggest Tron light has a broken, low-contrast toolbar that does not exist once the transition ends.
-    - Suggested fix: Wait for transitions to finish before each screenshot. Either await `Promise.all(document.getAnimations().map((a) => a.finished))` in the page, or pass `animations: 'disabled'` to `page.screenshot` (Playwright then jumps finite transitions to their end state). Then re-run the Electron test and replace the four PNGs.
+None.
 
 ## P3 Low
 
-- [ ] **CR-2 | A failed save rolls back both style and mode to a snapshot that may itself never have been saved**
-    - File: `packages/renderer/src/app/theme/theme.service.ts:84-95`
+- [ ] **CR-3 | A skipped `app.settings.get` or `app.settings.set` answer is discarded entirely, so `confirmed` can stay stale and a later failed save reverts to a value main does not store**
+    - File: `packages/renderer/src/app/theme/theme.service.ts:131-139` (`takeAnswer`), with the revert at `:113-119` and the startup `get` at `:79-83`
     - Category: Correctness
-    - Problem: `change()` snapshots `{ style, mode }` before applying its own change and restores the whole snapshot on failure. If two changes overlap and both fail, the UI ends in the wrong state:
-        1. Change A (style → tron) starts; its snapshot is S0.
-        2. Change B (mode → dark) starts; its snapshot already contains A's unsaved style.
-        3. A fails and restores S0.
-        4. B fails and restores its snapshot, which brings back A's unsaved `tron`.
+    - Problem: When `takeAnswer` skips a key, because there is a newer local choice or another save is in flight, it skips more than displaying the key. It also does not record the answered value in `confirmed`. The failure path then reverts to `confirmed`, which can be stale. A reachable sequence in the real app:
+        1. The stored style is Tron.
+        2. At startup, `app.settings.get` is still pending, and the window shows the default, Business.
+        3. The user picks Business. The save fails. The revert keeps Business, because `confirmed.style` is still the default `business`.
+        4. The `get` answer (Tron) arrives. Style's generation changed after `asked` was taken, so the answer is dropped.
 
-      The UI then shows a style that was never stored, which contradicts the comment "so the UI does not pretend it was saved". A single failure also resets the field the user did not change.
-    - Why it matters: This is rare in practice (two quick switches while saving keeps failing). When it happens, the visible theme stops matching `settings.json` until the next restart or broadcast.
-    - Suggested fix: Restore only the keys in `patch`, and only if they still hold the value this call set. Or, on failure, re-read `app.settings.get` and apply that result. Add a unit test with two overlapping failing changes.
+      The window shows Business while `settings.json` holds Tron, until the next broadcast or a restart. No broadcast arrives, because nothing was saved and a `get` does not broadcast. The uncommitted test `a save that fails before the late app.settings.get answer ends on the stored value` reproduces this against the committed service: it expects `tron` and gets `business`.
+
+      The same gap exists for a skipped `set` answer: an earlier save of the same key succeeds, and a later save of that key fails. In the real app, main's broadcast of the successful save updates `confirmed` and masks this case. The unit-test fake does not broadcast on `set`, so the committed overlap tests do not model this.
+    - Why it matters: The service's stated goal is that the UI never shows something other than what is stored ("so the UI does not pretend it was saved"). Here it does, until the next broadcast or restart. The trigger is rare: a save has to fail while the startup `get` is still pending.
+    - Suggested fix: In `takeAnswer`, always record the valid answered values in `confirmed` (`Object.assign(this.confirmed, this.valid(settings))`), and gate only what is shown. Then, when a failed save reverts a key, it reverts to the last value main reported. Also consider re-showing `confirmed` for a key whose newer choice has since failed. Keep the uncommitted regression test above, or an equivalent one.
 
 ## Review conclusion
 
-Material issues found; fix before completing the task. CR-1 affects the evidence for AC1. The implementation itself meets all five criteria.
+No material issues found. CR-1 and CR-2 from the first round are resolved, and all five acceptance criteria are met. The one remaining finding (CR-3, P3) is a rare edge case in the error path. It can be fixed in this task or recorded as a follow-up at the parent's discretion.

@@ -311,6 +311,108 @@ describe('ThemeService', () => {
       expect(theme.mode()).toBe('system');
       expect(attrs()).toEqual({ style: 'business', theme: 'light' });
     });
+
+    const changed = (settings: Settings) =>
+      fake.emit({ stream: BROADCAST_STREAMS.settingsChanged, kind: 'data', payload: { settings } });
+
+    it('a broadcast from another window while a save is pending: the later save wins', async () => {
+      const save = deferred<{ settings: Settings }>();
+      fake.handle('app.settings.set', () => save.promise);
+      const theme = TestBed.inject(ThemeService);
+      await theme.init();
+
+      const pending = theme.setStyle('tron');
+      // Another window stores Business/dark before main handles this window's save.
+      stored = { ...stored, style: 'business', mode: 'dark' };
+      changed({ ...stored });
+      stored = { ...stored, style: 'tron' }; // then main stores this window's choice
+      save.resolve({ settings: { ...stored } });
+      await pending;
+
+      expect(theme.style()).toBe('tron');
+      expect(theme.mode()).toBe('dark');
+      expect(attrs()).toEqual({ style: 'tron', theme: 'dark' });
+    });
+
+    it('a pending save that fails after a broadcast of the same value keeps the broadcast value', async () => {
+      const save = deferred<{ error: { code: 'INTERNAL'; message: string } }>();
+      fake.handle('app.settings.set', () => save.promise);
+      const theme = TestBed.inject(ThemeService);
+      await theme.init();
+
+      const pending = theme.setStyle('tron');
+      changed({ ...stored, style: 'tron' }); // another window stored Tron meanwhile
+      save.resolve({ error: { code: 'INTERNAL', message: 'disk full' } });
+      await expect(pending).rejects.toMatchObject({ code: 'INTERNAL' });
+
+      // Tron is what main stores now, so the failed save must not fall back to Business.
+      expect(theme.style()).toBe('tron');
+      expect(attrs().style).toBe('tron');
+    });
+
+    it('a pending save that fails after a broadcast of another value shows the broadcast value', async () => {
+      const save = deferred<{ error: { code: 'INTERNAL'; message: string } }>();
+      fake.handle('app.settings.set', () => save.promise);
+      const theme = TestBed.inject(ThemeService);
+      await theme.init();
+
+      const pending = theme.setMode('dark');
+      changed({ ...stored, mode: 'light' });
+      save.resolve({ error: { code: 'INTERNAL', message: 'disk full' } });
+      await expect(pending).rejects.toMatchObject({ code: 'INTERNAL' });
+
+      expect(theme.mode()).toBe('light');
+      expect(attrs().theme).toBe('light');
+    });
+
+    it('main echoes each save as a broadcast before answering: quick choices end on the last one', async () => {
+      // Like apps/desktop main: the store broadcasts the full settings, then the set answers.
+      const queue: (() => void)[] = [];
+      fake.handle('app.settings.set', (params) => {
+        return new Promise((resolve) =>
+          queue.push(() => {
+            stored = { ...stored, ...params.settings };
+            changed({ ...stored });
+            resolve({ settings: { ...stored } });
+          }),
+        );
+      });
+      const theme = TestBed.inject(ThemeService);
+      await theme.init();
+
+      const saves = [theme.setStyle('tron'), theme.setMode('dark'), theme.setStyle('business')];
+      await flushAll();
+      expect(queue).toHaveLength(3);
+      for (const step of queue) {
+        step();
+        await flushAll();
+      }
+      await Promise.all(saves);
+
+      expect(stored).toMatchObject({ style: 'business', mode: 'dark' });
+      expect(theme.style()).toBe('business');
+      expect(theme.mode()).toBe('dark');
+      expect(attrs()).toEqual({ style: 'business', theme: 'dark' });
+    });
+
+    it('a save that fails before the late app.settings.get answer ends on the stored value', async () => {
+      stored = { ...stored, style: 'tron' };
+      const get = deferred<{ settings: Settings }>();
+      fake.handle('app.settings.get', () => get.promise);
+      fake.fail('app.settings.set', { code: 'INTERNAL', message: 'disk full' });
+      const theme = TestBed.inject(ThemeService);
+      const started = theme.init();
+
+      // Startup still shows the default (Business); the user picks Business, the save fails.
+      await expect(theme.setStyle('business')).rejects.toMatchObject({ code: 'INTERNAL' });
+      get.resolve({ settings: { ...stored } });
+      await started;
+
+      // Nothing was saved, so the window must show what main stores: Tron.
+      expect(stored.style).toBe('tron');
+      expect(theme.style()).toBe('tron');
+      expect(attrs().style).toBe('tron');
+    });
   });
 });
 

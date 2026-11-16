@@ -2,15 +2,16 @@
 
 Date: 2026-11-16
 
-Task: themes - M0: Business and Tron styles, each light and dark
+Task: themes - M0: Business and Tron styles, each light and dark (second round, final revision after the fixes in `reviews/themes/fixes.md`)
 
-Scope: base 5f94685d0a60701a9dc0705b26f94243a3a317b1 .. HEAD bbe40893b0b1252222b095252587c10a767ef507, task-owned commits 644bd62 (token sets, ThemeService, switcher) and bbe4089 (Electron test), limited to `packages/renderer`, `apps/desktop/test` and `.gitignore`. The range also contains `packages/core/src/diff/*` from the diff-ops task (excluded, not this task). Uncommitted input: only this report's test additions in `packages/renderer/src/app/theme/theme.service.spec.ts`.
+Scope: `git diff e9d447f1c2d444ee4e3b82420101e7b5501f39d7..b7d29c1abc2e24f5d49b519121bf309cae712ec4 -- packages apps`. The parent supplied the base and the final revision. Changed in this range: `packages/renderer/src/app/theme/{theme.service.ts,theme-switcher.ts,index.ts,tokens.css}`, the theme specs, `packages/renderer/src/styles.css`, `styles.spec.ts`, `app.config.ts`, `api/api.service.ts`, `dev/explorer-demo.ts` and `apps/desktop/test/theme.electron.spec.ts`. Fix commit under re-check: b7d29c1 (`theme.service.ts` save ordering for TW-1..3 and CR-2; `theme.electron.spec.ts` waits for transitions before the screenshots, CR-1). Uncommitted input: only this round's additions to `packages/renderer/src/app/theme/theme.service.spec.ts`. `reviews/themes/review.md` also shows as modified in the working tree; I did not change it.
 
 Requirements:
 - tasks/themes.md acceptance criteria and recorded assumptions
 - SPEC.md "Two visual styles" (M0)
 - docs/ARCHITECTURE.md "Coverage"
-- Parent instructions (commands, known unrelated Electron failures)
+- reviews/themes/fixes.md and the first-round findings TW-1..3 and CR-1/CR-2
+- Parent instructions (commands; the 4 app/dev Electron failures are known on main)
 
 ## Test files changed
 
@@ -18,33 +19,30 @@ Requirements:
 
 ## Tests added or updated
 
-Count: 10 added (none modified or removed)
+Count: 5 added this round (none modified or removed). The file now has 31 tests. With theme-tokens.spec.ts, the theme specs total 49.
 
-- ThemeService: `applies a broadcast that changes only the mode, keeping the style`
-- ThemeService: `switching to system mode picks up the current OS preference at once`
-- ThemeService / overlapping requests: `a late app.settings.get answer does not undo a choice made meanwhile` (FAILS, TW-1)
-- ThemeService / overlapping requests: `answers in reverse order: the last choice wins (shown == stored)` (FAILS, TW-2)
-- ThemeService / overlapping requests: `a failed earlier save does not revert a later save that succeeded` (FAILS, TW-3)
-- provideTheme: `themes the root at startup without waiting for the settings`
-- provideTheme: `is part of the root app config`
-- ThemeSwitcher: `logs a failed mode save and shows the stored mode again`
-- ThemeSwitcher: `offers exactly the contract styles and modes`
-- ThemeSwitcher: `reflects a change made elsewhere (app.settings.changed)`
+All five are in `ThemeService > overlapping requests (order controlled with deferred answers)`:
+- `a broadcast from another window while a save is pending: the later save wins` (Pass)
+- `a pending save that fails after a broadcast of the same value keeps the broadcast value` (Pass)
+- `a pending save that fails after a broadcast of another value shows the broadcast value` (Pass)
+- `main echoes each save as a broadcast before answering: quick choices end on the last one` (Pass). This models apps/desktop main: `SettingsStore.onChange` broadcasts the full settings, then the set answers.
+- `a save that fails before the late app.settings.get answer ends on the stored value` (FAILS, TW-4)
 
-The response order is controlled with deferred promises returned from `FakeThicketBridge` handlers, with no real delays.
+Deferred promises and an explicit queue control the order. There are no real delays.
 
 ## Requirement coverage
 
 | Requirement | Tests | Command | Result |
 |---|---|---|---|
-| AC1 Four combinations render the explorer demo; screenshots | theme.electron.spec.ts `renders the explorer demo in all four combinations, switched without reload` (existing) | `npm run test:electron --prefix <repo>` | Pass. 4 PNGs written to `apps/desktop/test-results/screenshots/explorer-{business,tron}-{light,dark}.png` (20:23:46), all four hashes distinct, inspected visually. Copying them into `reviews/` is the parent's job. |
-| AC2 Business light/dark WCAG AA contrast (unit test computing ratios) | theme-tokens.spec.ts `business/light: every pair >= 4.5`, `business/dark: every pair >= 4.5`, focus ring >= 3:1, ratio sanity (existing) | `npx ng test --include='src/app/theme/*.spec.ts'` | Pass |
-| AC3 Tron keeps Canopy look, fonts local, glow/scanlines only in Tron | theme-tokens.spec.ts "Tron keeps the Canopy look; Business has no effects" (3 tests); styles.spec.ts Tron fonts; Electron test checks loaded Orbitron/Share Tech Mono fonts and the overlay (existing) | same plus `npm run check` and `npm run test:electron` | Pass |
-| AC4 Switching applies without reload; `system` follows prefers-color-scheme (test) | theme.service.spec.ts `system: follows prefers-color-scheme changes without reload`, `switching style and mode applies immediately...`, `a fixed mode ignores OS changes`, new `switching to system mode picks up the current OS preference at once`; Electron `system mode follows prefers-color-scheme changes live` and the no-reload marker | `npx ng test --include='src/app/theme/*.spec.ts'`; `npm run test:electron` | Pass |
-| AC4 (consistency of applied vs persisted choice under overlapping requests) | 3 new "overlapping requests" tests | `npx ng test --include='src/app/theme/*.spec.ts'` | Fail: TW-1, TW-2, TW-3 |
-| AC5 Tokens for production accent, read-only marker and each BSON type in all four sets (test enumerates) | theme-tokens.spec.ts `<style>/<theme>: production accent, read-only marker and every BSON type` x4, `defines the same token names in all four sets`, `gives each BSON type of a set a token (20 types)` (existing) | `npx ng test --include='src/app/theme/*.spec.ts'` | Pass |
-| Goal: persisted via app settings | ThemeService persistence/revert/broadcast tests (existing and new); Electron `persists the choice in settings.json and applies it after a restart` | both commands above | Pass, except the overlap cases TW-1..3 |
-| Startup theming (provideTheme in app.config) | new provideTheme tests | `npx ng test --include='src/app/theme/*.spec.ts'` | Pass |
+| AC1 Four combinations render the explorer demo; screenshots in reviews/ | theme.electron.spec.ts `renders the explorer demo in all four combinations, switched without reload` (now waits for `document.getAnimations()` to finish and uses `animations: 'disabled'`) | `npm run test:electron --prefix /home/eric/work/mongo-db-client-agents/agent-1` | Pass. 4 PNGs regenerated in `apps/desktop/test-results/screenshots/` at 20:31:40-41, with the same byte sizes as the committed `reviews/themes/screenshots/` files for business-dark (52499), tron-light (67856) and tron-dark (64839). I inspected tron-light: the controls show their final colors, so the CR-1 fix works. |
+| AC2 Business light/dark WCAG AA contrast (unit test computing ratios) | theme-tokens.spec.ts contrast tests (unchanged) | `cd packages/renderer && npx ng test --include='src/app/theme/*.spec.ts'` | Pass |
+| AC3 Tron keeps Canopy look, fonts local, glow/scanlines only in Tron | theme-tokens.spec.ts Tron/Business effect tests, styles.spec.ts, Electron font/overlay checks | same, plus `npm run test:electron` | Pass |
+| AC4 Switching applies without reload; `system` follows prefers-color-scheme (test) | theme.service.spec.ts system/OS tests; Electron `system mode follows prefers-color-scheme changes live` and the no-reload marker | both commands above | Pass |
+| AC4/Goal: shown choice == persisted choice under overlapping requests (TW-1, TW-2, TW-3, CR-2 re-check) | `a late app.settings.get answer does not undo a choice made meanwhile`, `answers in reverse order: the last choice wins`, `a failed earlier save does not revert a later save that succeeded`, `two overlapping failed saves end on the stored values` | `npx ng test --include='src/app/theme/*.spec.ts'` | Pass. The fixes for TW-1..3 and CR-2 hold. |
+| AC4/Goal: broadcasts while a save is pending (new this round) | the 4 passing broadcast/echo tests listed above | same | Pass |
+| AC4/Goal: failed save before the startup get answer | `a save that fails before the late app.settings.get answer ends on the stored value` | same | Fail: TW-4 |
+| AC5 Tokens for production accent, read-only marker and each BSON type in all four sets | theme-tokens.spec.ts enumeration tests (unchanged) | same | Pass |
+| Goal: persisted via app settings | ThemeService persistence/revert/broadcast tests; Electron `persists the choice in settings.json and applies it after a restart` | both commands | Pass, except TW-4 |
 
 ## Focused test execution
 
@@ -54,173 +52,120 @@ Command:
 
 Result:
 
-Fail: 2 files, 43 tests, 40 passed, 3 failed (TW-1, TW-2, TW-3). All other new and existing theme tests pass.
+Fail: 2 files, 49 tests, 48 passed, 1 failed (TW-4). All 44 tests that existed before this round pass, including the regression tests for TW-1..3 and CR-2.
 
 ## Full test execution
 
 Command:
 
-`npm run check` (repo root: eslint + prettier --check, typecheck, `vitest run`, `npm run test -w packages/renderer`)
+`npm run check` (repo root: `eslint . --max-warnings 0 && prettier --check .`, typecheck, `vitest run`, `npm run test -w packages/renderer`)
 
 Result:
 
-Fail, only because of TW-1..3. Lint, Prettier (after formatting the new spec) and typecheck pass. Root vitest: 33 files, 2099 tests passed. Renderer: 29 files, 484 tests, 481 passed, 3 failed (the same three).
+Fail, only because of TW-4. Lint, Prettier and typecheck pass (I also ran `prettier --check` and `eslint` on the changed spec: clean). Root vitest: 34 files, 2166 tests passed. Renderer: 29 files, 490 tests, 489 passed, 1 failed (TW-4).
 
 Command:
 
-`npm run test:electron --prefix /home/eric/work/mongo-db-client-agents/agent-1`
+`npm run test:electron --prefix /home/eric/work/mongo-db-client-agents/agent-1` (run twice, same result both times)
 
 Result:
 
-Electron: 5 files, 26 tests, 22 passed, 4 failed. `theme.electron.spec.ts` passed. The 4 failures are in `app.electron.spec.ts` (thicket://app with CSP, window.open/navigation, will-frame-navigate) and `dev.electron.spec.ts` (dev server URL). Per the parent and the task's recorded assumption, these fail on main without this task too (they expect a URL without `#/`). Not in scope.
+Fail overall, but not because of this task: 5 files, 26 tests, 20 passed, 6 failed. `theme.electron.spec.ts` (4 tests) and `settings.electron.spec.ts` pass. Failures:
+- 4 known failures from the parent's list: `app.electron.spec.ts` (thicket://app with CSP, window.open/navigation, will-frame-navigate) and `dev.electron.spec.ts` (dev server URL).
+- 2 in `secrets.electron.spec.ts`, which the first round and fixes.md did not list: `setSecret still saves (secureStorage: false)...` gets `NOT_FOUND: No profile with id p-electron`, and `after a restart the basic_text file still decrypts` then fails with ENOENT on `secrets.bin`. This task does not touch `secrets.electron.spec.ts` or the profiles/secrets code. Its only change under apps/ is `theme.electron.spec.ts`. The last commits on those files are from the profiles-store task (dd88233, 51e51c5), where `profiles.setSecret` requires an existing profile. Not in this task's scope. The parent may want to report it to the profiles-store owner.
 
 ## .taskcheck
 
 Result:
 
-Not run separately. `.taskcheck` runs `npm run check`, which is reported above: Fail, because of TW-1..3 only.
+Not run separately. `.taskcheck` runs `npm run check`, reported above: Fail, because of TW-4 only.
 
 ## Bugs found
 
-### A late app.settings.get answer overwrites a choice made meanwhile
+### A failed save made before the startup app.settings.get answer hides the stored setting
 
 Finding ID:
 
-`TW-1`
+`TW-4`
 
 Test:
 
-`ThemeService > overlapping requests (order controlled with deferred answers) > a late app.settings.get answer does not undo a choice made meanwhile`
+`ThemeService > overlapping requests (order controlled with deferred answers) > a save that fails before the late app.settings.get answer ends on the stored value`
 
 Production source:
 
-`packages/renderer/src/app/theme/theme.service.ts:66-68` (`init()` applies the `app.settings.get` result unconditionally)
+`packages/renderer/src/app/theme/theme.service.ts:79-83` (`init()` drops the get answer for a key whose `generation` changed) together with `:113-119` (a failed save reverts to `confirmed`, which still holds the defaults because the get has not answered yet)
 
 Requirement:
 
-AC4 / Goal: switching applies without reload and is persisted via app settings. The shown style/mode should match the stored setting.
+Goal/AC4: the theme is persisted via app settings, and the service's contract (fixes.md, code comment at :111) is that a failed save "show[s] what is stored again". The shown style/mode must match the stored settings.
 
 Expected behavior:
 
-The user picks Tron while the startup `app.settings.get` is still pending, and the save succeeds (stored = tron). When the older get answer (read before the save, style business) arrives, the window keeps Tron.
+Stored style is `tron`. The startup `app.settings.get` is still pending. The user picks a style (here `business`) and that save fails. When the get answer (`style: tron`) arrives, the window shows Tron, which is what main stores.
 
 Actual behavior:
 
-The late get answer is applied, and the window switches back to Business (`data-style="business"`, `theme.style() === 'business'`) while settings.json holds Tron. Severity is low in practice because the startup get normally answers quickly.
+The failed save bumped `generation.style`, so `takeAnswer` drops the get answer's style. The revert had set the style to `confirmed.style`, which is still the default `business`. The window ends on Business (`data-style="business"`, `theme.style() === 'business'`) while settings.json holds Tron, and only a later broadcast corrects it. The same applies to `mode`, for example stored `dark`, a failed `setMode('light')`, and the window ends on `system`. The fix for TW-1 introduced this gap: it is correct when the save succeeds, but not when the save fails. Possible fix direction, for the fixer to decide: do not treat a failed save as a "newer choice" for the get answer. For example, the get answer could be accepted for a key when no save of that key succeeded since the get was sent.
 
 Severity:
 
-Low
+Low. It needs a failed settings save while the startup get is still pending, which is rare in practice.
 
 Fix required:
 
 `Yes — production code must be fixed by the parent worker / fixer.`
 
-### An older app.settings.set answer arriving last overrides the newer choice
+## Observations (not defects, no failing test)
 
-Finding ID:
-
-`TW-2`
-
-Test:
-
-`ThemeService > overlapping requests (order controlled with deferred answers) > answers in reverse order: the last choice wins (shown == stored)`
-
-Production source:
-
-`packages/renderer/src/app/theme/theme.service.ts:84-90` (`change()` applies every `app.settings.set` result via `take(settings)`, regardless of newer pending changes)
-
-Requirement:
-
-AC4 / Goal: the applied style/mode should equal the persisted setting after quick successive switches.
-
-Expected behavior:
-
-`setStyle('tron')` then `setStyle('business')`. The second answer (business) arrives first and the first answer (tron) arrives last. The stored setting is business, so the window shows business.
-
-Actual behavior:
-
-The window shows Tron (`data-style="tron"`) while the stored style is business.
-
-Severity:
-
-Low (needs out-of-order answers from main)
-
-Fix required:
-
-`Yes — production code must be fixed by the parent worker / fixer.`
-
-### A failed save reverts a later, successful change of the other setting
-
-Finding ID:
-
-`TW-3`
-
-Test:
-
-`ThemeService > overlapping requests (order controlled with deferred answers) > a failed earlier save does not revert a later save that succeeded`
-
-Production source:
-
-`packages/renderer/src/app/theme/theme.service.ts:85,92` (`before` captures both style and mode at call time, and the catch path restores both)
-
-Requirement:
-
-AC4 / Goal: persisted via app settings, and the service's own contract that "the UI does not pretend it was saved". It also must not show something other than what is saved.
-
-Expected behavior:
-
-`setStyle('tron')` (fails later) overlaps `setMode('dark')` (succeeds; stored mode dark). After the failure, style returns to business, and mode stays dark (`data-theme="dark"`).
-
-Actual behavior:
-
-The failure restores the snapshot `{style: business, mode: system}`. Mode shows `system` (`data-theme="light"`) although settings.json has `mode: "dark"`. The switcher can trigger this, because changing style and mode quickly sends overlapping saves (the Electron `pick()` helper does exactly that).
-
-Severity:
-
-Medium
-
-Fix required:
-
-`Yes — production code must be fixed by the parent worker / fixer.`
+- Quick successive choices can flicker. Main broadcasts the full settings before each set answers, and `take()` applies broadcasts unconditionally (by design, per fixes.md). So while a newer save is still pending, the echo of an older save briefly shows the older value. For example, after `setStyle('tron')`, `setMode('dark')`, `setStyle('business')`, the echo of the first save briefly shows mode `system`, and the echo of the second briefly shows style `tron`. Every sequence I tested ends on the last choice, which equals the stored setting (the echo test above passes). It is a transient visual glitch and no requirement covers it, so it is not reported as a bug. The parent can decide whether it is worth a follow-up.
+- The CR-1 fix waits for `Animation.finished` on every running animation. There are no infinite CSS animations in the renderer today (only `jump-flash`, 1.6 s). If a future infinite animation (for example an animated Tron glow) is added, this wait would hang the Electron test.
 
 ## Coverage
 
-Status: partial-failed for the full run. The full coverage command exits non-zero because of TW-1..3 and writes no report. Diagnostic coverage comes from a run that excludes only the three failing tests through the CLI name filter (no test file modified). It is labelled diagnostic below and must be re-measured with the full suite after the fix.
+Status: partial-failed for the full run. The coverage command exits non-zero because of TW-4 and writes no fresh report. The diagnostic numbers below come from a run that excludes only the TW-4 test through the CLI `--filter` (no test file was modified or skipped in code). They must be re-measured with the full suite after TW-4 is fixed.
 
 Metric: whole-file coverage of task-changed production files.
-Changed-line coverage: not measured. The three in-scope TS files are new files, so whole-file coverage equals changed-line coverage for them.
+Changed-line coverage: not measured separately. The three measured TS files were added by this task (new in e9d447f..HEAD), so whole-file coverage equals changed-line coverage for them.
 
 Evidence:
-- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: themes; base 5f94685d0a60701a9dc0705b26f94243a3a317b1; HEAD bbe40893b0b1252222b095252587c10a767ef507; task commits 644bd62, bbe4089 (parent-supplied scope, matched against `git log 5f94685..HEAD -- packages/renderer apps/desktop/test .gitignore`).
-- Source/test snapshot identifier (including uncommitted inputs): sha256 theme.service.ts aa8bdd60…3d5e, theme-switcher.ts 78471cbd…c6608, index.ts afbbbbc8…0391, tokens.css 9f8765cb…2674, theme.service.spec.ts (uncommitted, with additions) 625e5300…ef89, theme-tokens.spec.ts 4f9a2cce…fe5e. Production hashes are identical before and after all runs.
-- Exact included files: `packages/renderer/src/app/theme/theme.service.ts`, `theme-switcher.ts`, `index.ts`. Excluded: `tokens.css` and `styles.css` (CSS, not instrumentable by V8 coverage; covered by the token/contrast unit tests and the Electron test). `app.config.ts`, `dev/explorer-demo.ts` and `api/api.service.ts` have one-line wiring/type changes only, exercised by app.spec.ts, the new provideTheme tests and the Electron test, but not in the measured include set. `apps/desktop/test/theme.electron.spec.ts` is a test file. `.gitignore` is config. `packages/core/src/diff/*` belongs to another task (diff-ops).
-- Provider/version, command, working directory, and test selection: Vitest 5.1.0 with @vitest/coverage-v8 5.1.0, via the Angular unit-test builder. Working directory `packages/renderer`. Full run: `npx ng test --coverage --coverage-include='src/app/theme/theme.service.ts' --coverage-include='src/app/theme/theme-switcher.ts' --coverage-include='src/app/theme/index.ts'`. Diagnostic run: the same command plus `--filter='^(?!.*overlapping requests).*$'` (skips the 3 TW tests and one unrelated api.service.spec.ts test whose name also contains "overlapping requests").
-- Run start/completion time and exit status: full run 2026-11-16T20:22:11+01:00 to 20:22:16, non-zero (3 failed), no report written. Diagnostic run on the final snapshot 20:24:05 to 20:24:10, 480 passed and 4 skipped, exit 0. Baseline before the new tests (20:20): 100/101 statements, 33/33 branches, 21/22 functions, 76/76 lines.
-- Generated report paths and report hashes/run identifier: `packages/renderer/coverage/renderer/coverage-summary.json` sha256 5361b11d147aa1a03ee68b94fb12d38a31eb7c541e44312b2011a4597d4e16b9, `packages/renderer/coverage/renderer/lcov.info` sha256 6f414090debdc7fd5cade6307ba866b5fa69b01bcde231b29d5b2f9c0ab4a9b9. The top-level `packages/renderer/coverage/coverage-summary.json` (18:21) is stale and was ignored.
-- Evidence outputs are fresh and inputs stayed unchanged: yes. The `coverage/renderer` directory was absent after the failed run and was regenerated at 20:24:10, and the input hashes were unchanged across the run.
-- Final run after latest test additions and production fixes: yes for the test additions. No production fixes exist yet, so coverage must be re-run after TW-1..3 are fixed.
+- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: themes; base e9d447f1c2d444ee4e3b82420101e7b5501f39d7; measured HEAD b7d29c1abc2e24f5d49b519121bf309cae712ec4; scope `git diff e9d447f..HEAD -- packages apps`, supplied by the parent and checked against `git diff --stat` (only theme-related files).
+- Source/test snapshot identifier (including uncommitted inputs): sha256 theme.service.ts a8d8ef5aea7d7f568f502bac6adec51b81b865e950ec3a66b68846ce48217dd9, theme-switcher.ts 78471cbd6de11c2b31e9261af6ad819022375643cff1b1a57100885730c5e6bb, index.ts afbbbbc83aa7b4a60d79ff8f37d016136a9ee8c29d159571e81b04ad7ec60391, tokens.css 9f8765cb5333b69f2d0b1d60049d72dc1c518d4bd0384b1e9f7a5522092d2674, theme.service.spec.ts (uncommitted, with this round's additions) 3c9507f98c37182566d24a4a1e7c167ad10f058b03ed150b1c42f655e9d0d585, theme-tokens.spec.ts 4f9a2ccea9a39060c6f0c7f9ed46dfc6881b2526974f4ded9e94692ba5de3d5e. The hashes are identical before (20:29:58) and after all runs.
+- Exact included files: `packages/renderer/src/app/theme/theme.service.ts`, `theme-switcher.ts` and `index.ts`. Excluded:
+  - `tokens.css` and `styles.css`: CSS, not instrumentable by V8. Covered by the token/contrast unit tests and the Electron test.
+  - `app.config.ts`: a one-line `provideTheme()` registration, exercised by `provideTheme > is part of the root app config`.
+  - `api/api.service.ts`: a type-only addition to `BroadcastPayloads`, so there is nothing executable.
+  - `dev/explorer-demo.ts`: template/import wiring only, exercised by the Electron test.
+  - `apps/desktop/test/theme.electron.spec.ts`: a test file.
+  - No renamed or deleted files.
+- Provider/version, command, working directory, and test selection: Vitest 5.1.0 with @vitest/coverage-v8 5.1.0, via the Angular unit-test builder, in working directory `packages/renderer`.
+  - Full run (parent's command): `npx ng test --coverage --coverage-include='src/app/theme/theme.service.ts' --coverage-include='src/app/theme/theme-switcher.ts' --coverage-include='src/app/theme/index.ts'`, all renderer specs.
+  - Diagnostic run: the same command plus `--filter='^(?!.*a save that fails before the late app.settings.get answer).*'` and `--coverage-reporters=text --coverage-reporters=json-summary --coverage-reporters=json`.
+- Run start/completion time and exit status:
+  - Full run started at 20:30:09 and finished at about 20:30:11. Exit non-zero (490 tests, 1 failed). No fresh report: the only top-level files in `coverage/` are dated 18:21 and are stale.
+  - Diagnostic run: 20:30:22 to 20:30:27, 489 passed and 1 skipped (the TW-4 test, deselected by the filter), exit 0.
+- Generated report paths and report hashes/run identifier: `packages/renderer/coverage/renderer/coverage-summary.json` sha256 9f794535f8928382ea84f1b325e42814f47a9b7fd503338357d88fd3ba23a3b6 and `packages/renderer/coverage/renderer/coverage-final.json` sha256 412669f252307a9dcceae32795379067cdae18b4323cf386d5195f57ccbb56ed, both written at 20:30:26.95. The stale top-level `packages/renderer/coverage/coverage-summary.json` (18:21) was ignored.
+- Evidence outputs are fresh and inputs stayed unchanged: yes. The report files' timestamps fall inside the diagnostic run, and the input hashes did not change.
+- Final run after latest test additions and production fixes: yes for the final revision b7d29c1 and this round's tests. If TW-4 is fixed, coverage must be re-run with the full suite.
 
-Values below use covered/total (percentage); diagnostic run, final test snapshot.
+Values below use covered/total (percentage); diagnostic run, final snapshot.
 
 | Changed file | Statements | Branches | Functions | Lines |
 |---|---:|---:|---:|---:|
-| `packages/renderer/src/app/theme/theme.service.ts` | 61/61 (100%) | 23/23 (100%) | 13/13 (100%) | 52/52 (100%) |
+| `packages/renderer/src/app/theme/theme.service.ts` | 96/96 (100%) | 37/37 (100%) | 18/18 (100%) | 81/81 (100%) |
 | `packages/renderer/src/app/theme/theme-switcher.ts` | 38/38 (100%) | 10/10 (100%) | 7/7 (100%) | 22/22 (100%) |
 | `packages/renderer/src/app/theme/index.ts` | 2/2 (100%) | N/A (0/0) | 2/2 (100%) | 2/2 (100%) |
-| Aggregate (3 measured files; CSS and one-line wiring files excluded as listed above) | 101/101 (100%) | 33/33 (100%) | 22/22 (100%) | 76/76 (100%) |
+| Aggregate (3 measured files; the CSS files and the wiring/type-only files above are excluded) | 136/136 (100%) | 47/47 (100%) | 27/27 (100%) | 105/105 (100%) |
 
 | File and uncovered lines/branch locations | Required behavior or risk | Action/test added or reason left uncovered |
 |---|---|---|
-| `theme-switcher.ts:77` (pickMode error handler, uncovered at baseline) | A failed mode save is logged and the select shows the stored mode again | Added `logs a failed mode save and shows the stored mode again`; now covered |
-| none remaining | 100% line/branch coverage does not cover ordering | TW-1..3 show defects that coverage alone did not reveal |
+| none (all lines and branches covered) | 100% coverage does not show that the ordering logic is correct | Broadcast and echo ordering tests added this round. TW-4 is a defect that full coverage did not reveal. |
 
 ## Unable to test
 
-- Attaching the screenshots in `reviews/` (AC1): the Electron test writes them to `apps/desktop/test-results/screenshots/` (git-ignored). Copying them to `reviews/themes/` is a parent action, not a test.
-- The same switcher revert with a failure answered within the same microtask burst, before change detection runs, can leave the select showing the unsaved value. Real IPC answers arrive as a separate task after rendering, so I tested the realistic order (render, then failure), and that passes. Not reported as a bug.
-- Real OS-level `prefers-color-scheme` changes: covered by Playwright `emulateMedia` in Electron, not by an actual OS theme switch.
+- Real OS-level `prefers-color-scheme` changes: covered by Playwright `emulateMedia` in Electron, not by an actual OS theme switch. No follow-up needed.
+- The real IPC interleaving of broadcasts and answers is modeled in the unit tests (broadcast first, then answer, as `SettingsStore.onChange` is wired in `apps/desktop/src/main/index.ts`). The Electron theme test does not exercise overlapping saves against the real main process. No follow-up needed unless the parent wants an Electron-level check.
 
 ## Summary
 
-Tests added; production defects were discovered and must be passed to the `fixer` before task completion. All five acceptance criteria have passing tests. TW-1 (Low), TW-2 (Low) and TW-3 (Medium) are ordering defects in `ThemeService` where the shown theme can differ from the persisted settings. Their failing tests make `npm run check` (and so `.taskcheck`) fail until `theme.service.ts` is fixed. Task-scoped coverage is 100% in a diagnostic run without those three tests and must be re-run with the full suite after the fix.
+Tests added; production defects were discovered and must be passed to the `fixer` before task completion. The CR-1, CR-2 and TW-1..3 fixes are confirmed: their tests pass, and the four new broadcast/echo ordering tests pass as well. One new Low-severity defect, TW-4, remains: a save that fails before the startup `app.settings.get` answer leaves the window on the default instead of the stored setting. Its failing test makes `npm run check` (and so `.taskcheck`) fail until `theme.service.ts` is fixed. Task-scoped coverage is 100% (136/136 statements, 47/47 branches, 27/27 functions, 105/105 lines) in a diagnostic run without the TW-4 test. Coverage must be re-run with the full suite after the fix. The Electron run also shows 2 `secrets.electron.spec.ts` failures outside this task (profiles-store), in addition to the 4 known ones.
