@@ -1,11 +1,11 @@
 ---
 title: M1: Databases and collections (db.*, coll.*)
-status: in_progress
+status: done
 owner: felix/agent-2
 deps: [conn-manager]
 touches: [packages/backend/src/browse]
 prio: 1
-lease_until: 2026-11-16T21:25:50Z
+lease_until: 
 ---
 ## Goal
 listDatabases, list collections/views/time series, stats on demand, create/drop/rename database and collection, through the write guard.
@@ -27,3 +27,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 21:32+0100 by felix/agent-2): ClientLike.db().command gained an optional options arg (passed RAW: no BSON promotion) so raw outputs are lossless canonical EJSON; abortable() in connections/manager.ts is now exported for reuse by browse handlers.
 - ASSUMPTION (2026-11-16 21:44+0100 by felix/agent-2): A cancelled browse write (db.create/drop, coll.create/drop/rename) still completes on the server; the handlers await it, but the shared serve() answers CANCELLED at once for any cancelled request. Changing that generic RPC behaviour is outside this task; the renderer should treat a cancelled write as 'may have happened' and refresh.
 - ASSUMPTION (2026-11-16 21:54+0100 by felix/agent-2): Correction to the earlier 'no BSON promotion' note: commands run with promoteLongs:false and fieldsAsRaw {firstBatch,nextBatch}; cursor documents (coll.list raw, coll.stats raw) are decoded with promoteValues:false and are lossless. db.stats raw comes from a non-cursor reply whose Int32/Double values are promoted (promoteValues:false would also turn MongoServerError.code into an Int32 object), so a whole-number Double size there may print as $numberInt; Int64 stays $numberLong.
+- done by felix/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 41s on 423be6de3; criteria verified 3/3
