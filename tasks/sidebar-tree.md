@@ -1,11 +1,11 @@
 ---
 title: M1: Sidebar tree of connections, databases, collections
-status: in_progress
+status: done
 owner: felix/agent-1
 deps: [app-layout,api-client,browse-backend,safety-ui]
 touches: [packages/renderer/src/app/sidebar]
 prio: 1
-lease_until: 2026-11-16T22:27:04Z
+lease_until: 
 ---
 ## Goal
 Tree: connections → databases → collections/views/time series with lazy loading, counts/sizes on demand, context menus for create/drop/rename (drop asks to type the name), open collection in a tab.
@@ -25,3 +25,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 22:23+0100 by felix/agent-1): Counts and sizes on demand = context menu: 'Show counts and sizes' (coll.stats / db.stats) and 'Show database sizes' (db.listDatabases withSizes); results shown inline on the node. Views have no stats and cannot be renamed (menu items disabled).
 - ASSUMPTION (2026-11-16 22:23+0100 by felix/agent-1): Drops always confirm with the typed name (WriteGuard alwaysConfirm + typeToConfirm), on every profile; create/rename confirm only where WriteGuard requires it (production). Dropping/renaming closes the affected collection tabs. Read-only: write menu items are disabled (with the read-only hint), not hidden.
 - ASSUMPTION (2026-11-16 22:23+0100 by felix/agent-1): Collection tab contract: id collection:<profileId>:<db>.<coll>, kind 'collection', data {profileId, db, coll, type} (CollectionTabData in app/sidebar) for collection-view.
+- done by felix/agent-1: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 54s on 12c02fe3e; criteria verified 3/3
