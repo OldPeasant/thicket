@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "task": "codegen",
+  "reviewed_revision": "66e458db66423bb54ca2403132f9f096498b8bc8",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/codegen/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/codegen/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/codegen/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    { "id": "CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "Java Arrays.asList(null) NPE; now (Object) null, int test runs $in: [null] in all languages" },
+    { "id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "useless SON branch removed; assumption corrected" },
+    { "id": "CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "accepted", "note": "Node sends BSON undefined as null (driver default); deprecated type, recorded as assumption" },
+    { "id": "CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "edge tests for CodegenError paths and date fallbacks added" },
+    { "id": "TW-1", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "layout reserves trailing text width; lines stay within 80 columns" },
+    { "id": "TW-2", "source": "test-writer", "severity": "Low", "disposition": "accepted", "note": "Node DBRef splits db.coll refs, Python does not; deprecated dbPointer is best effort, recorded as assumption" },
+    { "id": "TW-3", "source": "test-writer", "severity": "Low", "disposition": "accepted", "note": "same as CR-3, recorded as assumption" }
+  ],
+  "validation": [
+    { "command": "npx vitest run --project core packages/core/src/codegen", "result": "pass" },
+    { "command": "npm run test:int -- codegen", "result": "pass" },
+    { "command": "npm run check", "result": "pass" }
+  ]
+}
