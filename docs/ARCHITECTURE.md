@@ -162,6 +162,29 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   none, and switching `secretMode` away from `saved` clears the saved password.
   `profilesHandlers` serve `profiles.list/get/save/delete/duplicate` and gate
   `profiles.setSecret` on the profile existing (`NOT_FOUND`).
+- Connections (`packages/backend/src/connections/`, backend): `ConnectionManager` keeps one
+  driver client per profile id (`connecting` → `connected` / `error`; closed ones are forgotten
+  and report `disconnected`) and serves `conn.test/open/close/status/serverInfo`
+  (`connHandlers`). It loads the profile from main over the privileged port
+  (`profiles.forConnect`, `NOT_FOUND` for unknown ids) and its secrets (`secrets.get`); a
+  `password` in the request wins, and `secretMode: 'ask'` ignores a stored one. `clientConfig()`
+  keeps the saved connection string as the URI (hosts, SRV, `replicaSet`, `directConnection`)
+  and passes the form fields and secrets as driver options (`auth`, `authMechanism`
+  SCRAM-SHA-1/256, `authSource`, `tls`, `tlsCAFile`, `tlsCertificateKeyFile` + passphrase,
+  allow-invalid flags, read preference, `appName` (default `Thicket`), timeouts), so passwords
+  never enter the URI; SSH and the other mechanisms answer `UNSUPPORTED` until their tasks.
+  `toConnectError()` classifies driver errors by walking `cause`, `errors` and the server
+  selection `reason`: `AUTH_FAILED` > `TLS_ERROR` > `DNS_ERROR` > `NETWORK_ERROR` > `TIMEOUT` >
+  `SERVER_ERROR`; messages start with a readable prefix and are masked (`maskText` + the
+  connect's secret values), as is every log line. Later handlers get a connected client with
+  `manager.client(profileId)` (`NOT_CONNECTED` otherwise).
+- Write guard (`packages/backend/src/guard/`): `startBackend` wraps every handler of a
+  `WRITE_METHODS` method with `guardWrites()`, which loads the profile from main (fresh, per
+  write) and throws `READ_ONLY` for read-only profiles (even when confirmed), and
+  `CONFIRMATION_REQUIRED` without `confirmed: true` on production profiles and for
+  `docs.updateMany` / `docs.deleteMany` everywhere. `conditional` writes are checked only when
+  `CONDITIONAL_WRITES` says the params write (`agg.run` with a `$out`/`$merge` stage); a
+  conditional method without an entry there is always checked.
 - Wiring diagnostics in the contract: `app.ping` (main), `backend.ping` (backend; also checks the
   privileged port), `backend.sleep` (cancellable wait for tests).
 - Tests: unit specs next to the code; `npm run test:electron` (root: builds the renderer first)
