@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "task": "renderer-scaffold",
+  "reviewed_revision": "044a8e74081d36b92138e9f88edfa725ede8a429",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/renderer-scaffold/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/renderer-scaffold/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/renderer-scaffold/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "root engines.node raised to >=24.15.0 <25 (Angular 22 and jsdom 31 require ^24.15.0); docs/ARCHITECTURE.md install section updated"
+    },
+    {
+      "id": "CR-2",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "no-network.spec.ts REMOTE pattern now catches [src]/[attr.href] bindings and srcset; test-writer second pass extended it to ngSrc/ngSrcset (test-only), re-reviewed at 044a8e7"
+    }
+  ],
+  "validation": [
+    { "command": "npm run check (at 044a8e7, Node 24.21.0)", "result": "pass" },
+    { "command": "npm run build -w packages/renderer", "result": "pass" },
+    {
+      "command": "cd packages/renderer && npx ng test --coverage --coverage-include=src/app/app.ts --coverage-include=src/app/app.config.ts",
+      "result": "pass"
+    },
+    { "command": "sh .taskcheck", "result": "pass" }
+  ]
+}
