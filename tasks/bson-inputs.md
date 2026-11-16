@@ -11,7 +11,8 @@ lease_until: 2026-11-16T22:56:29Z
 Typed inputs per BSON type (ObjectId with validation/generate, date-time picker, Int32/Int64 with range check, Double, Decimal128, Binary/UUID, Regex with flags, Timestamp), type dropdown with all creatable types using bson-model conversions, number default from settings, field reorder.
 
 ## Acceptance criteria
-- [ ] Component tests: editing an Int64 keeps Int64; overflow shows an error; invalid ObjectId rejected
+- [x] Component tests: editing an Int64 keeps Int64; overflow shows an error; invalid ObjectId rejected
+  - verified (2026-11-16 23:38+0100 by felix/agent-2): cd packages/renderer && npx ng test --include bson-inputs.spec.ts, bson-input.component.spec.ts, editable-value.component.spec.ts, bson-input.util.spec.ts -> 4 files, 171 passed; 'typed inputs' tests: Int64 stays Int64 exactly, Int64/Int32 overflow shows error and keeps value, invalid ObjectId rejected
 - [ ] Type dropdown conversions follow the bson-model table; impossible conversions disabled (test)
 - [ ] New numeric value defaults per setting (Int32/Double) (test); fields can be moved (test)
 
