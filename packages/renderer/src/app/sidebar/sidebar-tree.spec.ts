@@ -525,4 +525,453 @@ describe('SidebarTree', () => {
       expect((must('menu-create-db') as HTMLButtonElement).disabled).toBe(false);
     });
   });
+
+  describe('menu details', () => {
+    async function key(target: Element, k: string, init: KeyboardEventInit = {}): Promise<void> {
+      target.dispatchEvent(
+        new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...init }),
+      );
+      await settle();
+    }
+
+    it('moves through the menu with the arrows (wrapping), Home and End', async () => {
+      await start();
+      await openShop();
+      await menu(node('coll', 'orders'));
+      expect(document.activeElement).toBe(must('menu-open'));
+      await key(document.activeElement as Element, 'ArrowDown');
+      expect(document.activeElement).toBe(must('menu-stats'));
+      await key(document.activeElement as Element, 'End');
+      expect(document.activeElement).toBe(must('menu-drop-coll'));
+      await key(document.activeElement as Element, 'ArrowDown');
+      expect(document.activeElement).toBe(must('menu-open'));
+      await key(document.activeElement as Element, 'ArrowUp');
+      expect(document.activeElement).toBe(must('menu-drop-coll'));
+      await key(document.activeElement as Element, 'Home');
+      expect(document.activeElement).toBe(must('menu-open'));
+    });
+
+    it('skips disabled items when moving through the menu', async () => {
+      await start();
+      await openShop();
+      await menu(node('coll', 'big_orders'));
+      // Open, (stats disabled), (rename disabled), Drop view.
+      expect(document.activeElement).toBe(must('menu-open'));
+      await key(document.activeElement as Element, 'ArrowDown');
+      expect(document.activeElement).toBe(must('menu-drop-coll'));
+    });
+
+    it('closes with Tab and returns focus to the node', async () => {
+      await start();
+      await openShop();
+      await menu(node('coll', 'orders'));
+      await key(must('menu-open'), 'Tab');
+      expect(byTestId('tree-menu')).toBeNull();
+      expect(document.activeElement).toBe(node('coll', 'orders'));
+    });
+
+    it('closes on a mousedown outside the menu but not inside it', async () => {
+      await start();
+      await openShop();
+      await menu(node('coll', 'orders'));
+      must('menu-stats').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      await settle();
+      expect(byTestId('tree-menu')).not.toBeNull();
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      await settle();
+      expect(byTestId('tree-menu')).toBeNull();
+    });
+
+    it('opens with the ContextMenu key', async () => {
+      await start();
+      await key(node('conn', 'Profile p1'), 'ContextMenu');
+      expect(byTestId('tree-menu')).not.toBeNull();
+      expect(must('menu-connect').textContent).toContain('Connect');
+    });
+
+    it('offers only Connect on a disconnected connection', async () => {
+      await start();
+      await menu(node('conn', 'Profile p1'));
+      expect((must('menu-connect') as HTMLButtonElement).disabled).toBe(false);
+      expect((must('menu-refresh') as HTMLButtonElement).disabled).toBe(true);
+      expect((must('menu-sizes') as HTMLButtonElement).disabled).toBe(true);
+      expect((must('menu-create-db') as HTMLButtonElement).disabled).toBe(true);
+      await click(must('menu-connect'));
+      expect(fake.requestsFor('conn.open')).toHaveLength(1);
+      expect(nodes('db')).toEqual(['admin', 'shop']);
+    });
+
+    it('a view has no stats or rename and is dropped as a view', async () => {
+      await start();
+      await openShop();
+      await menu(node('coll', 'big_orders'));
+      expect((must('menu-stats') as HTMLButtonElement).disabled).toBe(true);
+      expect((must('menu-rename') as HTMLButtonElement).disabled).toBe(true);
+      expect(must('menu-drop-coll').textContent?.trim()).toBe('Drop view…');
+      await click(must('menu-rename'));
+      expect(byTestId('tree-prompt')).toBeNull();
+    });
+
+    it('refreshes the databases and collections from the menu', async () => {
+      await start();
+      await openShop();
+      await menu(node('conn', 'Profile p1'));
+      await click(must('menu-refresh'));
+      expect(fake.requestsFor('db.listDatabases')).toHaveLength(2);
+      await menu(node('db', 'shop'));
+      await click(must('menu-refresh'));
+      expect(fake.requestsFor('coll.list')).toHaveLength(2);
+    });
+
+    it('shows a failed stats request on the node with the error as tooltip', async () => {
+      fake.fail('coll.stats', { code: 'SERVER_ERROR', message: 'stats not allowed' });
+      await start();
+      await openShop();
+      await menu(node('coll', 'orders'));
+      await click(must('menu-stats'));
+      const stats = node('coll', 'orders').querySelector<HTMLElement>('[data-testid="node-stats"]');
+      expect(stats?.textContent).toBe('stats failed');
+      expect(stats?.title).toContain('stats not allowed');
+    });
+
+    it('shows a failed database stats request on the database node', async () => {
+      fake.fail('db.stats', { code: 'SERVER_ERROR', message: 'dbStats not allowed' });
+      await start();
+      await click(node('conn', 'Profile p1'));
+      await menu(node('db', 'shop'));
+      await click(must('menu-stats'));
+      const stats = node('db', 'shop').querySelector<HTMLElement>('[data-testid="node-stats"]');
+      expect(stats?.textContent).toBe('stats failed');
+      expect(stats?.title).toContain('dbStats not allowed');
+    });
+
+    it('dismisses a notice', async () => {
+      fake.fail('db.drop', { code: 'SERVER_ERROR', message: 'not authorized to drop' });
+      await start();
+      await click(node('conn', 'Profile p1'));
+      await menu(node('db', 'shop'));
+      await click(must('menu-drop-db'));
+      await type('confirm-type', 'shop');
+      await click(must('confirm-ok'));
+      await click(must('sidebar-notice').querySelector('button') as HTMLElement);
+      expect(byTestId('sidebar-notice')).toBeNull();
+    });
+  });
+
+  describe('prompt details', () => {
+    async function key(target: Element, k: string, init: KeyboardEventInit = {}): Promise<void> {
+      target.dispatchEvent(
+        new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...init }),
+      );
+      await settle();
+    }
+
+    async function openCreateCollection(): Promise<void> {
+      await click(node('conn', 'Profile p1'));
+      await menu(node('db', 'shop'));
+      await click(must('menu-create-coll'));
+    }
+
+    it('focuses the first field of a prompt opened from the context menu', async () => {
+      // The prompt is a modal dialog (aria-modal, focus trap): keyboard users must land in it.
+      await start();
+      await openCreateCollection();
+      expect(document.activeElement).toBe(must('prompt-coll'));
+    });
+
+    it('focuses the password field of the connect prompt', async () => {
+      profiles = [
+        profile('p1', { auth: { mechanism: 'SCRAM-SHA-256', username: 'u', secretMode: 'ask' } }),
+      ];
+      await start();
+      await click(node('conn', 'Profile p1'));
+      expect(document.activeElement).toBe(must('prompt-password'));
+    });
+
+    it('closes with Escape and returns focus to the node', async () => {
+      await start();
+      await openCreateCollection();
+      await key(must('prompt-coll'), 'Escape');
+      expect(byTestId('tree-prompt')).toBeNull();
+      expect(fake.requestsFor('coll.create')).toHaveLength(0);
+      expect(document.activeElement).toBe(node('db', 'shop'));
+    });
+
+    it('keeps the focus inside the prompt with Tab and Shift+Tab', async () => {
+      await start();
+      await openCreateCollection();
+      const input = must('prompt-coll');
+      const ok = must('prompt-ok');
+      ok.focus();
+      await key(ok, 'Tab');
+      expect(document.activeElement).toBe(input);
+      await key(input, 'Tab', { shiftKey: true });
+      expect(document.activeElement).toBe(ok);
+    });
+
+    it('does not close with Escape while the request is running', async () => {
+      let release!: () => void;
+      fake.handle(
+        'coll.create',
+        () =>
+          new Promise((resolve) => {
+            release = () => resolve({});
+          }),
+      );
+      await start();
+      await openCreateCollection();
+      await type('prompt-coll', 'fresh');
+      await click(must('prompt-ok'));
+      expect((must('prompt-ok') as HTMLButtonElement).disabled).toBe(true);
+      await key(must('tree-prompt'), 'Escape');
+      expect(byTestId('tree-prompt')).not.toBeNull();
+      release();
+      await settle();
+      expect(byTestId('tree-prompt')).toBeNull();
+    });
+
+    it('refuses renaming to the same name', async () => {
+      await start();
+      await openShop();
+      await menu(node('coll', 'orders'));
+      await click(must('menu-rename'));
+      await click(must('prompt-ok'));
+      expect(must('prompt-problem').textContent).toBe('Enter a different name.');
+      expect(fake.requestsFor('coll.rename')).toHaveLength(0);
+    });
+
+    it('refuses an invalid collection name before sending', async () => {
+      await start();
+      await openCreateCollection();
+      await type('prompt-coll', 'system.users');
+      await click(must('prompt-ok'));
+      expect(must('prompt-problem').textContent).toContain('reserved');
+      expect((must('prompt-coll') as HTMLInputElement).getAttribute('aria-invalid')).toBe('true');
+      expect(fake.requestsFor('coll.create')).toHaveLength(0);
+    });
+
+    it('keeps the password prompt open with the error when the connection fails', async () => {
+      profiles = [
+        profile('p1', { auth: { mechanism: 'SCRAM-SHA-256', username: 'u', secretMode: 'ask' } }),
+      ];
+      fake.fail('conn.open', { code: 'AUTH_FAILED', message: 'Authentication failed' });
+      await start();
+      await click(node('conn', 'Profile p1'));
+      await type('prompt-password', 'wrong-fictitious');
+      await click(must('prompt-ok'));
+      expect(byTestId('tree-prompt')).not.toBeNull();
+      expect(must('prompt-error').textContent).toContain('Authentication failed');
+    });
+
+    it('a cancelled production confirm keeps the prompt open without an error', async () => {
+      profiles = [profile('p1', { production: true })];
+      await start();
+      await openCreateCollection();
+      await type('prompt-coll', 'fresh');
+      await click(must('prompt-ok'));
+      expect(byTestId('confirm-dialog')).not.toBeNull();
+      await click(must('confirm-cancel'));
+      expect(byTestId('tree-prompt')).not.toBeNull();
+      expect(byTestId('prompt-error')).toBeNull();
+      expect(fake.requestsFor('coll.create')).toHaveLength(0);
+    });
+  });
+
+  describe('tree details', () => {
+    it('shows empty database and collection lists', async () => {
+      databases = { p1: ['empty'] };
+      await start();
+      await click(node('conn', 'Profile p1'));
+      await click(node('db', 'empty'));
+      expect(byTestId('tree-status')?.textContent).toContain('No collections.');
+      databases = { p1: [] };
+      await menu(node('conn', 'Profile p1'));
+      await click(must('menu-refresh'));
+      expect(byTestId('tree-status')?.textContent).toContain('No databases.');
+    });
+
+    it('collapses a connection on a second click without disconnecting', async () => {
+      await start();
+      await click(node('conn', 'Profile p1'));
+      await click(node('conn', 'Profile p1'));
+      expect(nodes('db')).toEqual([]);
+      expect(node('conn', 'Profile p1').dataset['state']).toBe('connected');
+      expect(fake.requestsFor('conn.close')).toHaveLength(0);
+    });
+
+    it('moves to the first and last node with Home and End, opens with Space', async () => {
+      await start();
+      await openShop();
+      const press = async (target: HTMLElement, k: string) => {
+        target.dispatchEvent(
+          new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }),
+        );
+        await settle();
+      };
+      await press(node('conn', 'Profile p1'), 'End');
+      expect(document.activeElement).toBe(node('conn', 'Reader'));
+      await press(node('conn', 'Reader'), 'Home');
+      expect(document.activeElement).toBe(node('conn', 'Profile p1'));
+      await press(node('coll', 'orders'), ' ');
+      expect(TestBed.inject(WorkspaceService).activeId()).toBe(
+        collectionTabId('p1', 'shop', 'orders'),
+      );
+    });
+
+    it('shows a connecting line while conn.open is pending', async () => {
+      let release!: () => void;
+      fake.handle(
+        'conn.open',
+        ({ profileId }) =>
+          new Promise((resolve) => {
+            release = () => resolve({ profileId, state: 'connected' });
+          }),
+      );
+      await start();
+      await click(node('conn', 'Profile p1'));
+      expect(node('conn', 'Profile p1').dataset['state']).toBe('connecting');
+      expect(must('tree-status').textContent).toContain('Connecting');
+      release();
+      await settle();
+      expect(nodes('db')).toEqual(['admin', 'shop']);
+    });
+
+    it('shows a failed database list with a retry', async () => {
+      fake.fail('db.listDatabases', { code: 'SERVER_ERROR', message: 'listDatabases refused' });
+      await start();
+      await click(node('conn', 'Profile p1'));
+      const line = must('tree-status');
+      expect(line.dataset['tone']).toBe('error');
+      expect(line.textContent).toContain('listDatabases refused');
+      fake.handle('db.listDatabases', () => ({ databases: [{ name: 'shop' }] }));
+      await click(must('tree-retry'));
+      expect(nodes('db')).toEqual(['shop']);
+    });
+
+    it('reconnects from the Connect link of a disconnected connection', async () => {
+      await start();
+      await click(node('conn', 'Profile p1'));
+      fake.emit({
+        stream: 'conn.status',
+        kind: 'data',
+        payload: { profileId: 'p1', state: 'disconnected' },
+      });
+      await settle();
+      expect(must('tree-retry').textContent?.trim()).toBe('Connect');
+      await click(must('tree-retry'));
+      expect(fake.requestsFor('conn.open')).toHaveLength(2);
+      expect(nodes('db')).toEqual(['admin', 'shop']);
+    });
+
+    it('expanding a connection that is already open loads its databases without conn.open', async () => {
+      fake.respond('conn.status', { connections: [{ profileId: 'p1', state: 'connected' }] });
+      await start();
+      expect(node('conn', 'Profile p1').dataset['state']).toBe('connected');
+      await click(node('conn', 'Profile p1'));
+      expect(fake.requestsFor('conn.open')).toHaveLength(0);
+      expect(nodes('db')).toEqual(['admin', 'shop']);
+    });
+
+    it('opens a collection from the Open menu item', async () => {
+      await start();
+      await openShop();
+      await menu(node('coll', 'ticks'));
+      await click(must('menu-open'));
+      expect(TestBed.inject(WorkspaceService).active()).toMatchObject({
+        id: collectionTabId('p1', 'shop', 'ticks'),
+        data: { type: 'timeseries' },
+      });
+    });
+
+    it('shows a placeholder while stats load', async () => {
+      let release!: () => void;
+      fake.handle(
+        'db.stats',
+        () =>
+          new Promise((resolve) => {
+            release = () =>
+              resolve({
+                collections: 1,
+                views: 0,
+                objects: 1,
+                dataSize: 1,
+                storageSize: 1,
+                indexSize: 1,
+                raw: '{}',
+              });
+          }),
+      );
+      await start();
+      await click(node('conn', 'Profile p1'));
+      await menu(node('db', 'shop'));
+      await click(must('menu-stats'));
+      expect(node('db', 'shop').querySelector('[data-testid="node-stats"]')?.textContent).toBe('…');
+      release();
+      await settle();
+      expect(node('db', 'shop').textContent).toContain('1 coll., 1 doc, 1 B');
+    });
+
+    it('sends a prompt only once when it is submitted twice', async () => {
+      let release!: () => void;
+      fake.handle(
+        'coll.create',
+        () =>
+          new Promise((resolve) => {
+            release = () => resolve({});
+          }),
+      );
+      await start();
+      await click(node('conn', 'Profile p1'));
+      await menu(node('db', 'shop'));
+      await click(must('menu-create-coll'));
+      await type('prompt-coll', 'fresh');
+      const form = must('tree-prompt');
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      await settle();
+      expect(fake.requestsFor('coll.create')).toHaveLength(1);
+      release();
+      await settle();
+      expect(byTestId('tree-prompt')).toBeNull();
+    });
+
+    it('ArrowRight on an open node moves to its first child, ArrowUp moves back', async () => {
+      await start();
+      await click(node('conn', 'Profile p1'));
+      const press = async (target: HTMLElement, k: string) => {
+        target.dispatchEvent(
+          new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }),
+        );
+        await settle();
+      };
+      await press(node('conn', 'Profile p1'), 'ArrowRight');
+      expect(document.activeElement).toBe(node('db', 'admin'));
+      await press(node('db', 'admin'), 'ArrowUp');
+      expect(document.activeElement).toBe(node('conn', 'Profile p1'));
+      // F10 without Shift does not open the menu.
+      await press(node('conn', 'Profile p1'), 'F10');
+      expect(byTestId('tree-menu')).toBeNull();
+    });
+
+    it('reloads the profiles with the refresh button', async () => {
+      await start();
+      profiles = [...profiles, profile('p3')];
+      await click(must('sidebar-refresh'));
+      expect(nodes('conn')).toEqual(['Profile p1', 'Reader', 'Profile p3']);
+    });
+
+    it('resets the tree when the backend restarts', async () => {
+      await start();
+      await openShop();
+      fake.emit({
+        stream: 'backend.restarted',
+        kind: 'data',
+        payload: { restarts: 1, reason: 'exit code 1' },
+      });
+      await settle();
+      expect(node('conn', 'Profile p1').dataset['state']).toBe('disconnected');
+      expect(nodes('db')).toEqual([]);
+      expect(byTestId('tree-status')?.textContent).toContain('Not connected');
+    });
+  });
 });

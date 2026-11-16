@@ -104,11 +104,11 @@ test('create a database and collection, rename, and drop with the typed name', a
 
   // Open it in a tab; counts and sizes on demand.
   await treeNode(window, 'coll', 'renamed').click();
-  await expect(window.locator('[data-testid="tab"][data-tab-id$="sidebar_e2e.renamed"]')).toBeVisible();
+  await expect(
+    window.locator('[data-testid="tab"][data-tab-id$="sidebar_e2e.renamed"]'),
+  ).toBeVisible();
   await menuAction(window, treeNode(window, 'coll', 'first'), 'stats');
-  await expect(treeNode(window, 'coll', 'first').getByTestId('node-stats')).toHaveText(
-    /^0 docs, /,
-  );
+  await expect(treeNode(window, 'coll', 'first').getByTestId('node-stats')).toHaveText(/^0 docs, /);
 
   await mkdir(SHOTS, { recursive: true });
   await window.screenshot({ path: join(SHOTS, 'sidebar-tree.png') });
@@ -125,7 +125,9 @@ test('create a database and collection, rename, and drop with the typed name', a
   await ok.click();
   await expect(treeNode(window, 'coll', 'renamed')).toHaveCount(0);
   // Its tab was closed.
-  await expect(window.locator('[data-testid="tab"][data-tab-id$="sidebar_e2e.renamed"]')).toHaveCount(0);
+  await expect(
+    window.locator('[data-testid="tab"][data-tab-id$="sidebar_e2e.renamed"]'),
+  ).toHaveCount(0);
   expect(await collectionNames(mongo.uri)).toEqual(['first']);
 
   // Cancelling a database drop sends nothing.
