@@ -1,11 +1,11 @@
 ---
 title: M0: Copy the JSON Canopy explorer into the renderer
-status: todo
-owner: 
+status: in_progress
+owner: felix/agent-1
 deps: [renderer-scaffold]
 touches: [packages/renderer/src/app/explorer,packages/renderer/src/app/schema,packages/renderer/src/styles.css,vendor]
 prio: 1
-lease_until: 
+lease_until: 2026-11-16T18:38:01Z
 releases: 0
 extended: 
 hold: 
