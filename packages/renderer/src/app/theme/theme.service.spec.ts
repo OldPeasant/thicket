@@ -461,6 +461,64 @@ describe('ThemeService', () => {
       expect(theme.style()).toBe('tron');
       expect(attrs().style).toBe('tron');
     });
+
+    it('the last pending save failing after the latest choice failed ends on the stored value', async () => {
+      // Three style saves; the answers arrive as: third fails, first succeeds, second fails.
+      const firstAnswer = deferred<{ settings: Settings }>();
+      const secondAnswer = deferred<{ error: { code: 'INTERNAL'; message: string } }>();
+      let calls = 0;
+      fake.handle('app.settings.set', (params) => {
+        calls += 1;
+        if (calls === 1) {
+          stored = { ...stored, ...params.settings };
+          const snapshot = { settings: { ...stored } };
+          return firstAnswer.promise.then(() => snapshot);
+        }
+        if (calls === 2) return secondAnswer.promise;
+        return { error: { code: 'INTERNAL', message: 'disk full' } };
+      });
+      const theme = TestBed.inject(ThemeService);
+      await theme.init();
+
+      const first = theme.setStyle('tron'); // stored, answer late
+      const second = theme.setStyle('business'); // will fail, answer late
+      await expect(theme.setStyle('tron')).rejects.toMatchObject({ code: 'INTERNAL' });
+      firstAnswer.resolve({ settings: { ...stored } });
+      await first;
+      secondAnswer.resolve({ error: { code: 'INTERNAL', message: 'disk full' } });
+      await expect(second).rejects.toMatchObject({ code: 'INTERNAL' });
+
+      // Only the first save was stored: the window must show Tron, as main does.
+      expect(stored.style).toBe('tron');
+      expect(theme.style()).toBe('tron');
+      expect(attrs().style).toBe('tron');
+    });
+
+    it('a late startup answer while an older save is pending, then that save fails: ends on the stored value', async () => {
+      stored = { ...stored, mode: 'dark' };
+      const get = deferred<{ settings: Settings }>();
+      fake.handle('app.settings.get', () => get.promise);
+      const older = deferred<{ error: { code: 'INTERNAL'; message: string } }>();
+      let calls = 0;
+      fake.handle('app.settings.set', () => {
+        calls += 1;
+        if (calls === 1) return older.promise;
+        return { error: { code: 'INTERNAL', message: 'disk full' } };
+      });
+      const theme = TestBed.inject(ThemeService);
+      const started = theme.init();
+
+      const first = theme.setMode('light'); // fails, answer late
+      await expect(theme.setMode('dark')).rejects.toMatchObject({ code: 'INTERNAL' });
+      get.resolve({ settings: { ...stored } }); // main stores dark
+      await started;
+      older.resolve({ error: { code: 'INTERNAL', message: 'disk full' } });
+      await expect(first).rejects.toMatchObject({ code: 'INTERNAL' });
+
+      expect(stored.mode).toBe('dark');
+      expect(theme.mode()).toBe('dark');
+      expect(attrs().theme).toBe('dark');
+    });
   });
 });
 
