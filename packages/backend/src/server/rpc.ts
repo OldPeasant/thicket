@@ -6,6 +6,7 @@ import {
   response as responseSchema,
   type ErrorCode,
   type ErrorInfo,
+  type Event,
   type MethodDef,
   type Response,
   type Route,
@@ -41,11 +42,38 @@ export class RpcError extends Error {
   }
 }
 
+/** What a stream producer gets: its signal, and `send` for one `data` payload. */
+export interface StreamSink {
+  readonly streamId: string;
+  /** Aborted when the caller cancels the stream (or the port closes). */
+  readonly signal: AbortSignal;
+  /** Sends one `data` event (validated against the method's `stream` schema). Ignored once over. */
+  send(payload: unknown): void;
+}
+
+/**
+ * Produces a stream's data. Resolves with the number of items delivered (the `end` event's
+ * `delivered`); a rejection ends the stream with an `error` event. After a cancel the producer
+ * should stop and clean up (e.g. kill the server operation) promptly: the `CANCELLED` error event
+ * is sent when it settles (or after {@link STREAM_CANCEL_GRACE_MS} at the latest).
+ */
+export type StreamProducer = (sink: StreamSink) => Promise<number>;
+
 export interface HandlerContext {
   /** Aborted when the caller cancels the request (or the port closes). */
   signal: AbortSignal;
   requestId: string;
+  /**
+   * Opens a stream for a streaming method and returns its id for the `{ streamId }` result. The
+   * producer starts only after the response was sent, so the caller knows the id before any event;
+   * if the request fails or is cancelled, it never starts. Always set by `serve`; optional so
+   * unit tests of non-streaming handlers can pass a plain context.
+   */
+  openStream?: (producer: StreamProducer) => string;
 }
+
+/** Longest wait for a cancelled stream's producer to clean up before `CANCELLED` is sent anyway. */
+export const STREAM_CANCEL_GRACE_MS = 5000;
 
 /** Serves one method: gets validated params, returns the result (validated before it is sent). */
 export type Handler = (params: never, context: HandlerContext) => unknown;
@@ -70,22 +98,126 @@ function toErrorInfo(error: unknown): ErrorInfo {
   return { code: 'INTERNAL', message: `Unexpected error: ${message}` };
 }
 
+interface PendingStream {
+  id: string;
+  producer: StreamProducer;
+  controller: AbortController;
+}
+
+interface RunningStream {
+  controller: AbortController;
+  /** Sends the final event once; later calls do nothing. */
+  finish(event: Event): void;
+}
+
+const cancelledInfo = (): ErrorInfo => ({
+  code: 'CANCELLED',
+  message: 'The operation was cancelled',
+});
+
 /**
  * Answers the requests that arrive on `port` with `options.handlers` and handles `{ cancel }`
  * messages: a cancelled request is answered `CANCELLED` at once and its handler's signal aborted;
- * whatever the handler returns later is dropped. Returns a function that stops serving and aborts
- * every running request.
+ * whatever the handler returns later is dropped. Streams opened by a handler
+ * (`context.openStream`) send `data` events, then `end` (`{ delivered }`) or `error`; a cancel of
+ * the stream id aborts its producer and ends it with an `error` event of code `CANCELLED`.
+ * Returns a function that stops serving and aborts every running request and stream.
  */
 export function serve(port: Port, options: ServeOptions): () => void {
   const running = new Map<string, AbortController>();
+  const streams = new Map<string, RunningStream>();
   const report = options.onError ?? (() => undefined);
 
-  const answer = (message: Response) => {
-    if (!running.delete(message.id)) return; // cancelled meanwhile: already answered
-    port.send(message);
+  const startStream = (method: string, pending: PendingStream) => {
+    const { id, controller } = pending;
+    const def = Object.hasOwn(options.table, method) ? options.table[method] : undefined;
+    let over = false;
+    let delivered = 0;
+    const finish = (event: Event) => {
+      if (over) return;
+      over = true;
+      streams.delete(id);
+      port.send(event);
+    };
+    streams.set(id, { controller, finish });
+    const sink: StreamSink = {
+      streamId: id,
+      signal: controller.signal,
+      send(payload) {
+        if (over || controller.signal.aborted) return;
+        const parsed = def?.stream?.safeParse(payload);
+        if (parsed && !parsed.success) {
+          report(new Error(`Invalid stream data for ${method}: ${parsed.error.message}`));
+          controller.abort();
+          finish({
+            stream: id,
+            kind: 'error',
+            payload: { code: 'INTERNAL', message: `Invalid stream data for ${method}` },
+          });
+          return;
+        }
+        delivered++;
+        port.send({ stream: id, kind: 'data', payload: parsed ? parsed.data : payload });
+      },
+    };
+    const settle = (event: () => Event) => {
+      if (controller.signal.aborted) {
+        finish({ stream: id, kind: 'error', payload: cancelledInfo() });
+      } else finish(event());
+    };
+    let produced: Promise<number>;
+    try {
+      produced = pending.producer(sink);
+    } catch (error) {
+      produced = Promise.reject(error);
+    }
+    produced.then(
+      (count) =>
+        settle(() => ({
+          stream: id,
+          kind: 'end',
+          payload: { delivered: Number.isInteger(count) && count >= 0 ? count : delivered },
+        })),
+      (error: unknown) =>
+        settle(() => {
+          if (!(error instanceof RpcError)) report(error);
+          return { stream: id, kind: 'error', payload: toErrorInfo(error) };
+        }),
+    );
   };
 
-  const handle = async (id: string, method: string, rawParams: unknown, signal: AbortSignal) => {
+  const cancelStream = (id: string): boolean => {
+    const stream = streams.get(id);
+    if (!stream) return false;
+    stream.controller.abort();
+    const timer = setTimeout(
+      () => stream.finish({ stream: id, kind: 'error', payload: cancelledInfo() }),
+      STREAM_CANCEL_GRACE_MS,
+    );
+    (timer as { unref?: () => void }).unref?.();
+    return true;
+  };
+
+  const answer = (method: string, message: Response, opened: PendingStream[]) => {
+    if (!running.delete(message.id)) {
+      // Cancelled meanwhile: already answered, its streams never start.
+      for (const s of opened) s.controller.abort();
+      return;
+    }
+    port.send(message);
+    for (const s of opened) {
+      if (message.ok) startStream(method, s);
+      else s.controller.abort();
+    }
+  };
+
+  const handle = async (
+    id: string,
+    method: string,
+    rawParams: unknown,
+    signal: AbortSignal,
+    opened: PendingStream[],
+  ): Promise<Response> => {
     const def = Object.hasOwn(options.table, method) ? options.table[method] : undefined;
     if (def && def.route !== options.route) {
       return errorResponse(id, {
@@ -103,7 +235,20 @@ export function serve(port: Port, options: ServeOptions): () => void {
       });
     }
     try {
-      const value: unknown = await handler(params.data as never, { signal, requestId: id });
+      const openStream = (producer: StreamProducer): string => {
+        const stream: PendingStream = {
+          id: `stream-${globalThis.crypto.randomUUID()}`,
+          producer,
+          controller: new AbortController(),
+        };
+        opened.push(stream);
+        return stream.id;
+      };
+      const value: unknown = await handler(params.data as never, {
+        signal,
+        requestId: id,
+        openStream,
+      });
       const result = parseResultIn(options.table, method, value);
       if (!result.ok) report(new Error(result.error.message));
       return result.ok
@@ -118,6 +263,7 @@ export function serve(port: Port, options: ServeOptions): () => void {
   const onMessage = (message: unknown) => {
     const cancelled = cancelSchema.safeParse(message);
     if (cancelled.success) {
+      if (cancelStream(cancelled.data.cancel)) return;
       const controller = running.get(cancelled.data.cancel);
       if (!controller) return; // unknown or finished: ignored
       running.delete(cancelled.data.cancel);
@@ -147,7 +293,10 @@ export function serve(port: Port, options: ServeOptions): () => void {
     }
     const controller = new AbortController();
     running.set(id, controller);
-    void handle(id, method, params, controller.signal).then(answer);
+    const opened: PendingStream[] = [];
+    void handle(id, method, params, controller.signal, opened).then((response) =>
+      answer(method, response, opened),
+    );
   };
 
   const unsubscribe = port.onMessage(onMessage);
@@ -155,6 +304,8 @@ export function serve(port: Port, options: ServeOptions): () => void {
     unsubscribe();
     for (const controller of running.values()) controller.abort();
     running.clear();
+    for (const stream of streams.values()) stream.controller.abort();
+    streams.clear();
   };
 }
 

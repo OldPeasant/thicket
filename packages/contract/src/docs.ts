@@ -51,7 +51,12 @@ export const docsMethods = defineMethods({
   'docs.find': {
     summary: 'Run a query; documents arrive as batches on the returned stream',
     route: 'backend',
-    /** Paging is either `skip`/`limit` or range paging with one of `after`/`before` (+ `limit`). */
+    /**
+     * Paging is either `skip`/`limit` or range paging with one of `after`/`before` (+ `limit`), or
+     * `fromEnd` for the last page. Batches arrive in display order (the backend reverses what it
+     * reads backwards). With a sort of plain directions, the projection is widened so that every
+     * sort key is in the returned documents (`projectionWithSortKeys`), as range paging needs.
+     */
     params: z
       .strictObject({
         ...collTarget,
@@ -65,6 +70,11 @@ export const docsMethods = defineMethods({
         after: ejsonDocument('range start').optional(),
         /** Range paging backwards: continue before these sort-key values. */
         before: ejsonDocument('range end').optional(),
+        /**
+         * Read the last `limit` documents of the sorted result (with the reversed sort, no deep
+         * skip). Needs a sort of plain directions (an empty sort means `{_id: 1}`).
+         */
+        fromEnd: z.boolean().optional(),
         batchSize: z.number().int().positive().optional(),
       })
       .refine((p) => p.after === undefined || p.before === undefined, {
@@ -72,7 +82,13 @@ export const docsMethods = defineMethods({
       })
       .refine((p) => p.skip === undefined || (p.after === undefined && p.before === undefined), {
         message: 'docs.find takes skip or range paging (after/before), not both',
-      }),
+      })
+      .refine(
+        (p) =>
+          p.fromEnd !== true ||
+          (p.skip === undefined && p.after === undefined && p.before === undefined),
+        { message: 'docs.find takes fromEnd without skip, after or before' },
+      ),
     result: streamResult,
     stream: docsBatch,
   },

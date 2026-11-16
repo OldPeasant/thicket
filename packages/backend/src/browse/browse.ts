@@ -21,7 +21,7 @@ import { RpcError } from '../server/rpc';
  * driver's own numeric error handling. Instead the cursor's batch documents are kept as BSON
  * bytes (`fieldsAsRaw`; error replies have no such fields) and decoded with `DECODE`.
  */
-const RAW: RunCommandOptions = {
+export const RAW: RunCommandOptions = {
   promoteLongs: false,
   promoteBuffers: false,
   bsonRegExp: true,
@@ -37,7 +37,7 @@ const DECODE = {
 } as const;
 
 /** A cursor batch's documents, decoded losslessly when they came as bytes (test fakes send documents). */
-function decodeBatch(batch: unknown): Document[] {
+export function decodeBatch(batch: unknown): Document[] {
   if (!Array.isArray(batch)) return [];
   return batch.map((doc: unknown) =>
     doc instanceof Uint8Array ? BSON.deserialize(doc, DECODE) : (doc as Document),
@@ -121,7 +121,8 @@ function size(value: unknown): number {
   return n !== undefined && Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
-function canonical(doc: Document): string {
+/** Canonical EJSON text of a document. */
+export function canonical(doc: Document): string {
   return BSON.EJSON.stringify(doc, { relaxed: false });
 }
 
