@@ -1,11 +1,11 @@
 ---
 title: M1: Connection profiles store (connections.json)
-status: in_progress
+status: done
 owner: dell26/agent-2
 deps: [secrets-store,contract]
 touches: [apps/desktop/src/profiles]
 prio: 1
-lease_until: 2026-11-16T19:42:17Z
+lease_until: 
 ---
 ## Goal
 profiles.* in main: list/get/save/delete/duplicate, folders, color, read-only and production flags, 'ask for password each time'; versioned schema with migrations; no secrets in the file.
@@ -24,3 +24,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 20:05+0100 by dell26/agent-2): profiles.save with an id that does not exist -> NOT_FOUND (ids are assigned by main); duplicate names the copy '<name> (copy)', inserts it after the original and keeps secretMode; switching secretMode away from saved deletes the saved password; profiles.setSecret for an unknown profile -> NOT_FOUND.
 - ASSUMPTION (2026-11-16 20:05+0100 by dell26/agent-2): connections.json with any invalid profile or duplicate id is treated as corrupt as a whole (renamed .corrupt-<time>, start empty) instead of silently dropping entries; unreadable (EACCES) fails operations; newer version read-only (UNSUPPORTED on change). defaultSecretMode is left to the renderer form via profiles.secretStorage; the store does not rewrite secretMode.
 - ASSUMPTION (2026-11-16 20:24+0100 by dell26/agent-2): Review CR-4 accepted: if secrets.bin is locked (v11 keyring file, weak session) during a v0 migration, the migrated profile switches to secretMode ask and the v0 password is not kept. v0 is a pre-release layout no shipped build wrote, so this is not worth a separate locked-state path.
+- done by dell26/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 19s on ea295d204; criteria verified 3/3
