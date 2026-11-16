@@ -13,7 +13,8 @@ secrets.bin encrypted with safeStorage, keyed by profile id; detection of Linux 
 ## Acceptance criteria
 - [x] Unit tests with a fake safeStorage: set/get/delete, file corruption handled
   - verified (2026-11-16 19:59+0100 by dell26/agent-2): npx vitest run --project desktop --project contract -> 865 passed; apps/desktop/src/secrets/store.spec.ts (FakeSafeStorage: set/get/delete, overwrite, persistence without plain text, 0600 + atomic temp/rename, concurrency, corrupt files of 15+ kinds moved aside to secrets.bin.corrupt-<time> and store keeps working, weak-backend v11 lock vs v10/garbage moved aside); store.ts coverage 145/146 stmts, 124/124 lines
-- [ ] On `basic_text` the status API reports `weak` and profiles default to not saving passwords (test)
+- [x] On `basic_text` the status API reports `weak` and profiles default to not saving passwords (test)
+  - verified (2026-11-16 19:59+0100 by dell26/agent-2): store.spec.ts 'Linux basic_text is weak: profiles default to not saving passwords' + handlers.spec.ts profiles.secretStorage -> {level:'weak', backend:'basic_text', defaultSecretMode:'ask'} pass; real Electron 45: npm run test:electron (secrets.electron.spec.ts with --password-store=basic, temp --user-data-dir) -> 17 passed, status weak/basic_text/ask, setSecret -> secureStorage:false
 - [ ] Renderer cannot request a secret: contract test shows no renderer-routable method returns a secret
 
 ## Notes
