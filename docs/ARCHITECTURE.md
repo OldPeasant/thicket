@@ -208,6 +208,16 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   (`$ownOps` when not allowed otherwise; probed every 100 ms until it shows up or the command
   settles, at most 4 s), `killOp`s it and `killCursors` an open cursor, also one returned by a
   late reply (`Operation`).
+- Document writes (`packages/backend/src/docs/write/`, `docsWriteHandlers`, behind the write
+  guard): raw `insert`/`update`/`delete` commands through `Operation` (cancellable, canonical
+  EJSON params, so BSON types are kept). `docs.insert` adds an ObjectId `_id` where missing and
+  returns every id. `docs.update` (operator documents only) / `docs.replace` (no `$` keys) /
+  `docs.delete` match `{$and: [{_id: {$eq: id}}, expected]}`; no match → `CONFLICT` with
+  `ConflictDetail` (`current`: the server version, `null` when deleted), except a delete of a
+  document that is gone, which answers `deleted: false`. `docs.previewMany` = `docs.count`'s
+  aggregation + a `find` sample (default 20); `docs.updateMany` (operators or pipeline) /
+  `docs.deleteMany` refuse with `CONFLICT` when more documents match than the confirmed
+  `expectedCount`. Write and write-concern errors in a reply → `SERVER_ERROR`.
 - Write guard (`packages/backend/src/guard/`): `startBackend` wraps every handler of a
   `WRITE_METHODS` method with `guardWrites()`, which loads the profile from main (fresh, per
   write) and throws `READ_ONLY` for read-only profiles (even when confirmed), and
