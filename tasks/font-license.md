@@ -5,7 +5,7 @@ owner: felix/agent-2
 deps: [explorer-copy]
 touches: [packages/renderer/src/assets/fonts,NOTICE,docs/ARCHITECTURE.md]
 prio: 2
-lease_until: 2026-11-16T19:54:01Z
+lease_until: 2026-11-16T19:54:54Z
 ---
 ## Goal
 The explorer-copy task extracted the Orbitron and Share Tech Mono fonts from JSON Canopy's inlined CSS into
