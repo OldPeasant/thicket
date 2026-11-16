@@ -105,7 +105,7 @@ export class SchemaModel {
     const s = this.narrow(node, data);
     const required = new Set(s.required ?? []);
     return Object.entries(s.properties ?? {})
-      .filter(([key]) => !(key in data))
+      .filter(([key]) => !Object.hasOwn(data, key))
       .map(([key, prop]) => {
         const schema = this.resolve(prop);
         const hasDefault = 'default' in schema;
@@ -203,23 +203,23 @@ export class SchemaModel {
     const reset: string[] = [];
     for (const [key, current] of Object.entries(object)) {
       if (key === info.property) {
-        value[key] = to;
+        setOwn(value, key, to);
       } else if (drop && !this.permits(target, key)) {
         dropped.push(key);
       } else {
-        const declared = target.properties?.[key];
+        const declared = ownEntry(target.properties, key);
         const allowed = declared && this.enumerated(declared);
         const fits = !declared || !allowed || allowed.some((a) => deepEqual(a, current));
-        value[key] = fits ? current : this.seed(declared);
+        setOwn(value, key, fits ? current : this.seed(declared));
         if (!fits) reset.push(key);
       }
     }
-    value[info.property] = to;
+    setOwn(value, info.property, to);
     const added: string[] = [];
     for (const key of target.required ?? []) {
-      const declared = target.properties?.[key];
-      if (!(key in value) && declared) {
-        value[key] = this.seed(declared);
+      const declared = ownEntry(target.properties, key);
+      if (!Object.hasOwn(value, key) && declared) {
+        setOwn(value, key, this.seed(declared));
         added.push(key);
       }
     }
@@ -311,8 +311,8 @@ export class SchemaModel {
         const out: Record<string, unknown> = {};
         if (depth < 4) {
           for (const key of s.required ?? []) {
-            const prop = s.properties?.[key];
-            if (prop) out[key] = this.seed(prop, depth + 1);
+            const prop = ownEntry(s.properties, key);
+            if (prop) setOwn(out, key, this.seed(prop, depth + 1));
           }
         }
         return out;
@@ -516,7 +516,7 @@ export class SchemaModel {
       if (positional) return positional;
       return typeof s.items === 'object' ? s.items : s.items === true ? {} : undefined;
     }
-    const declared = s.properties?.[key];
+    const declared = ownEntry(s.properties, key);
     if (declared) return declared;
     const patterns = Object.entries(s.patternProperties ?? {}).filter(([p]) =>
       safeRegExp(p)?.test(key),
@@ -542,7 +542,7 @@ export class SchemaModel {
     property: string,
     constOnly: boolean,
   ): unknown[] | undefined {
-    const p = variant.properties?.[property];
+    const p = ownEntry(variant.properties, property);
     if (!p) return undefined;
     const prop = this.resolve(p);
     if (prop.const !== undefined) return [prop.const];
@@ -583,6 +583,21 @@ function mergeTwo(a: JsonSchema, b: JsonSchema): JsonSchema {
   return out;
 }
 
+/** `record[key]` if `record` has it as an own property, so names like `toString` are not inherited. */
+function ownEntry<T>(record: Record<string, T> | undefined, key: string): T | undefined {
+  return record && Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+/** Sets `key` as an own data property, so a `__proto__` key is stored instead of changing the prototype. */
+function setOwn(target: Record<string, unknown>, key: string, value: unknown): void {
+  Object.defineProperty(target, key, {
+    value,
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
+}
+
 /** Cheap structural check: does `data` look like `variant`? Never runs full validation. */
 function fits(variant: JsonSchema, data: unknown, strict: boolean): boolean {
   if (variant.type !== undefined && ![variant.type].flat().some((t) => typeMatches(t, data)))
@@ -591,11 +606,11 @@ function fits(variant: JsonSchema, data: unknown, strict: boolean): boolean {
   if (variant.enum && !variant.enum.some((v) => deepEqual(v, data))) return false;
   if (isObject(data)) {
     for (const [key, prop] of Object.entries(variant.properties ?? {})) {
-      if (!(key in data)) continue;
+      if (!Object.hasOwn(data, key)) continue;
       if (prop.const !== undefined && !deepEqual(prop.const, data[key])) return false;
       if (prop.enum && !prop.enum.some((v) => deepEqual(v, data[key]))) return false;
     }
-    if (strict && (variant.required ?? []).some((k) => !(k in data))) return false;
+    if (strict && (variant.required ?? []).some((k) => !Object.hasOwn(data, k))) return false;
   }
   return true;
 }
