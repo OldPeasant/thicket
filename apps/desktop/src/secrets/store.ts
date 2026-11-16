@@ -75,6 +75,17 @@ const LOCKED_MESSAGE =
   'secrets.bin was encrypted with an OS keyring that is not available now; ' +
   'saved secrets cannot be read or changed until it is available again';
 
+/**
+ * Chromium's os_crypt on Linux prefixes ciphertext with its version: `v10` for the hard-coded
+ * basic_text key, `v11` for a key from the keyring (libsecret / KWallet). Only a `v11` file that a
+ * basic_text session can't decrypt may still be readable later; anything else is corrupt.
+ */
+const KEYRING_PREFIX = Buffer.from('v11');
+
+function isKeyringCiphertext(raw: Buffer): boolean {
+  return raw.subarray(0, KEYRING_PREFIX.length).equals(KEYRING_PREFIX);
+}
+
 function isSecretKind(value: string): value is SecretKind {
   return (SECRET_KINDS as readonly string[]).includes(value);
 }
@@ -120,9 +131,10 @@ function serialize(secrets: Secrets): string {
  *   `secure` backend (the key is the real one, so the file is unusable), is moved aside to
  *   `secrets.bin.corrupt-<timestamp>` and the store starts empty: the user has to enter the
  *   passwords again, but the app keeps working and the old file is not lost.
- * - With a `weak` backend a file that cannot be decrypted was most likely written with an OS
- *   keyring that is not available in this session. It is left in place and the store is locked
- *   for the session: reads are empty, `set`/`delete` throw `SecretStorageUnavailableError`.
+ * - With a `weak` backend a keyring-encrypted file (`v11` prefix) that cannot be decrypted was
+ *   written with an OS keyring that is not available in this session. It is left in place and the
+ *   store is locked for the session: reads are empty, `set`/`delete` throw
+ *   `SecretStorageUnavailableError`. Any other undecryptable file is corrupt and moved aside.
  * - While no encryption is available (`unavailable`) the file is left alone, reads are empty, and
  *   `set` (and `delete` while the file exists) throw `SecretStorageUnavailableError`.
  * - Operations run one after another, so concurrent writes never interleave.
@@ -273,8 +285,8 @@ export class SecretsStore {
     } catch {
       decrypted = undefined;
     }
-    if (!decrypted && (await this.status()).level === 'weak') {
-      // Most likely written with a real keyring this session can't reach: keep the file.
+    if (!decrypted && isKeyringCiphertext(raw) && (await this.status()).level === 'weak') {
+      // Written with a real keyring this session can't reach: keep the file.
       this.log(`${LOCKED_MESSAGE}; leaving it in place`);
       this.locked = true;
       this.data = new Map();

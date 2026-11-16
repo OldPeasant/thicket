@@ -63,6 +63,9 @@ linuxOnly('secrets with the real safeStorage on basic_text (Linux)', () => {
     expect(set).toEqual({ id: 'set', ok: true, result: { secureStorage: false } });
     const bytes = await readFile(path.join(userData, 'secrets.bin'));
     expect(bytes.length).toBeGreaterThan(0);
+    // Chromium's os_crypt marks basic_text ciphertext `v10` (keyring ciphertext is `v11`); the
+    // store relies on this to tell a corrupt file from one written with an absent keyring.
+    expect(bytes.subarray(0, 3).toString('latin1')).toBe('v10');
     expect(bytes.toString('latin1')).not.toContain(SECRET);
     expect(bytes.toString('latin1')).not.toContain('p-electron');
 

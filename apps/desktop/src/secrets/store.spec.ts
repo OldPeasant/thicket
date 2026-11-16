@@ -208,6 +208,20 @@ describe('SecretsStore with a corrupt file', () => {
     expect(await store.get('p')).toEqual({ password: 'fresh' });
   });
 
+  it.each([
+    ['garbage bytes', Buffer.from([0, 1, 2, 3, 255])],
+    ['a damaged basic_text file (v10)', Buffer.from('v10-truncated')],
+    ['plain JSON', Buffer.from('{"version":1,"profiles":{}}')],
+  ])('weak backend, %s: corrupt, moved aside, not locked', async (_name, bytes) => {
+    await writeFile(file, bytes);
+    const { store } = makeStore(new FakeSafeStorage({ backend: 'basic_text' }));
+    expect(await store.get('p')).toBeNull();
+    expect(await readdir(dir)).toEqual(['secrets.bin.corrupt-2026-11-16T10-20-30-456Z']);
+    await store.set('p', 'password', 'fresh');
+    const { store: reopened } = makeStore(new FakeSafeStorage({ backend: 'basic_text' }));
+    expect(await reopened.get('p')).toEqual({ password: 'fresh' });
+  });
+
   it('a file from another keychain key (decrypt throws) on a secure backend is moved aside', async () => {
     await writeFile(file, Buffer.from('v11-other-key-ciphertext'));
     const { store } = makeStore();
