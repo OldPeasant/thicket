@@ -1,0 +1,129 @@
+name: release
+
+# On a `v*` tag: build unsigned installers on each OS (electron-builder, apps/desktop/electron-builder.yml)
+# and upload them with SHA-256 checksums to a draft GitHub release. A human reviews and publishes it.
+#   Linux x64 + arm64: AppImage, deb, rpm
+#   macOS:             dmg (arm64 + x64, both built on one Apple Silicon runner)
+#   Windows x64:       NSIS installer + portable zip
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            os: ubuntu-latest
+            args: --linux --x64
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            args: --linux --arm64
+          - name: mac
+            os: macos-latest
+            # Arches come from electron-builder.yml (mac.target: dmg, arm64 + x64).
+            args: --mac
+          - name: win-x64
+            os: windows-latest
+            args: --win --x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # rpmbuild for the rpm target (deb and AppImage need nothing extra).
+      - name: Install rpm tooling
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
+      - name: Install
+        run: npm ci
+
+      # The version comes from the tag (v1.2.3 -> 1.2.3), the package.json files stay at 0.0.0.
+      # --publish never: electron-builder must not publish on its own; the release job does.
+      - name: Build installers
+        env:
+          TAG: ${{ github.ref_name }}
+          ARGS: ${{ matrix.args }}
+          # No code signing yet (SPEC: unsigned); keep electron-builder from looking for certificates.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          version="${TAG#v}"
+          # shellcheck disable=SC2086 # ARGS holds several flags
+          npm run dist -w apps/desktop -- $ARGS "-c.extraMetadata.version=$version"
+
+      - name: Collect installers
+        run: |
+          mkdir -p out
+          shopt -s nullglob
+          files=(apps/desktop/release/*.{AppImage,deb,rpm,dmg,exe,zip})
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "no installers found in apps/desktop/release" >&2
+            ls -la apps/desktop/release >&2 || true
+            exit 1
+          fi
+          cp "${files[@]}" out/
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.name }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: draft release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: installers-*
+          path: out
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: out
+        run: |
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      # Creates the draft release for the tag, or adds to it when the workflow is re-run.
+      - name: Upload to draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        working-directory: out
+        run: |
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            gh release create "$TAG" --draft --verify-tag --title "Thicket $TAG" --generate-notes
+          fi
+          gh release upload "$TAG" --clobber -- *
