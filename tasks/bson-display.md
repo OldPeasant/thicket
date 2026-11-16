@@ -1,11 +1,11 @@
 ---
 title: M1: Explorer shows BSON types
-status: in_progress
+status: done
 owner: felix/agent-2
 deps: [explorer-copy,bson-model,themes]
 touches: [packages/renderer/src/app/explorer]
 prio: 1
-lease_until: 2026-11-16T20:45:24Z
+lease_until: 
 ---
 ## Goal
 Adapt the explorer to the BSON model: type badges and colors per type, Date in local time with timezone and UTC toggle, Int64/Decimal128 exact display, Binary/UUID display, deprecated types read-only.
@@ -26,3 +26,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 21:09+0100 by felix/agent-2): Moved the all-types fixture from core ejson.spec.ts to packages/core/src/bson/fixtures.ts, exported as @thicket/core/testing, so renderer tests use the same fixture. Renderer now depends on @thicket/core; fixed core paging/projection.ts '_id' index access for the renderer's noPropertyAccessFromIndexSignature.
 - ASSUMPTION (2026-11-16 21:09+0100 by felix/agent-2): JSON-Schema features (ajv validation, schema types) are not adapted to BsonLeaf values; schema-driven views of BSON documents are out of scope here.
 - ASSUMPTION (2026-11-16 21:19+0100 by felix/agent-2): CR-1 deferred to bson-inputs: explorer trees from toExplorerValue are plain JS objects (integer-like keys first, repeated keys collapse); saving edits through fromExplorerValue would reorder such fields, so bson-inputs (which owns field reorder) must give the explorer an order-preserving container before edits are saved.
+- done by felix/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 46s on 908d93eec; criteria verified 3/3
