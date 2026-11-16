@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { count, emptyParams, profileId } from './common';
 import { defineMethods } from './define';
+import { profile } from './profiles';
 
 /** Longest `backend.sleep`, so a forgotten test request cannot hold the backend for long. */
 export const MAX_SLEEP_MS = 600_000;
@@ -58,6 +59,14 @@ export const privilegedMethods = defineMethods({
     params: z.strictObject({ profileId }),
     /** `null` when the profile has no stored secrets. */
     result: z.object({ secrets: z.record(z.string(), z.string()).nullable() }),
+  },
+  'profiles.forConnect': {
+    summary:
+      "A saved profile (without secrets), read by main for the backend's connect and write guard",
+    route: 'main',
+    params: z.strictObject({ profileId }),
+    /** Answers `NOT_FOUND` for an unknown profile. */
+    result: z.object({ profile }),
   },
 });
 

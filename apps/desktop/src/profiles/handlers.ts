@@ -13,6 +13,12 @@ async function mapErrors<T>(operation: () => Promise<T>): Promise<T> {
   }
 }
 
+/** `profiles.forConnect` on the privileged port: the backend loads a profile to connect or guard writes. */
+export function profileForConnectHandler(store: ProfilesStore): Handler {
+  return (params: { profileId: string }) =>
+    mapErrors(async () => ({ profile: (await store.get(params.profileId)).profile }));
+}
+
 /**
  * `profiles.list/get/save/delete/duplicate` (served by `main`). `secrets` are the secrets
  * handlers (`secretsHandlers`): `profiles.setSecret` is only passed on for an existing profile, so

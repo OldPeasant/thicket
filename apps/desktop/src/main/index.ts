@@ -117,7 +117,7 @@ const host = new BackendHost<MessagePortMain>({
     serve(fromMainPort(port), {
       table: privilegedMethods,
       route: 'main',
-      handlers: privilegedHandlers({ secrets: secretsStore() }),
+      handlers: privilegedHandlers({ secrets: secretsStore(), profiles: profilesStore() }),
       onError: (error) => log(`privileged handler: ${String(error)}`),
     }),
   closePort: (port) => port.close(),

@@ -1,9 +1,11 @@
-import { methods } from '@thicket/contract';
+import { methods, type Profile } from '@thicket/contract';
 
-import { wiringHandlers } from './handlers';
+import { ConnectionManager, connHandlers } from '../connections';
+import { guardWrites } from '../guard';
+import { wiringHandlers, type PrivilegedLink } from './handlers';
 import { fromMainPort, type MainPortLike } from './ports';
 import { isBackendControlMessage } from './protocol';
-import { RpcClient, serve, type Handler } from './rpc';
+import { RpcClient, RpcError, serve, type Handler } from './rpc';
 
 /** Electron's `process.parentPort` in a utilityProcess (only what the backend uses). */
 export interface ParentPortLike {
@@ -26,7 +28,30 @@ export interface BackendOptions {
 export function startBackend(options: BackendOptions): Record<string, Handler> {
   const log = options.log ?? (() => undefined);
   let privileged: RpcClient | undefined;
-  const handlers = wiringHandlers({ pid: options.pid, privileged: () => privileged });
+  const link = (): PrivilegedLink => {
+    if (!privileged) throw new RpcError('INTERNAL', 'The backend has no link to main yet');
+    return privileged;
+  };
+  const loadProfile = async (profileId: string): Promise<Profile> =>
+    ((await link().call('profiles.forConnect', { profileId })) as { profile: Profile }).profile;
+  const connections = new ConnectionManager({
+    loadProfile,
+    loadSecrets: async (profileId) =>
+      (
+        (await link().call('secrets.get', { profileId })) as {
+          secrets: Record<string, string> | null;
+        }
+      ).secrets,
+    log: (message) => log(`connections: ${message}`),
+  });
+  // Every write handler goes through the guard; it checks the profile as main has it now.
+  const handlers = guardWrites(
+    {
+      ...wiringHandlers({ pid: options.pid, privileged: () => privileged }),
+      ...connHandlers(connections),
+    },
+    loadProfile,
+  );
 
   options.parentPort.on('message', (event) => {
     const [raw] = event.ports;

@@ -166,6 +166,35 @@ describe('main handlers with a ProfilesStore', () => {
     expect(Object.keys(withProfiles()).filter((name) => privileged.includes(name))).toEqual([]);
   });
 
+  it('serves profiles.forConnect on the privileged port (NOT_FOUND for unknown ids)', async () => {
+    const secrets = new SecretsStore({
+      file: path.join(dir, 'secrets.bin'),
+      safeStorage: new FakeSafeStorage(),
+      platform: 'linux',
+    });
+    const profiles = new ProfilesStore({ file: path.join(dir, 'connections.json'), secrets });
+    const saved = await profiles.save({
+      name: 'Local',
+      connectionString: 'mongodb://localhost:27017',
+      readOnly: true,
+      production: false,
+    });
+    expect(Object.keys(privilegedHandlers({ secrets }))).not.toContain('profiles.forConnect');
+    const handlers = privilegedHandlers({ secrets, profiles });
+    expect(Object.keys(mainHandlers({ version: '1', secrets, profiles }))).not.toContain(
+      'profiles.forConnect',
+    );
+    const found: unknown = await handlers['profiles.forConnect']?.(
+      { profileId: saved.id } as never,
+      ctx,
+    );
+    expect(found).toEqual({ profile: saved });
+    expect(parseResultIn(privilegedMethods, 'profiles.forConnect', found).ok).toBe(true);
+    await expect(
+      handlers['profiles.forConnect']?.({ profileId: 'missing' } as never, ctx),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
   it('gates profiles.setSecret on the profile existing (over the main port)', async () => {
     const port = fakePort();
     serve(port, { table: methods, route: 'main', handlers: withProfiles() });

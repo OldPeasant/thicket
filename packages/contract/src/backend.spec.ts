@@ -74,4 +74,22 @@ describe('privileged methods', () => {
     const missing = parseResultIn(privilegedMethods, 'nope', {});
     expect(missing.ok ? undefined : missing.error.code).toBe('UNKNOWN_METHOD');
   });
+
+  it('profiles.forConnect returns a profile without a password in its connection string', () => {
+    const profile = {
+      id: 'p1',
+      name: 'Local',
+      connectionString: 'mongodb://u@localhost:27017',
+      readOnly: false,
+      production: false,
+    };
+    expect(parseParamsIn(privilegedMethods, 'profiles.forConnect', { profileId: 'p1' }).ok).toBe(
+      true,
+    );
+    expect(parseResultIn(privilegedMethods, 'profiles.forConnect', { profile }).ok).toBe(true);
+    const leaking = parseResultIn(privilegedMethods, 'profiles.forConnect', {
+      profile: { ...profile, connectionString: 'mongodb://u:secret@localhost:27017' },
+    });
+    expect(leaking.ok).toBe(false);
+  });
 });

@@ -1,7 +1,7 @@
 import type { Handler } from '@thicket/backend';
 import type { ParsedParamsOf, ResultOf, Settings } from '@thicket/contract';
 
-import { profilesHandlers, type ProfilesStore } from '../profiles';
+import { profileForConnectHandler, profilesHandlers, type ProfilesStore } from '../profiles';
 import { secretsGetHandler, secretsHandlers, type SecretsStore } from '../secrets';
 
 /** What the settings handlers need from the `SettingsStore`. */
@@ -40,9 +40,16 @@ export function mainHandlers(deps: MainHandlerDeps): Record<string, Handler> {
 }
 
 /** Handlers of the privileged main ↔ backend port (never served to a renderer). */
-export function privilegedHandlers(deps: { secrets: SecretsStore }): Record<string, Handler> {
-  return {
+export function privilegedHandlers(deps: {
+  secrets: SecretsStore;
+  /** Serves `profiles.forConnect` when given. */
+  profiles?: ProfilesStore;
+}): Record<string, Handler> {
+  const handlers: Record<string, Handler> = {
     'main.ping': () => ({ process: 'main' }),
     'secrets.get': secretsGetHandler(deps.secrets),
   };
+  const profiles = deps.profiles;
+  if (profiles) handlers['profiles.forConnect'] = profileForConnectHandler(profiles);
+  return handlers;
 }
