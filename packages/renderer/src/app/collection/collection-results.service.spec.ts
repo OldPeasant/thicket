@@ -940,4 +940,295 @@ describe('CollectionResults', () => {
       expect(results.canNext()).toBe(true);
     });
   });
+
+  describe('an exact count arriving while a page read runs from an unknown position', () => {
+    /** 1 234 documents, filter: the last page was read from the end (rows 1 185-1 234). */
+    const onUnknownLastPage = async () => {
+      await runAndLoad(query({ filter: '{ a: 1 }' }));
+      results.last();
+      await flush();
+      await answer(2, docs(1185, 50));
+      expect(results.pagesFromEnd()).toBe(0);
+    };
+
+    it('keeps Next back to the last page, then reads it again with the remainder', async () => {
+      await onUnknownLastPage();
+      results.previous();
+      await flush();
+      await answer(3, docs(1135, 50));
+      expect(results.pagesFromEnd()).toBe(1);
+      results.countExact();
+      await flush();
+      results.next();
+      await flush();
+      expect(lastFind()).toMatchObject({ after: '{"_id":{"$numberInt":"1184"}}', limit: 50 });
+      counts[0]?.resolve({ count: 1_234 });
+      await flush();
+      // The count does not replace the running Next.
+      expect(finds()).toHaveLength(4);
+      expect(fake.cancels).not.toContain(sid(4));
+      expect(results.loading()).toBe(true);
+      expect(results.count()).toEqual({ value: 1_234, exact: true });
+      await answer(4, docs(1185, 50));
+      // Next reached the last page (a full page, not the remainder): it is read again aligned.
+      expect(lastFind()).toMatchObject({ fromEnd: true, limit: 34 });
+      await answer(5, docs(1201, 34));
+      expect(results.pagesFromEnd()).toBeNull();
+      expect(results.paging().pageIndex).toBe(24);
+      expect(results.page()?.firstRow).toBe(1_200);
+      expect(results.canNext()).toBe(false);
+      expect(results.loading()).toBe(false);
+    });
+
+    it('keeps a jump by number and reads nothing more once it arrived', async () => {
+      await onUnknownLastPage();
+      results.countExact();
+      await flush();
+      results.jump(3);
+      await flush();
+      expect(lastFind()).toMatchObject({ skip: 100, limit: 50 });
+      counts[0]?.resolve({ count: 1_234 });
+      await flush();
+      expect(finds()).toHaveLength(3);
+      expect(fake.cancels).not.toContain(sid(3));
+      await answer(3, docs(101, 50));
+      expect(finds()).toHaveLength(3); // a jump has a known position: no re-read
+      expect(results.pagesFromEnd()).toBeNull();
+      expect(results.paging().pageIndex).toBe(2);
+      expect(results.page()?.firstRow).toBe(100);
+      expect(results.pageCount()).toBe(25);
+      expect(results.loading()).toBe(false);
+    });
+
+    it('then Previous is cancelled: no read starts, the next Previous is placed by the count', async () => {
+      await onUnknownLastPage();
+      results.countExact();
+      await flush();
+      results.previous();
+      await flush();
+      counts[0]?.resolve({ count: 1_234 });
+      await flush();
+      results.cancel();
+      await flush();
+      expect(fake.cancels).toContain(sid(3));
+      expect(finds()).toHaveLength(3);
+      expect(results.busy()).toBe(false);
+      expect(results.notice()).toBe('Query cancelled.');
+      // The shown page stays the last page, still named from the end, with the count known.
+      expect(results.page()?.docs[0]).toBe(docs(1185, 1)[0]);
+      expect(results.pagesFromEnd()).toBe(0);
+      expect(results.count()).toEqual({ value: 1_234, exact: true });
+      // The next navigation is placed: Previous reads by range, then page 24 aligned.
+      results.previous();
+      await flush();
+      expect(lastFind()).toMatchObject({ before: '{"_id":{"$numberInt":"1185"}}' });
+      await answer(4, docs(1135, 50));
+      expect(lastFind()).toMatchObject({ skip: 1_150, limit: 50 });
+      await answer(5, docs(1151, 50));
+      expect(results.pagesFromEnd()).toBeNull();
+      expect(results.paging().pageIndex).toBe(23);
+      expect(results.page()?.firstRow).toBe(1_150);
+    });
+
+    it('then Previous fails: the error shows, the page stays and nothing more is read', async () => {
+      await onUnknownLastPage();
+      results.countExact();
+      await flush();
+      results.previous();
+      await flush();
+      counts[0]?.resolve({ count: 1_234 });
+      await flush();
+      fake.failStream(sid(3), { code: 'SERVER_ERROR', message: 'cursor killed' });
+      await flush();
+      expect(results.error()).toContain('cursor killed');
+      expect(results.loading()).toBe(false);
+      expect(finds()).toHaveLength(3);
+      expect(results.page()?.docs[0]).toBe(docs(1185, 1)[0]);
+      expect(results.pagesFromEnd()).toBe(0);
+      expect(results.count()).toEqual({ value: 1_234, exact: true });
+    });
+
+    it('a failed exact count leaves the running Previous alone', async () => {
+      await onUnknownLastPage();
+      results.countExact();
+      await flush();
+      results.previous();
+      await flush();
+      counts[0]?.reject(new Error('count timed out'));
+      await flush();
+      expect(results.error()).toContain('count timed out');
+      expect(fake.cancels).not.toContain(sid(3));
+      expect(results.loading()).toBe(true);
+      await answer(3, docs(1135, 50));
+      expect(finds()).toHaveLength(3);
+      expect(results.pagesFromEnd()).toBe(1);
+      expect(results.count()).toBeNull();
+    });
+  });
+
+  describe('a short backward read from an unknown position reads page 1 aligned', () => {
+    /**
+     * `pageSize + short` documents with ids 1..n: Last shows the final `pageSize` rows (from the
+     * end), Previous reads the `short` rows before them, which reached the start.
+     */
+    for (const [pageSize, short] of [
+      [50, 1],
+      [50, 49],
+      [20, 7],
+      [20, 0],
+      [100, 30],
+    ] as const) {
+      it(`page size ${pageSize}, ${short} row(s) before the last page`, async () => {
+        await runAndLoad(query({ filter: '{ a: 1 }' }));
+        if (pageSize !== 50) {
+          results.setPageSize(pageSize);
+          await flush();
+          await answer(finds().length, docs(1, pageSize));
+        }
+        results.last();
+        await flush();
+        expect(lastFind()).toMatchObject({ fromEnd: true, limit: pageSize });
+        await answer(finds().length, docs(short + 1, pageSize));
+        results.previous();
+        await flush();
+        expect(lastFind()).toMatchObject({
+          before: `{"_id":{"$numberInt":"${short + 1}"}}`,
+          limit: pageSize,
+        });
+        const readsBefore = finds().length;
+        await answer(readsBefore, docs(1, short));
+        // The short answer is not shown; page 1 is read from the start with a full page size.
+        expect(finds()).toHaveLength(readsBefore + 1);
+        expect(lastFind()).toMatchObject({ limit: pageSize });
+        for (const key of ['before', 'after', 'skip', 'fromEnd']) {
+          expect(lastFind()).not.toHaveProperty(key);
+        }
+        expect(results.loading()).toBe(true);
+        expect(results.page()?.docs[0]).toBe(docs(short + 1, 1)[0]);
+        expect(results.pagesFromEnd()).toBe(0);
+        await answer(finds().length, docs(1, pageSize));
+        expect(results.pagesFromEnd()).toBeNull();
+        expect(results.paging().pageIndex).toBe(0);
+        expect(results.paging().pageSize).toBe(pageSize);
+        expect(results.page()?.docs).toHaveLength(pageSize);
+        expect(results.page()?.firstRow).toBe(0);
+        expect(results.canPrevious()).toBe(false);
+        // Next continues from the aligned page 1: the remaining rows, numbered from pageSize + 1.
+        expect(results.canNext()).toBe(true);
+        results.next();
+        await flush();
+        expect(lastFind()).toMatchObject({
+          after: `{"_id":{"$numberInt":"${pageSize}"}}`,
+          limit: pageSize,
+        });
+        await answer(finds().length, docs(pageSize + 1, short));
+        expect(results.paging().pageIndex).toBe(1);
+        expect(results.page()?.firstRow).toBe(pageSize);
+        expect(results.page()?.docs).toHaveLength(short);
+      });
+    }
+
+    /** 120 documents: Last (71-120), Previous (21-70, one page before the last). */
+    const onePageBeforeUnknownLast = async () => {
+      await runAndLoad(query({ filter: '{ a: 1 }' }));
+      results.last();
+      await flush();
+      await answer(2, docs(71, 50));
+      results.previous();
+      await flush();
+      await answer(3, docs(21, 50));
+      expect(results.pagesFromEnd()).toBe(1);
+    };
+
+    it('an exact count answering during the short read: page 1 is read once, aligned', async () => {
+      await onePageBeforeUnknownLast();
+      results.countExact();
+      await flush();
+      results.previous();
+      await flush();
+      expect(lastFind()).toMatchObject({ before: '{"_id":{"$numberInt":"21"}}' });
+      counts[0]?.resolve({ count: 120 });
+      await flush();
+      expect(finds()).toHaveLength(4); // the count does not replace the running Previous
+      await answer(4, docs(1, 20));
+      expect(finds()).toHaveLength(5);
+      expect(lastFind()).not.toHaveProperty('before');
+      expect(lastFind()).not.toHaveProperty('skip');
+      await answer(5, docs(1, 50));
+      expect(finds()).toHaveLength(5);
+      expect(results.pagesFromEnd()).toBeNull();
+      expect(results.paging().pageIndex).toBe(0);
+      expect(results.page()?.firstRow).toBe(0);
+      expect(results.pageCount()).toBe(3);
+      expect(results.canNext()).toBe(true);
+    });
+
+    it('an exact count answering during the page-1 re-read reads nothing more', async () => {
+      await onePageBeforeUnknownLast();
+      results.previous();
+      await flush();
+      await answer(4, docs(1, 20));
+      expect(finds()).toHaveLength(5);
+      results.countExact();
+      await flush();
+      counts[0]?.resolve({ count: 120 });
+      await flush();
+      expect(finds()).toHaveLength(5);
+      expect(fake.cancels).not.toContain(sid(5));
+      await answer(5, docs(1, 50));
+      expect(finds()).toHaveLength(5);
+      expect(results.pagesFromEnd()).toBeNull();
+      expect(results.paging().pageIndex).toBe(0);
+      expect(results.count()).toEqual({ value: 120, exact: true });
+      expect(results.pageCount()).toBe(3);
+    });
+
+    it('a cancelled page-1 re-read keeps the shown page and its name from the end', async () => {
+      await onePageBeforeUnknownLast();
+      results.previous();
+      await flush();
+      await answer(4, docs(1, 20));
+      expect(results.loading()).toBe(true);
+      results.cancel();
+      await flush();
+      expect(fake.cancels).toContain(sid(5));
+      expect(results.notice()).toBe('Query cancelled.');
+      expect(results.page()?.docs[0]).toBe(docs(21, 1)[0]);
+      expect(results.pagesFromEnd()).toBe(1);
+      expect(results.canPrevious()).toBe(true);
+      // A late answer of the cancelled re-read changes nothing.
+      await answer(5, docs(1, 50));
+      expect(results.page()?.docs[0]).toBe(docs(21, 1)[0]);
+      expect(results.pagesFromEnd()).toBe(1);
+    });
+
+    it('a failed page-1 re-read reports the error and keeps the shown page', async () => {
+      await onePageBeforeUnknownLast();
+      results.previous();
+      await flush();
+      await answer(4, docs(1, 20));
+      fake.failStream(sid(5), { code: 'SERVER_ERROR', message: 'connection lost' });
+      await flush();
+      expect(results.error()).toContain('connection lost');
+      expect(results.loading()).toBe(false);
+      expect(results.page()?.docs[0]).toBe(docs(21, 1)[0]);
+      expect(results.pagesFromEnd()).toBe(1);
+      expect(finds()).toHaveLength(5);
+    });
+
+    it('a short answer to Previous from a page of known position is page 1 as paging-core says', async () => {
+      // Known position (page 2 reached by Next): paging-core's previousPage reads page 1 without
+      // a bound, so no `before` read and no re-read happen.
+      await runAndLoad(query({ filter: '{ a: 1 }' }));
+      results.next();
+      await flush();
+      await answer(2, docs(51, 50));
+      results.previous();
+      await flush();
+      expect(lastFind()).not.toHaveProperty('before');
+      await answer(3, docs(1, 50));
+      expect(finds()).toHaveLength(3);
+      expect(results.paging().pageIndex).toBe(0);
+    });
+  });
 });

@@ -642,6 +642,87 @@ describe('CollectionView', () => {
     expect(get<HTMLInputElement>('pager-page').value).toBe('1');
   });
 
+  /** Answers `docs.find` like a collection of documents with ids 1..n in `_id` order. */
+  const collectionOf = (n: number) => (p: Record<string, unknown>) => {
+    const limit = p['limit'] as number;
+    const idOf = (bound: unknown) =>
+      Number((JSON.parse(bound as string) as { _id: { $numberInt: string } })._id.$numberInt);
+    if (p['fromEnd']) return docs(n - limit + 1, limit);
+    if (p['before'] !== undefined) {
+      const before = idOf(p['before']);
+      const start = Math.max(1, before - limit);
+      return docs(start, before - start);
+    }
+    const from = p['after'] !== undefined ? idOf(p['after']) : ((p['skip'] as number) ?? 0);
+    return docs(from + 1, Math.max(0, Math.min(limit, n - from)));
+  };
+
+  it('paging back from Last to the start numbers page 1 and the pages after it aligned', async () => {
+    // 120 documents: Last 71-120, Previous 21-70, Previous again reaches the start (1-20 only).
+    answer = collectionOf(120);
+    type('query-filter', '{ a: 1 }');
+    click('query-run');
+    await settle();
+    click('pager-last');
+    await settle();
+    click('pager-prev');
+    await settle();
+    expect(q('pager-rows')?.textContent).toContain('1 page before the last');
+    click('pager-prev');
+    await settle();
+    expect(q('results-empty')).toBeNull();
+    expect(q('pager-rows')?.textContent).toContain('1–50');
+    expect(get<HTMLInputElement>('pager-page').value).toBe('1');
+    expect(q<HTMLButtonElement>('pager-prev')?.disabled).toBe(true);
+    click('pager-next');
+    await settle();
+    expect(lastFind()).toMatchObject({ after: '{"_id":{"$numberInt":"50"}}' });
+    expect(q('pager-rows')?.textContent).toContain('51–100');
+    expect(get<HTMLInputElement>('pager-page').value).toBe('2');
+  });
+
+  it('an exact count answering while Previous runs from an unknown last page shows the page before the last', async () => {
+    answer = collectionOf(1_234);
+    let resolveCount!: (value: { count: number }) => void;
+    fake.handle(
+      'docs.count',
+      () =>
+        new Promise<{ count: number }>((resolve) => {
+          resolveCount = resolve;
+        }),
+    );
+    type('query-filter', '{ a: 1 }');
+    click('query-run');
+    await settle();
+    click('pager-last');
+    await settle();
+    expect(q('pager-rows')?.textContent).toContain('Last 50');
+    click('pager-count');
+    await settle();
+    // Previous is pressed while the count runs; its stream is held open until the count answers.
+    const respond = answer;
+    let held: Record<string, unknown> | null = null;
+    answer = (p) => {
+      held = p;
+      return null;
+    };
+    const streamId = `s${streams + 1}`;
+    click('pager-prev');
+    await settle();
+    expect(held).toMatchObject({ before: '{"_id":{"$numberInt":"1185"}}' });
+    answer = respond;
+    resolveCount({ count: 1_234 });
+    await settle();
+    expect(fake.cancels).not.toContain(streamId);
+    const rows = respond(held ?? {}) ?? [];
+    fake.data('docs.find', streamId, { docs: rows });
+    fake.end(streamId, { delivered: rows.length });
+    await settle();
+    expect(get<HTMLInputElement>('pager-page').value).toBe('24');
+    expect(q('pager-rows')?.textContent).toContain('1,151–1,200');
+    expect(q('pager-rows')?.textContent).toMatch(/of 1,234 documents/);
+  });
+
   it('shows the explorer read-only', () => {
     const toggle = el().querySelector<HTMLButtonElement>('.mode-toggle');
     expect(toggle?.disabled).toBe(true);
