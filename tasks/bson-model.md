@@ -1,11 +1,11 @@
 ---
 title: Core: BSON value model with lossless EJSON round trip
-status: in_progress
+status: done
 owner: dell26/agent-3
 deps: [scaffold]
 touches: [packages/core/src/bson]
 prio: 1
-lease_until: 2026-11-16T19:08:15Z
+lease_until: 
 ---
 ## Goal
 Typed, order-preserving value tree for all BSON types (SPEC M1 'Documents and BSON'), parsed from and serialized to canonical EJSON v2 with the `bson` package; explicit conversions between types with validation; no Node APIs (runs in the renderer).
@@ -27,3 +27,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 19:31+0100 by dell26/agent-3): Legacy {$regex,$options} is NOT decoded as a regex (it is also the query operator); legacy {$binary,$type} and {$date:<number>} are accepted. Wrapper keys with invalid values are errors, per the EJSON spec.
 - ASSUMPTION (2026-11-16 19:31+0100 by dell26/agent-3): Relaxed plain JSON numbers: integer text -> Int32 if it fits, else Int64, else Double; any number with '.' or exponent -> Double (1.0 stays Double, unlike bson which makes it Int32).
 - ASSUMPTION (2026-11-16 19:31+0100 by dell26/agent-3): String->Date accepts ISO date-only (UTC midnight) or date-time with Z/offset; zone-less date-times are rejected as ambiguous. Lossy conversions are errors (Int64->Double beyond 2^53, fractional->int), except Decimal->Double which rounds like Number().
+- done by dell26/agent-3: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 15s on 7ae723d4e; criteria verified 4/4
