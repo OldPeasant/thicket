@@ -169,7 +169,7 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   (`profiles.forConnect`, `NOT_FOUND` for unknown ids) and its secrets (`secrets.get`); a
   `password` in the request wins, and `secretMode: 'ask'` ignores a stored one. A `conn.test`
   draft with an `id` gets that profile's stored secrets only while its connection string, auth,
-  TLS and SSH settings equal the saved profile's. Concurrent `conn.open`s of one profile share
+  TLS, SSH and proxy settings equal the saved profile's. Concurrent `conn.open`s of one profile share
   one connect (the first caller's `password`); each caller's cancel ends only its own wait, and
   the connect is closed (`CANCELLED`) once every caller cancelled or `conn.close` ran; a client
   abandoned mid-connect is closed again when the driver's connect settles. `clientConfig()`
@@ -178,9 +178,23 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   SCRAM-SHA-1/256, `authSource`, `tls`, `tlsCAFile`, `tlsCertificateKeyFile` + passphrase,
   allow-invalid flags, read preference, `appName` (default `Thicket`), timeouts), so passwords
   never enter the URI; SSH and the other mechanisms answer `UNSUPPORTED` until their tasks.
+  MONGODB-X509 (task x509-proxy) needs TLS with a client certificate (`AUTH_FAILED` otherwise),
+  always uses `authSource: '$external'`, and sends a user name only when the profile has one
+  (else the server takes the certificate subject). The client certificate is a PEM bundle
+  (`tls.certificateKeyFile` → `tlsCertificateKeyFile`) or certificate + `tls.keyFile`, which
+  `clientConfig()` reads itself (driver `cert`/`key`/`passphrase`; unreadable → `TLS_ERROR`);
+  the key passphrase is the `tlsKeyPassphrase` secret. `proxy` → `proxyHost`/`proxyPort`
+  (+ `proxyUsername` and the `proxyPassword` secret; a user without a stored password is
+  `AUTH_FAILED`) through the `socks` package (a backend dependency the driver loads lazily).
+  `readPreferenceTags` (contract: tag sets as `{ name, value }` pairs, no free-form records) and
+  `writeConcern` (`w`, `journal`, `wtimeoutMS`) become the client's defaults: driver helpers
+  (`find`, `insertOne`, ...) and commands given `client.readPreference` follow them, but raw
+  `db.command()`s (docs/browse `Operation`s) still run on the primary without the write concern
+  (task `raw-cmd-read-pref`).
   `toConnectError()` classifies driver errors by walking `cause`, `errors` and the server
   selection `reason`: `AUTH_FAILED` > `TLS_ERROR` > `DNS_ERROR` > `NETWORK_ERROR` > `TIMEOUT` >
-  `SERVER_ERROR`; messages start with a readable prefix and are masked (`maskText` + the
+  `SERVER_ERROR` (`ERR_OSSL_*`, e.g. a wrong key passphrase, is TLS; the server's `UserNotFound`
+  counts as `AUTH_FAILED` only for connect errors, e.g. an X.509 subject without a user); messages start with a readable prefix and are masked (`maskText` + the
   connect's secret values), as is every log line. Later handlers get a connected client with
   `manager.client(profileId)` (`NOT_CONNECTED` otherwise).
 - Streams (`serve()` in `packages/backend/src/server/rpc.ts`): a streaming handler calls
@@ -440,6 +454,15 @@ Windows: run `.taskcheck` and npm scripts from Git for Windows' bash (TFP runs t
 - The TLS server certificate's SANs are `localhost`, `127.0.0.1` and `::1`, so the TLS fixtures assume
   the container runtime's host is local. A remote `DOCKER_HOST` would need that host added to the SANs.
 - Tests use their own database/collection names so files can share a fixture.
+- Fixtures started by their test file (not in the global setup): `fixtures/x509.ts`
+  (`startX509Fixture()`: 8.x with `--auth` + `requireTLS`, its own CA from `generateTestPki()`, an
+  `$external` user for a generated client certificate; bundle, encrypted bundle, separate
+  cert/key files, a certificate without user and one from a foreign CA, all in a temp dir) and
+  `fixtures/socks.ts` (`startSocksFixture()`: a private container network with the two-member
+  replica set `rs2` (`rs-a:27017` primary, tag `dc: a`; `rs-b:27017` priority 0, tag `dc: b`)
+  and a SOCKS5 proxy (`serjs/go-socks5-proxy`, generated user/password). The member names
+  resolve only behind the proxy, so set discovery and reads from the secondary work only
+  through it.
 
 ## End-to-end tests
 - `npm run test:e2e` builds the renderer and the Electron bundles, then runs Playwright Test
