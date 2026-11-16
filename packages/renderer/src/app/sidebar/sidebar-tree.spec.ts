@@ -10,7 +10,7 @@ import { ConfirmDialog } from '../safety/confirm-dialog';
 import { ConfirmService } from '../safety/confirm.service';
 import { READ_ONLY_HINT } from '../safety/write-control.directive';
 import { SidebarTree } from './sidebar-tree';
-import { collectionTabId } from './sidebar-tree.service';
+import { SidebarTreeService, collectionTabId } from './sidebar-tree.service';
 
 @Component({
   selector: 'app-test-host',
@@ -1073,6 +1073,106 @@ describe('SidebarTree', () => {
       expect(node('conn', 'Profile p1').dataset['state']).toBe('disconnected');
       expect(nodes('db')).toEqual([]);
       expect(byTestId('tree-status')?.textContent).toContain('Not connected');
+    });
+  });
+
+  describe('round 2 fixes', () => {
+    async function key(target: Element, k: string, init: KeyboardEventInit = {}): Promise<void> {
+      target.dispatchEvent(
+        new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...init }),
+      );
+      await settle();
+    }
+
+    it('a disconnect collapses only the databases of that connection', async () => {
+      databases = { p1: ['shop'], p2: ['archive'] };
+      collections['archive'] = [coll('logs')];
+      await start();
+      await openShop();
+      await click(node('conn', 'Reader'));
+      await click(node('db', 'archive'));
+      expect(nodes('coll')).toEqual(['big_orders', 'orders', 'ticks', 'logs']);
+      fake.emit({
+        stream: 'conn.status',
+        kind: 'data',
+        payload: { profileId: 'p1', state: 'disconnected' },
+      });
+      await settle();
+      expect(node('db', 'archive').getAttribute('aria-expanded')).toBe('true');
+      expect(nodes('coll')).toEqual(['logs']);
+      expect(fake.requestsFor('coll.list')).toHaveLength(2);
+    });
+
+    it('tells the shell while the prompt is open, through submit and Escape', async () => {
+      const service = TestBed.inject(SidebarTreeService);
+      fake.respond('coll.create', {});
+      await start();
+      expect(service.promptOpen()).toBe(false);
+      await click(node('conn', 'Profile p1'));
+      await menu(node('db', 'shop'));
+      await click(must('menu-create-coll'));
+      expect(service.promptOpen()).toBe(true);
+      await type('prompt-coll', 'fresh');
+      await click(must('prompt-ok'));
+      expect(byTestId('tree-prompt')).toBeNull();
+      expect(service.promptOpen()).toBe(false);
+
+      await menu(node('db', 'shop'));
+      await click(must('menu-create-coll'));
+      expect(service.promptOpen()).toBe(true);
+      await key(must('prompt-coll'), 'Escape');
+      expect(service.promptOpen()).toBe(false);
+    });
+
+    it('clears the prompt flag when the sidebar is destroyed with the prompt open', async () => {
+      const service = TestBed.inject(SidebarTreeService);
+      await start();
+      await click(node('conn', 'Profile p1'));
+      await menu(node('db', 'shop'));
+      await click(must('menu-create-coll'));
+      expect(service.promptOpen()).toBe(true);
+      fixture.destroy();
+      expect(service.promptOpen()).toBe(false);
+    });
+
+    it('a menu item that opens no prompt returns the focus to its node', async () => {
+      await start();
+      await openShop();
+      await menu(node('conn', 'Profile p1'));
+      await click(must('menu-refresh'));
+      expect(byTestId('tree-menu')).toBeNull();
+      expect(document.activeElement).toBe(node('conn', 'Profile p1'));
+    });
+
+    it('keeps a menu larger than the room around the pointer at the window margin', async () => {
+      const real = HTMLElement.prototype.getBoundingClientRect;
+      const width = window.innerWidth + 50;
+      const height = window.innerHeight - 20;
+      const spy = vi
+        .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+        .mockImplementation(function (this: HTMLElement) {
+          return this.classList.contains('menu')
+            ? DOMRect.fromRect({ x: 0, y: 0, width, height })
+            : real.call(this);
+        });
+      try {
+        await start();
+        node('conn', 'Profile p1').dispatchEvent(
+          new MouseEvent('contextmenu', {
+            bubbles: true,
+            cancelable: true,
+            clientX: 40,
+            clientY: 100,
+          }),
+        );
+        await settle();
+        const m = must('tree-menu');
+        // Neither fits: the menu sits at the 4px margin instead of leaving the window.
+        expect(m.style.left).toBe('4px');
+        expect(m.style.top).toBe('4px');
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 });
