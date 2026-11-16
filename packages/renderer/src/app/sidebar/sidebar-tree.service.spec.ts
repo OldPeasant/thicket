@@ -620,6 +620,101 @@ describe('SidebarTreeService', () => {
       expect(tree.conn('p1')).toEqual({ state: 'connected' });
     });
 
+    it('a conn.open answering after backend.restarted is ignored (success and failure)', async () => {
+      const ok = deferred<ResultOf<'conn.open'>>();
+      const failed = deferred<{ error: { code: string; message: string } }>();
+      fake.handle('conn.open', inOrder<never>(ok as never, failed as never));
+      const first = tree.connect('p1');
+      const second = tree.connect('p2');
+      fake.emit({
+        stream: 'backend.restarted',
+        kind: 'data',
+        payload: { restarts: 1, reason: 'exit code 1' },
+      });
+      await flush();
+      ok.resolve({ profileId: 'p1', state: 'connected' });
+      failed.resolve({ error: { code: 'INTERNAL', message: 'backend gone' } });
+      expect(await first).toEqual({ state: 'disconnected' });
+      expect(await second).toEqual({ state: 'disconnected' });
+      expect(tree.conn('p1')).toEqual({ state: 'disconnected' });
+      expect(tree.conn('p2')).toEqual({ state: 'disconnected' });
+      expect(tree.databases('p1')).toBeUndefined();
+      expect(fake.requestsFor('db.listDatabases')).toHaveLength(0);
+    });
+
+    it('a connect started after backend.restarted is current again', async () => {
+      fake.emit({
+        stream: 'backend.restarted',
+        kind: 'data',
+        payload: { restarts: 1, reason: 'exit code 1' },
+      });
+      await flush();
+      expect(await tree.connect('p1')).toEqual({ state: 'connected' });
+      expect(tree.databases('p1')).toMatchObject({ status: 'loaded' });
+    });
+
+    it('a disconnected broadcast while connecting keeps a late CANCELLED from showing an error', async () => {
+      const pending = deferred<{ error: { code: string; message: string } }>();
+      fake.handle('conn.open', () => pending.promise as never);
+      const attempt = tree.connect('p1');
+      fake.emit({
+        stream: 'conn.status',
+        kind: 'data',
+        payload: { profileId: 'p1', state: 'disconnected' },
+      });
+      await flush();
+      pending.resolve({ error: { code: 'CANCELLED', message: 'The operation was cancelled.' } });
+      expect(await attempt).toEqual({ state: 'disconnected' });
+      expect(tree.conn('p1')).toEqual({ state: 'disconnected' });
+    });
+
+    it('an error broadcast while connecting wins over the late conn.open rejection', async () => {
+      const pending = deferred<{ error: { code: string; message: string } }>();
+      fake.handle('conn.open', () => pending.promise as never);
+      const attempt = tree.connect('p1');
+      fake.emit({
+        stream: 'conn.status',
+        kind: 'data',
+        payload: {
+          profileId: 'p1',
+          state: 'error',
+          error: { code: 'NETWORK', message: 'connection reset (broadcast)' },
+        },
+      });
+      await flush();
+      pending.resolve({ error: { code: 'NETWORK', message: 'connection reset (answer)' } });
+      const view = await attempt;
+      // The caller (the password prompt) still sees the error state.
+      expect(view.state).toBe('error');
+      expect(view.message).toContain('(broadcast)');
+      expect(fake.requestsFor('db.listDatabases')).toHaveLength(0);
+    });
+
+    it('a connected broadcast while connecting does not make the attempt stale', async () => {
+      const pending = deferred<ResultOf<'conn.open'>>();
+      fake.handle('conn.open', () => pending.promise);
+      const attempt = tree.connect('p1');
+      fake.emit({
+        stream: 'conn.status',
+        kind: 'data',
+        payload: { profileId: 'p1', state: 'connected' },
+      });
+      await flush();
+      pending.resolve({ profileId: 'p1', state: 'connected' });
+      expect(await attempt).toEqual({ state: 'connected' });
+      expect(tree.databases('p1')).toMatchObject({ status: 'loaded' });
+    });
+
+    it('disconnecting a profile whose id is a prefix keeps another profile connect current', async () => {
+      const pending = deferred<ResultOf<'conn.open'>>();
+      fake.handle('conn.open', () => pending.promise);
+      const attempt = tree.connect('p10');
+      await tree.disconnect('p1');
+      pending.resolve({ profileId: 'p10', state: 'connected' });
+      expect(await attempt).toEqual({ state: 'connected' });
+      expect(tree.databases('p10')).toMatchObject({ status: 'loaded' });
+    });
+
     it('a failed conn.open becomes an error state, not a rejection, and loads nothing', async () => {
       fake.fail('conn.open', { code: 'AUTH_FAILED', message: 'Authentication failed' });
       const view = await tree.connect('p1');

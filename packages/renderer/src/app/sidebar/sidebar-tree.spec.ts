@@ -937,6 +937,28 @@ describe('SidebarTree', () => {
       expect(nodes('db')).toEqual(['admin', 'shop']);
     });
 
+    it('Disconnect while connecting shows the node not connected, without an error', async () => {
+      let cancel!: () => void;
+      fake.handle(
+        'conn.open',
+        () =>
+          new Promise((resolve) => {
+            cancel = () =>
+              resolve({ error: { code: 'CANCELLED', message: 'The operation was cancelled.' } });
+          }) as never,
+      );
+      await start();
+      await click(node('conn', 'Profile p1'));
+      expect(node('conn', 'Profile p1').dataset['state']).toBe('connecting');
+      await menu(node('conn', 'Profile p1'));
+      await click(must('menu-disconnect'));
+      cancel();
+      await settle();
+      expect(node('conn', 'Profile p1').dataset['state']).toBe('disconnected');
+      expect(el.textContent).not.toContain('cancelled');
+      expect(fake.requestsFor('db.listDatabases')).toHaveLength(0);
+    });
+
     it('shows a failed database list with a retry', async () => {
       fake.fail('db.listDatabases', { code: 'SERVER_ERROR', message: 'listDatabases refused' });
       await start();
