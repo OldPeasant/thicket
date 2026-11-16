@@ -71,7 +71,7 @@ tab lost focus.
 Fix:
 - Tab wrappers (`data-testid="tab"`, still draggable, still handle middle click) get
   `role="presentation"`; the close button (`data-testid="tab-close"`) has `tabindex="-1"` and
-  `aria-hidden="true"`, keeps its click handler and gets a `title` tooltip ("Close <title>").
+  `aria-hidden="true"`, keeps its click handler and gets a `title` tooltip ("Close " followed by the tab title).
 - Exported DOM id helpers `tabDomId` / `tabPanelDomId` (tab id URI-encoded, so IDREFs contain no
   whitespace) and `START_TAB_DOM_ID` / `START_PANEL_DOM_ID`. Every tab has an id and
   `aria-controls`; every panel has an id and `aria-labelledby` (replacing `aria-label`); the routed
@@ -156,7 +156,7 @@ top of 75c9186.
 
 ### Fixed findings
 
-#### TW-1 — Ctrl/Cmd+W with focus on the closed tab drops focus to `<body>`
+#### TW-1 — Ctrl/Cmd+W with focus on the closed tab drops focus to the document body
 
 Files changed:
 - `packages/renderer/src/app/layout/tab-bar.ts`
