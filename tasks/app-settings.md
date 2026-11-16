@@ -1,11 +1,11 @@
 ---
 title: M0: Settings store in main (settings.json, app.* methods)
-status: in_progress
+status: done
 owner: dell26/agent-1
 deps: [electron-shell]
 touches: [apps/desktop/src/settings]
 prio: 1
-lease_until: 2026-11-16T19:27:26Z
+lease_until: 
 ---
 ## Goal
 Persist app settings (style, mode, page size, number default, update check on/off …) in userData/settings.json with schema version and defaults; serve `app.settings.get/set` and push `app.settings.changed` events.
@@ -23,3 +23,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 19:48+0100 by dell26/agent-1): Defaults: style business, mode system (follow OS), pageSize 50, nestedPageSize 100, defaultIntegerType int32, dateDisplay local, checkForUpdates true, schemaSampleSize 1000. SPEC fixes only business/100/int32; the rest are my picks.
 - ASSUMPTION (2026-11-16 19:48+0100 by dell26/agent-1): settings.json layout {version:1, settings:{...}}. Invalid values of known keys fall back to that key's default (not treated as corrupt); only unparseable JSON or a wrong top-level layout counts as corrupt and is renamed to settings.json.corrupt-<ISO time>. A newer version is read leniently (known keys only).
 - ASSUMPTION (2026-11-16 19:48+0100 by dell26/agent-1): Added BROADCAST_STREAMS.settingsChanged='app.settings.changed' and the SettingsChanged payload {settings} to the contract; the event is only sent when a set actually changes a value. Env THICKET_USER_DATA overrides userData (for tests).
+- done by dell26/agent-1: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 17s on 7fb6a6a35; criteria verified 3/3
