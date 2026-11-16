@@ -1,11 +1,11 @@
 ---
 title: Release: GitHub Actions builds installers on tag
-status: in_progress
+status: done
 owner: felix/agent-1
 deps: [packaging,ci-check]
 touches: [.github/workflows/release.yml]
 prio: 2
-lease_until: 2026-11-16T20:10:15Z
+lease_until: 
 ---
 ## Goal
 On a `v*` tag build AppImage/deb/rpm (x64, arm64), dmg (arm64, x64), NSIS + zip (x64), with SHA-256 checksums, and upload them to a draft GitHub release.
@@ -22,3 +22,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-16 20:47+0100 by felix/agent-1): Linux arm64 is built natively on GitHub's ubuntu-24.04-arm runner; both macOS dmgs (arm64+x64) on one macos-latest runner (no native modules, so cross-arch is fine)
 - ASSUMPTION (2026-11-16 20:47+0100 by felix/agent-1): Release assets are only the installers + SHA256SUMS.txt (no blockmaps/latest*.yml, there is no auto-update); draft is created by gh in a separate job with contents:write, build jobs stay read-only
 - ASSUMPTION (2026-11-16 20:50+0100 by felix/agent-1): Criterion 2 (test tag -> draft release) not run: agents must not push tags; a human should push e.g. v0.0.1-test and delete the draft afterwards
+- done by felix/agent-1: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 33s on d4750dd34; criteria verified 1/2, skipped #2
