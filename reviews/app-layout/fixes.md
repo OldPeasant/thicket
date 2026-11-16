@@ -145,3 +145,69 @@ Remaining unresolved findings:
 ## Final status
 
 All validated findings fixed and validation passed.
+
+## Round 2 — TW-1
+
+Date: 2026-11-16
+
+Scope: finding TW-1 of `reviews/app-layout/tests.md` (test-writer re-run on 75c9186), approved by the
+parent worker. Changes limited to `packages/renderer/src/app/layout/`; uncommitted working tree on
+top of 75c9186.
+
+### Fixed findings
+
+#### TW-1 — Ctrl/Cmd+W with focus on the closed tab drops focus to `<body>`
+
+Files changed:
+- `packages/renderer/src/app/layout/tab-bar.ts`
+- `packages/renderer/src/app/layout/app-shell.ts`
+- `packages/renderer/src/app/layout/app-shell.spec.ts`
+
+Problem:
+`AppShell.onKeydown` called `workspace.close()` directly, bypassing the TabBar close path that moves
+focus, so closing the focused active tab with Ctrl/Cmd+W removed the focused element and focus fell
+back to `document.body` (unlike Delete, the close button and middle click).
+
+Fix:
+`TabBar` gets a public `closeActive()`: it closes the active tab and, only when focus was inside the
+tab strip (which includes the closed tab), focuses the newly selected tab (or "Start") via the
+existing `focusSelected()`. Focus elsewhere is left where it is (unlike `closeTab`, which also moves
+focus whenever the closed tab was the active one, as that path is triggered from the strip itself).
+The focus test is factored into a private `hasFocus()` shared with `closeTab`. `AppShell` reaches the
+tab bar through `viewChild.required(TabBar)` and calls `closeActive()` for Ctrl/Cmd+W; key matching,
+`preventDefault` and all other shortcuts are unchanged.
+The failing test "Ctrl+W with focus on the closed tab moves focus to the newly selected tab" is kept
+unchanged and now passes. Added regression test "Ctrl+W with focus outside the tab strip leaves focus
+where it is" (focus on the splitter stays on the splitter after Ctrl+W closes a tab).
+
+Validation:
+- `cd packages/renderer && npx ng test --include='src/app/layout/**/*.spec.ts'` — Pass (7 files,
+  140 tests)
+
+### Not fixed
+
+None.
+
+### Validation summary
+
+Focused tests:
+- `cd packages/renderer && npx ng test --include='src/app/layout/**/*.spec.ts'` — Pass (7 files,
+  140 tests, including the TW-1 test)
+
+Full test suite:
+- `npm run check` (lint, prettier, type checks, unit tests) — Pass (backend/contract/desktop 2551
+  tests, renderer 37 files / 664 tests)
+
+Lint/type-check/build:
+- Covered by `npm run check` — Pass. E2E not re-run (the change is focus handling covered by unit
+  tests; no template, CSS or e2e-visible markup changed).
+
+`.taskcheck`:
+- Pass (it runs `npm run check`, run from the repo root)
+
+Remaining unresolved findings:
+0
+
+### Final status
+
+All validated findings fixed and validation passed.

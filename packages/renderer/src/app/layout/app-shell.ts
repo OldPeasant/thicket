@@ -1,5 +1,12 @@
 import { NgComponentOutlet } from '@angular/common';
-import { ChangeDetectionStrategy, Component, DestroyRef, inject, type Type } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  inject,
+  viewChild,
+  type Type,
+} from '@angular/core';
 import {
   NavigationEnd,
   NavigationSkipped,
@@ -96,6 +103,7 @@ export class AppShell {
   protected readonly workspace = inject(WorkspaceService);
   protected readonly sidebar = inject(SidebarWidthService);
   private readonly views = inject(TAB_VIEWS);
+  private readonly tabBar = viewChild.required(TabBar);
   protected readonly nav = NAV;
   protected readonly min = SIDEBAR_WIDTH.min;
   protected readonly max = SIDEBAR_WIDTH.max;
@@ -138,7 +146,7 @@ export class AppShell {
     if (isW && !event.shiftKey) {
       // Always consumed, so the shortcut never closes the window instead of a tab.
       event.preventDefault();
-      this.workspace.close();
+      this.tabBar().closeActive();
     } else if (key === 'Tab') {
       event.preventDefault();
       this.workspace.cycle(event.shiftKey ? -1 : 1);

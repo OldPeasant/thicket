@@ -157,9 +157,22 @@ export class TabBar {
    */
   protected closeTab(id: string): void {
     const wasActive = this.workspace.activeId() === id;
-    const active = this.host.nativeElement.ownerDocument.activeElement;
-    const hadFocus = active !== null && this.host.nativeElement.contains(active);
+    const hadFocus = this.hasFocus();
     if (this.workspace.close(id) && (wasActive || hadFocus)) this.focusSelected();
+  }
+
+  /**
+   * Closes the active tab (Ctrl/Cmd+W). Focus moves to the newly selected tab only when it was in
+   * the strip (e.g. on the closed tab); focus elsewhere stays where it is.
+   */
+  closeActive(): void {
+    const hadFocus = this.hasFocus();
+    if (this.workspace.close() && hadFocus) this.focusSelected();
+  }
+
+  private hasFocus(): boolean {
+    const active = this.host.nativeElement.ownerDocument.activeElement;
+    return active !== null && this.host.nativeElement.contains(active);
   }
 
   /** Arrow keys, Home and End select and focus another tab; Delete closes the focused tab. */

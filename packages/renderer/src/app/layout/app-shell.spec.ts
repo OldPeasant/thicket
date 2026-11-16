@@ -296,6 +296,20 @@ describe('AppShell', () => {
       expect(document.activeElement).toBe(selectOf('a'));
     });
 
+    it('Ctrl+W with focus outside the tab strip leaves focus where it is', async () => {
+      await start();
+      ['a', 'b'].forEach((id) => ws.open(tab(id)));
+      await settle();
+      const splitter = must(el.querySelector<HTMLElement>('[data-testid="splitter"]'));
+      splitter.focus();
+      splitter.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'w', ctrlKey: true, bubbles: true, cancelable: true }),
+      );
+      await settle();
+      expect(tabIds()).toEqual(['a']);
+      expect(document.activeElement).toBe(splitter);
+    });
+
     it('a Latin letter on the W key (AZERTY Ctrl+Z) is not taken for Ctrl+W', async () => {
       await start();
       ws.open(tab('a'));
