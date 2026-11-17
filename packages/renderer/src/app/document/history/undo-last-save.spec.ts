@@ -841,4 +841,122 @@ describe('Undo last save', () => {
       expect(replaces()).toHaveLength(0);
     });
   });
+
+  // Added by the test-writer (round 3): the recorded assumptions.
+
+  it('a conflicting undo of a document deleted on the server opens no conflict view and drops the undo', async () => {
+    await saveAs('{"_id":{"$numberInt":"1"},"status":"open","total":{"$numberInt":"15"}}');
+    server.stored = null;
+
+    expect(await actions.undoSave(ID)).toBe(false);
+
+    expect(server.stored).toBeNull();
+    expect(actions.message()).toEqual({
+      kind: 'error',
+      text:
+        'Not undone: the document was changed on the server since the save. Nothing was ' +
+        'overwritten; run the query again to see the current version.',
+    });
+    expect(actions.conflicts().size).toBe(0);
+    expect(actions.canUndoSave(ID)).toBe(false);
+    expect(actions.busy()).toBe(false);
+    expect(fake.requestsFor('docs.insert')).toHaveLength(0);
+  });
+
+  it('is not offered after inserting a document deleted on the server again (not a save)', async () => {
+    server.stored = null;
+    fake.handle('docs.insert', (p) => {
+      server.stored = doc(p.docs[0] as string);
+      return { insertedIds: [ID] };
+    });
+    const edited = '{"_id":{"$numberInt":"1"},"status":"open","total":{"$numberInt":"15"}}';
+    edits.edit(doc(ORIGINAL), doc(edited));
+    expect(await actions.save(ID)).toBe(false);
+    expect(actions.conflicts().get(ID)?.current).toBeNull();
+
+    expect(await actions.overwrite(ID)).toBe(true);
+
+    expect(stringifyEJson(server.stored as unknown as BsonDocument)).toBe(edited);
+    expect(actions.canUndoSave(ID)).toBe(false);
+    expect(await actions.undoSave(ID)).toBe(false);
+    expect(updates()).toHaveLength(1);
+    expect(replaces()).toHaveLength(0);
+  });
+
+  it('refuses with its own text an undo that would replace a whole field loaded under a projection', async () => {
+    const withAddr = '{"_id":{"$numberInt":"1"},"status":"open","addr":{"city":"Springfield"}}';
+    server.stored = doc(withAddr);
+    projection = '{"addr":{"$numberInt":"1"}}';
+    const shown = doc('{"_id":{"$numberInt":"1"},"addr":{"city":"Springfield"}}');
+    // A scalar $set is allowed under the projection; setting the document back would not be.
+    edits.edit(shown, doc('{"_id":{"$numberInt":"1"},"addr":"unknown"}'), true);
+    expect(await actions.save(ID)).toBe(true);
+    const saved = stringifyEJson(server.stored as BsonDocument);
+
+    expect(await actions.undoSave(ID)).toBe(false);
+
+    expect(actions.message()).toEqual({
+      kind: 'error',
+      text:
+        'Not undone: this document was loaded only partly, so restoring the old version could ' +
+        'change data that was not loaded.',
+    });
+    expect(updates()).toHaveLength(1);
+    expect(replaces()).toHaveLength(0);
+    expect(stringifyEJson(server.stored as BsonDocument)).toBe(saved);
+  });
+
+  // Repeated top-level keys (kept by the EJSON parser): the whole-document check can't be built,
+  // so the undo falls back to the diff's own replace and its changed-field check.
+  describe('a document with repeated top-level keys', () => {
+    const REPEATED =
+      '{"_id":{"$numberInt":"1"},"status":"open","tag":"a","tag":"b","total":{"$numberInt":"10"}}';
+    const SAVED =
+      '{"_id":{"$numberInt":"1"},"status":"open","tag":"a","tag":"b","total":{"$numberInt":"15"}}';
+
+    async function saveRepeated(): Promise<void> {
+      server.stored = doc(REPEATED);
+      edits.edit(doc(REPEATED), doc(SAVED));
+      expect(await actions.save(ID)).toBe(true);
+      expect(stringifyEJson(server.stored as BsonDocument)).toBe(SAVED);
+    }
+
+    it('save, undo last save: the server document equals the original again', async () => {
+      await saveRepeated();
+
+      expect(await actions.undoSave(ID)).toBe(true);
+
+      expect(stringifyEJson(server.stored as BsonDocument)).toBe(REPEATED);
+      expect(replaces()).toHaveLength(2);
+      expect(replaces()[1]?.['expected']).toBe('{"total":{"$eq":{"$numberInt":"15"}}}');
+    });
+
+    it('reports a conflict when the field the save changed was changed on the server since', async () => {
+      await saveRepeated();
+      server.set('total', { type: 'int', value: 20 });
+      const changedOnServer = stringifyEJson(server.stored as BsonDocument);
+
+      expect(await actions.undoSave(ID)).toBe(false);
+
+      expect(stringifyEJson(server.stored as BsonDocument)).toBe(changedOnServer);
+      expect(actions.message()?.text).toMatch(
+        /^Not undone: the document was changed on the server/,
+      );
+    });
+
+    // AC2: any change on the server since the save conflicts. The undo is a replace of every
+    // field, but this fallback checks only the field the save changed.
+    it('reports a conflict instead of replacing over a server change to a field the save did not touch', async () => {
+      await saveRepeated();
+      server.set('status', { type: 'string', value: 'shipped' });
+      const changedOnServer = stringifyEJson(server.stored as BsonDocument);
+
+      await actions.undoSave(ID);
+
+      expect(stringifyEJson(server.stored as BsonDocument)).toBe(changedOnServer);
+      expect(actions.message()?.text).toMatch(
+        /^Not undone: the document was changed on the server/,
+      );
+    });
+  });
 });
