@@ -15,7 +15,8 @@ Import Compass's exported connections JSON (plain and encrypted-without-passphra
   - verified (2026-11-17 04:17+0100 by dell26/agent-2): cd apps/desktop && npx vitest run src/profiles/import -> 74 passed (Compass plain/encrypted fixtures in src/profiles/import/fixtures; source recorded via assume)
 - [x] Export file contains no password/passphrase/token (test greps the output)
   - verified (2026-11-17 04:17+0100 by dell26/agent-2): cd apps/desktop && npx vitest run src/profiles/import -t 'without secrets' -> 2 passed (greps export output for passwords/passphrases/tokens); e2e test also greps the exported file
-- [ ] e2e: import → profiles appear in the sidebar
+- [x] e2e: import → profiles appear in the sidebar
+  - verified (2026-11-17 04:17+0100 by dell26/agent-2): npm run test:e2e -- profiles-import (Electron + Playwright, real mongod container) -> 1 passed: imported Compass + URI profiles appear in sidebar
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
