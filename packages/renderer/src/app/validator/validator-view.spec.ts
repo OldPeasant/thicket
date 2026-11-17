@@ -361,6 +361,45 @@ describe('ValidatorView', () => {
       await settle();
       expect(sets()).toHaveLength(1);
     });
+
+    it('Ctrl+Enter without a change sends nothing, like the disabled Save button', async () => {
+      expect(saveButton().disabled).toBe(true);
+      get('val-text').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
+      await settle();
+      await view.save();
+      expect(sets()).toEqual([]);
+      expect(q('val-message')).toBeNull();
+    });
+
+    it('locks the editor while saving, so nothing typed is lost to the reload', async () => {
+      const answer = deferred<Record<string, never>>();
+      fake.handle('coll.validator.set', () => answer.promise);
+      await typeText('{ a: 1 }');
+      const pending = view.save();
+      await settle();
+      expect(get<HTMLTextAreaElement>('val-text').readOnly).toBe(true);
+      expect(get<HTMLSelectElement>('val-level').disabled).toBe(true);
+      expect(get<HTMLSelectElement>('val-action').disabled).toBe(true);
+      answer.resolve({});
+      await pending;
+      await settle();
+      expect(get<HTMLTextAreaElement>('val-text').readOnly).toBe(false);
+      expect(get<HTMLSelectElement>('val-level').disabled).toBe(false);
+      expect(get<HTMLSelectElement>('val-action').disabled).toBe(false);
+    });
+
+    it('locks the template button while saving', async () => {
+      const answer = deferred<Record<string, never>>();
+      fake.handle('coll.validator.set', () => answer.promise);
+      await typeText('');
+      const pending = view.save();
+      await settle();
+      expect(get<HTMLButtonElement>('val-template').disabled).toBe(true);
+      answer.resolve({});
+      await pending;
+      await settle();
+      expect(view.saving()).toBe(false);
+    });
   });
 
   describe('on a production profile', () => {
@@ -396,6 +435,14 @@ describe('ValidatorView', () => {
       expect(view.dirty()).toBe(true);
       expect(view.saving()).toBe(false);
     });
+
+    it('Ctrl+Enter without a change asks nothing', async () => {
+      const confirm = TestBed.inject(ConfirmService);
+      get('val-text').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
+      await settle();
+      expect(confirm.current()).toBeNull();
+      expect(sets()).toEqual([]);
+    });
   });
 
   describe('on a read-only profile', () => {
@@ -410,12 +457,15 @@ describe('ValidatorView', () => {
       expect(saveButton().disabled).toBe(true);
     });
 
-    it('refuses a save called directly before anything is sent', async () => {
+    it('Ctrl+Enter and a direct save do nothing, like the disabled Save button', async () => {
       await typeText('{ a: 1 }');
+      get('val-text').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
+      await settle();
       await view.save();
       await settle();
       expect(sets()).toEqual([]);
-      expect(text(get('val-message'))).toContain('read-only');
+      expect(q('val-message')).toBeNull();
+      expect(view.dirty()).toBe(true);
     });
   });
 });

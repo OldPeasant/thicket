@@ -1,4 +1,4 @@
-import { inject, Injectable, signal } from '@angular/core';
+import { inject, Injectable, signal, type WritableSignal } from '@angular/core';
 import { MAX_VALIDATOR_CHECK_IDS } from '@thicket/contract';
 import { parseEJson, stringifyEJson } from '@thicket/core/bson';
 
@@ -22,16 +22,26 @@ function nsKey(t: ValidatorTarget): string {
  */
 @Injectable({ providedIn: 'root' })
 export class ValidatorChanges {
-  private readonly versions = signal<ReadonlyMap<string, number>>(new Map());
+  /** One signal per collection, so a change re-checks only that collection's tabs. */
+  private readonly versions = new Map<string, WritableSignal<number>>();
 
   /** A number that grows each time the validator of `target` is changed here. */
   version(target: ValidatorTarget): number {
-    return this.versions().get(nsKey(target)) ?? 0;
+    return this.versionOf(target)();
   }
 
   changed(target: ValidatorTarget): void {
+    this.versionOf(target).update((n) => n + 1);
+  }
+
+  private versionOf(target: ValidatorTarget): WritableSignal<number> {
     const key = nsKey(target);
-    this.versions.update((map) => new Map(map).set(key, (map.get(key) ?? 0) + 1));
+    let version = this.versions.get(key);
+    if (version === undefined) {
+      version = signal(0);
+      this.versions.set(key, version);
+    }
+    return version;
   }
 }
 

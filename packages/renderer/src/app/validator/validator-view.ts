@@ -13,6 +13,7 @@ import { VALIDATION_ACTIONS, VALIDATION_LEVELS } from '@thicket/contract';
 import { ApiError, describeError } from '../api/api-error';
 import { ApiService } from '../api/api.service';
 import type { WorkspaceTab } from '../layout/workspace.service';
+import { ProfileSafetyService } from '../safety/profile-safety.service';
 import { WriteControl } from '../safety/write-control.directive';
 import { WriteGuard } from '../safety/write-guard.service';
 import type { CollectionTabData } from '../sidebar/sidebar-tree.service';
@@ -58,6 +59,7 @@ export class ValidatorView {
   private readonly api = inject(ApiService);
   private readonly guard = inject(WriteGuard);
   private readonly changes = inject(ValidatorChanges);
+  private readonly safety = inject(ProfileSafetyService);
 
   protected readonly levels = VALIDATION_LEVELS;
   protected readonly actions = VALIDATION_ACTIONS;
@@ -162,8 +164,12 @@ export class ValidatorView {
     this.message.set(null);
   }
 
+  /**
+   * Saves the editor. Does nothing while Save is disabled (nothing changed, a save is running,
+   * or the profile is read-only), so Ctrl+Enter behaves like the button.
+   */
   async save(): Promise<void> {
-    if (this.saving()) return;
+    if (this.saving() || !this.dirty() || this.safety.readOnly(this.target().profileId)()) return;
     const parsed = parseValidatorText(this.text());
     if (!parsed.ok) {
       this.parseError.set(parsed.error);

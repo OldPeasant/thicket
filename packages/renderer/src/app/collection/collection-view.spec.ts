@@ -1503,9 +1503,11 @@ describe('CollectionView', () => {
     it("keeps this tab's marks when the validator of another collection changes", async () => {
       failing(4);
       await recheck();
+      const before = checks().length;
       TestBed.inject(ValidatorChanges).changed({ profileId: 'p1', db: 'shop', coll: 'items' });
       await settle();
-      // Any check this tab sends stays about its own collection, so the marks stay right.
+      // Another collection's change sends no check from this tab.
+      expect(checks()).toHaveLength(before);
       expect(new Set(checks().map((c) => c['coll']))).toEqual(new Set(['orders']));
       expect(get('validator-summary').textContent).toContain('1 document');
     });
@@ -1522,6 +1524,25 @@ describe('CollectionView', () => {
       expect(markedPositions()).toEqual([]);
       // The documents are still shown.
       expect(shownDocs()).toHaveLength(50);
+    });
+
+    it('says why when the check fails, and drops the notice after a successful check', async () => {
+      failing();
+      await recheck();
+      expect(q('validator-check-error')).toBeNull();
+      fake.fail('coll.validator.check', { code: 'SERVER_ERROR', message: 'not authorized' });
+      await recheck();
+      const notice = get('validator-check-error');
+      const said = notice.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+      expect(said.startsWith('Could not check the documents against the validator: ')).toBe(true);
+      expect(said).toContain('not authorized');
+      expect(notice.getAttribute('role')).toBe('status');
+      expect(notice.classList).not.toContain('error');
+
+      failing(2);
+      await recheck();
+      expect(q('validator-check-error')).toBeNull();
+      expect(q('validator-summary')).not.toBeNull();
     });
 
     it('does not mark a document whose answer came for an older page', async () => {

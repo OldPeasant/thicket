@@ -320,6 +320,11 @@
     } @else if (results.notice(); as notice) {
       <p class="message" data-testid="results-notice" role="status">{{ notice }}</p>
     }
+    @if (validator.error(); as e) {
+      <p class="message" data-testid="validator-check-error" role="status">
+        Could not check the documents against the validator: {{ e }}
+      </p>
+    }
     @if (invalidText(); as invalid) {
       <p class="message invalid" data-testid="validator-summary" role="status">
         {{ invalid }}.

@@ -1,4 +1,4 @@
-import { provideZonelessChangeDetection } from '@angular/core';
+import { computed, provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { MAX_VALIDATOR_CHECK_IDS, type ResultOf } from '@thicket/contract';
 import { stringifyEJson } from '@thicket/core/bson';
@@ -65,6 +65,23 @@ describe('ValidatorChanges', () => {
     changes.changed(other);
     expect(changes.version(other)).toBe(1);
     expect(changes.version(T)).toBe(2);
+  });
+
+  it('notifies readers of the changed collection only', () => {
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    const changes = TestBed.inject(ValidatorChanges);
+    let runs = 0;
+    const watched = computed(() => {
+      runs++;
+      return changes.version(T);
+    });
+    expect(watched()).toBe(0);
+    changes.changed({ ...T, coll: 'items' });
+    expect(watched()).toBe(0);
+    expect(runs).toBe(1);
+    changes.changed(T);
+    expect(watched()).toBe(1);
+    expect(runs).toBe(2);
   });
 
   it('does not confuse names that join to the same text', () => {

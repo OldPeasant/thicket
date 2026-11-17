@@ -40,6 +40,7 @@
             rows="16"
             placeholder="{ $jsonSchema: { … } }   (empty: no validator)"
             [value]="text()"
+            [readOnly]="saving()"
             (input)="editText($event)"
             (keydown.control.enter)="save()"
             [attr.aria-invalid]="parseError() ? true : null"
@@ -57,6 +58,7 @@
                 type="button"
                 class="btn quiet small"
                 data-testid="val-template"
+                [disabled]="saving()"
                 (click)="useTemplate()"
               >
                 Start a $jsonSchema
@@ -68,7 +70,12 @@
         <div class="options">
           <label class="option">
             <span class="code">validationLevel:</span>
-            <select data-testid="val-level" [value]="level()" (change)="editLevel($event)">
+            <select
+              data-testid="val-level"
+              [value]="level()"
+              [disabled]="saving()"
+              (change)="editLevel($event)"
+            >
               @for (l of levels; track l) {
                 <option [value]="l" [selected]="l === level()">{{ l }}</option>
               }
@@ -77,7 +84,12 @@
           </label>
           <label class="option">
             <span class="code">validationAction:</span>
-            <select data-testid="val-action" [value]="action()" (change)="editAction($event)">
+            <select
+              data-testid="val-action"
+              [value]="action()"
+              [disabled]="saving()"
+              (change)="editAction($event)"
+            >
               @for (a of actions; track a) {
                 <option [value]="a" [selected]="a === action()">{{ a }}</option>
               }
