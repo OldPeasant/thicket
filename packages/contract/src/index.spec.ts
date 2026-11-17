@@ -81,6 +81,7 @@ const SAMPLES: { [M in MethodName]: { valid: ParamsOf<M>; invalid: unknown } } =
   'conn.open': { valid: { profileId: P }, invalid: { profileId: P, password: 1 } },
   'conn.close': { valid: { profileId: P }, invalid: {} },
   'conn.status': { valid: {}, invalid: { profileId: '' } },
+  'conn.trustHostKey': { valid: { promptId: 'k1', trust: true }, invalid: { promptId: 'k1' } },
   'conn.serverInfo': { valid: { profileId: P }, invalid: { id: P } },
 
   'db.listDatabases': {
@@ -634,6 +635,7 @@ describe('envelope', () => {
       'app.theme',
       'app.settings.changed',
       'backend.restarted',
+      'ssh.hostKey',
     ]);
   });
 

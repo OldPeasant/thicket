@@ -12,3 +12,4 @@ export * from './server/handlers';
 export * from './server/ports';
 export * from './server/protocol';
 export * from './server/rpc';
+export * from './ssh';

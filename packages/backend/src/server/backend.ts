@@ -1,4 +1,6 @@
-import { methods, type Profile } from '@thicket/contract';
+import { join } from 'node:path';
+
+import { BROADCAST_STREAMS, methods, type Event, type Profile } from '@thicket/contract';
 
 import { browseHandlers } from '../browse';
 import { ConnectionManager, connHandlers } from '../connections';
@@ -6,6 +8,7 @@ import { docsQueryHandlers } from '../docs/query';
 import { docsWriteHandlers } from '../docs/write';
 import { guardWrites } from '../guard';
 import { dialogsOverLink, ioHandlers } from '../io';
+import { HostKeyPrompts, KnownHosts, sshHandlers } from '../ssh';
 import { wiringHandlers, type PrivilegedLink } from './handlers';
 import { fromMainPort, type MainPortLike } from './ports';
 import { isBackendControlMessage } from './protocol';
@@ -23,6 +26,11 @@ export interface BackendOptions {
   parentPort: ParentPortLike;
   pid: number;
   log?: (message: string) => void;
+  /**
+   * Electron's `userData` folder (`THICKET_USER_DATA`, set by main when it starts the backend);
+   * holds `known_hosts`. Without it SSH tunnels answer `UNSUPPORTED`.
+   */
+  userData?: string;
 }
 
 /**
@@ -36,6 +44,14 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
     if (!privileged) throw new RpcError('INTERNAL', 'The backend has no link to main yet');
     return privileged;
   };
+  // Senders of the connected renderer ports, for the backend's broadcasts (`ssh.hostKey`).
+  const renderers = new Set<(event: Event) => void>();
+  const prompts = new HostKeyPrompts((prompt) => {
+    for (const send of renderers) {
+      send({ stream: BROADCAST_STREAMS.sshHostKey, kind: 'data', payload: prompt });
+    }
+    return renderers.size;
+  });
   const loadProfile = async (profileId: string): Promise<Profile> =>
     ((await link().call('profiles.forConnect', { profileId })) as { profile: Profile }).profile;
   const connections = new ConnectionManager({
@@ -47,12 +63,21 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
         }
       ).secrets,
     log: (message) => log(`connections: ${message}`),
+    ...(options.userData !== undefined
+      ? {
+          ssh: {
+            knownHosts: new KnownHosts(join(options.userData, 'known_hosts')),
+            confirmHostKey: (question, signal) => prompts.ask(question, signal),
+          },
+        }
+      : {}),
   });
   // Every write handler goes through the guard; it checks the profile as main has it now.
   const handlers = guardWrites(
     {
       ...wiringHandlers({ pid: options.pid, privileged: () => privileged }),
       ...connHandlers(connections),
+      ...sshHandlers(prompts),
       ...browseHandlers(connections),
       ...docsQueryHandlers(connections),
       ...docsWriteHandlers(connections),
@@ -78,10 +103,13 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
     }
     const window = event.data.window;
     let stop: () => void = () => undefined;
+    const send = (message: Event) => port.send(message);
     const port = fromMainPort(raw, () => {
       stop();
+      renderers.delete(send);
       log(`renderer ${window} disconnected`);
     });
+    renderers.add(send);
     stop = serve(port, {
       table: methods,
       route: 'backend',

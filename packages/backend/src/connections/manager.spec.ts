@@ -3,7 +3,14 @@ import type { Document, MongoClientOptions } from 'mongodb';
 import { describe, expect, it, vi } from 'vitest';
 
 import { RpcError } from '../server/rpc';
-import { ConnectionManager, readServerInfo, topologyOf, type ClientLike } from './manager';
+import { KnownHosts, type SshTunnel } from '../ssh';
+import {
+  ConnectionManager,
+  readServerInfo,
+  topologyOf,
+  type ClientLike,
+  type ConnectionManagerDeps,
+} from './manager';
 
 /** Fictitious secrets; none of them is a real credential. */
 const STORED_PASSWORD = 'fictitious-stored-Pw1';
@@ -67,6 +74,8 @@ interface SetupOptions {
   secrets?: Record<string, Record<string, string> | null>;
   loadSecrets?: (profileId: string) => Promise<Record<string, string> | null>;
   clients?: FakeClient[];
+  /** Enables SSH tunnels with this opener. */
+  openTunnel?: NonNullable<ConnectionManagerDeps['openTunnel']>;
 }
 
 function setup(options: SetupOptions = {}) {
@@ -98,6 +107,15 @@ function setup(options: SetupOptions = {}) {
     },
     log: (message) => logs.push(message),
     now: () => (clock += 7),
+    ...(options.openTunnel
+      ? {
+          openTunnel: options.openTunnel,
+          ssh: {
+            knownHosts: new KnownHosts('/nonexistent/known_hosts'),
+            confirmHostKey: () => Promise.resolve(false),
+          },
+        }
+      : {}),
   });
   return { manager, created, logs, loadProfile, loadSecrets };
 }
@@ -439,7 +457,7 @@ describe('ConnectionManager.open / close / status', () => {
     expect(created).toEqual([]);
   });
 
-  it('UNSUPPORTED profiles (SSH) fail before a client is created', async () => {
+  it('SSH profiles without an SSH environment fail UNSUPPORTED before a client is created', async () => {
     const { manager, created } = setup({
       profiles: {
         p1: savedProfile('p1', {
@@ -1132,5 +1150,114 @@ describe('ConnectionManager proxy and X.509 (task x509-proxy)', () => {
     });
     expect(JSON.stringify(created[0]?.options)).not.toContain(STORED_PASSWORD);
     await manager.close('p1');
+  });
+});
+
+describe('ConnectionManager SSH tunnels', () => {
+  const SSH = {
+    host: 'bastion.example.test',
+    port: 22,
+    username: 'ops',
+    method: 'password' as const,
+  };
+  const PROXY = {
+    proxyHost: '127.0.0.1',
+    proxyPort: 40999,
+    proxyUsername: 'tunnel-user',
+    proxyPassword: 'tunnel-pass',
+  };
+
+  function fakeTunnel() {
+    const tunnel = {
+      proxy: PROXY,
+      openChannels: () => 0,
+      close: vi.fn(() => Promise.resolve()),
+    } satisfies SshTunnel;
+    return tunnel;
+  }
+
+  function sshSetup(
+    open: NonNullable<ConnectionManagerDeps['openTunnel']>,
+    clients?: FakeClient[],
+  ) {
+    return setup({
+      profiles: { p1: savedProfile('p1', { ssh: SSH }) },
+      secrets: { p1: { password: STORED_PASSWORD, sshPassword: 'fictitious-ssh-Pw4' } },
+      openTunnel: open,
+      ...(clients ? { clients } : {}),
+    });
+  }
+
+  it('opens the tunnel with the stored SSH secrets and closes it with the connection', async () => {
+    const tunnel = fakeTunnel();
+    const open = vi.fn(() => Promise.resolve(tunnel));
+    const { manager, created } = sshSetup(open);
+    await manager.open('p1', undefined);
+    expect(open).toHaveBeenCalledWith(
+      SSH,
+      expect.objectContaining({ sshPassword: 'fictitious-ssh-Pw4' }),
+      expect.anything(),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(created[0]?.options).toMatchObject(PROXY);
+    expect(tunnel.close).not.toHaveBeenCalled();
+    await manager.close('p1');
+    expect(created[0]?.client.close).toHaveBeenCalled();
+    expect(tunnel.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the tunnel when the driver cannot connect', async () => {
+    const tunnel = fakeTunnel();
+    const failing = fakeClient(() => Promise.reject(new Error('connect ECONNREFUSED')));
+    const { manager } = sshSetup(() => Promise.resolve(tunnel), [failing]);
+    await rejection(manager.open('p1', undefined));
+    expect(tunnel.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('an SSH failure leaves the connection in error without creating a client', async () => {
+    const { manager, created } = sshSetup(() =>
+      Promise.reject(new RpcError('SSH_ERROR', 'SSH authentication failed')),
+    );
+    expect((await rejection(manager.open('p1', undefined))).code).toBe('SSH_ERROR');
+    expect(created).toEqual([]);
+    expect(manager.statusOf('p1')).toMatchObject({ state: 'error', error: { code: 'SSH_ERROR' } });
+  });
+
+  it('close() while the tunnel opens aborts it and answers CANCELLED', async () => {
+    let seen: AbortSignal | undefined;
+    const { manager, created } = sshSetup((_ssh, _secrets, _env, options) => {
+      seen = options?.signal;
+      return new Promise((_resolve, reject) => {
+        options?.signal?.addEventListener('abort', () =>
+          reject(new RpcError('CANCELLED', 'cancelled')),
+        );
+      });
+    });
+    const opening = manager.open('p1', undefined);
+    await vi.waitFor(() => expect(seen).toBeDefined());
+    await manager.close('p1');
+    expect(seen?.aborted).toBe(true);
+    expect((await rejection(opening)).code).toBe('CANCELLED');
+    expect(created).toEqual([]);
+    expect(manager.statusOf('p1').state).toBe('disconnected');
+  });
+
+  it('conn.test closes its tunnel after the test', async () => {
+    const tunnel = fakeTunnel();
+    const { manager } = sshSetup(() => Promise.resolve(tunnel));
+    await manager.test({ profileId: 'p1' }, undefined);
+    expect(tunnel.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses SSH together with a SOCKS5 proxy before opening a tunnel', async () => {
+    const open = vi.fn(() => Promise.resolve(fakeTunnel()));
+    const { manager } = setup({
+      profiles: {
+        p1: savedProfile('p1', { ssh: SSH, proxy: { host: 'proxy.example.test', port: 1080 } }),
+      },
+      openTunnel: open,
+    });
+    expect((await rejection(manager.open('p1', undefined))).code).toBe('INVALID_PARAMS');
+    expect(open).not.toHaveBeenCalled();
   });
 });

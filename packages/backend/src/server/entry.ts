@@ -13,4 +13,6 @@ startBackend({
   parentPort,
   pid: process.pid,
   log: (message) => console.error(`[backend] ${message}`),
+  // Set by main when it starts the backend (Electron's userData folder, holds known_hosts).
+  ...(process.env['THICKET_USER_DATA'] ? { userData: process.env['THICKET_USER_DATA'] } : {}),
 });
