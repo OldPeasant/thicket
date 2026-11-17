@@ -17,3 +17,4 @@ Import Compass's exported connections JSON (plain and encrypted-without-passphra
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-17 03:49+0100 by dell26/agent-2): Compass export format written from memory of Compass's connection-storage export (type 'Compass Connections', version {$numberInt:'1'}, connections[].connectionOptions.connectionString/sshTunnel, favorite.name/color, connectionSecrets when a passphrase is used); fixtures in apps/desktop/src/profiles/import/fixtures are hand-written from that, not real Compass output. favorite.color keys color1..color10 mapped to approximate hex values. Legacy (pre-1.39) Compass exports, oidc/fleOptions/useSystemCA are ignored.
