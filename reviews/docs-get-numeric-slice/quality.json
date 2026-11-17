@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "task": "docs-get-numeric-slice",
+  "reviewed_revision": "3be0d7eb276c66307cf4e854e9b2eec2e2f4d58b",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/docs-get-numeric-slice/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/docs-get-numeric-slice/review.md"},
+    "fixer": {"status": "not_required", "reason": "no P0-P2 findings; only optional P3 CR-1 (shared name rule), deferred"}
+  },
+  "fixes_required": false,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "deferred", "note": "optional refactor: share the sliceable-name rule between sliceLargeArrays and getDocument; outside the acceptance criterion, kept the change minimal"}
+  ],
+  "validation": [
+    {"command": "cd packages/backend && npx vitest run src/docs/query/query.spec.ts", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}

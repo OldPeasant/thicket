@@ -465,7 +465,8 @@ function sliceEntry(field: string, n: number, inclusion: boolean): Document {
  * loaded with `$slice` (their sizes are read on the server first, so the full arrays never
  * travel) and listed in `sliced`, keeping the user's projection: with an inclusion projection only
  * arrays it includes as a whole are sliced, with an exclusion projection only arrays it doesn't
- * mention. Field names with `.` or a leading `$` can't be addressed in a projection: not sliced.
+ * mention. Field names with `.` or a leading `$` can't be addressed in a projection and all-digit
+ * names can't be paged with `docs.getSlice`: not sliced.
  */
 export async function getDocument(
   client: ClientLike,
@@ -521,7 +522,8 @@ export async function getDocument(
     const fields: Document = { ...projection };
     const inclusion = projection !== undefined && isInclusion(projection);
     for (const { path, total } of large) {
-      if (path.includes('.') || path.startsWith('$')) continue;
+      // Same rule as sliceLargeArrays: `docs.getSlice` can't address all-digit names.
+      if (path.includes('.') || path.startsWith('$') || /^\d+$/.test(path)) continue;
       const named = Object.entries(fields).filter(([k]) => relatedPath(k, path));
       // Inclusion: only arrays included as a whole; exclusion: only arrays not mentioned.
       const sliceable = inclusion
