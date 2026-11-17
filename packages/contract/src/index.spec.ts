@@ -219,7 +219,7 @@ const SAMPLES: { [M in MethodName]: { valid: ParamsOf<M>; invalid: unknown } } =
     invalid: { profileId: P, db: 'shop', bucket: 'fs', id: ' ' },
   },
   'gridfs.upload': {
-    valid: { profileId: P, db: 'shop', bucket: 'fs', contentType: 'application/pdf' },
+    valid: { profileId: P, db: 'shop', bucket: 'fs', filename: 'a.pdf' },
     invalid: { profileId: P, db: 'shop', bucket: 'f$s' },
   },
   'gridfs.delete': {

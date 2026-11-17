@@ -40,6 +40,7 @@ export const gridfsFile = z.object({
   chunkSize: count,
   /** ISO date of `uploadDate`; empty when the document has none. */
   uploadDate: z.string(),
+  /** `contentType`, or `metadata.contentType` (where newer tools keep it). */
   contentType: z.string().optional(),
   metadata: ejsonDocument('metadata').optional(),
 });
@@ -102,7 +103,6 @@ export const gridfsMethods = defineMethods({
       bucket: bucketName,
       /** Stored as `filename`; defaults to the chosen file's base name. */
       filename: z.string().min(1).optional(),
-      contentType: z.string().min(1).optional(),
     }),
     /** `streamId` and `fileName` are `null` when the dialog was cancelled. */
     result: z.object({
