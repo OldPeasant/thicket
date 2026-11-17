@@ -79,6 +79,11 @@ let nextRequestId = 1;
  */
 export class ShellHost {
   private readonly sessions = new Map<string, Session>();
+  /**
+   * Opens still waiting for their worker, by profile: `closeProfile` aborts them, since the
+   * session they would register belongs to a connection that is gone.
+   */
+  private readonly opening = new Map<string, Set<AbortController>>();
   private readonly workerUrl: string | URL | undefined;
   private readonly createWorker: (url: string | URL) => WorkerLike;
   private readonly interruptGraceMs: number;
@@ -104,7 +109,32 @@ export class ShellHost {
       throw new RpcError('UNSUPPORTED', 'This backend was started without a shell worker');
     }
     const id = randomUUID();
-    const { worker, db: current } = await this.startWorker(id, config, db, signal);
+    const closing = new AbortController();
+    const pending = this.opening.get(profileId) ?? new Set<AbortController>();
+    pending.add(closing);
+    this.opening.set(profileId, pending);
+    const onAbort = () => closing.abort();
+    if (signal?.aborted) closing.abort();
+    else signal?.addEventListener('abort', onAbort, { once: true });
+    let started: { worker: WorkerLike; db: string };
+    try {
+      started = await this.startWorker(id, config, db, closing.signal);
+      if (closing.signal.aborted) {
+        // Aborted after the worker had answered, before this continuation ran.
+        await started.worker.terminate().catch(() => undefined);
+        throw cancelled();
+      }
+    } catch (error) {
+      if (closing.signal.reason === CONNECTION_CLOSED) throw connectionClosed();
+      throw error;
+    } finally {
+      signal?.removeEventListener('abort', onAbort);
+      pending.delete(closing);
+      if (pending.size === 0 && this.opening.get(profileId) === pending) {
+        this.opening.delete(profileId);
+      }
+    }
+    const { worker, db: current } = started;
     const session: Session = {
       id,
       profileId,
@@ -246,6 +276,9 @@ export class ShellHost {
 
   /** Closes the sessions of a profile (its connection was closed). */
   async closeProfile(profileId: string): Promise<void> {
+    // Opens in flight answer CANCELLED and terminate their worker (startWorker).
+    for (const closing of this.opening.get(profileId) ?? []) closing.abort(CONNECTION_CLOSED);
+    this.opening.delete(profileId);
     await Promise.all(
       [...this.sessions.values()]
         .filter((s) => s.profileId === profileId)
@@ -432,6 +465,13 @@ async function cloneableOptions(
 
 function notFound(sessionId: string): RpcError {
   return new RpcError('NOT_FOUND', `No shell session ${sessionId}`);
+}
+
+/** Abort reason of opens whose connection was closed (`closeProfile`). */
+const CONNECTION_CLOSED = Symbol('connection closed');
+
+function connectionClosed(): RpcError {
+  return new RpcError('CANCELLED', 'The connection was closed while the shell was opening');
 }
 
 function cancelled(): RpcError {

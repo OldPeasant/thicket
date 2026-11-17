@@ -1175,6 +1175,90 @@ describe('ShellHost.complete', () => {
 });
 
 describe('ShellHost.close / closeProfile / closeAll', () => {
+  it('closeProfile while an open waits for its worker answers CANCELLED and terminates the worker', async () => {
+    const worker = new FakeWorker(false);
+    const other = new FakeWorker(false);
+    const { host } = setup({ workers: [worker, other] });
+    const opening = host.open('p1', CONFIG, undefined);
+    const otherOpening = host.open('p2', CONFIG, undefined);
+    await vi.waitFor(() => expect(worker.of('open')).toHaveLength(1));
+    await host.closeProfile('p1');
+    const error = await rejection(opening);
+    expect(error.code).toBe('CANCELLED');
+    expect(error.message).toContain('connection was closed');
+    expect(worker.terminated).toBe(1);
+    // The worker answering late registers nothing.
+    worker.reply({ type: 'opened', db: 'test' });
+    await Promise.resolve();
+    expect(host.sessionIds()).toEqual([]);
+    // Another profile's open is not affected.
+    expect(other.terminated).toBe(0);
+    other.reply({ type: 'opened', db: 'test' });
+    const opened = await otherOpening;
+    expect(host.sessionIds()).toEqual([opened.sessionId]);
+  });
+
+  it('closeProfile while the credential provider is pending cancels the open before posting', async () => {
+    let resolveProvider: (value: { accessKeyId: string; secretAccessKey: string }) => void = () =>
+      undefined;
+    const config: ClientConfig = {
+      uri: AWS_CONFIG.uri,
+      options: {
+        authMechanism: 'MONGODB-AWS',
+        authMechanismProperties: {
+          AWS_CREDENTIAL_PROVIDER: () =>
+            new Promise((resolve) => {
+              resolveProvider = resolve;
+            }),
+        },
+      },
+    };
+    const worker = new FakeWorker();
+    const { host } = setup({ workers: [worker] });
+    const opening = host.open('aws', config, undefined);
+    await host.closeProfile('aws');
+    expect((await rejection(opening)).code).toBe('CANCELLED');
+    expect(worker.terminated).toBe(1);
+    resolveProvider({ accessKeyId: AWS_KEY_ID, secretAccessKey: AWS_SECRET });
+    await Promise.resolve();
+    expect(worker.posted).toEqual([]);
+    expect(host.sessionIds()).toEqual([]);
+  });
+
+  it('a shell opened after closeProfile (reconnect) is unaffected', async () => {
+    const first = new FakeWorker(false);
+    const { host, workers } = setup({ workers: [first] });
+    const opening = host.open('p1', CONFIG, undefined);
+    await vi.waitFor(() => expect(first.of('open')).toHaveLength(1));
+    await host.closeProfile('p1');
+    expect((await rejection(opening)).code).toBe('CANCELLED');
+    // Reconnected: a new open on the same profile works and stays open.
+    const { sessionId } = await host.open('p1', CONFIG, 'shop');
+    const second = workers[1] as FakeWorker;
+    expect(second.terminated).toBe(0);
+    expect(host.sessionIds()).toEqual([sessionId]);
+    const out = collector();
+    const running = host.eval(sessionId, '1', out.emit);
+    const evalMessage = await lastEval(second);
+    second.reply({ type: 'output', id: evalMessage.id, output: { kind: 'print', text: 'ok' } });
+    second.reply({ type: 'evalDone', id: evalMessage.id });
+    await expect(running).resolves.toBe(1);
+  });
+
+  it("an open cancelled by its own signal still answers CANCELLED and doesn't affect closeProfile", async () => {
+    const worker = new FakeWorker(false);
+    const { host } = setup({ workers: [worker] });
+    const controller = new AbortController();
+    const opening = host.open('p1', CONFIG, undefined, controller.signal);
+    await vi.waitFor(() => expect(worker.of('open')).toHaveLength(1));
+    controller.abort();
+    const error = await rejection(opening);
+    expect(error.code).toBe('CANCELLED');
+    expect(error.message).not.toContain('connection was closed');
+    expect(worker.terminated).toBe(1);
+    await host.closeProfile('p1');
+  });
+
   it('closes the client in the worker, then terminates it; the id is gone', async () => {
     const { host, workers, logs } = setup();
     const { sessionId } = await host.open('p1', CONFIG, undefined);
