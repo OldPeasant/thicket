@@ -17,3 +17,4 @@ List running operations with filters (namespace, duration, type) and auto-refres
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 06:35+0100 by felix/agent-1): currentOp and killOp run on the primary (the connection's default server), not the profile's read preference: killOp must reach the server that listed the opid; ops on secondaries are not listed
+- ASSUMPTION (2026-11-17 06:35+0100 by felix/agent-1): The namespace filter is a prefix on name boundaries (^ns(\.|$)): 'shop' matches shop and shop.orders but not shopping.x
