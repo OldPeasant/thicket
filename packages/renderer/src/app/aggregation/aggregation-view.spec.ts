@@ -1078,6 +1078,133 @@ describe('AggregationView', () => {
       expect(get('agg-run-error').textContent).toContain('Fix stage 1 first');
       expect(q('agg-results')).toBeNull();
     });
+
+    it('Next pages the collection that produced the result after the tab is pointed elsewhere', async () => {
+      total = RESULT_PAGE_SIZE * 2;
+      await click(get('agg-run'));
+      expect(runs().at(-1)).toMatchObject({ coll: 'orders' });
+      fixture.componentRef.setInput('tab', {
+        ...TAB,
+        data: { profileId: 'p1', db: 'shop', coll: 'invoices', type: 'collection' },
+      });
+      await settle();
+
+      await click(get('agg-next'));
+      expect(runs().at(-1)).toMatchObject({ profileId: 'p1', db: 'shop', coll: 'orders' });
+      expect(runs().at(-1)?.['pipeline']).toContain('"$skip":{"$numberInt":"20"}');
+
+      // A new Run uses the new collection from the first page.
+      await click(get('agg-run'));
+      expect(runs().at(-1)).toMatchObject({ coll: 'invoices' });
+      expect(runs().at(-1)?.['pipeline']).not.toContain('$skip');
+    });
+
+    it('a page turn whose stream fails shows the error and clears the result', async () => {
+      total = RESULT_PAGE_SIZE * 2;
+      await click(get('agg-run'));
+      fake.handle('agg.run', () => {
+        setTimeout(() => fake.failStream('s-page', { code: 'SERVER_ERROR', message: 'page gone' }));
+        return { streamId: 's-page' };
+      });
+      await click(get('agg-next'));
+      expect(get('agg-run-error').textContent).toContain('page gone');
+      expect(q('agg-results')).toBeNull();
+      expect(q('agg-next')).toBeNull();
+    });
+
+    it('a $out Run refused on a read-only profile clears the earlier result', async () => {
+      await click(get('agg-run'));
+      expect(all('agg-result-doc')).toHaveLength(3);
+      TestBed.inject(ProfileSafetyService).set({
+        id: 'p1',
+        name: 'Reporting',
+        readOnly: true,
+        production: false,
+      });
+      await click(get('agg-add-stage'));
+      await setOperator(1, '$out');
+      await click(get('agg-run'));
+      expect(runs()).toHaveLength(1);
+      expect(get('agg-run-error').textContent).toContain('read-only');
+      expect(q('agg-results')).toBeNull();
+    });
+
+    it('cancelling the $out confirmation keeps the earlier result and shows no error', async () => {
+      await click(get('agg-run'));
+      const confirms = TestBed.inject(ConfirmService);
+      confirms.confirm = () => Promise.resolve(false);
+      await click(get('agg-add-stage'));
+      await setOperator(1, '$out');
+      await click(get('agg-run'));
+      expect(runs()).toHaveLength(1);
+      expect(q('agg-run-error')).toBeNull();
+      expect(all('agg-result-doc')).toHaveLength(3);
+    });
+  });
+
+  describe('retrying a failed preview, more cases', () => {
+    it('the Retry button names its stage, and a Retry that fails again can be retried', async () => {
+      fake.fail('agg.previewStage', { code: 'NOT_CONNECTED', message: 'gone' });
+      await click(get('agg-add-stage'));
+      await setBody(1, '{ b: 2 }');
+      const retry = inStage(1, 'agg-preview-retry');
+      expect(retry.getAttribute('aria-label')).toBe('Retry the preview of stage 2');
+      expect(retry.getAttribute('type')).toBe('button');
+
+      const before = previews().length;
+      await click(retry);
+      expect(previews()).toHaveLength(before + 1);
+      expect(operators(previews().at(-1)?.['pipeline'])).toEqual(['$match', '$match']);
+      // Still failing: the error and its Retry button stay, and Retry asks again.
+      expect(inStage(1, 'agg-preview-error').textContent).toContain('gone');
+      fake.respond('agg.previewStage', { docs: docs(1, 4) });
+      await click(inStage(1, 'agg-preview-retry'));
+      expect(previews()).toHaveLength(before + 2);
+      expect(inStage(1, 'agg-stage-preview').querySelectorAll('pre')).toHaveLength(4);
+      expect(stageEl(1).querySelector('[data-testid="agg-preview-retry"]')).toBeNull();
+    });
+
+    it('Retry asks only for its own stage', async () => {
+      await click(get('agg-add-stage'));
+      fake.fail('agg.previewStage', { code: 'NOT_CONNECTED', message: 'gone' });
+      await setBody(1, '{ b: 2 }');
+      fake.respond('agg.previewStage', { docs: docs(1, 1) });
+      const before = previews().length;
+      await click(inStage(1, 'agg-preview-retry'));
+      expect(
+        previews()
+          .slice(before)
+          .map((p) => operators(p['pipeline'])),
+      ).toEqual([['$match', '$match']]);
+      // The first stage's preview was fine and is not touched.
+      expect(inStage(0, 'agg-stage-preview').querySelectorAll('pre')).toHaveLength(1);
+    });
+  });
+
+  it('Copy in full-text mode copies the code of the text as typed', async () => {
+    let copied = '';
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: (text: string) => {
+          copied = text;
+          return Promise.resolve();
+        },
+      },
+    });
+    await click(get('agg-mode-text'));
+    const area = get<HTMLTextAreaElement>('agg-text');
+    area.value = '[{ $match: { a: 1 } }, { $project: { b: 1 } }]';
+    area.dispatchEvent(new Event('input'));
+    await click(get('agg-export'));
+    await click(get('agg-copy'));
+    expect(copied).toMatch(/\$match[\s\S]*\$project/);
+    // An empty pipeline text exports too.
+    area.value = '[]';
+    area.dispatchEvent(new Event('input'));
+    await settle();
+    expect(get('agg-code').textContent).toContain('.aggregate(');
+    expect(get('agg-code').textContent).not.toContain('$match');
   });
 
   it('announces only the preview count, and does not re-announce stage errors while typing', async () => {

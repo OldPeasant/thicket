@@ -2,36 +2,40 @@
 
 Date: 2026-11-17
 
-Task: agg-ui (M3: Aggregation pipeline builder)
+Task: agg-ui (M3: Aggregation pipeline builder). Second review round, on the final code after the fixes.
 
-Scope: `git diff e08080a..HEAD`, excluding `tasks/` changes. Committed changes only. Production code was reviewed first because test-writer may be adding tests in the same folder at the same time.
+Scope: `git diff 8f353ab..HEAD`, excluding `tasks/` and `reviews/`. Committed changes only. This round focused on the fix commit 2b0cf0e (text-mode Export and Create view, preview retry, forgetting failed preview runs, paging of the remembered pipeline, a11y changes) and on how it interacts with the rest of the builder. Production code was the focus because test-writer may be editing spec files at the same time.
 
 Requirements:
 - tasks/agg-ui.md acceptance criteria and recorded assumptions
 - SPEC.md M3 and demo step 8
 - docs/ARCHITECTURE.md "Aggregation builder" and "Write safety in the renderer"
-- AGENTS.md project notes, which require theme tokens only, no secrets and no eval
-- Parent instructions: write safety, accessibility, races in previews and Run, and whether the core codegen import is renderer-safe
+- AGENTS.md project notes (theme tokens only, no secrets, no eval)
+- Earlier review (round 1, CR-1 to CR-5) and reviews/agg-ui/fixes.md
+- Parent instructions for this round
 
 Git range:
 - Branch: main
-- HEAD: 1d21e962c97222111dbd8fc9c5b57351b81c86ba
-- Base/start: e08080a659e944cf9af39b5c463e389a224d9481
-- Commits reviewed: 6 (c2d00c8, d5eb68f, 871b7d7, 695dcaa, 1a06ba6, 1d21e96)
+- HEAD: 2b0cf0e0af11d41b630f7023f82c98c6d3eefe92
+- Base/start: 8f353abe0a3372ad3e5add2a759591d3cc073684 (`git merge-base HEAD origin/main`)
+- Commits reviewed: 8 (05546e1, 52fa993, 6d32586, 27f4f9e, 6802bb6, 8ac20ee, f3cfcf4, 2b0cf0e). Of these, 6d32586 and 27f4f9e touch only `tasks/`.
+- Uncommitted changes: none at review time.
 
-Summary: 0 P0, 1 P1, 1 P2, 3 P3
+Summary: 0 P0, 0 P1, 0 P2, 2 P3
 
-Checked with no findings:
-- No eval. `parseStage` and `parsePipeline` use core's `parseShellSyntax`.
-- Codegen import is renderer-safe. `@thicket/core/codegen` (`src/codegen/*`) imports only `../bson/*`, `../shellsyntax` and local modules. It has no Node built-ins.
-- Theme tokens only. No hex, rgb, hsl or named colors appear in `aggregation-view.css`. The only literal values are `transparent` and `currentColor`.
-- `$out`/`$merge` ask first. They use `WriteGuard.approve` with `alwaysConfirm`, and the stream is sent with `confirmed: true`. They are excluded from previews.
-- `agg.createView` goes through `WriteGuard.run`.
-- Contract fields match `packages/contract/src/agg.ts`.
-- When a stage's preview plan changes, the older request is aborted, and aborted results are dropped.
-- Drop and rename close aggregation tabs.
+## Disposition of earlier findings
 
-Acceptance criteria evidence: both criteria are still unverified in `python tasks.py verify agg-ui`. The parent must record them before `done`. The e2e test (`test/e2e/aggregation.e2e.ts`) and the component tests (`aggregation-view.spec.ts`: reorder, disable and syntax-error cases) cover the criteria in substance.
+- **CR-1 (P1), text mode: Create view and Export used the stale stage list. Resolved.** `createView()` now runs `applyText()` in text mode and stops if it fails (`aggregation-view.ts:586-589`). Then it reads `pipeline()`, so the view gets the text as typed. Export goes through the new `exportPipeline` computed (`:210-227`). In text mode it parses `text()` and skips disabled stages. If the text has an error, it shows that error, and Copy is disabled because `code().ok` is false. The `$out`/`$merge` refusal and `WriteGuard.run` still apply after the text is applied.
+- **CR-2 (P2), tests missing. Resolved.** The spec has tests for text-mode Export and Create view. The out-of-order preview cases are under "preview requests in flight" (test-writer).
+- **CR-3 (P3), a failed preview could not be retried. Resolved.** A failed preview that was not aborted deletes its own `previewRuns` entry. The check `previewRuns.get(id)?.abort.signal === signal` (`:421`) means a newer run is never removed. `retryPreview` (`:390-396`) uses `startPreview`, which aborts any run in flight before it starts a new one. A pending debounced pass then finds the same key and skips the stage, so no duplicate request is sent.
+- **CR-4 (P3), paging used the edited pipeline, and old results stayed after errors. Resolved, with one gap (see CR-6).** The result now stores its `pipeline` and `target`. `turnPage` pages through those (`:457-461`), and `run()` always starts the current pipeline at page 0. The stream error, a refused approval and "Fix stage N first" now go through `failRun`, which clears `result`. A user cancel still leaves everything unchanged. `cancelRun()` at the start of `runPage` keeps an older stream from overwriting a newer one.
+- **CR-5 (P3), the whole preview region was aria-live, and errors used `role="alert"`. Mostly resolved.** The document list is no longer announced, and stage errors are no longer alerts. However, the new live region on the count is likely not announced at all (see CR-7).
+
+Checked this round with no findings:
+- The fix commit changes only aggregation files. It adds no new API calls and changes no contract fields.
+- Removing `ProfileSafetyService` and `readOnly` keeps read-only enforcement. `appWriteControl` stays on both Create view buttons, and `WriteGuard` still handles both writes.
+- The CSS adds only `.retry { margin-left }`. It has no color literals.
+- In text mode, a text that `parsePipeline` accepts can still fail `parseStage` only when a body is empty or an operator is invalid. `parsePipeline` rejects those inputs, so the vague "Fix stage N first" message in text mode cannot be reached in practice.
 
 ## P0 Critical
 
@@ -39,47 +43,28 @@ None.
 
 ## P1 High
 
-- [ ] **CR-1 | In full-text mode, Create view and Export use the stage list from before the text was edited**
-    - File: `packages/renderer/src/app/aggregation/aggregation-view.ts:506` (`createView`), `:201` (`code`), `:307` (`editText`)
-    - Category: Correctness
-    - Problem: `editText` updates only the `text` signal. `stages()` changes only when `applyText()` runs. `run()` calls `applyText()` first (line 399), but `createView()` and the `code` computed do not. Both read `this.pipeline()`, which is built from `stages()`. The Export and Create view panels stay visible in text mode (they are outside the `@if (mode() === 'stages')` block in the template). As a result, after editing the full text:
-        - Export shows and copies code for the earlier pipeline.
-        - Create view sends `agg.createView` with the earlier pipeline. On a non-production profile, `WriteGuard` sends it with no dialog, so the user never sees the pipeline that is written.
-    - Why it matters: A write (the view definition) is created with a pipeline other than the one on screen, with no prompt to catch it. Exported code also silently does not match the text.
-    - Suggested fix: Use one rule for every action. In text mode, `createView` should call `applyText()` first and stop if it fails, as `run()` does. The `code` computed should parse `text()` in text mode, for example from a `parsePipeline(text())`-based computed, or show "apply the text first". Add a component test that edits the text and then exports or creates a view.
+None.
 
 ## P2 Medium
 
-- [ ] **CR-2 | No component test for Export or Create view in full-text mode, or for out-of-order preview responses**
-    - File: `packages/renderer/src/app/aggregation/aggregation-view.spec.ts`
-    - Category: Tests
-    - Problem: The spec covers export and create view only in stage mode, which is how CR-1 went unnoticed. No test resolves an older `agg.previewStage` after a newer one to show that the aborted result is dropped. The abort guard at `aggregation-view.ts:370`/`:373` is untested.
-    - Why it matters: Both are regression-prone paths that the parent explicitly asked about (races, write safety).
-    - Suggested fix: Add a test that edits the text and then runs Export and Create view, checking the sent `pipeline`. Add a test with two deferred preview responses for the same stage, resolved out of order, checking that only the newer result is shown.
+None.
 
 ## P3 Low
 
-- [ ] **CR-3 | A failed preview cannot be retried without changing the pipeline**
-    - File: `packages/renderer/src/app/aggregation/aggregation-view.ts:343`, `:372-375`
+- [ ] **CR-6 | In text mode, a Run refused for a text parse error keeps the earlier result and any earlier run error**
+    - File: `packages/renderer/src/app/aggregation/aggregation-view.ts:447`
     - Category: Correctness
-    - Problem: Entries in `previewRuns` are never removed after a request finishes. If the request fails (for example a timeout or a lost connection), later scheduling skips the stage because `previewRuns.get(id)?.key === key`. The error stays until the stage's prefix text changes, and the template has no retry control.
-    - Why it matters: A transient error leaves a preview stuck with no way to recover except editing the stage.
-    - Suggested fix: Remove the `previewRuns` entry (or its key) when a request fails, so the next scheduling pass tries again. Alternatively, add a "Retry" button next to `agg-preview-error`.
+    - Problem: The CR-4 fix sends every refused or failed Run through `failRun`, which clears `result`. The one exception is the first line of `run()`: `if (this.mode() === 'text' && !this.applyText()) return;`. When the full text does not parse, Run returns early. `result` and `runError` are left unchanged. The text error appears under the text area, but the results of an earlier, different pipeline stay on screen, and so does an unrelated `agg-run-error` from an earlier failed run. For comparison, "Fix stage N first" in stage mode clears the earlier result.
+    - Why it matters: Failed runs behave differently depending on the mode, which is the misleading state that CR-4 was meant to remove. No data is affected.
+    - Suggested fix: When `applyText()` fails in `run()`, clear `result` and `runError`. Do not set a second message: the text error is already shown and announced. Alternatively, document that the earlier result stays. Add a test next to "a Run refused for a stage error clears the earlier result".
 
-- [ ] **CR-4 | Next and Previous run the current, possibly edited pipeline with the old page number, and old results stay visible after a Run error**
-    - File: `packages/renderer/src/app/aggregation/aggregation-view.ts:398-451`, `aggregation-view.html:330`/`:341`
-    - Category: Correctness
-    - Problem: The pager calls `run(r.page ± 1)`, which reads `this.pipeline()` at click time. If the user edits stages after a Run, "Next" shows page 2 of a different pipeline. `resultRange()` then shows "21–40", which looks like a continuation of the earlier run. When a run fails, `runError` is set but `result` keeps the previous result, so an error and unrelated documents appear together.
-    - Why it matters: The results can be misleading. No data is affected.
-    - Suggested fix: Keep the pipeline used by the last Run with its result and page through that pipeline. Alternatively, reset to page 0 or clear `result` when the pipeline changes. Clear `result` when a run fails.
-
-- [ ] **CR-5 | Each preview region is `aria-live`, so screen readers read out whole documents on every update**
-    - File: `packages/renderer/src/app/aggregation/aggregation-view.html:157`
+- [ ] **CR-7 | The new preview-count live region is created together with its text, so screen readers are unlikely to announce it**
+    - File: `packages/renderer/src/app/aggregation/aggregation-view.html:170`
     - Category: Quality (accessibility)
-    - Problem: The whole preview container of every stage, including up to 20 `<pre>` documents, has `aria-live="polite"`. One edit to stage 1 re-runs the previews of all later stages. Each region then announces "Loading preview…" followed by every document. The stage error (`role="alert"`, line 149) also re-announces on each keystroke while the text stays invalid.
-    - Why it matters: Screen-reader users get long, repeated announcements while typing.
-    - Suggested fix: Make only the count line (`agg-preview-count`) or the error line live, not the document list. Consider `aria-live="polite"` instead of `role="alert"` for errors that change while the user types.
+    - Problem: `aria-live="polite"` is now on `<p data-testid="agg-preview-count">`, which only exists inside `@case ('ok')`. Each preview first sets `state: 'loading'` (`aggregation-view.ts:404`), so Angular removes the paragraph and inserts a new one, live attribute and text included, when the result arrives. Screen readers generally announce changes only inside a live region that was already in the DOM. A region inserted together with its content is often not read (WAI-ARIA live-region guidance, MDN "ARIA live regions"). Before the fix, the live attribute sat on the persistent `agg-stage-preview` container. The new test (`aggregation-view.spec.ts:1083`) checks only that the attribute is present, not that the region persists.
+    - Why it matters: The fix removed the noisy announcements but probably also removed the useful one, the preview count after an edit, which the parent asked about for a11y.
+    - Suggested fix: Put a persistent, small live element in `agg-stage-preview` outside the `@switch`, for example a visually hidden `<p aria-live="polite">`. Fill it with the count, "Loading preview…" or the preview error text, and keep the document `<pre>` list outside it.
 
 ## Review conclusion
 
-Material issues found; fix before completing the task.
+No material issues found. The earlier findings CR-1 to CR-5 are resolved in substance. Two P3 follow-ups remain: CR-6 (a text-mode Run with a parse error leaves the earlier result) and CR-7 (the live region is recreated on every preview). Neither blocks completion. The parent decides whether to fix them now or record them.
