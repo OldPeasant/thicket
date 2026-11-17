@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "task": "users-roles-view",
-  "reviewed_revision": "4b9c7b7ab6bd7cb32092f47f3d3a01915aac2f3d",
+  "reviewed_revision": "8cf069d7e1888a2adccdd899da4525d1367b75e1",
   "helpers": {
     "test-writer": {"status": "completed", "report": "reviews/users-roles-view/tests.md"},
     "code-reviewer": {"status": "completed", "report": "reviews/users-roles-view/review.md"},
@@ -15,7 +15,7 @@
   "validation": [
     {"command": "npm run test:int -- users-roles", "result": "pass"},
     {"command": "cd packages/renderer && npx ng test --include='src/app/admin/**/*.spec.ts'", "result": "pass"},
-    {"command": "cd packages/renderer && npx ng test --include='src/app/app.spec.ts'", "result": "pass"},
+    {"command": "cd packages/renderer && npx ng test --include='src/app/app.spec.ts' --include='src/app/sidebar/**/*.spec.ts'", "result": "pass"},
     {"command": "cd packages/backend && npx vitest run src/admin", "result": "pass"},
     {"command": "npm run check", "result": "pass"}
   ]
