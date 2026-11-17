@@ -11,7 +11,8 @@ lease_until: 2026-11-17T07:12:22Z
 serverStatus, dbStats and replica set status with a few charts (ops/s, connections, memory) refreshing live.
 
 ## Acceptance criteria
-- [ ] Integration test for the data methods
+- [x] Integration test for the data methods
+  - verified (2026-11-17 07:56+0100 by dell26/agent-2): npm run test:int -- server-stats (testcontainers mongo:8.2 standalone + mongo:8.2 replica set, served through serve() with contract validation) -> 7 passed: admin.serverStatus fields + counters grow, admin.replSetStatus null on standalone / members on RS, serverStatus repl section, db.stats sizes, NOT_CONNECTED
 - [ ] Component tests with recorded serverStatus fixtures
 
 ## Notes
