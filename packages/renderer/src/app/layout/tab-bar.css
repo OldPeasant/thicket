@@ -121,7 +121,8 @@
   border-radius: 50%;
 }
 
-.kind[data-kind='admin'] {
+.kind[data-kind='admin'],
+.kind[data-kind='users'] {
   transform: rotate(45deg);
 }
 

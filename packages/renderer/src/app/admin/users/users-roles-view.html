@@ -1,0 +1,267 @@
+<section class="ur" [attr.aria-label]="'Users and roles of ' + target().db">
+  <header class="head">
+    <span class="code call"
+      >db<span class="dot">.</span
+      ><span class="fn">{{ mode() === 'users' ? 'getUsers' : 'getRoles' }}</span
+      >({{ mode() === 'roles' && builtin() ? '{ showBuiltinRoles: true }' : '' }})</span
+    >
+    <span class="ns" [title]="target().db"
+      >in <span class="db">{{ target().db }}</span></span
+    >
+    <div class="switch" role="group" aria-label="Show">
+      <button
+        type="button"
+        class="seg"
+        data-testid="mode-users"
+        [attr.aria-pressed]="mode() === 'users'"
+        (click)="setMode('users')"
+      >
+        Users
+      </button>
+      <button
+        type="button"
+        class="seg"
+        data-testid="mode-roles"
+        [attr.aria-pressed]="mode() === 'roles'"
+        (click)="setMode('roles')"
+      >
+        Roles
+      </button>
+    </div>
+    <div class="actions">
+      @if (mode() === 'roles') {
+        <label class="check">
+          <input
+            #builtinBox
+            type="checkbox"
+            data-testid="builtin"
+            [checked]="builtin()"
+            (change)="setBuiltin(builtinBox.checked)"
+          />
+          Built-in roles
+        </label>
+      }
+      <span class="ro" title="Users and roles are shown, not changed, here">Read-only</span>
+      <button type="button" class="btn" data-testid="refresh" (click)="refresh()">Refresh</button>
+    </div>
+  </header>
+
+  @if (mode() === 'users') {
+    @if (usersError(); as message) {
+      <p class="note error" role="alert">{{ message }}</p>
+    } @else if (userItems(); as list) {
+      @if (list.length === 0) {
+        <p class="note" data-testid="empty">No users are defined in {{ target().db }}.</p>
+      } @else {
+        <div class="split">
+          <nav class="list" aria-label="Users">
+            @for (u of list; track u.name) {
+              <button
+                type="button"
+                class="item"
+                data-testid="user-item"
+                [attr.aria-current]="u.name === user()?.name ? 'true' : null"
+                (click)="selectUser(u.name)"
+              >
+                <span class="name">{{ u.name }}</span>
+                <span class="count">{{ u.roles.length }}</span>
+              </button>
+            }
+          </nav>
+          @if (user(); as u) {
+            <article class="detail" data-testid="user-detail">
+              <h2 class="title">
+                {{ u.name }}<span class="at">&#64;{{ u.db }}</span>
+              </h2>
+              @if (u.mechanisms.length > 0 || u.restrictions > 0) {
+                <p class="facts">
+                  @if (u.mechanisms.length > 0) {
+                    <span>Signs in with {{ u.mechanisms.join(', ') }}</span>
+                  }
+                  @if (u.restrictions > 0) {
+                    <span
+                      >{{ u.restrictions }} authentication
+                      {{ u.restrictions === 1 ? 'restriction' : 'restrictions' }}</span
+                    >
+                  }
+                </p>
+              }
+              <ng-container
+                *ngTemplateOutlet="
+                  lineage;
+                  context: { direct: u.roles, inherited: u.inheritedRoles, label: 'Roles' }
+                "
+              />
+              <ng-container
+                *ngTemplateOutlet="
+                  privilegeTable;
+                  context: {
+                    list: u.privileges,
+                    label: 'Privileges',
+                    hint: 'Everything the user may do, through all of their roles.',
+                  }
+                "
+              />
+              @if (u.customData) {
+                <h3 class="sub">Custom data</h3>
+                <pre class="code block">{{ u.customData }}</pre>
+              }
+            </article>
+          }
+        </div>
+      }
+    } @else {
+      <p class="note" role="status">Loading users…</p>
+    }
+  } @else {
+    @if (rolesError(); as message) {
+      <p class="note error" role="alert">{{ message }}</p>
+    } @else if (roleItems(); as list) {
+      @if (list.length === 0) {
+        <p class="note" data-testid="empty">
+          No custom roles are defined in {{ target().db }}. Turn on “Built-in roles” to see the
+          roles every database has.
+        </p>
+      } @else {
+        <div class="split">
+          <nav class="list" aria-label="Roles">
+            @for (r of list; track r.name) {
+              <button
+                type="button"
+                class="item"
+                data-testid="role-item"
+                [class.builtin]="r.builtin"
+                [attr.aria-current]="r.name === role()?.name ? 'true' : null"
+                (click)="selectRole(r.name)"
+              >
+                <span class="name">{{ r.name }}</span>
+                @if (r.builtin) {
+                  <span class="tag">built-in</span>
+                }
+              </button>
+            }
+          </nav>
+          @if (role(); as r) {
+            <article class="detail" data-testid="role-detail">
+              <h2 class="title">
+                {{ r.name }}<span class="at">&#64;{{ r.db }}</span>
+                @if (r.builtin) {
+                  <span class="tag">built-in</span>
+                }
+              </h2>
+              <ng-container
+                *ngTemplateOutlet="
+                  lineage;
+                  context: { direct: r.roles, inherited: r.inheritedRoles, label: 'Inherits from' }
+                "
+              />
+              <ng-container
+                *ngTemplateOutlet="
+                  privilegeTable;
+                  context: {
+                    list: r.privileges,
+                    label: 'Own privileges',
+                    hint: 'Granted by this role itself.',
+                  }
+                "
+              />
+              @if (r.roles.length > 0) {
+                <ng-container
+                  *ngTemplateOutlet="
+                    privilegeTable;
+                    context: {
+                      list: r.allPrivileges,
+                      label: 'All privileges',
+                      hint: 'Its own and those of every role it inherits from.',
+                    }
+                  "
+                />
+              }
+            </article>
+          }
+        </div>
+      }
+    } @else {
+      <p class="note" role="status">Loading roles…</p>
+    }
+  }
+</section>
+
+<!-- Direct roles on the rail, the roles held through them below, fainter. -->
+<ng-template #lineage let-direct="direct" let-inherited="inherited" let-label="label">
+  <h3 class="sub">{{ label }}</h3>
+  @if (direct.length === 0) {
+    <p class="none">None.</p>
+  } @else {
+    <ul class="rail" data-testid="direct-roles">
+      @for (ref of direct; track roleKey(ref)) {
+        <li class="node">
+          <ng-container *ngTemplateOutlet="roleChip; context: { $implicit: ref }" />
+        </li>
+      }
+    </ul>
+    @if (inherited.length > 0) {
+      <h4 class="sub minor">Held through them</h4>
+      <ul class="rail inherited" data-testid="inherited-roles">
+        @for (ref of inherited; track roleKey(ref)) {
+          <li class="node">
+            <ng-container *ngTemplateOutlet="roleChip; context: { $implicit: ref }" />
+          </li>
+        }
+      </ul>
+    }
+  }
+</ng-template>
+
+<ng-template #roleChip let-ref>
+  @if (isLocal(ref)) {
+    <button
+      type="button"
+      class="role link"
+      data-testid="role-link"
+      [title]="'Show the role ' + ref.role"
+      (click)="openRole(ref)"
+    >
+      {{ ref.role }}<span class="at">&#64;{{ ref.db }}</span>
+    </button>
+  } @else {
+    <span class="role" [title]="'Defined in ' + ref.db"
+      >{{ ref.role }}<span class="at">&#64;{{ ref.db }}</span></span
+    >
+  }
+</ng-template>
+
+<ng-template #privilegeTable let-list="list" let-label="label" let-hint="hint">
+  <h3 class="sub">{{ label }}</h3>
+  @if (list.length === 0) {
+    <p class="none">None.</p>
+  } @else {
+    <table class="privs" data-testid="privileges">
+      <caption class="hint">
+        {{
+          hint
+        }}
+      </caption>
+      <thead>
+        <tr>
+          <th scope="col">Resource</th>
+          <th scope="col">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (p of list; track p.resource) {
+          <tr>
+            <th scope="row" class="code res">{{ p.resource }}</th>
+            <td>
+              <ul class="actions-list">
+                @for (a of p.actions; track a) {
+                  <li class="action">{{ a }}</li>
+                }
+              </ul>
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  }
+</ng-template>

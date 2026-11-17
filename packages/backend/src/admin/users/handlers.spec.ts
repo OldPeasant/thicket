@@ -21,7 +21,13 @@ const defaultAnswer: Answer = (db, command) => {
   if ('buildInfo' in command) return { version: '8.2.0', ok: 1 };
   if ('usersInfo' in command) {
     if (command['usersInfo'] === 1) {
-      return { users: [{ user: 'zed', db }, { user: 'amy', db }], ok: 1 };
+      return {
+        users: [
+          { user: 'zed', db },
+          { user: 'amy', db },
+        ],
+        ok: 1,
+      };
     }
     return {
       users: [

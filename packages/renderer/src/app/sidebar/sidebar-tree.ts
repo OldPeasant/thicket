@@ -437,6 +437,11 @@ export class SidebarTree {
           run: () => void this.tree.loadDbStats(profileId, db),
         },
         {
+          id: 'users',
+          label: 'Users and roles',
+          run: () => this.tree.openUsers(profileId, db),
+        },
+        {
           id: 'create-coll',
           label: 'Create collection…',
           write: true,

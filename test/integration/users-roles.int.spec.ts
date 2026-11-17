@@ -57,10 +57,11 @@ beforeAll(async () => {
   });
   await db.command({
     createRole: 'orderClerk',
-    privileges: [
-      { resource: { db: DB, collection: 'orders' }, actions: ['insert', 'update'] },
+    privileges: [{ resource: { db: DB, collection: 'orders' }, actions: ['insert', 'update'] }],
+    roles: [
+      { role: 'orderReader', db: DB },
+      { role: 'read', db: DB },
     ],
-    roles: [{ role: 'orderReader', db: DB }, { role: 'read', db: DB }],
   });
   await db.command({
     createUser: 'alice',
@@ -71,7 +72,10 @@ beforeAll(async () => {
   await db.command({
     createUser: 'bob',
     pwd: randomBytes(12).toString('hex'),
-    roles: [{ role: 'orderReader', db: DB }, { role: 'read', db: OTHER_DB }],
+    roles: [
+      { role: 'orderReader', db: DB },
+      { role: 'read', db: OTHER_DB },
+    ],
   });
 
   manager = new ConnectionManager({
