@@ -228,4 +228,25 @@ describe('toRoleEntry', () => {
       privilegesSource: '[]',
     });
   });
+
+  it('privilegesSource keeps BSON types in shell syntax', () => {
+    const entry = toRoleEntry(
+      JSON.stringify({
+        role: 'clerk',
+        db: 'shop',
+        privileges: [
+          { resource: { cluster: true }, actions: ['serverStatus'], n: { $numberLong: '5' } },
+        ],
+      }),
+    );
+    expect(entry.privilegesSource).toContain('cluster: true');
+    expect(entry.privilegesSource).toContain('NumberLong(5)');
+  });
+
+  it('privilegesSource is [] when the privileges are not a list or not valid EJSON', () => {
+    const source = (privileges: unknown) =>
+      toRoleEntry(JSON.stringify({ role: 'clerk', db: 'shop', privileges })).privilegesSource;
+    expect(source('not a list')).toBe('[]');
+    expect(source([{ resource: { db: 'shop', collection: '' }, x: { $oid: 'zz' } }])).toBe('[]');
+  });
 });

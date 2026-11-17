@@ -596,5 +596,152 @@ describe('UsersRolesView', () => {
       expect(get('editor-error').textContent).toContain('already exists');
       expect(all('principal-editor')).toHaveLength(1);
     });
+
+    it('changing a user selects it after the save and reads both lists again', async () => {
+      fake.respond('admin.updateUser', {});
+      await create();
+      view.selectUser('bob');
+      await settle();
+      await click('edit');
+      expect(el().querySelector('[data-testid="principal-editor"] .title')?.textContent).toContain(
+        'Change user bob',
+      );
+      await type('editor-custom-data', '{ team: "ops" }');
+      await click('editor-save');
+      expect(sent('admin.updateUser')).toEqual([
+        { profileId: 'p1', db: 'shop', user: 'bob', customData: '{"team":"ops"}' },
+      ]);
+      expect(all('principal-editor')).toHaveLength(0);
+      expect(get('notice').textContent).toContain('User bob changed.');
+      expect(fake.requestsFor('admin.users')).toHaveLength(2);
+      expect(rolesParams()).toHaveLength(2);
+      expect(get('user-detail').querySelector('.title')?.textContent).toContain('bob');
+    });
+
+    it('Cancel closes the form; switching mode closes it too', async () => {
+      await create();
+      await click('create');
+      expect(get<HTMLButtonElement>('create').disabled).toBe(true);
+      await click('editor-cancel');
+      expect(all('principal-editor')).toHaveLength(0);
+      await click('create');
+      await click('mode-roles');
+      expect(all('principal-editor')).toHaveLength(0);
+      await click('create');
+      expect(el().querySelector('[data-testid="principal-editor"] .title')?.textContent).toContain(
+        'New role in shop',
+      );
+    });
+
+    it('built-in roles cannot be changed, dropped or granted to', async () => {
+      await create();
+      await click('mode-roles');
+      view.setBuiltin(true);
+      await settle();
+      view.selectRole('read');
+      await settle();
+      const detail = get('role-detail');
+      expect(detail.querySelector('[data-testid="edit"]')).toBeNull();
+      expect(detail.querySelector('[data-testid="drop"]')).toBeNull();
+      expect(detail.querySelector('[data-testid="grant"]')).toBeNull();
+      view.edit();
+      await view.drop();
+      await settle();
+      expect(all('principal-editor')).toHaveLength(0);
+      expect(fake.requestsFor('admin.dropRole')).toHaveLength(0);
+      expect(TestBed.inject(ConfirmService).current()).toBeNull();
+    });
+
+    it('grants to and revokes from the selected role with kind "role"', async () => {
+      fake.respond('admin.grantRoles', {});
+      fake.respond('admin.revokeRoles', {});
+      await create();
+      await click('mode-roles');
+      await type('role-input', 'readAnyDatabase@admin');
+      await click('role-add');
+      expect(sent('admin.grantRoles')).toEqual([
+        {
+          profileId: 'p1',
+          db: 'shop',
+          kind: 'role',
+          name: 'clerk',
+          roles: [{ role: 'readAnyDatabase', db: 'admin' }],
+        },
+      ]);
+      expect(get('notice').textContent).toContain('Granted readAnyDatabase@admin to clerk.');
+      (all('revoke')[0] as HTMLElement).click();
+      await settle();
+      expect(sent('admin.revokeRoles')[0]).toMatchObject({ kind: 'role', name: 'clerk' });
+      expect(get('notice').textContent).toContain('Revoked');
+    });
+
+    it('drops a role only after the confirm dialog, also on a non-production connection', async () => {
+      fake.respond('admin.dropRole', {});
+      await create();
+      await click('mode-roles');
+      const confirm = TestBed.inject(ConfirmService);
+      get('drop').click();
+      await settle();
+      expect(confirm.current()).toMatchObject({
+        operation: 'db.getSiblingDB("shop").dropRole("clerk")',
+        destructive: true,
+      });
+      expect(sent('admin.dropRole')).toEqual([]);
+      confirm.answer(true);
+      await settle();
+      expect(sent('admin.dropRole')).toEqual([
+        { profileId: 'p1', db: 'shop', role: 'clerk', confirmed: true },
+      ]);
+      expect(get('notice').textContent).toContain('Role clerk dropped.');
+      expect(rolesParams()).toHaveLength(2);
+    });
+
+    it('a cancelled drop sends nothing, shows nothing and reads nothing again', async () => {
+      await create();
+      const confirm = TestBed.inject(ConfirmService);
+      get('drop').click();
+      await settle();
+      confirm.answer(false);
+      await settle();
+      expect(fake.requestsFor('admin.dropUser')).toHaveLength(0);
+      expect(el().querySelector('[data-testid="notice"]')).toBeNull();
+      expect(fake.requestsFor('admin.users')).toHaveLength(1);
+      expect(view.busy()).toBe(false);
+    });
+
+    it('a failed grant shows the error as an alert and the buttons work again', async () => {
+      fake.fail('admin.grantRoles', {
+        code: 'SERVER_ERROR',
+        message: 'The server refused the command: Could not find role: nope@shop',
+      });
+      await create();
+      await type('role-input', 'nope');
+      await click('role-add');
+      const notice = get('notice');
+      expect(notice.getAttribute('role')).toBe('alert');
+      expect(notice.textContent).toContain('Could not find role: nope@shop');
+      expect(view.busy()).toBe(false);
+      expect(get<HTMLButtonElement>('drop').disabled).toBe(false);
+      expect(fake.requestsFor('admin.users')).toHaveLength(1);
+    });
+
+    it('a second change while one is pending is ignored', async () => {
+      let release!: () => void;
+      fake.handle(
+        'admin.revokeRoles',
+        () => new Promise((resolve) => (release = () => resolve({}))),
+      );
+      await create();
+      const first = view.revoke({ role: 'clerk', db: 'shop' });
+      await settle();
+      expect(view.busy()).toBe(true);
+      expect(get<HTMLButtonElement>('drop').disabled).toBe(true);
+      await view.revoke({ role: 'read', db: 'reports' });
+      expect(sent('admin.revokeRoles')).toHaveLength(1);
+      release();
+      await first;
+      await settle();
+      expect(view.busy()).toBe(false);
+    });
   });
 });

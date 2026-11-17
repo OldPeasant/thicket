@@ -444,6 +444,45 @@ describe('startBackend: connections', () => {
     },
   );
 
+  const role = [{ role: 'read', db: 'shop' }];
+  const userWrites: [string, Record<string, unknown>][] = [
+    ['admin.createUser', { db: 'shop', user: 'carl', password: 'fictitious-Pw', roles: role }],
+    ['admin.updateUser', { db: 'shop', user: 'carl', roles: role }],
+    ['admin.dropUser', { db: 'shop', user: 'carl' }],
+    ['admin.createRole', { db: 'shop', role: 'clerk', privileges: '[]', roles: role }],
+    ['admin.updateRole', { db: 'shop', role: 'clerk', roles: role }],
+    ['admin.dropRole', { db: 'shop', role: 'clerk' }],
+    ['admin.grantRoles', { db: 'shop', kind: 'user', name: 'carl', roles: role }],
+    ['admin.revokeRoles', { db: 'shop', kind: 'role', name: 'clerk', roles: role }],
+  ];
+
+  it.each(userWrites)(
+    '%s is served and guarded: READ_ONLY on a read-only profile, CONFIRMATION_REQUIRED on production',
+    async (method, params) => {
+      const parentPort: ParentPortLike = { on: () => undefined };
+      expect(Object.keys(startBackend({ parentPort, pid: 1 }))).toContain(method);
+      const m = withMain();
+      m.renderer.send({
+        id: 'ro',
+        method,
+        params: { profileId: 'ssh', confirmed: true, ...params },
+      });
+      m.renderer.send({ id: 'prod', method, params: { profileId: 'prod', ...params } });
+      // Allowed by the guard: reaches the handler, which finds no open connection.
+      m.renderer.send({
+        id: 'ok',
+        method,
+        params: { profileId: 'prod', confirmed: true, ...params },
+      });
+      expect(await m.answer('ro')).toMatchObject({ ok: false, error: { code: 'READ_ONLY' } });
+      expect(await m.answer('prod')).toMatchObject({
+        ok: false,
+        error: { code: 'CONFIRMATION_REQUIRED' },
+      });
+      expect(await m.answer('ok')).toMatchObject({ ok: false, error: { code: 'NOT_CONNECTED' } });
+    },
+  );
+
   it('docs.previewMany is served and not guarded on a read-only profile (a read)', async () => {
     const parentPort: ParentPortLike = { on: () => undefined };
     expect(Object.keys(startBackend({ parentPort, pid: 1 }))).toContain('docs.previewMany');
