@@ -4,7 +4,8 @@ import type { ErrorInfo, Request } from '@thicket/contract';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
-import { CollectionResults } from './collection-results.service';
+import { NestedPageSizeService } from '../explorer/services/nested-page-size.service';
+import { CollectionResults, LARGE_DOC_BYTES } from './collection-results.service';
 import { EMPTY_QUERY, type ParsedQuery, parseQuery, type QueryText } from './query.util';
 
 /** `n` documents `{_id: Int32(i), name: "doc i"}` as canonical EJSON, starting at `from`. */
@@ -1264,6 +1265,103 @@ describe('CollectionResults', () => {
       results.patchDocument(3, null);
       results.patchDocument(-1, null);
       expect(results.page()).toBe(before);
+    });
+  });
+
+  describe('large documents (slice)', () => {
+    const items = (total: number) => [{ path: 'items', total, loaded: 100 }];
+
+    it('asks docs.find to cut large arrays at the nested page size and 1 MiB', async () => {
+      results.run(query({}));
+      await flush();
+      expect(lastFind()['slice']).toEqual({ above: 100, docBytes: LARGE_DOC_BYTES });
+      expect(LARGE_DOC_BYTES).toBe(1024 * 1024);
+    });
+
+    it('follows the nested page size setting', async () => {
+      TestBed.inject(NestedPageSizeService).size.set(250);
+      results.run(query({}));
+      await flush();
+      expect(lastFind()['slice']).toEqual({ above: 250, docBytes: LARGE_DOC_BYTES });
+    });
+
+    it('collects the cut arrays of every batch at the index of the page', async () => {
+      results.run(query({}));
+      await flush();
+      const n = finds().length;
+      fake.data('docs.find', sid(n), {
+        docs: docs(1, 3),
+        sliced: [{ index: 1, arrays: items(5000) }],
+      });
+      fake.data('docs.find', sid(n), {
+        docs: docs(4, 3),
+        sliced: [
+          { index: 0, arrays: items(700) },
+          { index: 2, arrays: items(300) },
+        ],
+      });
+      fake.data('docs.find', sid(n), { docs: docs(7, 2) });
+      fake.end(sid(n), { delivered: 8 });
+      await flush();
+      const page = results.page();
+      expect(page?.docs).toHaveLength(8);
+      expect(page?.sliced).toHaveLength(8);
+      expect(page?.sliced).toEqual([
+        undefined,
+        items(5000),
+        undefined,
+        items(700),
+        undefined,
+        items(300),
+        undefined,
+        undefined,
+      ]);
+    });
+
+    it('a page without cut arrays has no sliced list', async () => {
+      await runAndLoad(query({}), docs(1, 3));
+      expect(results.page()).not.toHaveProperty('sliced');
+    });
+
+    it('a superseded read does not leak its cut arrays into the newer page', async () => {
+      await runAndLoad(query({}));
+      results.jump(5);
+      await flush();
+      results.jump(7);
+      await flush();
+      fake.data('docs.find', sid(2), {
+        docs: docs(201, 2),
+        sliced: [{ index: 0, arrays: items(900) }],
+      });
+      await answer(3, docs(301, 2));
+      expect(results.page()?.docs[0]).toBe(docs(301, 1)[0]);
+      expect(results.page()).not.toHaveProperty('sliced');
+    });
+
+    it('patchDocument loads a saved document whole and keeps the others cut', async () => {
+      results.run(query({}));
+      await flush();
+      const n = finds().length;
+      fake.data('docs.find', sid(n), {
+        docs: docs(1, 3),
+        sliced: [
+          { index: 0, arrays: items(5000) },
+          { index: 2, arrays: items(800) },
+        ],
+      });
+      fake.end(sid(n), { delivered: 3 });
+      await flush();
+
+      results.patchDocument(0, '{"_id":{"$numberInt":"1"},"name":"saved"}');
+      expect(results.page()?.sliced).toEqual([undefined, undefined, items(800)]);
+
+      // A deleted document takes its entry along: the others keep their index.
+      results.patchDocument(1, null);
+      expect(results.page()?.docs).toEqual([
+        '{"_id":{"$numberInt":"1"},"name":"saved"}',
+        docs(3, 1)[0],
+      ]);
+      expect(results.page()?.sliced).toEqual([undefined, items(800)]);
     });
   });
 });

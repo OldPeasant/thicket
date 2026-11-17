@@ -161,6 +161,23 @@ describe('Paging inside a document', () => {
     expect(names()[0]).toBe('v200');
   });
 
+  it('adding a key to a paged object shows the page it landed on', async () => {
+    const big = Object.fromEntries(Array.from({ length: 250 }, (_, i) => [`k${i}`, `v${i}`]));
+    fixture.componentInstance.doc.set({ _id: 1, big });
+    await settle();
+    expect(range()).toBe('1–100 of 250 fields');
+    // The first key field is `big`'s (nested inside the root's rows); the root's comes last.
+    const input = el().querySelector<HTMLInputElement>('input.add-input');
+    if (!input) throw new Error('no key field');
+    input.value = 'added';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    await settle();
+    const doc = fixture.componentInstance.doc() as { big: Record<string, string> };
+    expect(Object.keys(doc.big)).toHaveLength(251);
+    expect(doc.big['added']).toBe('');
+    expect(range()).toBe('201–251 of 251 fields');
+  });
+
   it('adding an item to a paged array shows the page it landed on', async () => {
     const add = [...el().querySelectorAll<HTMLButtonElement>('button')].find(
       (b) => b.title === 'Add item' || b.title === 'Add row',
@@ -170,6 +187,65 @@ describe('Paging inside a document', () => {
     await settle();
     expect(docItems()).toHaveLength(2001);
     expect(range()).toBe('2,001–2,001 of 2,001 items');
+  });
+});
+
+// The same explorer in the form layout (one field per line).
+@Component({
+  standalone: true,
+  imports: [JsonExplorerComponent],
+  template: `<app-json-explorer [value]="doc()" layout="form" (valueChange)="doc.set($event)" />`,
+})
+class FormHost {
+  readonly doc = signal<unknown>({
+    _id: 1,
+    big: Object.fromEntries(Array.from({ length: 250 }, (_, i) => [`k${i}`, `v${i}`])),
+  });
+}
+
+describe('Paging an object in the form layout', () => {
+  let fixture: ComponentFixture<FormHost>;
+  const el = () => fixture.nativeElement as HTMLElement;
+  const settle = async () => {
+    for (let i = 0; i < 3; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await fixture.whenStable();
+    }
+  };
+  const range = () => el().querySelector('[data-testid="nested-pager-range"]')?.textContent?.trim();
+
+  beforeEach(async () => {
+    TestBed.configureTestingModule({
+      imports: [FormHost],
+      providers: [provideZonelessChangeDetection()],
+    });
+    TestBed.inject(EditModeService).toggle();
+    fixture = TestBed.createComponent(FormHost);
+    await settle();
+  });
+
+  it('pages the fields of a large object and goes to another page', async () => {
+    expect(el().querySelector('app-json-form')).not.toBeNull();
+    expect(el().querySelectorAll('[data-testid="nested-pager"]')).toHaveLength(1);
+    expect(range()).toBe('1–100 of 250 fields');
+    el().querySelector<HTMLButtonElement>('[data-testid="nested-pager-last"]')?.click();
+    await settle();
+    expect(range()).toBe('201–250 of 250 fields');
+    expect(el().textContent).toContain('k249');
+    expect(el().textContent).not.toContain('k199');
+  });
+
+  it('adding a field to the large object shows the page it landed on', async () => {
+    // The key field of `big` comes before the root object's (after all of its fields).
+    const input = el().querySelector<HTMLInputElement>('input.add-input');
+    if (!input) throw new Error('no key field');
+    input.value = 'added';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    await settle();
+    const doc = fixture.componentInstance.doc() as { big: Record<string, string> };
+    expect(Object.keys(doc)).toEqual(['_id', 'big']);
+    expect(Object.keys(doc.big)).toHaveLength(251);
+    expect(range()).toBe('201–251 of 251 fields');
   });
 });
 

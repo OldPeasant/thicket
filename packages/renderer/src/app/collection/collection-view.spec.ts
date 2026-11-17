@@ -4,6 +4,7 @@ import type { Request } from '@thicket/contract';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
+import { DocumentEdits } from '../document';
 import type { WorkspaceTab } from '../layout/workspace.service';
 import { ProfileSafetyService } from '../safety/profile-safety.service';
 import { CollectionView } from './collection-view';
@@ -855,5 +856,117 @@ describe('CollectionView', () => {
     expect(q('import-status')?.getAttribute('data-phase')).toBe('error');
     expect(finds()).toHaveLength(2);
     expect(lastFind()).toMatchObject({ coll: 'orders' });
+  });
+
+  describe('a large document with a cut array', () => {
+    const sku = (i: number) => `SKU-${String(i).padStart(6, '0')}`;
+    const skus = (from: number, n: number) => Array.from({ length: n }, (_, i) => sku(from + i));
+    /** `{_id: Int32(1), name, items: [first 100 skus]}`, as `docs.find` sends it cut. */
+    const bigDoc = JSON.stringify({
+      _id: { $numberInt: '1' },
+      name: 'large order (fictitious)',
+      items: skus(0, 100),
+    });
+    const smallDoc = docs(2, 1)[0] ?? '';
+    let slices: Record<string, unknown>[];
+
+    /** Every text shown in the explorer that is one of the skus. */
+    const shownSkus = () =>
+      [...el().querySelectorAll('app-json-explorer .val')]
+        .map((v) => /SKU-\d{6}/.exec(v.textContent ?? '')?.[0])
+        .filter((t): t is string => t !== undefined);
+    const pagerButton = (id: string) =>
+      el().querySelector<HTMLButtonElement>(`[data-testid="nested-pager"] [data-testid="${id}"]`);
+
+    beforeEach(async () => {
+      slices = [];
+      fake.handle('docs.getSlice', (params) => {
+        const p = params as unknown as Record<string, unknown>;
+        slices.push(p);
+        const skip = p['skip'] as number;
+        const limit = p['limit'] as number;
+        return { items: JSON.stringify(skus(skip, limit)), total: 50_000 };
+      });
+      fake.handle('docs.find', () => {
+        const id = `s${++streams}`;
+        setTimeout(() => {
+          fake.data('docs.find', id, {
+            docs: [bigDoc, smallDoc],
+            sliced: [{ index: 0, arrays: [{ path: 'items', total: 50_000, loaded: 100 }] }],
+          });
+          fake.end(id, { delivered: 2 });
+        });
+        return { streamId: id };
+      });
+      type('query-filter', '{ big: true }');
+      click('query-run');
+      await settle();
+    });
+
+    it('asks docs.find for cut arrays and shows the cut one with a pager over its whole length', () => {
+      expect(lastFind()['slice']).toEqual({ above: 100, docBytes: 1024 * 1024 });
+      expect(
+        el().querySelector('[data-testid="nested-pager"] [data-testid="nested-pager-range"]')
+          ?.textContent,
+      ).toContain('1–100 of 50,000');
+      expect(shownSkus()[0]).toBe(sku(0));
+      expect(slices).toEqual([]);
+    });
+
+    it('reads another page of the array with docs.getSlice by _id and path', async () => {
+      pagerButton('nested-pager-next')?.click();
+      await settle();
+      expect(slices).toEqual([
+        {
+          profileId: 'p1',
+          db: 'shop',
+          coll: 'orders',
+          id: '{"$numberInt":"1"}',
+          path: 'items',
+          skip: 100,
+          limit: 100,
+        },
+      ]);
+      expect(shownSkus()[0]).toBe(sku(100));
+      pagerButton('nested-pager-last')?.click();
+      await settle();
+      expect(slices.at(-1)).toMatchObject({ skip: 49_900, limit: 100 });
+      expect(shownSkus().at(-1)).toBe(sku(49_999));
+    });
+
+    it('marks an edit of the large document partial, and leaves the cut array out of the update', async () => {
+      el().querySelector<HTMLButtonElement>('.mode-toggle')?.click();
+      await settle();
+      const name = [...el().querySelectorAll<HTMLInputElement>('input.val-input.str')].find(
+        (i) => i.value === 'large order (fictitious)',
+      );
+      if (!name) throw new Error('name of the large document not editable');
+      name.value = 'renamed order';
+      name.dispatchEvent(new Event('blur'));
+      await settle();
+
+      const edits = fixture.debugElement.injector.get(DocumentEdits);
+      const entry = edits.get('{"$numberInt":"1"}');
+      expect(entry?.partial).toBe(true);
+      const pending = edits.pending().get('{"$numberInt":"1"}');
+      expect(pending?.ok).toBe(true);
+      // Only `name` changes: the 100 loaded items must never replace the 50 000 on the server.
+      expect(JSON.stringify(pending)).toContain('renamed order');
+      expect(JSON.stringify(pending)).not.toContain('items');
+    });
+
+    it('does not mark the small document of the same page partial', async () => {
+      el().querySelector<HTMLButtonElement>('.mode-toggle')?.click();
+      await settle();
+      const name = [...el().querySelectorAll<HTMLInputElement>('input.val-input.str')].find(
+        (i) => i.value === 'doc 2',
+      );
+      if (!name) throw new Error('name of the small document not editable');
+      name.value = 'doc 2 renamed';
+      name.dispatchEvent(new Event('blur'));
+      await settle();
+      const edits = fixture.debugElement.injector.get(DocumentEdits);
+      expect(edits.get('{"$numberInt":"2"}')?.partial).toBe(false);
+    });
   });
 });

@@ -1,4 +1,4 @@
-import type { ParsedParamsOf } from '@thicket/contract';
+import type { DocsBatch, ParsedParamsOf } from '@thicket/contract';
 import { andFilter, rangeQuery } from '@thicket/core';
 import { BSON, MongoServerError, type Document, type RunCommandOptions } from 'mongodb';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -52,6 +52,31 @@ describe('sliceLargeArrays (docs.find slice)', () => {
     expect(cut.doc['1']).toHaveLength(200);
     expect(cut.doc['a']).toHaveLength(200);
     expect(cut.doc['b']).toHaveLength(200);
+  });
+
+  it('cuts only arrays longer than a page, and leaves an unchanged document as is', () => {
+    const doc = { _id: 1, exactly: big(100), longer: big(101), note: 'x'.repeat(5000) };
+    const cut = sliceLargeArrays(doc, 100, 1000);
+    expect(cut.arrays.map((s) => s.path)).toEqual(['longer']);
+    expect(cut.doc['exactly']).toBe(doc.exactly);
+
+    const none = { _id: 1, small: big(5), note: 'x'.repeat(5000) };
+    expect(sliceLargeArrays(none, 100, 1000).doc).toBe(none);
+  });
+
+  it('skips field names docs.getSlice can not address ($-prefixed, dotted)', () => {
+    const doc = { _id: 1, $weird: big(200), 'a.b': big(200), ok: big(200) };
+    const cut = sliceLargeArrays(doc, 100, 1000);
+    expect(cut.arrays.map((s) => s.path)).toEqual(['ok']);
+    expect(cut.doc['$weird']).toHaveLength(200);
+    expect(cut.doc['a.b']).toHaveLength(200);
+  });
+
+  it('with an exclusion projection, cuts arrays it does not mention', () => {
+    const doc = { _id: 1, items: big(200), other: big(200) };
+    const cut = sliceLargeArrays(doc, 100, 1000, { secret: 0, 'other.pad': 0 });
+    expect(cut.arrays.map((s) => s.path)).toEqual(['items']);
+    expect(cut.doc['other']).toHaveLength(200);
   });
 });
 
@@ -543,6 +568,91 @@ describe('streamFind', () => {
     expect((await rejection(streamFind(client, findParams(), () => undefined))).code).toBe(
       'NOT_FOUND',
     );
+  });
+});
+
+describe('streamFind with slice (large documents)', () => {
+  /** A document `_id: i` with `n` items, large enough for the 1 000-byte threshold below. */
+  const large = (i: number, n = 150) => ({
+    _id: new BSON.Int32(i),
+    items: Array.from({ length: n }, (_, k) => new BSON.Int32(k)),
+  });
+  const small = (i: number) => ({ _id: new BSON.Int32(i), items: [new BSON.Int32(1)] });
+  const slice = { above: 100, docBytes: 1000 };
+  const itemsOf = (text: string) =>
+    (BSON.EJSON.parse(text, { relaxed: true }) as { items: unknown[] }).items;
+
+  it('cuts large documents and lists them per batch, by index into that batch', async () => {
+    const client = fakeClient((_db, command) => {
+      if ('find' in command) return cursorReply(7, [small(1), large(2), small(3)]);
+      return cursorReply(0, [large(4, 300), small(5)], false);
+    });
+    const batches: DocsBatch[] = [];
+    const delivered = await streamFind(
+      client,
+      findParams({ batchSize: 2, slice }),
+      (b) => void batches.push(b),
+    );
+    expect(delivered).toBe(5);
+    expect(idsOfBatches(batches)).toEqual([[1, 2], [3], [4, 5]]);
+    expect(batches[0]?.sliced).toEqual([
+      { index: 1, arrays: [{ path: 'items', total: 150, loaded: 100 }] },
+    ]);
+    expect(batches[1]).not.toHaveProperty('sliced');
+    expect(batches[2]?.sliced).toEqual([
+      { index: 0, arrays: [{ path: 'items', total: 300, loaded: 100 }] },
+    ]);
+    expect(itemsOf(batches[0]?.docs[1] ?? '{}')).toHaveLength(100);
+    expect(itemsOf(batches[0]?.docs[0] ?? '{}')).toHaveLength(1);
+    // The slice is the renderer's business: it never goes to the server.
+    expect(client.sent[0]?.command).not.toHaveProperty('slice');
+  });
+
+  it('indexes the documents of a page read from the end in display order', async () => {
+    const client = fakeClient(() => cursorReply(0, [large(3), small(2), small(1)]));
+    const batches: DocsBatch[] = [];
+    await streamFind(
+      client,
+      findParams({ fromEnd: true, limit: 3, slice }),
+      (b) => void batches.push(b),
+    );
+    expect(idsOfBatches(batches)).toEqual([[1, 2, 3]]);
+    expect(batches[0]?.sliced).toEqual([
+      { index: 2, arrays: [{ path: 'items', total: 150, loaded: 100 }] },
+    ]);
+  });
+
+  it('sends documents whole without slice, however large', async () => {
+    const client = fakeClient(() => cursorReply(0, [large(1, 5000)]));
+    const batches: DocsBatch[] = [];
+    await streamFind(client, findParams(), (b) => void batches.push(b));
+    expect(batches[0]).not.toHaveProperty('sliced');
+    expect(itemsOf(batches[0]?.docs[0] ?? '{}')).toHaveLength(5000);
+  });
+
+  it('keeps an array the projection returns only partly', async () => {
+    const client = fakeClient(() => cursorReply(0, [large(1)]));
+    const batches: DocsBatch[] = [];
+    await streamFind(
+      client,
+      findParams({ projection: '{"items":{"$slice":120}}', slice }),
+      (b) => void batches.push(b),
+    );
+    expect(batches[0]).not.toHaveProperty('sliced');
+    expect(itemsOf(batches[0]?.docs[0] ?? '{}')).toHaveLength(150);
+  });
+
+  it('cuts an array the projection includes whole', async () => {
+    const client = fakeClient(() => cursorReply(0, [large(1)]));
+    const batches: DocsBatch[] = [];
+    await streamFind(
+      client,
+      findParams({ projection: '{"items":{"$numberInt":"1"}}', slice }),
+      (b) => void batches.push(b),
+    );
+    expect(batches[0]?.sliced).toEqual([
+      { index: 0, arrays: [{ path: 'items', total: 150, loaded: 100 }] },
+    ]);
   });
 });
 
