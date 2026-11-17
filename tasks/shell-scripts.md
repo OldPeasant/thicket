@@ -11,7 +11,8 @@ lease_until: 2026-11-17T06:03:01Z
 Choose a .js/.mongodb file and run it in the current shell with progress and output.
 
 ## Acceptance criteria
-- [ ] e2e: run a fixture script that inserts 3 docs; output shown, docs present
+- [x] e2e: run a fixture script that inserts 3 docs; output shown, docs present
+  - verified (2026-11-17 06:45+0100 by dell26/agent-3): npm run test:e2e -- test/e2e/shell.e2e.ts (built Electron app, Testcontainers MongoDB; test 'run a script file in the shell' picks test/e2e/fixtures/insert-three.mongodb via the Run script… file chooser) -> 3 passed; transcript shows 'inserted 1..3', 'count: 3', no errors; MongoClient finds the 3 docs in shell_scripts_e2e.scripted
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
