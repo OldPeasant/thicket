@@ -13,7 +13,8 @@ Export a query result as JSON array or JSON Lines (EJSON relaxed or canonical) s
 ## Acceptance criteria
 - [x] Integration test: export 10 000 docs and import into a new collection gives identical documents (canonical)
   - verified (2026-11-17 01:42+0100 by felix/agent-1): npm run test:int -- io.int (MongoDB container via Podman, HEAD 85deb3b) -> 10/10 passed; 'exports 10 000 documents as jsonl/json (canonical) and imports them unchanged' compares all 10 000 canonical docs of source and new collection: equal
-- [ ] Import with a bad line: continue mode reports the line number and imports the rest (int test)
+- [x] Import with a bad line: continue mode reports the line number and imports the rest (int test)
+  - verified (2026-11-17 01:42+0100 by felix/agent-1): npm run test:int -- io.int (Podman, HEAD 85deb3b) -> 10/10 passed; 'continue mode reports the bad lines and imports the rest (JSON Lines)' and '... in a JSON array reports the line of the bad element' pass: errors carry the bad line numbers, the other docs are inserted
 - [ ] Memory stays bounded: export streams (test with 200 000 small docs checks no full buffering)
 
 ## Notes
