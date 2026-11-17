@@ -4,10 +4,12 @@ Date: 2026-11-17
 
 Task: index-backend - M3: Index management backend
 
-Scope: committed task changes `git diff 71c78ae..1a57567` (commits 1805029, 1a57567). The branch was
-later rebased to HEAD 27c0d2f (task commits e5c306d, 27c0d2f); `git diff 1a57567 27c0d2f` differs
-only in `tasks/index-backend.md` (three assumption lines), so the reviewed code is identical at
-27c0d2f. Uncommitted files (test-writer work in progress) are not reviewed.
+Scope: final task code, `git diff 5ae4d005cf68ba0021d0a2f0aee39399dce638f4..782ea95430abf6dc996f877ee92de2f2001a2767`
+excluding `tasks/` and `reviews/`. Reviewed revision 782ea95430abf6dc996f877ee92de2f2001a2767.
+This is a re-review: since the first review (findings CR-1 P2 missing unit tests, CR-2 P3 duplicated
+`isUnauthorized`), the test-writer added `packages/backend/src/indexes/indexes.spec.ts` and
+`handlers.spec.ts`, and `docs/ARCHITECTURE.md` gained an "Indexes" bullet. No production code changed
+since the first review. Working tree clean; no uncommitted changes reviewed.
 
 Requirements:
 - `tasks/index-backend.md` acceptance criteria and recorded assumptions
@@ -18,49 +20,70 @@ Requirements:
 
 Git range:
 - Branch: main
-- HEAD: 27c0d2f3e10bd551c7a43101efb4940dfda037f1
-- Base/start: 71c78ae8c9e4c27b8027ea70543d78bda7d7e011
-- Commits reviewed: 2 (1805029, 1a57567; rebased as e5c306d, 27c0d2f)
+- HEAD: 782ea95430abf6dc996f877ee92de2f2001a2767
+- Base/start: 5ae4d005cf68ba0021d0a2f0aee39399dce638f4 (`git merge-base HEAD origin/main`)
+- Commits reviewed: 5 (af1f624, 4521edb, b959cf5, 3894a9a, 782ea95; b959cf5 touches only `reviews/`)
 
-Summary: 0 P0, 0 P1, 1 P2, 1 P3
+Summary: 0 P0, 0 P1, 0 P2, 1 P3
 
 ## Commands run
 
+- `cd packages/backend && npx vitest run src/indexes` -> 2 files, 76 tests passed.
 - `npx vitest run --config test/integration/vitest.config.ts test/integration/indexes.int.spec.ts`
-  (Podman, 8.x replica set fixture plus an auth-enabled 8.x fixture) -> 1 file, 26 passed.
-- `npm run check` -> ran to completion; the final (renderer) step reported 72 files, 2154 tests
-  passed. Only the tail of the output was inspected.
+  (container fixtures) -> 1 file, 26 tests passed.
+- `npx eslint --max-warnings 0 packages/backend/src/indexes` -> clean.
+- `npx prettier --check packages/backend/src/indexes docs/ARCHITECTURE.md` -> all files formatted.
+- `cd packages/backend && npm run typecheck` (`tsc -p tsconfig.json`) -> no errors.
 
 ## Acceptance criteria
 
-1. Integration tests for each index option and hide/unhide: met. `indexes.int.spec.ts` creates
-   compound (mixed directions, default name), unique (custom name, enforcement checked), sparse,
-   partial filter, TTL, collation, hidden-at-creation, text (weights, default_language, `$text` use),
-   2dsphere (`$near` use) and wildcard (with `wildcardProjection`) indexes through the served,
-   contract-validated, guarded handlers and checks the server's `listIndexes` entry and `idx.list`.
-   Hide/unhide is checked on the server spec, in `idx.list` and in the query plan
-   (COLLSCAN while hidden, IXSCAN after unhide).
-2. Read-only refuses create/drop (int test): met. `idx.create`, `idx.drop` and `idx.hide` answer
-   `READ_ONLY` on a read-only profile with and without `confirmed: true`, and the server's indexes
-   are unchanged. The production profile requires `confirmed: true`.
+1. Integration tests for each index option and for hide/unhide: met. `test/integration/indexes.int.spec.ts`
+   creates compound, unique, sparse, partial, TTL, collation, hidden, text, 2dsphere and wildcard
+   indexes through the served, contract-validated, guarded handlers and checks the server's
+   `listIndexes` entry and `idx.list`; hide/unhide is checked on the spec, in `idx.list` and in the
+   query plan. Observed passing (26/26).
+2. Read-only refuses create/drop (int test): met. `idx.create`, `idx.drop`, `idx.hide` answer
+   `READ_ONLY` on a read-only profile with and without `confirmed: true`, and the indexes are
+   unchanged; the production profile needs `confirmed: true`. Observed passing.
+
+## Status of earlier findings
+
+- CR-1 (P2, missing unit tests for `indexes.ts`, sharded aggregation unverified): resolved.
+  `indexes.spec.ts` drives `indexStatistics` with a fake `ClientLike` answering two shard documents
+  for `$collStats` and `$indexStats` and asserts summed sizes/accesses and the earliest `since` in
+  both orders (`indexes.spec.ts:325`), multi-batch shards via getMore (`:347`), zero/negative/NaN/
+  non-numeric sizes (`:362`), indexes only in `$indexStats` (`:379`), the `Unauthorized` fallback by
+  code, code name and Int32 code (`:443-488`), and rethrow of other errors (`:490`). `toIndexInfo`,
+  `defaultIndexName`, `createIndex` option validation, `dropIndex` `*` refusal and `hideIndex` are
+  also covered. I checked each expectation against `indexes.ts`; they assert observable results and
+  sent commands rather than internals, and they would fail on the regressions CR-1 named (e.g.
+  overwriting instead of summing).
+- CR-2 (P3, duplicated `isUnauthorized`): still present; carried forward as CR-1 below.
+
+## Review of the new tests and doc (no finding)
+
+- `handlers.spec.ts` uses a real `ConnectionManager` over a fake client, as `browse/handlers.spec.ts`
+  does. It checks the exact handler set, `NOT_CONNECTED` without sending, routing of db/coll/params,
+  cancellable reads and non-cancellable writes. The "write with an already aborted signal still
+  sends" case matches the established `browse/handlers.spec.ts:225` behavior for guarded writes.
+- No test was weakened, skipped or deleted; the only pre-existing spec touched
+  (`server/backend.spec.ts`) gains one assertion that `startBackend` serves the `idx.*` handlers.
+- `docs/ARCHITECTURE.md:285-290` matches the code: `listIndexes` in server order, `$collStats`
+  `indexSizes` plus `$indexStats`, shard summing with earliest `since`, sizes only without the
+  `indexStats` privilege, driver default name returned, `*` refused with `INVALID_PARAMS`, `collMod`
+  `index.hidden`, writes behind the guard, int test path correct.
+- Fixtures use `example.test` hosts and no credentials.
 
 ## Other checks (no finding)
 
-- Guard integration: the three writes are `write: 'always'` in the contract and listed in
-  `EXPECTED_WRITES`; `startBackend` adds `indexHandlers` inside `guardWrites`
-  (`packages/backend/src/server/backend.ts:54-70`).
-- Error mapping: server errors go through `toBrowseError` (`NamespaceNotFound` -> `NOT_FOUND`,
-  other server refusals -> `SERVER_ERROR`, messages redacted); a missing collection in `idx.stats`
-  (empty `$collStats`) is `NOT_FOUND`. Only `Unauthorized` on `$indexStats` is swallowed; other
-  errors are rethrown.
-- Contract: `IndexInfo.expireAfterSeconds` is truncated to a non-negative integer and NaN/negative
-  values are dropped; `accesses` is a non-negative integer; `since` is ISO. Results are validated
-  by `serve` in the integration tests.
-- Safety: `idx.drop` refuses `*` (recorded assumption); reads are cancellable via `abortable` and
-  `killCursors`, writes run to completion, consistent with the other handler modules.
-- Sharded handling: per-shard `$collStats` sizes and `$indexStats` ops are summed and the earliest
-  `since` kept (recorded assumption). Logic reads correctly; see CR-1 for the missing test.
-- No secrets or credentials in the diff; test passwords are generated with `randomBytes`.
+- Guard integration: the three writes are `write: 'always'` in the contract; `startBackend` spreads
+  `indexHandlers(connections)` among the guarded handlers (`packages/backend/src/server/backend.ts:93`).
+- Error mapping through `runCommand`/`runCursor` (`toBrowseError`); empty `$collStats` is `NOT_FOUND`;
+  only `Unauthorized` on `$indexStats` is swallowed.
+- Contract conformance: `expireAfterSeconds` non-negative integer, `accesses` non-negative integer,
+  `sizeBytes` non-negative, `since` ISO; results are parsed by the contract schemas in the unit tests.
+- The `browse.ts` change only exports existing `run` (as `runCommand`) and `runCursor`; no behavior change.
+- No secrets or credentials in the diff.
 
 ## P0 Critical
 
@@ -72,42 +95,23 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | No unit tests for `indexes.ts`; sharded aggregation in `idx.stats` is unverified**
-    - File: `packages/backend/src/indexes/indexes.ts:71`
-    - Category: Tests
-    - Problem: The task adds no `indexes.spec.ts` or `handlers.spec.ts`, unlike every sibling module
-      (`browse/`, `agg/`, `docs/` each have `*.spec.ts` next to the code, as
-      `docs/ARCHITECTURE.md:587` asks). The integration tests run only against a single replica set,
-      so the multi-document paths of `indexStatistics` (summing `indexSizes` and `accesses.ops`
-      over several `$collStats`/`$indexStats` documents, keeping the earliest `since`, ignoring
-      non-finite or non-positive sizes, creating entries for indexes present only in `$indexStats`)
-      never execute with more than one document. `toIndexInfo` edge cases (NaN/negative/Long TTL,
-      non-object partial filter), `defaultIndexName` with Int32/Double/string values, the
-      `options.name` validation, and the rethrow of non-`Unauthorized` `$indexStats` errors are
-      also untested at unit level.
-    - Why it matters: Sharded clusters are the only place the summing logic matters, there is no
-      sharded fixture, and a regression there (e.g. overwriting instead of summing) would pass the
-      current suite. The `npm run check` gate exercises none of this module.
-    - Suggested fix: Add `packages/backend/src/indexes/indexes.spec.ts` with a fake `ClientLike`
-      answering two shard documents for `$collStats` and `$indexStats` (different `since` values,
-      Long ops, a zero/NaN size), an `Unauthorized` and a non-`Unauthorized` `$indexStats` failure,
-      and `toIndexInfo`/`defaultIndexName`/`createIndex` option-validation cases.
+None.
 
 ## P3 Low
 
-- [ ] **CR-2 | Third copy of `UNAUTHORIZED`/`isUnauthorized`**
+- [ ] **CR-1 | Third copy of `UNAUTHORIZED`/`isUnauthorized`**
     - File: `packages/backend/src/indexes/indexes.ts:17`, `packages/backend/src/indexes/indexes.ts:58`
     - Category: Quality
     - Problem: `UNAUTHORIZED = 13` and `isUnauthorized` (reading `RpcError.detail.serverCode` /
-      `codeName`) are a verbatim copy of `packages/backend/src/docs/query/query.ts:38` and `:91`;
-      `browse.ts:49`/`:103` holds a third variant for raw driver errors.
-    - Why it matters: The "is this a privilege refusal" rule now lives in three places; a change
-      (e.g. also treating code 18 or a new code name) must be made in each.
-    - Suggested fix: Export one helper next to `toBrowseError` in `browse.ts` (which already
-      exports `runCommand`/`runCursor` for this module) and use it from `query.ts` and `indexes.ts`.
+      `codeName`) duplicate `packages/backend/src/docs/query/query.ts` (same constant and helper);
+      `browse.ts` holds a further variant for raw driver errors.
+    - Why it matters: The rule for recognising a privilege refusal lives in several places; a change
+      (another code or code name) must be repeated in each.
+    - Suggested fix: Export one helper next to `toBrowseError` in `browse.ts` (which already exports
+      `runCommand`/`runCursor` to this module) and use it from `query.ts` and `indexes.ts`. Optional.
 
 ## Review conclusion
 
 No material issues found. Both acceptance criteria are met and were observed passing in the
-integration suite. CR-1 is a non-blocking test gap that is worth closing (the test-writer can add
-the unit spec); CR-2 is optional cleanup.
+integration suite; the earlier P2 test gap is resolved by the new unit tests (76 passing). The only
+remaining item is an optional P3 cleanup.
