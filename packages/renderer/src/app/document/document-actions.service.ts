@@ -1,5 +1,5 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
-import { type ConflictDetail, conflictDetail } from '@thicket/contract';
+import { type ConflictDetail, conflictDetail, type SlicedArray } from '@thicket/contract';
 import {
   type BsonDocument,
   type BsonField,
@@ -24,10 +24,17 @@ export interface DocumentHost {
   /** The query's projection (canonical EJSON), used to read a saved document back. */
   projection(): string | undefined;
   /**
-   * A document changed on the server: `doc` is its new version as canonical EJSON (`null` when
-   * deleted, or when it could not be read back). The view updates the shown page.
+   * The shown document `key` is a large document whose long arrays came cut (`arrays`, cut to
+   * `above` items each); `undefined` for a document loaded whole. A saved large document is read
+   * back cut the same way.
    */
-  documentChanged(key: string, doc: string | null): void;
+  slicedOf?(key: string): { above: number; arrays: readonly SlicedArray[] } | undefined;
+  /**
+   * A document changed on the server: `doc` is its new version as canonical EJSON (`null` when
+   * deleted, or when it could not be read back). `sliced`: the arrays `doc` has only partly
+   * (`undefined`: it is whole). The view updates the shown page.
+   */
+  documentChanged(key: string, doc: string | null, sliced?: readonly SlicedArray[]): void;
 }
 
 /** A new document that is not inserted yet (Insert document, Clone). */
@@ -115,7 +122,10 @@ export class DocumentActions {
     const diff = pending.diff;
     const partial = entry.partial || host.projection() !== undefined;
     if (partial && overwritesHiddenData(diff, entry.original)) {
-      this.messageState.set({ kind: 'error', text: PROJECTION_REFUSED });
+      this.messageState.set({
+        kind: 'error',
+        text: host.projection() !== undefined ? PROJECTION_REFUSED : PARTIAL_REFUSED,
+      });
       return false;
     }
     const sent = entry.current;
@@ -283,18 +293,21 @@ export class DocumentActions {
   private async readBack(key: string, id: string, saved: BsonDocument): Promise<void> {
     const host = this.requireHost();
     const projection = host.projection();
+    // A large document is read back with its long arrays cut again, not sent whole.
+    const cut = host.slicedOf?.(key);
     try {
-      const { doc } = await this.api.request('docs.get', {
+      const { doc, sliced } = await this.api.request('docs.get', {
         profileId: host.profileId,
         db: host.db,
         coll: host.coll,
         id,
         ...(projection === undefined ? {} : { projection }),
+        ...(cut === undefined ? {} : { sliceAbove: cut.above }),
       });
-      host.documentChanged(key, doc);
+      host.documentChanged(key, doc, sliced.length > 0 ? sliced : undefined);
     } catch {
-      // Not readable now: show what was saved.
-      host.documentChanged(key, stringifyEJson(saved));
+      // Not readable now: show what was saved (its cut arrays are still only partly there).
+      host.documentChanged(key, stringifyEJson(saved), cut?.arrays);
     }
   }
 
@@ -323,6 +336,12 @@ export class DocumentActions {
 const PROJECTION_REFUSED =
   'Not saved: with a projection active, this edit would replace data the projection hides. ' +
   'Clear the projection and edit again.';
+
+/** The same refusal for a document loaded only partly without a projection active now. */
+const PARTIAL_REFUSED =
+  'Not saved: this document was loaded only partly (with a projection, or a large document whose ' +
+  'long arrays are read page by page), and this edit would replace data that was not loaded. ' +
+  'Edit single values instead, or run the query without a projection and edit again.';
 
 /**
  * With a query projection the loaded document may be partial, so a save must not replace what

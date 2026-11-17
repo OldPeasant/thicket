@@ -315,7 +315,8 @@ export class CollectionView {
         this.actions.setHost({
           ...target,
           projection: () => this.results.query().projection,
-          documentChanged: (key, doc) => this.documentChanged(key, doc),
+          slicedOf: (key) => this.slicedOf(key),
+          documentChanged: (key, doc, sliced) => this.documentChanged(key, doc, sliced),
         });
         this.run();
       });
@@ -329,6 +330,13 @@ export class CollectionView {
     // (the explorer's default is one row per field). The user can still flip it.
     const orientation = inject(TableOrientationService);
     if (orientation.read('') === 'v') orientation.toggle('');
+    // Inner pages are kept by row: a newly read page of documents (next page, query run again)
+    // starts every array on its first page instead of the page the previous row's array was on.
+    const pages = inject(PageService);
+    effect(() => {
+      this.results.pageLoads();
+      untracked(() => pages.clear());
+    });
   }
 
   protected edit(field: QueryField, event: Event): void {
@@ -473,9 +481,16 @@ export class CollectionView {
   }
 
   /** A document of this tab was saved or deleted: the shown page follows. */
-  private documentChanged(key: string, doc: string | null): void {
+  private documentChanged(key: string, doc: string | null, sliced?: readonly SlicedArray[]): void {
     const index = this.docs().findIndex((d) => d !== null && documentKey(d) === key);
-    if (index !== -1) this.results.patchDocument(index, doc);
+    if (index !== -1) this.results.patchDocument(index, doc, sliced);
+  }
+
+  /** The cut arrays of the shown large document `key` (`undefined`: it was loaded whole). */
+  private slicedOf(key: string): { above: number; arrays: readonly SlicedArray[] } | undefined {
+    const index = this.docs().findIndex((d) => d !== null && documentKey(d) === key);
+    const arrays = index === -1 ? undefined : this.results.page()?.sliced?.[index];
+    return arrays === undefined ? undefined : { above: this.results.sliceAbove(), arrays };
   }
 
   protected toggleIo(panel: 'export' | 'import'): void {

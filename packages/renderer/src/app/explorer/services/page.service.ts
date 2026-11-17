@@ -33,7 +33,9 @@ export class PageService {
     this.set(key, pageOf(position, size));
   }
 
+  /** Every node back to its first page (views showing one read their page again). */
   clear(): void {
+    for (const sig of this.signals.values()) sig.set(0);
     this.signals.clear();
   }
 }

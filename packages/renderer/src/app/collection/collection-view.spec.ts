@@ -955,6 +955,110 @@ describe('CollectionView', () => {
       expect(JSON.stringify(pending)).not.toContain('items');
     });
 
+    /** Renames the large document in the explorer and saves it with the edit bar. */
+    const renameAndSave = async () => {
+      el().querySelector<HTMLButtonElement>('.mode-toggle')?.click();
+      await settle();
+      const name = [...el().querySelectorAll<HTMLInputElement>('input.val-input.str')].find(
+        (i) => i.value === 'large order (fictitious)',
+      );
+      if (!name) throw new Error('name of the large document not editable');
+      name.value = 'renamed order';
+      name.dispatchEvent(new Event('blur'));
+      await settle();
+      get<HTMLButtonElement>('edit-save').click();
+      await settle();
+    };
+    const pagerRange = () =>
+      el().querySelector('[data-testid="nested-pager"] [data-testid="nested-pager-range"]')
+        ?.textContent;
+
+    it('reads a saved large document back with its arrays cut, and keeps paging them', async () => {
+      const gets: Record<string, unknown>[] = [];
+      fake.respond('docs.update', { modified: true });
+      fake.handle('docs.get', (params) => {
+        gets.push(params as unknown as Record<string, unknown>);
+        return {
+          doc: bigDoc.replace('large order (fictitious)', 'renamed order'),
+          sliced: [{ path: 'items', total: 50_000, loaded: 100 }],
+        };
+      });
+      await renameAndSave();
+      expect(fake.requestsFor('docs.update')).toHaveLength(1);
+      expect(gets).toEqual([
+        {
+          profileId: 'p1',
+          db: 'shop',
+          coll: 'orders',
+          id: '{"$numberInt":"1"}',
+          sliceAbove: 100,
+        },
+      ]);
+      // Still a partly loaded array: the pager spans the whole length and reads by getSlice.
+      expect(pagerRange()).toContain('1–100 of 50,000');
+      pagerButton('nested-pager-next')?.click();
+      await settle();
+      expect(slices.at(-1)).toMatchObject({ path: 'items', skip: 100, limit: 100 });
+      expect(shownSkus()[0]).toBe(sku(100));
+    });
+
+    it('reads a saved small document back whole (no sliceAbove)', async () => {
+      const gets: Record<string, unknown>[] = [];
+      fake.respond('docs.update', { modified: true });
+      fake.handle('docs.get', (params) => {
+        gets.push(params as unknown as Record<string, unknown>);
+        return { doc: smallDoc.replace('doc 2', 'doc 2 renamed'), sliced: [] };
+      });
+      el().querySelector<HTMLButtonElement>('.mode-toggle')?.click();
+      await settle();
+      const name = [...el().querySelectorAll<HTMLInputElement>('input.val-input.str')].find(
+        (i) => i.value === 'doc 2',
+      );
+      if (!name) throw new Error('name of the small document not editable');
+      name.value = 'doc 2 renamed';
+      name.dispatchEvent(new Event('blur'));
+      await settle();
+      get<HTMLButtonElement>('edit-save').click();
+      await settle();
+      expect(gets).toHaveLength(1);
+      expect(gets[0]).not.toHaveProperty('sliceAbove');
+    });
+
+    it('keeps the cut array partly loaded and the document partial when the read-back fails', async () => {
+      fake.respond('docs.update', { modified: true });
+      fake.fail('docs.get', { code: 'INTERNAL', message: 'not readable' });
+      await renameAndSave();
+      expect(fake.requestsFor('docs.get')).toHaveLength(1);
+      // The saved version (with only the first 100 items) is shown, still as a cut array.
+      expect(
+        [...el().querySelectorAll<HTMLInputElement>('input.val-input.str')].some(
+          (i) => i.value === 'renamed order',
+        ),
+      ).toBe(true);
+      expect(pagerRange()).toContain('1–100 of 50,000');
+      const edits = fixture.debugElement.injector.get(DocumentEdits);
+      const name = [...el().querySelectorAll<HTMLInputElement>('input.val-input.str')].find(
+        (i) => i.value === 'renamed order',
+      );
+      if (!name) throw new Error('name of the saved document not editable');
+      name.value = 'renamed again';
+      name.dispatchEvent(new Event('blur'));
+      await settle();
+      expect(edits.get('{"$numberInt":"1"}')?.partial).toBe(true);
+    });
+
+    it('starts the inner pages over when another page of documents is read', async () => {
+      pagerButton('nested-pager-next')?.click();
+      await settle();
+      expect(pagerRange()).toContain('101–200 of 50,000');
+      const before = slices.length;
+      click('query-run');
+      await settle();
+      expect(pagerRange()).toContain('1–100 of 50,000');
+      // The first page is among the loaded items: nothing is read for it.
+      expect(slices).toHaveLength(before);
+    });
+
     it('does not mark the small document of the same page partial', async () => {
       el().querySelector<HTMLButtonElement>('.mode-toggle')?.click();
       await settle();

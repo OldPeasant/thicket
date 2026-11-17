@@ -240,6 +240,10 @@ describe('DocumentActions', () => {
     const PROJECTION_REFUSED =
       'Not saved: with a projection active, this edit would replace data the projection hides. ' +
       'Clear the projection and edit again.';
+    const PARTIAL_REFUSED =
+      'Not saved: this document was loaded only partly (with a projection, or a large document ' +
+      'whose long arrays are read page by page), and this edit would replace data that was not ' +
+      'loaded. Edit single values instead, or run the query without a projection and edit again.';
     const loaded = parseEJsonDocument(
       '{"_id":{"$numberInt":"1"},"a":"x","b":"y","addr":{"city":"Bonn"},"tags":["p"]}',
     );
@@ -308,7 +312,7 @@ describe('DocumentActions', () => {
       projection = undefined;
       expect(await actions.save(keyOf(1))).toBe(false);
       expect(fake.requests).toHaveLength(0);
-      expect(actions.message()?.text).toBe(PROJECTION_REFUSED);
+      expect(actions.message()?.text).toBe(PARTIAL_REFUSED);
       // Undo and redo keep the flag.
       edits.undo();
       edits.redo();
@@ -332,7 +336,7 @@ describe('DocumentActions', () => {
       projection = undefined;
       expect(await actions.save(keyOf(1))).toBe(false);
       expect(params('docs.replace')).toHaveLength(0);
-      expect(actions.message()?.text).toBe(PROJECTION_REFUSED);
+      expect(actions.message()?.text).toBe(PARTIAL_REFUSED);
       expect(edits.isModified(keyOf(1))).toBe(true);
     });
 

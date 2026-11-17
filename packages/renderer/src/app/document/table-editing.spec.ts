@@ -236,7 +236,7 @@ describe('Editing documents in the table view', () => {
       expect(fake.requestsFor('docs.replace')).toHaveLength(0);
       expect(fake.requestsFor('docs.update')).toHaveLength(0);
       expect(el().querySelector('[data-testid="edit-message"]')?.textContent).toContain(
-        'this edit would replace data the projection hides',
+        'this edit would replace data that was not loaded',
       );
       expect(edits().isModified('{"$numberInt":"2"}')).toBe(true);
     });

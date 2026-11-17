@@ -1363,5 +1363,25 @@ describe('CollectionResults', () => {
       ]);
       expect(results.page()?.sliced).toEqual([undefined, items(800)]);
     });
+
+    it('patchDocument keeps a document read back cut partly loaded', async () => {
+      await runAndLoad(query({}), docs(1, 3));
+      expect(results.page()).not.toHaveProperty('sliced');
+      results.patchDocument(1, docs(2, 1)[0] ?? '', items(5000));
+      expect(results.page()?.sliced).toEqual([undefined, items(5000), undefined]);
+      // Read back whole: no cut document is left, so the list goes away.
+      results.patchDocument(1, docs(2, 1)[0] ?? '');
+      expect(results.page()).not.toHaveProperty('sliced');
+      expect(results.page()?.docs).toEqual(docs(1, 3));
+    });
+
+    it('counts page reads in pageLoads, not patches', async () => {
+      const before = results.pageLoads();
+      await runAndLoad(query({}), docs(1, 3));
+      const loaded = results.pageLoads();
+      expect(loaded).toBeGreaterThan(before);
+      results.patchDocument(0, null);
+      expect(results.pageLoads()).toBe(loaded);
+    });
   });
 });

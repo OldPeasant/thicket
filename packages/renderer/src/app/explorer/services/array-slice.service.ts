@@ -35,6 +35,8 @@ interface Entry {
 export class ArraySliceService {
   private readonly byArray = new WeakMap<object, Entry>();
   private readonly byOwner = new WeakMap<object, Map<string, Entry>>();
+  /** Pages within the loaded items of a registered array, by `start:end`. */
+  private readonly inMemory = new WeakMap<object, Map<string, SlicePage>>();
   /** Bumped when a page arrives or fails: the views asking for it read it again. */
   private readonly version = signal(0);
 
@@ -68,8 +70,23 @@ export class ArraySliceService {
   page(arr: readonly unknown[], start: number, end: number): SlicePage {
     this.version();
     const entry = this.byArray.get(arr);
-    if (!entry || end <= arr.length) return { items: arr.slice(start, end), error: null };
+    if (!entry) return { items: arr.slice(start, end), error: null };
     const key = `${start}:${end}`;
+    if (end <= arr.length) {
+      // Kept per array: the same window gives the same page object, so views
+      // memoising on it (the table's sparse array) don't rebuild it.
+      let pages = this.inMemory.get(arr);
+      if (!pages) {
+        pages = new Map();
+        this.inMemory.set(arr, pages);
+      }
+      let page = pages.get(key);
+      if (!page) {
+        page = { items: arr.slice(start, end), error: null };
+        pages.set(key, page);
+      }
+      return page;
+    }
     const known = entry.pages.get(key);
     if (known) return known;
     const loading: SlicePage = { items: null, error: null };

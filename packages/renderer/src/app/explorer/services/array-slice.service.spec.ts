@@ -66,6 +66,22 @@ describe('ArraySliceService', () => {
     expect(calls).toEqual([]);
   });
 
+  it('gives the same page object for the same window within the loaded items', () => {
+    const { src } = source(5000);
+    const owner = {};
+    const loaded = range(0, 100);
+    slices.register(loaded, owner, 'items', src);
+    const first = slices.page(loaded, 0, 100);
+    expect(slices.page(loaded, 0, 100)).toBe(first);
+    expect(slices.page(loaded, 0, 50)).not.toBe(first);
+    // A tree rebuilt from the same document version gets pages of its own array.
+    const rebuilt = range(0, 100);
+    slices.register(rebuilt, owner, 'items', src);
+    const again = slices.page(rebuilt, 0, 100);
+    expect(again).not.toBe(first);
+    expect(again.items?.[0]).toBe(rebuilt[0]);
+  });
+
   it('reads a page past the loaded items once: loading, then the items', async () => {
     const { src, calls } = source(5000);
     const loaded = range(0, 100);

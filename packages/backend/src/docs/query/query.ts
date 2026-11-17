@@ -324,7 +324,9 @@ export function buildFind(p: ParsedParamsOf<'docs.find'>): FindCommand {
  * items cut to their first `above` items, for `docs.find`'s `slice`. Only arrays `docs.getSlice`
  * can read the rest of: field names without `.` or a leading `$` and not all digits, returned
  * whole by the projection (none of its keys names the field's inside, and the field itself only
- * as a plain inclusion). Smaller documents and other fields are returned unchanged.
+ * as a plain inclusion). Smaller documents, documents without `_id` (a projection such as
+ * `{_id: 0}`: `docs.getSlice` can't address them, so their arrays could not be paged) and other
+ * fields are returned unchanged.
  */
 export function sliceLargeArrays(
   doc: Document,
@@ -333,7 +335,7 @@ export function sliceLargeArrays(
   projection?: Document,
 ): { doc: Document; arrays: SlicedArray[] } {
   const arrays: SlicedArray[] = [];
-  if (BSON.calculateObjectSize(doc) <= docBytes) return { doc, arrays };
+  if (!('_id' in doc) || BSON.calculateObjectSize(doc) <= docBytes) return { doc, arrays };
   const keys = projection === undefined ? [] : Object.keys(projection);
   let out: Document | undefined;
   for (const [field, value] of Object.entries(doc)) {

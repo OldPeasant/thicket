@@ -72,6 +72,14 @@ describe('sliceLargeArrays (docs.find slice)', () => {
     expect(cut.doc['a.b']).toHaveLength(200);
   });
 
+  it('leaves documents without _id whole (docs.getSlice could not read the rest)', () => {
+    const doc = { items: big(500), name: 'n' };
+    const cut = sliceLargeArrays(doc, 100, 1000, { _id: 0 });
+    expect(cut).toEqual({ doc, arrays: [] });
+    expect(cut.doc).toBe(doc);
+    expect(sliceLargeArrays(doc, 100, 1000).arrays).toEqual([]);
+  });
+
   it('with an exclusion projection, cuts arrays it does not mention', () => {
     const doc = { _id: 1, items: big(200), other: big(200) };
     const cut = sliceLargeArrays(doc, 100, 1000, { secret: 0, 'other.pad': 0 });

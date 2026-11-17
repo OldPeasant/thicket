@@ -87,10 +87,13 @@ export class CollectionResults implements OnDestroy {
    * only a placeholder (at least 1 on a last page, so Previous stays possible).
    */
   private readonly fromEndState = signal<number | null>(null);
+  private readonly pageLoadsState = signal(0);
 
   readonly query = this.queryState.asReadonly();
   readonly paging = this.pagingState.asReadonly();
   readonly page = this.pageState.asReadonly();
+  /** Bumped whenever a page read arrives (not when `patchDocument` changes the page shown). */
+  readonly pageLoads = this.pageLoadsState.asReadonly();
   readonly loading = this.loadingState.asReadonly();
   readonly counting = this.countingState.asReadonly();
   /** Something is running that Cancel stops. */
@@ -260,22 +263,33 @@ export class CollectionResults implements OnDestroy {
   /**
    * A shown document changed on the server (saved or deleted from this tab): replaces the
    * document at `index` of the shown page with `doc` (canonical EJSON), or removes it for `null`.
-   * The page is not read again; paging and counts stay as they are.
+   * `docSliced`: the arrays `doc` has only partly (a large document read back cut); without it
+   * `doc` is whole. The page is not read again; paging and counts stay as they are.
    */
-  patchDocument(index: number, doc: string | null): void {
+  patchDocument(index: number, doc: string | null, docSliced?: readonly SlicedArray[]): void {
     const page = this.pageState();
     if (page === null || index < 0 || index >= page.docs.length) return;
     const docs = page.docs.slice();
-    // The new version is the whole document: none of its arrays is partly loaded any more.
-    const sliced = page.sliced?.slice();
+    let sliced = page.sliced?.slice();
     if (doc === null) {
       docs.splice(index, 1);
       sliced?.splice(index, 1);
     } else {
       docs[index] = doc;
-      if (sliced) sliced[index] = undefined;
+      if (docSliced !== undefined && docSliced.length > 0) {
+        sliced ??= new Array<readonly SlicedArray[] | undefined>(docs.length).fill(undefined);
+        sliced[index] = docSliced;
+      } else if (sliced) {
+        sliced[index] = undefined;
+      }
     }
-    this.pageState.set(sliced ? { ...page, docs, sliced } : { ...page, docs });
+    if (sliced && !sliced.some(Boolean)) sliced = undefined;
+    this.pageState.set(sliced ? { ...page, docs, sliced } : { docs, firstRow: page.firstRow });
+  }
+
+  /** Arrays above this many items are cut in large documents (`docs.find`'s `slice.above`). */
+  sliceAbove(): number {
+    return this.nestedPageSize.size();
   }
 
   ngOnDestroy(): void {
@@ -435,6 +449,7 @@ export class CollectionResults implements OnDestroy {
     this.pagingState.set(state);
     const firstRow = state.pageIndex * state.pageSize;
     this.pageState.set(sliced ? { docs, sliced, firstRow } : { docs, firstRow });
+    this.pageLoadsState.update((n) => n + 1);
     this.realign();
   }
 
