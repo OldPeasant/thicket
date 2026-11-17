@@ -67,8 +67,14 @@ describe('splitShellInput', () => {
     '/* open comment; use t',
     'x = /abc; use t',
     'x = `open; use t',
+    // A string still open at the end of the input.
+    'print("open string; use t',
   ])('unterminated literals keep the rest as JavaScript: %j', (input) => {
     expect(splitShellInput(input)).toEqual([input]);
+  });
+
+  it('a regex literal ends at a line break: a command on the next line is still found', () => {
+    expect(splitShellInput('x = /abc\nuse t')).toEqual(['x = /abc\n', 'use t']);
   });
 
   it.each([
@@ -116,6 +122,36 @@ describe('splitShellInput', () => {
     'use test /* open\n*/',
   ])('not a command with trailing code or an open comment: %j', (input) => {
     expect(splitShellInput(input)).toEqual([input]);
+  });
+
+  it.each([
+    // CRLF line endings: the comment ends at the \r, which is consumed with the command like
+    // trailing whitespace (as for `use test\r\n` without a comment); the next line still runs.
+    ['use test // first\r\ndb.c.find()', ['use test', '\ndb.c.find()']],
+    // An empty block comment, and one whose opening `/*/` does not close it.
+    ['use test /**/\nx', ['use test', '\nx']],
+    ['use test /*/ x */\ny', ['use test', '\ny']],
+    // A `;` inside a trailing comment does not end the command early.
+    ['use test /* a; b */\nx', ['use test', '\nx']],
+    // Everything after `//` is a comment, `;` included: nothing else runs on that line.
+    ['use test // a; db.c.drop()', ['use test']],
+    // A block then a line comment.
+    ['show dbs /* a */ // b\nx', ['show dbs', '\nx']],
+    // A comment before the command at a statement start stays a JavaScript piece of its own
+    // (mongosh evaluates it to nothing, like the `use test; // c` case above), the command is
+    // still recognised.
+    ['/* first */ use test // then\nx', ['/* first */', 'use test', '\nx']],
+    ['// note\nuse test\nx', ['// note\n', 'use test', '\nx']],
+  ])('trailing comment edge cases: %j', (input, pieces) => {
+    expect(splitShellInput(input)).toEqual(pieces);
+  });
+
+  it('a command with a trailing comment between JavaScript lines splits into three pieces', () => {
+    expect(splitShellInput('var a = 1\nuse test // switch\na + 1')).toEqual([
+      'var a = 1\n',
+      'use test',
+      '\na + 1',
+    ]);
   });
 
   it('drops empty input', () => {

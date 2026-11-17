@@ -231,6 +231,36 @@ describe('shell.eval', () => {
     await backend.call('shell.close', { sessionId: own });
   });
 
+  it('comments around a shell command (CRLF, a leading block comment) produce no extra output', async () => {
+    const { sessionId: own } = await backend.call('shell.open', { profileId: PROFILE.id });
+    const outcome = await backend.evaluate(
+      own,
+      `/* first */ use ${DB} // then\r\n// note\r\ndb.getName()`,
+    );
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.outputs.filter((o) => o.kind === 'error')).toEqual([]);
+    // The comment-only pieces evaluate to nothing: only the results of `use` and db.getName().
+    expect(results(outcome).map((r) => r.text)).toEqual([`switched to db ${DB}`, DB]);
+    expect(outcome.outputs).toContainEqual({ kind: 'db', db: DB });
+    await backend.call('shell.close', { sessionId: own });
+  });
+
+  it('exit between JavaScript lines is refused in place; quit(1) fails; the session goes on', async () => {
+    const { sessionId: own } = await backend.call('shell.open', { profileId: PROFILE.id, db: DB });
+    const mixed = await backend.evaluate(own, 'var before = 1 + 1; before\nexit;\nbefore + 2');
+    expect(mixed.error).toBeUndefined();
+    expect(mixed.outputs).toEqual([
+      expect.objectContaining({ kind: 'result', text: '2' }),
+      { kind: 'print', text: EXIT_TEXT },
+      expect.objectContaining({ kind: 'result', text: '4' }),
+    ]);
+    const called = await backend.evaluate(own, 'quit(1)');
+    expect(called.outputs).toEqual([{ kind: 'error', text: `Error: ${EXIT_TEXT}` }]);
+    const next = await backend.evaluate(own, 'before');
+    expect(results(next).at(-1)?.text).toBe('2');
+    await backend.call('shell.close', { sessionId: own });
+  });
+
   it('answers NOT_FOUND for an unknown session', async () => {
     const error = await failure(backend.call('shell.eval', { sessionId: 'nope', code: '1' }));
     expect(error.code).toBe('NOT_FOUND');
