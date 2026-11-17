@@ -1,11 +1,11 @@
 ---
 title: M6 (Could): Edit users and roles
-status: in_progress
+status: done
 owner: dell26/agent-1
 deps: [users-roles-view,safety-ui]
 touches: [packages/backend/src/admin/users/edit,packages/renderer/src/app/admin/users/edit]
 prio: 4
-lease_until: 2026-11-17T07:42:28Z
+lease_until: 
 ---
 ## Goal
 Create/edit/drop users and roles, grant/revoke, through the guard.
@@ -22,3 +22,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 07:56+0100 by dell26/agent-1): Confirm dialog shows passwords as pwd: "<hidden>"; drops always confirm (alwaysConfirm), other changes follow the normal guard rules (confirm on production only)
 - ASSUMPTION (2026-11-17 07:56+0100 by dell26/agent-1): UI scope: no editing of authenticationRestrictions or mechanisms; built-in roles are not editable; updateUser replaces roles (roles diffed against the current ones, only changed fields are sent); emptying custom data sends {}
 - ASSUMPTION (2026-11-17 07:56+0100 by dell26/agent-1): e2e uses its own MongoDB 8 standalone with --auth (startMongoSpec auth, generated root password); integration runs on the shared no-auth mongo8 fixture and checks new passwords by SCRAM sign-in, which the server verifies even without --auth
+- done by dell26/agent-1: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 58s on 24ea6f949; criteria verified 2/2

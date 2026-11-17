@@ -5,7 +5,7 @@ import { BROADCAST_STREAMS, methods, type Event, type Profile } from '@thicket/c
 import { currentOpHandlers } from '../admin/currentop';
 import { statsHandlers } from '../admin/stats';
 import { watchHandlers } from '../admin/watch';
-import { usersHandlers } from '../admin/users';
+import { usersEditHandlers, usersHandlers } from '../admin/users';
 import { aggHandlers } from '../agg';
 import { OidcAuthenticator } from '../auth/oidc';
 import { browseHandlers, validatorHandlers } from '../browse';
@@ -145,6 +145,7 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
       ...indexHandlers(connections),
       ...schemaHandlers(connections),
       ...usersHandlers(connections),
+      ...usersEditHandlers(connections),
       ...currentOpHandlers(connections),
       ...statsHandlers(connections),
       ...watchHandlers(connections),

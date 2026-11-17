@@ -41,12 +41,48 @@
           Built-in roles
         </label>
       }
-      <span class="ro" title="Users and roles are shown, not changed, here">Read-only</span>
+      @if (readOnly()) {
+        <span class="ro" title="The connection is read-only: users and roles can't be changed"
+          >Read-only</span
+        >
+      }
+      <button
+        type="button"
+        class="btn primary"
+        data-testid="create"
+        [appWriteControl]="target().profileId"
+        [disabledWhen]="editing() !== null"
+        (click)="create()"
+      >
+        {{ mode() === 'users' ? 'New user' : 'New role' }}
+      </button>
       <button type="button" class="btn" data-testid="refresh" (click)="refresh()">Refresh</button>
     </div>
   </header>
 
-  @if (mode() === 'users') {
+  @if (notice(); as n) {
+    <p
+      class="notice"
+      data-testid="notice"
+      [class.error]="n.error"
+      [attr.role]="n.error ? 'alert' : 'status'"
+    >
+      {{ n.text }}
+    </p>
+  }
+
+  @if (editing(); as subject) {
+    <div class="editor-pane">
+      <app-principal-editor
+        [profileId]="target().profileId"
+        [db]="target().db"
+        [subject]="subject"
+        [known]="knownRoles()"
+        (saved)="saved($event)"
+        (closed)="closeEditor()"
+      />
+    </div>
+  } @else if (mode() === 'users') {
     @if (usersError(); as message) {
       <p class="note error" role="alert">{{ message }}</p>
     } @else if (userItems(); as list) {
@@ -70,9 +106,12 @@
           </nav>
           @if (user(); as u) {
             <article class="detail" data-testid="user-detail">
-              <h2 class="title">
-                {{ u.name }}<span class="at">&#64;{{ u.db }}</span>
-              </h2>
+              <div class="title-row">
+                <h2 class="title">
+                  {{ u.name }}<span class="at">&#64;{{ u.db }}</span>
+                </h2>
+                <ng-container *ngTemplateOutlet="changeButtons; context: { noun: 'user' }" />
+              </div>
               @if (u.mechanisms.length > 0 || u.restrictions > 0) {
                 <p class="facts">
                   @if (u.mechanisms.length > 0) {
@@ -89,7 +128,13 @@
               <ng-container
                 *ngTemplateOutlet="
                   lineage;
-                  context: { direct: u.roles, inherited: u.inheritedRoles, label: 'Roles' }
+                  context: {
+                    direct: u.roles,
+                    inherited: u.inheritedRoles,
+                    label: 'Roles',
+                    editable: true,
+                    owner: u.name,
+                  }
                 "
               />
               <ng-container
@@ -143,16 +188,27 @@
           </nav>
           @if (role(); as r) {
             <article class="detail" data-testid="role-detail">
-              <h2 class="title">
-                {{ r.name }}<span class="at">&#64;{{ r.db }}</span>
-                @if (r.builtin) {
-                  <span class="tag">built-in</span>
+              <div class="title-row">
+                <h2 class="title">
+                  {{ r.name }}<span class="at">&#64;{{ r.db }}</span>
+                  @if (r.builtin) {
+                    <span class="tag">built-in</span>
+                  }
+                </h2>
+                @if (!r.builtin) {
+                  <ng-container *ngTemplateOutlet="changeButtons; context: { noun: 'role' }" />
                 }
-              </h2>
+              </div>
               <ng-container
                 *ngTemplateOutlet="
                   lineage;
-                  context: { direct: r.roles, inherited: r.inheritedRoles, label: 'Inherits from' }
+                  context: {
+                    direct: r.roles,
+                    inherited: r.inheritedRoles,
+                    label: 'Inherits from',
+                    editable: !r.builtin,
+                    owner: r.name,
+                  }
                 "
               />
               <ng-container
@@ -188,7 +244,14 @@
 </section>
 
 <!-- Direct roles on the rail, the roles held through them below, fainter. -->
-<ng-template #lineage let-direct="direct" let-inherited="inherited" let-label="label">
+<ng-template
+  #lineage
+  let-direct="direct"
+  let-inherited="inherited"
+  let-label="label"
+  let-editable="editable"
+  let-owner="owner"
+>
   <h3 class="sub">{{ label }}</h3>
   @if (direct.length === 0) {
     <p class="none">None.</p>
@@ -197,9 +260,40 @@
       @for (ref of direct; track roleKey(ref)) {
         <li class="node">
           <ng-container *ngTemplateOutlet="roleChip; context: { $implicit: ref }" />
+          @if (editable) {
+            <button
+              type="button"
+              class="revoke"
+              data-testid="revoke"
+              [appWriteControl]="target().profileId"
+              [disabledWhen]="busy()"
+              [title]="'Revoke ' + roleLabel(ref) + ' from ' + owner"
+              [attr.aria-label]="'Revoke ' + roleLabel(ref) + ' from ' + owner"
+              (click)="revoke(ref)"
+            >
+              ×
+            </button>
+          }
         </li>
       }
     </ul>
+  }
+  @if (editable && !readOnly()) {
+    <div class="grant" data-testid="grant">
+      <app-role-input
+        #grantField
+        [db]="target().db"
+        [known]="knownRoles()"
+        [forRole]="mode() === 'roles'"
+        [clearOnPick]="false"
+        [disabled]="busy()"
+        [label]="'Grant a role to ' + owner"
+        action="Grant"
+        (picked)="grant($event, grantField)"
+      />
+    </div>
+  }
+  @if (direct.length > 0) {
     @if (inherited.length > 0) {
       <h4 class="sub minor">Held through them</h4>
       <ul class="rail inherited" data-testid="inherited-roles">
@@ -211,6 +305,31 @@
       </ul>
     }
   }
+</ng-template>
+
+<ng-template #changeButtons let-noun="noun">
+  <div class="change">
+    <button
+      type="button"
+      class="btn"
+      data-testid="edit"
+      [appWriteControl]="target().profileId"
+      [disabledWhen]="busy()"
+      (click)="edit()"
+    >
+      Change {{ noun }}
+    </button>
+    <button
+      type="button"
+      class="btn danger"
+      data-testid="drop"
+      [appWriteControl]="target().profileId"
+      [disabledWhen]="busy()"
+      (click)="drop()"
+    >
+      Drop {{ noun }}
+    </button>
+  </div>
 </ng-template>
 
 <ng-template #roleChip let-ref>

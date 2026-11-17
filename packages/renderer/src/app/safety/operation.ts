@@ -26,6 +26,22 @@ function database(db: string): string {
   return `db.getSiblingDB(${str(db)})`;
 }
 
+/** What the confirm dialog shows instead of a password: it is never displayed. */
+export const HIDDEN_PASSWORD = '"<hidden>"';
+
+/** `[{ role: "read", db: "shop" }, …]` as mongosh prints role lists. */
+function roleList(roles: unknown): string {
+  const list = (roles as { role: string; db: string }[]).map(
+    (r) => `{ role: ${str(r.role)}, db: ${str(r.db)} }`,
+  );
+  return `[${list.join(', ')}]`;
+}
+
+/** `{ a: …, b: … }` of the fields given (multi-line values keep their own lines). */
+function fieldsDoc(fields: [string, string][]): string {
+  return `{ ${fields.map(([k, v]) => `${k}: ${v}`).join(', ')} }`;
+}
+
 /** `{ _id: <id>, ...expected }`: the filter a single-document write sends (conflict check). */
 function idFilter(id: string, expected?: string): string {
   const idText = shell(id, 0);
@@ -139,6 +155,47 @@ export function describeWrite<M extends WriteMethodName>(method: M, params: Para
     }
     case 'admin.killOp':
       return `db.killOp(${shell(p['opId'] as string, 0)})`;
+    case 'admin.createUser': {
+      const fields: [string, string][] = [['user', str(p['user'] as string)]];
+      if (p['password'] !== undefined) fields.push(['pwd', HIDDEN_PASSWORD]);
+      fields.push(['roles', roleList(p['roles'])]);
+      if (p['customData']) fields.push(['customData', shell(p['customData'] as string, 0)]);
+      return call(database(p.db), 'createUser', [fieldsDoc(fields)]);
+    }
+    case 'admin.updateUser': {
+      const fields: [string, string][] = [];
+      if (p['password'] !== undefined) fields.push(['pwd', HIDDEN_PASSWORD]);
+      if (p['roles'] !== undefined) fields.push(['roles', roleList(p['roles'])]);
+      if (p['customData']) fields.push(['customData', shell(p['customData'] as string, 0)]);
+      return call(database(p.db), 'updateUser', [str(p['user'] as string), fieldsDoc(fields)]);
+    }
+    case 'admin.dropUser':
+      return call(database(p.db), 'dropUser', [str(p['user'] as string)]);
+    case 'admin.createRole':
+      return call(database(p.db), 'createRole', [
+        fieldsDoc([
+          ['role', str(p['role'] as string)],
+          ['privileges', shell(p['privileges'] as string)],
+          ['roles', roleList(p['roles'])],
+        ]),
+      ]);
+    case 'admin.updateRole': {
+      const fields: [string, string][] = [];
+      if (p['privileges'] !== undefined) {
+        fields.push(['privileges', shell(p['privileges'] as string)]);
+      }
+      if (p['roles'] !== undefined) fields.push(['roles', roleList(p['roles'])]);
+      return call(database(p.db), 'updateRole', [str(p['role'] as string), fieldsDoc(fields)]);
+    }
+    case 'admin.dropRole':
+      return call(database(p.db), 'dropRole', [str(p['role'] as string)]);
+    case 'admin.grantRoles':
+    case 'admin.revokeRoles': {
+      const grant = method === 'admin.grantRoles';
+      const target = p['kind'] === 'user' ? 'User' : 'Role';
+      const fn = grant ? `grantRolesTo${target}` : `revokeRolesFrom${target}`;
+      return call(database(p.db), fn, [str(p['name'] as string), roleList(p['roles'])]);
+    }
     case 'io.import': {
       const options: string[] = [];
       if (p['ordered'] !== undefined) options.push(`ordered: ${String(p['ordered'])}`);

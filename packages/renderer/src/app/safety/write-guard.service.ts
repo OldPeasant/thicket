@@ -40,6 +40,9 @@ const DESTRUCTIVE: readonly WriteMethodName[] = [
   'idx.drop',
   'admin.killOp',
   'gridfs.delete',
+  'admin.dropUser',
+  'admin.dropRole',
+  'admin.revokeRoles',
 ];
 
 const TITLES: Partial<Record<WriteMethodName, string>> = {
@@ -61,6 +64,14 @@ const TITLES: Partial<Record<WriteMethodName, string>> = {
   'agg.run': 'Run aggregation with $out/$merge',
   'agg.createView': 'Create view',
   'admin.killOp': 'Kill operation',
+  'admin.createUser': 'Create user',
+  'admin.updateUser': 'Change user',
+  'admin.dropUser': 'Drop user',
+  'admin.createRole': 'Create role',
+  'admin.updateRole': 'Change role',
+  'admin.dropRole': 'Drop role',
+  'admin.grantRoles': 'Grant roles',
+  'admin.revokeRoles': 'Revoke roles',
   'io.import': 'Import documents',
   'gridfs.upload': 'Upload file',
   'gridfs.delete': 'Delete file',

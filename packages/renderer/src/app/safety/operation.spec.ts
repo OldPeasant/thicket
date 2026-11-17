@@ -257,6 +257,116 @@ describe('describeWrite', () => {
     );
   });
 
+  describe('user and role changes', () => {
+    const D = 'db.getSiblingDB("shop")';
+    const PW = 'fictitious-Pw-93aa';
+    const u = { profileId: 'p', db: 'shop' };
+    const roles = [
+      { role: 'read', db: 'shop' },
+      { role: 'readAnyDatabase', db: 'admin' },
+    ];
+    const ROLES = '[{ role: "read", db: "shop" }, { role: "readAnyDatabase", db: "admin" }]';
+
+    it('createUser hides the password and prints roles and custom data', () => {
+      const text = describeWrite('admin.createUser', {
+        ...u,
+        user: 'carl',
+        password: PW,
+        roles,
+        customData: '{"team":"sales"}',
+      });
+      expect(text).toBe(
+        `${D}.createUser({ user: "carl", pwd: "<hidden>", roles: ${ROLES}, customData: { team: "sales" } })`,
+      );
+      expect(text).not.toContain(PW);
+    });
+
+    it('createUser of a $external user has no pwd', () => {
+      expect(
+        describeWrite('admin.createUser', {
+          profileId: 'p',
+          db: '$external',
+          user: 'x',
+          roles: [],
+        }),
+      ).toBe('db.getSiblingDB("$external").createUser({ user: "x", roles: [] })');
+    });
+
+    it('updateUser prints only the fields sent; the password is hidden', () => {
+      const text = describeWrite('admin.updateUser', { ...u, user: 'alice', password: PW });
+      expect(text).toBe(`${D}.updateUser("alice", { pwd: "<hidden>" })`);
+      expect(text).not.toContain(PW);
+      expect(describeWrite('admin.updateUser', { ...u, user: 'alice', roles: [] })).toBe(
+        `${D}.updateUser("alice", { roles: [] })`,
+      );
+      expect(describeWrite('admin.updateUser', { ...u, user: 'alice', customData: '{}' })).toBe(
+        `${D}.updateUser("alice", { customData: {} })`,
+      );
+      expect(
+        describeWrite('admin.updateUser', {
+          ...u,
+          user: 'alice',
+          password: PW,
+          roles,
+          customData: '{"n":{"$numberInt":"3"}}',
+        }),
+      ).toBe(
+        `${D}.updateUser("alice", { pwd: "<hidden>", roles: ${ROLES}, customData: { n: 3 } })`,
+      );
+    });
+
+    it('drops name the user or role', () => {
+      expect(describeWrite('admin.dropUser', { ...u, user: 'alice' })).toBe(
+        `${D}.dropUser("alice")`,
+      );
+      expect(describeWrite('admin.dropRole', { ...u, role: 'clerk' })).toBe(
+        `${D}.dropRole("clerk")`,
+      );
+    });
+
+    it('createRole and updateRole print the privileges in shell syntax', () => {
+      const privileges = '[{"resource":{"db":"shop","collection":""},"actions":["find"]}]';
+      expect(
+        describeWrite('admin.createRole', { ...u, role: 'clerk', privileges, roles: [] }),
+      ).toBe(
+        `${D}.createRole({ role: "clerk", privileges: [\n` +
+          `  {\n    resource: {\n      db: "shop",\n      collection: ""\n    },\n` +
+          `    actions: [\n      "find"\n    ]\n  }\n], roles: [] })`,
+      );
+      expect(describeWrite('admin.updateRole', { ...u, role: 'clerk', roles })).toBe(
+        `${D}.updateRole("clerk", { roles: ${ROLES} })`,
+      );
+      expect(describeWrite('admin.updateRole', { ...u, role: 'clerk', privileges: '[]' })).toBe(
+        `${D}.updateRole("clerk", { privileges: [] })`,
+      );
+    });
+
+    it.each([
+      ['admin.grantRoles', 'user', 'grantRolesToUser'],
+      ['admin.grantRoles', 'role', 'grantRolesToRole'],
+      ['admin.revokeRoles', 'user', 'revokeRolesFromUser'],
+      ['admin.revokeRoles', 'role', 'revokeRolesFromRole'],
+    ] as const)('%s for a %s prints %s', (method, kind, fn) => {
+      expect(describeWrite(method, { ...u, kind, name: 'alice', roles })).toBe(
+        `${D}.${fn}("alice", ${ROLES})`,
+      );
+    });
+
+    it('escapes user, role and database names', () => {
+      expect(describeWrite('admin.dropUser', { profileId: 'p', db: 'a"b', user: 'x"y\\z' })).toBe(
+        'db.getSiblingDB("a\\"b").dropUser("x\\"y\\\\z")',
+      );
+      expect(
+        describeWrite('admin.grantRoles', {
+          ...u,
+          kind: 'user',
+          name: 'alice',
+          roles: [{ role: 'r"1', db: 'shop' }],
+        }),
+      ).toBe(`${D}.grantRolesToUser("alice", [{ role: "r\\"1", db: "shop" }])`);
+    });
+  });
+
   it('shell() indents by two by default and leaves invalid EJSON as it is', () => {
     expect(shell('{"a":1}')).toBe('{\n  a: 1\n}');
     expect(shell('{"a":', 0)).toBe('{"a":');

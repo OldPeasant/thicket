@@ -3,6 +3,8 @@ import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { FakeThicketBridge, provideFakeThicket } from '../../api/testing';
+import { ConfirmService } from '../../safety/confirm.service';
+import { ProfileSafetyService } from '../../safety/profile-safety.service';
 import type { WorkspaceTab } from '../../layout/workspace.service';
 import { UsersRolesView, usersTabId } from './users-roles-view';
 
@@ -451,5 +453,458 @@ describe('UsersRolesView', () => {
     const id = fake.requestsFor('admin.users')[0]?.id;
     fixture.destroy();
     expect(fake.cancels).toContain(id);
+  });
+
+  describe('changes', () => {
+    const type = async (id: string, value: string) => {
+      const field = get<HTMLInputElement>(id);
+      field.value = value;
+      field.dispatchEvent(new Event('input'));
+      await settle();
+    };
+    const click = async (id: string) => {
+      get(id).click();
+      await settle();
+    };
+    const sent = (method: Parameters<FakeThicketBridge['requestsFor']>[0]) =>
+      fake.requestsFor(method).map((r) => r.params as Record<string, unknown>);
+
+    it('creates a user with a password and roles, then reads the lists again', async () => {
+      fake.respond('admin.createUser', {});
+      await create();
+      await click('create');
+      await type('editor-name', 'carl');
+      await type('editor-password', 's3cret');
+      await type('editor-repeat', 's3cret');
+      await type('role-input', 'clerk');
+      await click('role-add');
+      await type('role-input', 'readAnyDatabase@admin');
+      await click('role-add');
+      await click('editor-save');
+      expect(sent('admin.createUser')).toEqual([
+        {
+          profileId: 'p1',
+          db: 'shop',
+          user: 'carl',
+          password: 's3cret',
+          roles: [
+            { role: 'clerk', db: 'shop' },
+            { role: 'readAnyDatabase', db: 'admin' },
+          ],
+        },
+      ]);
+      expect(fake.requestsFor('admin.users')).toHaveLength(2);
+      expect(get('notice').textContent).toContain('User carl created.');
+    });
+
+    it('does not save a new user while the passwords differ', async () => {
+      await create();
+      await click('create');
+      await type('editor-name', 'carl');
+      await type('editor-password', 'one');
+      await type('editor-repeat', 'two');
+      await settle();
+      expect(get<HTMLButtonElement>('editor-save').disabled).toBe(true);
+      expect(get('editor-problem').textContent).toContain('The passwords differ.');
+    });
+
+    it('changes a role: privileges in shell syntax replace the old ones', async () => {
+      fake.respond('admin.updateRole', {});
+      await create();
+      await click('mode-roles');
+      await click('edit');
+      await type(
+        'editor-privileges',
+        '[{ resource: { db: "shop", collection: "" }, actions: ["find"] }]',
+      );
+      await click('editor-save');
+      const [params] = sent('admin.updateRole');
+      expect(params).toMatchObject({ profileId: 'p1', db: 'shop', role: 'clerk' });
+      expect(JSON.parse(params?.['privileges'] as string)).toEqual([
+        { resource: { db: 'shop', collection: '' }, actions: ['find'] },
+      ]);
+      expect(params).not.toHaveProperty('roles');
+    });
+
+    it('grants and revokes a role of the selected user', async () => {
+      fake.respond('admin.grantRoles', {});
+      fake.respond('admin.revokeRoles', {});
+      await create();
+      await type('role-input', 'reader');
+      await click('role-add');
+      expect(sent('admin.grantRoles')).toEqual([
+        {
+          profileId: 'p1',
+          db: 'shop',
+          kind: 'user',
+          name: 'alice',
+          roles: [{ role: 'reader', db: 'shop' }],
+        },
+      ]);
+      await click('revoke');
+      expect(sent('admin.revokeRoles')).toEqual([
+        {
+          profileId: 'p1',
+          db: 'shop',
+          kind: 'user',
+          name: 'alice',
+          roles: [{ role: 'clerk', db: 'shop' }],
+        },
+      ]);
+    });
+
+    it('drops a user only after the confirm dialog', async () => {
+      fake.respond('admin.dropUser', {});
+      await create();
+      const confirm = TestBed.inject(ConfirmService);
+      get('drop').click();
+      await settle();
+      expect(confirm.current()?.operation).toBe('db.getSiblingDB("shop").dropUser("alice")');
+      expect(sent('admin.dropUser')).toEqual([]);
+      confirm.answer(true);
+      await settle();
+      expect(sent('admin.dropUser')).toEqual([
+        { profileId: 'p1', db: 'shop', user: 'alice', confirmed: true },
+      ]);
+    });
+
+    it('turns every change off on a read-only connection', async () => {
+      TestBed.inject(ProfileSafetyService).set({
+        id: 'p1',
+        name: 'Local',
+        readOnly: true,
+        production: false,
+      });
+      await create();
+      expect(get<HTMLButtonElement>('create').disabled).toBe(true);
+      expect(get<HTMLButtonElement>('drop').disabled).toBe(true);
+      expect(all('grant')).toEqual([]);
+      expect(el().textContent).toContain('Read-only');
+    });
+
+    it('shows a server refusal and keeps the form open', async () => {
+      fake.fail('admin.createUser', {
+        code: 'SERVER_ERROR',
+        message: 'User "carl@shop" already exists',
+      });
+      await create();
+      await click('create');
+      await type('editor-name', 'carl');
+      await type('editor-password', 'pw');
+      await type('editor-repeat', 'pw');
+      await click('editor-save');
+      expect(get('editor-error').textContent).toContain('already exists');
+      expect(all('principal-editor')).toHaveLength(1);
+    });
+
+    it('changing a user selects it after the save and reads both lists again', async () => {
+      fake.respond('admin.updateUser', {});
+      await create();
+      view.selectUser('bob');
+      await settle();
+      await click('edit');
+      expect(el().querySelector('[data-testid="principal-editor"] .title')?.textContent).toContain(
+        'Change user bob',
+      );
+      await type('editor-custom-data', '{ team: "ops" }');
+      await click('editor-save');
+      expect(sent('admin.updateUser')).toEqual([
+        { profileId: 'p1', db: 'shop', user: 'bob', customData: '{"team":"ops"}' },
+      ]);
+      expect(all('principal-editor')).toHaveLength(0);
+      expect(get('notice').textContent).toContain('User bob changed.');
+      expect(fake.requestsFor('admin.users')).toHaveLength(2);
+      expect(rolesParams()).toHaveLength(2);
+      expect(get('user-detail').querySelector('.title')?.textContent).toContain('bob');
+    });
+
+    it('Cancel closes the form; switching mode closes it too', async () => {
+      await create();
+      await click('create');
+      expect(get<HTMLButtonElement>('create').disabled).toBe(true);
+      await click('editor-cancel');
+      expect(all('principal-editor')).toHaveLength(0);
+      await click('create');
+      await click('mode-roles');
+      expect(all('principal-editor')).toHaveLength(0);
+      await click('create');
+      expect(el().querySelector('[data-testid="principal-editor"] .title')?.textContent).toContain(
+        'New role in shop',
+      );
+    });
+
+    it('built-in roles cannot be changed, dropped or granted to', async () => {
+      await create();
+      await click('mode-roles');
+      view.setBuiltin(true);
+      await settle();
+      view.selectRole('read');
+      await settle();
+      const detail = get('role-detail');
+      expect(detail.querySelector('[data-testid="edit"]')).toBeNull();
+      expect(detail.querySelector('[data-testid="drop"]')).toBeNull();
+      expect(detail.querySelector('[data-testid="grant"]')).toBeNull();
+      view.edit();
+      await view.drop();
+      await settle();
+      expect(all('principal-editor')).toHaveLength(0);
+      expect(fake.requestsFor('admin.dropRole')).toHaveLength(0);
+      expect(TestBed.inject(ConfirmService).current()).toBeNull();
+    });
+
+    it('grants to and revokes from the selected role with kind "role"', async () => {
+      fake.respond('admin.grantRoles', {});
+      fake.respond('admin.revokeRoles', {});
+      await create();
+      await click('mode-roles');
+      await type('role-input', 'readAnyDatabase@admin');
+      await click('role-add');
+      expect(sent('admin.grantRoles')).toEqual([
+        {
+          profileId: 'p1',
+          db: 'shop',
+          kind: 'role',
+          name: 'clerk',
+          roles: [{ role: 'readAnyDatabase', db: 'admin' }],
+        },
+      ]);
+      expect(get('notice').textContent).toContain('Granted readAnyDatabase@admin to clerk.');
+      (all('revoke')[0] as HTMLElement).click();
+      await settle();
+      expect(sent('admin.revokeRoles')[0]).toMatchObject({ kind: 'role', name: 'clerk' });
+      expect(get('notice').textContent).toContain('Revoked');
+    });
+
+    it('drops a role only after the confirm dialog, also on a non-production connection', async () => {
+      fake.respond('admin.dropRole', {});
+      await create();
+      await click('mode-roles');
+      const confirm = TestBed.inject(ConfirmService);
+      get('drop').click();
+      await settle();
+      expect(confirm.current()).toMatchObject({
+        operation: 'db.getSiblingDB("shop").dropRole("clerk")',
+        destructive: true,
+      });
+      expect(sent('admin.dropRole')).toEqual([]);
+      confirm.answer(true);
+      await settle();
+      expect(sent('admin.dropRole')).toEqual([
+        { profileId: 'p1', db: 'shop', role: 'clerk', confirmed: true },
+      ]);
+      expect(get('notice').textContent).toContain('Role clerk dropped.');
+      expect(rolesParams()).toHaveLength(2);
+    });
+
+    it('a cancelled drop sends nothing, shows nothing and reads nothing again', async () => {
+      await create();
+      const confirm = TestBed.inject(ConfirmService);
+      get('drop').click();
+      await settle();
+      confirm.answer(false);
+      await settle();
+      expect(fake.requestsFor('admin.dropUser')).toHaveLength(0);
+      expect(el().querySelector('[data-testid="notice"]')).toBeNull();
+      expect(fake.requestsFor('admin.users')).toHaveLength(1);
+      expect(view.busy()).toBe(false);
+    });
+
+    it('a failed grant shows the error as an alert and the buttons work again', async () => {
+      fake.fail('admin.grantRoles', {
+        code: 'SERVER_ERROR',
+        message: 'The server refused the command: Could not find role: nope@shop',
+      });
+      await create();
+      await type('role-input', 'nope');
+      await click('role-add');
+      const notice = get('notice');
+      expect(notice.getAttribute('role')).toBe('alert');
+      expect(notice.textContent).toContain('Could not find role: nope@shop');
+      expect(view.busy()).toBe(false);
+      expect(get<HTMLButtonElement>('drop').disabled).toBe(false);
+      expect(fake.requestsFor('admin.users')).toHaveLength(1);
+    });
+
+    const suggestions = () =>
+      [...get('grant').querySelectorAll('datalist option')].map((o) => o.getAttribute('value'));
+
+    it('suggests admin roles when granting to a user, not when granting to a role of shop', async () => {
+      await create();
+      expect(suggestions()).toContain('readAnyDatabase@admin');
+      expect(suggestions()).toContain('clerk');
+      await click('mode-roles');
+      expect(suggestions()).toContain('reader');
+      expect(suggestions().some((s) => s?.includes('@'))).toBe(false);
+    });
+
+    it('a refused grant keeps the typed role; a grant that worked empties the field', async () => {
+      fake.fail('admin.grantRoles', {
+        code: 'SERVER_ERROR',
+        message: 'The server refused the command: Could not find role: nope@shop',
+      });
+      await create();
+      await type('role-input', 'nope');
+      await click('role-add');
+      expect(get('notice').textContent).toContain('Could not find role');
+      expect(get<HTMLInputElement>('role-input').value).toBe('nope');
+      fake.respond('admin.grantRoles', {});
+      await type('role-input', 'reader');
+      await click('role-add');
+      expect(get('notice').textContent).toContain('Granted reader to alice.');
+      expect(get<HTMLInputElement>('role-input').value).toBe('');
+    });
+
+    it('a change answered after the tab moved to another database shows no notice', async () => {
+      let release!: () => void;
+      fake.handle(
+        'admin.grantRoles',
+        () => new Promise((resolve) => (release = () => resolve({}))),
+      );
+      await create();
+      const pending = view.grant({ role: 'reader', db: 'shop' });
+      await settle();
+      fixture.componentRef.setInput('tab', { ...TAB, data: { profileId: 'p1', db: 'crm' } });
+      await settle();
+      release();
+      await pending;
+      await settle();
+      expect(view.notice()).toBeNull();
+      expect(el().querySelector('[data-testid="notice"]')).toBeNull();
+      expect(view.busy()).toBe(false);
+    });
+
+    it('a failure answered after the tab moved to another database shows no error', async () => {
+      let fail!: () => void;
+      fake.handle(
+        'admin.revokeRoles',
+        () =>
+          new Promise((resolve) => {
+            fail = () =>
+              resolve({ error: { code: 'SERVER_ERROR', message: 'Could not find role' } });
+          }),
+      );
+      await create();
+      const pending = view.revoke({ role: 'clerk', db: 'shop' });
+      await settle();
+      fixture.componentRef.setInput('tab', { ...TAB, data: { profileId: 'p1', db: 'crm' } });
+      await settle();
+      fail();
+      await pending;
+      await settle();
+      expect(view.notice()).toBeNull();
+      expect(view.busy()).toBe(false);
+    });
+
+    it('a grant cancelled in the confirm dialog keeps the typed role; confirming empties it', async () => {
+      TestBed.inject(ProfileSafetyService).set({
+        id: 'p1',
+        name: 'Prod',
+        readOnly: false,
+        production: true,
+      });
+      fake.respond('admin.grantRoles', {});
+      await create();
+      const confirm = TestBed.inject(ConfirmService);
+      await type('role-input', 'reader');
+      await click('role-add');
+      expect(confirm.current()?.operation).toBe(
+        'db.getSiblingDB("shop").grantRolesToUser("alice", [{ role: "reader", db: "shop" }])',
+      );
+      confirm.answer(false);
+      await settle();
+      expect(sent('admin.grantRoles')).toEqual([]);
+      expect(el().querySelector('[data-testid="notice"]')).toBeNull();
+      expect(get<HTMLInputElement>('role-input').value).toBe('reader');
+      expect(view.busy()).toBe(false);
+      await click('role-add');
+      confirm.answer(true);
+      await settle();
+      expect(sent('admin.grantRoles')).toHaveLength(1);
+      expect(get('notice').textContent).toContain('Granted reader to alice.');
+      expect(get<HTMLInputElement>('role-input').value).toBe('');
+    });
+
+    it('a change answered after the tab moved reads nothing again and keeps the new lists', async () => {
+      let release!: () => void;
+      fake.handle('admin.dropUser', () => new Promise((resolve) => (release = () => resolve({}))));
+      await create();
+      const pending = view.drop();
+      await settle();
+      TestBed.inject(ConfirmService).answer(true);
+      await settle();
+      expect(sent('admin.dropUser')).toHaveLength(1);
+      fixture.componentRef.setInput('tab', { ...TAB, data: { profileId: 'p1', db: 'crm' } });
+      await settle();
+      expect(sent('admin.users').map((p) => p['db'])).toEqual(['shop', 'crm']);
+      release();
+      await pending;
+      await settle();
+      expect(sent('admin.users').map((p) => p['db'])).toEqual(['shop', 'crm']);
+      expect(rolesParams().map((p) => p['db'])).toEqual(['shop', 'crm']);
+      expect(view.notice()).toBeNull();
+      expect(view.users().state).toBe('loaded');
+    });
+
+    it('a save reported after the form was closed shows nothing and reads nothing again', async () => {
+      await create();
+      await click('create');
+      view.closeEditor();
+      await view.saved('carl');
+      await settle();
+      expect(view.notice()).toBeNull();
+      expect(fake.requestsFor('admin.users')).toHaveLength(1);
+    });
+
+    it('choosing the mode already shown keeps an open form', async () => {
+      await create();
+      await click('create');
+      await type('editor-name', 'carl');
+      await click('mode-users');
+      expect(all('principal-editor')).toHaveLength(1);
+      expect(get<HTMLInputElement>('editor-name').value).toBe('carl');
+    });
+
+    it('with nothing selected, grant, revoke and drop send nothing', async () => {
+      fake.respond('admin.users', { users: [] });
+      fake.handle('admin.roles', () => ({ roles: [] }));
+      await create();
+      await view.grant({ role: 'read', db: 'shop' });
+      await view.revoke({ role: 'read', db: 'shop' });
+      await view.drop();
+      view.edit();
+      expect(view.editing()).toBeNull();
+      view.setMode('roles');
+      await settle();
+      await view.grant({ role: 'read', db: 'shop' });
+      await view.drop();
+      view.edit();
+      await settle();
+      expect(fake.requestsFor('admin.grantRoles')).toHaveLength(0);
+      expect(fake.requestsFor('admin.revokeRoles')).toHaveLength(0);
+      expect(fake.requestsFor('admin.dropUser')).toHaveLength(0);
+      expect(fake.requestsFor('admin.dropRole')).toHaveLength(0);
+      expect(TestBed.inject(ConfirmService).current()).toBeNull();
+      expect(view.editing()).toBeNull();
+      expect(view.notice()).toBeNull();
+    });
+
+    it('a second change while one is pending is ignored', async () => {
+      let release!: () => void;
+      fake.handle(
+        'admin.revokeRoles',
+        () => new Promise((resolve) => (release = () => resolve({}))),
+      );
+      await create();
+      const first = view.revoke({ role: 'clerk', db: 'shop' });
+      await settle();
+      expect(view.busy()).toBe(true);
+      expect(get<HTMLButtonElement>('drop').disabled).toBe(true);
+      await view.revoke({ role: 'read', db: 'reports' });
+      expect(sent('admin.revokeRoles')).toHaveLength(1);
+      release();
+      await first;
+      await settle();
+      expect(view.busy()).toBe(false);
+    });
   });
 });

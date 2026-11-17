@@ -1,0 +1,140 @@
+<form
+  class="editor"
+  data-testid="principal-editor"
+  [attr.aria-label]="title()"
+  (submit)="$event.preventDefault(); save()"
+>
+  <h2 class="title">{{ title() }}</h2>
+
+  @if (creating()) {
+    <label class="row">
+      <span class="label">Name</span>
+      <input
+        #nameField
+        type="text"
+        class="field mono"
+        data-testid="editor-name"
+        autocomplete="off"
+        spellcheck="false"
+        [value]="name()"
+        (input)="name.set(nameField.value)"
+      />
+    </label>
+  }
+
+  @if (isUser()) {
+    @if (db() !== '$external') {
+      <label class="row">
+        <span class="label">{{ creating() ? 'Password' : 'New password' }}</span>
+        <input
+          #pw
+          type="password"
+          class="field"
+          data-testid="editor-password"
+          autocomplete="new-password"
+          [value]="password()"
+          [placeholder]="creating() ? '' : 'Leave empty to keep the current one'"
+          (input)="password.set(pw.value)"
+        />
+      </label>
+      <label class="row">
+        <span class="label">Repeat password</span>
+        <input
+          #pw2
+          type="password"
+          class="field"
+          data-testid="editor-repeat"
+          autocomplete="new-password"
+          [value]="repeat()"
+          (input)="repeat.set(pw2.value)"
+        />
+      </label>
+    } @else {
+      <p class="hint">
+        Users of $external sign in through LDAP, X.509 or AWS: they have no password here.
+      </p>
+    }
+  }
+
+  <div class="row" role="group" [attr.aria-label]="isUser() ? 'Roles' : 'Inherits from'">
+    <span class="label">{{ isUser() ? 'Roles' : 'Inherits from' }}</span>
+    <div class="rail-edit">
+      @if (roles().length === 0) {
+        <p class="none">None yet.</p>
+      } @else {
+        <ul class="chips" data-testid="editor-roles">
+          @for (ref of roles(); track roleKey(ref)) {
+            <li class="chip">
+              <span class="mono">{{ roleLabel(ref) }}</span>
+              <button
+                type="button"
+                class="x"
+                data-testid="editor-role-remove"
+                [attr.aria-label]="'Remove ' + roleLabel(ref)"
+                (click)="removeRole(ref)"
+              >
+                ×
+              </button>
+            </li>
+          }
+        </ul>
+      }
+      <app-role-input
+        [db]="db()"
+        [known]="known()"
+        [forRole]="!isUser()"
+        [label]="isUser() ? 'Add a role' : 'Add a role to inherit from'"
+        (picked)="addRole($event)"
+      />
+    </div>
+  </div>
+
+  @if (isUser()) {
+    <label class="row">
+      <span class="label">Custom data</span>
+      <textarea
+        #cd
+        class="field mono area"
+        rows="3"
+        data-testid="editor-custom-data"
+        spellcheck="false"
+        placeholder='{ team: "sales" }'
+        [value]="customData()"
+        (input)="customData.set(cd.value)"
+      ></textarea>
+    </label>
+  } @else {
+    <label class="row">
+      <span class="label">Privileges</span>
+      <textarea
+        #privs
+        class="field mono area"
+        rows="6"
+        data-testid="editor-privileges"
+        spellcheck="false"
+        [placeholder]="privilegesHint"
+        [value]="privileges()"
+        (input)="privileges.set(privs.value)"
+      ></textarea>
+    </label>
+  }
+
+  @if (error(); as message) {
+    <p class="message error" role="alert" data-testid="editor-error">{{ message }}</p>
+  } @else if (problem(); as message) {
+    <p class="message" data-testid="editor-problem">{{ message }}</p>
+  }
+
+  <div class="buttons">
+    <button type="button" class="btn" data-testid="editor-cancel" (click)="cancel()">Cancel</button>
+    <button
+      type="submit"
+      class="btn primary"
+      data-testid="editor-save"
+      [appWriteControl]="profileId()"
+      [disabledWhen]="saving() || problem() !== null"
+    >
+      {{ saving() ? 'Saving…' : saveLabel() }}
+    </button>
+  </div>
+</form>
