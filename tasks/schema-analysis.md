@@ -1,11 +1,11 @@
 ---
 title: M3: Schema analysis
-status: in_progress
+status: done
 owner: felix/agent-2
 deps: [docs-query-backend,collection-view]
 touches: [packages/backend/src/schema,packages/renderer/src/app/schema-analysis]
 prio: 2
-lease_until: 2026-11-17T05:35:25Z
+lease_until: 
 ---
 ## Goal
 Sample-based (default 1 000) analysis with mongodb-schema: fields, types and shares, missing ratio, examples; shown in the table view; click a value to use it as a filter.
@@ -25,3 +25,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 06:02+0100 by felix/agent-2): Correction to the earlier sample assumption: examples are full values only; the library limit is 1000 chars/bytes and any example that may have been cut is dropped, so no example builds a filter that cannot match (review CR-1/CR-6).
 - ASSUMPTION (2026-11-17 06:02+0100 by felix/agent-2): Uses @mongodb-js/mongodb-schema (maintained successor of the deprecated mongodb-schema named in ARCHITECTURE.md; same API).
 - ASSUMPTION (2026-11-17 06:02+0100 by felix/agent-2): Schema analysis ignores the query bar's collation: schema.analyze has no collation param in the contract (review CR-3, accepted).
+- done by felix/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 122s on dc6633fe9; criteria verified 2/2
