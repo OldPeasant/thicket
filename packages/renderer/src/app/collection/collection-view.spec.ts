@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
 import type { WorkspaceTab } from '../layout/workspace.service';
+import { ProfileSafetyService } from '../safety/profile-safety.service';
 import { CollectionView } from './collection-view';
 
 const TAB: WorkspaceTab = {
@@ -727,5 +728,32 @@ describe('CollectionView', () => {
     const toggle = el().querySelector<HTMLButtonElement>('.mode-toggle');
     expect(toggle?.disabled).toBe(false);
     expect(q('edit-bar')).not.toBeNull();
+  });
+
+  it('offers export and import on a writable profile', async () => {
+    expect(q('io-export')).not.toBeNull();
+    click('io-import');
+    await settle();
+    expect(q('import-panel')).not.toBeNull();
+    click('io-export');
+    await settle();
+    expect(q('import-panel')).toBeNull();
+    expect(q('export-panel')).not.toBeNull();
+  });
+
+  it('does not offer import on a read-only profile, and closes an open import panel', async () => {
+    const safety = TestBed.inject(ProfileSafetyService);
+    click('io-import');
+    await settle();
+    expect(q('import-panel')).not.toBeNull();
+
+    safety.set({ id: 'p1', name: 'Reporting', readOnly: true, production: false });
+    await settle();
+    expect(q('io-import')).toBeNull();
+    expect(q('import-panel')).toBeNull();
+    // Export is a read: still offered.
+    expect(q('io-export')).not.toBeNull();
+    expect(fake.requestsFor('io.previewImport')).toHaveLength(0);
+    expect(fake.requestsFor('io.import')).toHaveLength(0);
   });
 });
