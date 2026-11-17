@@ -11,7 +11,8 @@ lease_until: 2026-11-17T06:31:38Z
 List running operations with filters (namespace, duration, type) and auto-refresh; kill with confirm.
 
 ## Acceptance criteria
-- [ ] Integration test: a slow op is listed and killed
+- [x] Integration test: a slow op is listed and killed
+  - verified (2026-11-17 07:16+0100 by felix/agent-1): npx vitest run --config test/integration/vitest.config.ts test/integration/currentop.int.spec.ts (Podman MongoDB container) at 0fecf7d2 -> 3 passed (slow $where find listed with filters, killed, ends Interrupted, gone from list; read-only refused)
 - [ ] e2e: kill from the UI with confirm
 
 ## Notes
