@@ -42,10 +42,10 @@ describe('scriptFileProblem', () => {
   it('accepts a script of exactly the size limit and refuses one byte more', () => {
     expect(scriptFileProblem({ name: 'big.js', size: MAX_SCRIPT_BYTES })).toBeNull();
     expect(scriptFileProblem({ name: 'big.js', size: MAX_SCRIPT_BYTES + 1 })).toBe(
-      'big.js is too large to run (5.0 MB; at most 5.0 MB)',
+      'big.js is too large to run: it is larger than 5 MB',
     );
     expect(scriptFileProblem({ name: 'huge.mongodb', size: 12 * 1024 * 1024 })).toBe(
-      'huge.mongodb is too large to run (12.0 MB; at most 5.0 MB)',
+      'huge.mongodb is too large to run: it is larger than 5 MB',
     );
   });
 

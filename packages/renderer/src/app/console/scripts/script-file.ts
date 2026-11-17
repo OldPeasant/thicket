@@ -14,6 +14,9 @@ export const SCRIPT_ACCEPT = SCRIPT_EXTENSIONS.join(',');
 /** Largest script the console runs (the whole text travels in one `shell.eval` request). */
 export const MAX_SCRIPT_BYTES = 5 * 1024 * 1024;
 
+/** The limit in MB, as the "too large" message names it (exact, so a file just over it is clear). */
+const MAX_SCRIPT_MB = MAX_SCRIPT_BYTES / (1024 * 1024);
+
 /** A script read from a file, ready to evaluate. */
 export interface ScriptFile {
   readonly name: string;
@@ -36,7 +39,7 @@ export function scriptFileProblem(file: Pick<ScriptSource, 'name' | 'size'>): st
     return `${file.name} is not a script: choose a .js or .mongodb file`;
   }
   if (file.size > MAX_SCRIPT_BYTES) {
-    return `${file.name} is too large to run (${formatSize(file.size)}; at most ${formatSize(MAX_SCRIPT_BYTES)})`;
+    return `${file.name} is too large to run: it is larger than ${MAX_SCRIPT_MB} MB`;
   }
   return null;
 }
@@ -60,10 +63,4 @@ export async function readScriptFile(file: ScriptSource): Promise<ScriptFile> {
 function countLines(code: string): number {
   const trimmed = code.replace(/\r?\n$/, '');
   return trimmed.split(/\r?\n/).length;
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

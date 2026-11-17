@@ -63,7 +63,10 @@ export interface Run {
   readonly code: string;
   readonly outputs: readonly ShownOutput[];
   readonly state: 'running' | 'done' | 'stopped';
-  /** Set when the run is a script file: its name and length (`code` is the script's text). */
+  /**
+   * Set when the run is a script file: its name and length. `code` is then empty: the script's
+   * text is sent to the session but not kept in the transcript.
+   */
   readonly script?: { readonly name: string; readonly lines: number };
 }
 
@@ -288,8 +291,17 @@ export class ShellConsole {
       this.scriptProblem.set(error instanceof Error ? error.message : String(error));
       return;
     }
+    // The session or the running input may have changed while the file was read.
+    if (this.closed) return;
     const session = this.session();
-    if (this.closed || session.state !== 'open' || this.running()) return;
+    if (session.state !== 'open') {
+      this.scriptProblem.set(`${script.name} was not run: the session is not open`);
+      return;
+    }
+    if (this.running()) {
+      this.scriptProblem.set(`${script.name} was not run: the shell is busy`);
+      return;
+    }
     this.closeCompletions();
     this.evaluate(session.sessionId, script.code, { name: script.name, lines: script.lines });
     this.focusInput();
@@ -300,7 +312,8 @@ export class ShellConsole {
     const run: Run = {
       id,
       prompt: this.prompt(),
-      code,
+      // A script's text is sent but not kept: the transcript shows only its name and lines.
+      code: script ? '' : code,
       outputs: [],
       state: 'running',
       ...(script ? { script } : {}),

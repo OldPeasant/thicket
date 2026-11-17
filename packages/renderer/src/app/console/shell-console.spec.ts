@@ -903,7 +903,8 @@ describe('ShellConsole', () => {
       expect(run.querySelector('pre.code')).toBeNull();
       expect(run.textContent).not.toContain('insertOne');
       expect(view.runs()[0]?.script).toEqual({ name: 'insert-three.mongodb', lines: 5 });
-      expect(view.runs()[0]?.code).toBe(SCRIPT);
+      // The text was sent (see above) but is not kept in the transcript.
+      expect(view.runs()[0]?.code).toBe('');
     });
 
     it('says "1 line" for a one-line script', async () => {
@@ -1075,6 +1076,9 @@ describe('ShellConsole', () => {
       await runScript(source('seed.js', 'x = 1'));
       expect(evals().map((e) => e.code)).toEqual(['sleep(100000)']);
       expect(all('shell-run')).toHaveLength(1);
+      expect(get('shell-script-problem').textContent).toContain(
+        'seed.js was not run: the shell is busy',
+      );
       fake.end('st1');
       await settle();
       expect(scriptButton().disabled).toBe(false);
@@ -1098,6 +1102,54 @@ describe('ShellConsole', () => {
       expect(chooser.count).toBe(0);
       await runScript(source('seed.js', 'x = 1'));
       expect(evals()).toEqual([]);
+    });
+
+    /** A source whose `text()` resolves only when `release` is called. */
+    const slowSource = (name: string) => {
+      const slow: { release: (text: string) => void } = { release: () => undefined };
+      const file: Source = {
+        name,
+        size: 5,
+        text: () =>
+          new Promise<string>((resolve) => {
+            slow.release = resolve;
+          }),
+      };
+      return { slow, file };
+    };
+
+    it('says why when a run started while the file was read', async () => {
+      await create();
+      const { slow, file } = slowSource('slow.js');
+      const pending = view.runScript(file);
+      await type('sleep(100000)');
+      await key('Enter');
+      slow.release('x = 1');
+      await pending;
+      await settle();
+      expect(evals().map((e) => e.code)).toEqual(['sleep(100000)']);
+      expect(all('shell-run')).toHaveLength(1);
+      expect(get('shell-script-problem').getAttribute('role')).toBe('alert');
+      expect(get('shell-script-problem').textContent).toContain(
+        'slow.js was not run: the shell is busy',
+      );
+    });
+
+    it('says why when the session ended while the file was read', async () => {
+      await create();
+      const { slow, file } = slowSource('slow.js');
+      const pending = view.runScript(file);
+      await type('1');
+      await key('Enter');
+      fake.failStream('st1', { code: 'NOT_FOUND', message: 'No shell session s1' });
+      await settle();
+      slow.release('x = 1');
+      await pending;
+      await settle();
+      expect(evals().map((e) => e.code)).toEqual(['1']);
+      expect(get('shell-script-problem').textContent).toContain(
+        'slow.js was not run: the session is not open',
+      );
     });
 
     it('sends nothing when the tab goes away while the file is read', async () => {
