@@ -34,6 +34,25 @@ describe('MongoDB fixtures', () => {
     expect(await coll.countDocuments({ name })).toBe(1);
   });
 
+  // mongod 8.2 crashes (SIGSEGV) ~30 s after start with TCMalloc's background thread on; the 8.x
+  // fixtures pass MONGOD_8_ARGS. 7.0 lacks the parameter and must start without it.
+  it.each(FIXTURE_NAMES)(
+    '%s runs with TCMalloc background thread off on 8.x only',
+    async (name) => {
+      const fixture = mongo[name];
+      const spec = FIXTURE_SPECS[name];
+      const c = client(fixture.uri, fixture.tls ? { tls: true, tlsCAFile } : {});
+      const admin = c.db('admin');
+      if (spec.version === '8') {
+        const reply = await admin.command({ getParameter: 1, tcmallocEnableBackgroundThread: 1 });
+        expect(reply['tcmallocEnableBackgroundThread']).toBe(false);
+      } else {
+        const { argv } = await admin.command({ getCmdLineOpts: 1 });
+        expect((argv as string[]).join(' ')).not.toContain('tcmallocEnableBackgroundThread');
+      }
+    },
+  );
+
   it('replica set fixture supports transactions', async () => {
     const c = client(mongo.mongo8rs.uri);
     const coll = c.db('fixture_smoke').collection('tx');
