@@ -1,10 +1,11 @@
 ---
 title: M1 (Should): Edit a field across selected rows
-status: todo
-owner:
+status: in_progress
+owner: dell26/agent-1
 deps: [doc-edit-save]
 touches: [packages/renderer/src/app/collection/multi-edit]
 prio: 3
+lease_until: 2026-11-17T05:57:04Z
 ---
 ## Goal
 In the table view, select rows and set/unset one field for all; saved as one batch through WriteGuard with the document count in the confirmation; per-document conflict checks.
