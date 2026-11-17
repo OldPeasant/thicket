@@ -11,7 +11,8 @@ lease_until: 2026-11-17T06:36:44Z
 In the table view, select rows and set/unset one field for all; saved as one batch through WriteGuard with the document count in the confirmation; per-document conflict checks.
 
 ## Acceptance criteria
-- [ ] e2e: select 3 rows, set a field, save → 3 docs updated
+- [x] e2e: select 3 rows, set a field, save → 3 docs updated
+  - verified (2026-11-17 07:17+0100 by dell26/agent-1): npm run test:e2e -- test/e2e/multi-edit.e2e.ts (Playwright/Electron, built app, MongoDB container fixture) -> 'select 3 rows, set a field, save: 3 documents updated' passed (3/3 passed)
 - [ ] One conflicting document is reported, the others saved (int/e2e test)
 
 ## Notes
