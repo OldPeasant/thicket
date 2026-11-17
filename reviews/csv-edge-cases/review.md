@@ -4,32 +4,38 @@ Date: 2026-11-17
 
 Task: csv-edge-cases - CSV edge cases: one-column blank rows, dates beyond year 9999, dotted field names; ARCHITECTURE.md io section
 
-Scope: `git diff ad4dde00..a27a8aa4`, committed changes only (one task commit a27a8aa4). Files: packages/backend/src/io/csv/csv.ts, packages/backend/src/io/csv/convert.ts, csv.spec.ts, convert.spec.ts, packages/backend/src/io/export.spec.ts, docs/ARCHITECTURE.md. The ARCHITECTURE Import/export paragraph was checked against the code in packages/backend/src/io (export.ts, import.ts, csv/, bson/).
+Scope: `git diff ad4dde00..3dae8b2f`, committed changes only. This is the second review, of the final code: the task commit a27a8aa4, the test commit 087d412e and the fix commit 3dae8b2f. Production files: packages/backend/src/io/csv/convert.ts and packages/backend/src/io/csv/csv.ts. Tests: convert.spec.ts, csv.spec.ts and packages/backend/src/io/export.spec.ts. Docs: docs/ARCHITECTURE.md. The review also checked that the fixes for CR-1 (first review) and TW-1 (reviews/csv-edge-cases/tests.md), described in reviews/csv-edge-cases/fixes.md, are correct. An uncommitted change to convert.spec.ts by a concurrent test-writer is outside this scope.
 
 Requirements:
 - tasks/csv-edge-cases.md: four acceptance criteria and two recorded assumptions (dotted field names in CSV export; `±YYYYYY` extended years in the CSV `date` type)
 - reviews/io-advanced/review.md CR-1..CR-4 (the deferred findings this task fixes)
 - SPEC.md, docs/ARCHITECTURE.md, AGENTS.md
-- Parent instructions: review the committed code at a27a8aa4
+- Parent instructions: second review of the committed code at 3dae8b2f, including the fixes and docs/ARCHITECTURE.md
 
 Git range:
 - Branch: main
-- HEAD: a27a8aa43c0cafcb7d497306bad39036fb248189
+- HEAD: 3dae8b2f1b49f4e640bcb7c6d7ccbed329875216
 - Base/start: ad4dde008e42b8df74f6b9f004ceb4067611ef01
-- Commits reviewed: 1
+- Commits reviewed: 3
 
-Summary: 0 P0, 0 P1, 1 P2, 0 P3
+Summary: 0 P0, 0 P1, 0 P2, 0 P3
+
+## Verification of the fixes
+
+- **CR-1 (a top-level dotted key holding a document lost its value): fixed.** `collectPaths` now has `!key.includes('.')` in the flatten condition (convert.ts:47). As a result, `{"a.b": {c: 1}}` gives the single column `a.b`, holding `{"c":1}`. With a colliding `a: {b: {c: 9}}`, the columns are `a.b` and `a`, and both values are written. Other shapes I probed also keep their values: `{".": 1, "a.": {b: 2}}` and `{x: {y: {"z.w": 1}}}` (the latter as column `x.y`). The doc comment and the ARCHITECTURE sentence now match the behavior. New tests cover both reported shapes, and the "loses no value" test includes them.
+- **TW-1 (offset forms at the Date range limits refused): fixed.** `date()` now validates the parts directly: month, days per month with proleptic Gregorian leap years (negative years included, since `-0 === 0`), hour, minute, second and offset. It then computes the instant arithmetically with `daysFromCivil` and refuses `|ms| > 8.64e15`. Near the limit every intermediate value is an exact integer, because 8.64e15 < 2^53. Values far beyond the limit (6-digit years up to 999999) can exceed 2^53, but they are well over 8.64e15 and are refused anyway, so the comment "Exact: |ms| < 2^53" only describes the accepted range.
 
 ## Verification of the acceptance criteria
 
-- **1. One-column export of an empty value round-trips:** met. `csvLine([''])` now returns `""\n` (csv.ts:167). `CsvScanner` reads that as one empty cell (state `quoted` → `quoteSeen` → newline ends the record, also at EOF through `end()`). Tests: csv.spec.ts (scanner round trip), export.spec.ts (empty, null and missing values, imported with a `string` mapping and with the default mapping, 5 documents back). It also fixes a header of a single column named `""` (top-level key `''`), which used to be written as a blank line.
-- **2. Dates outside the years 0000-9999:** met. `ISO_DATE` accepts `[+-]\d{6}` (convert.ts:137) and refuses `-000000`. `setUTCFullYear` handles years 0-99 and negative years correctly, the roll-over check refuses an out-of-range result (NaN fails every comparison), and the new NaN check after the offset (convert.ts:172-174) catches offsets that move the first or last representable day out of range. Tests cover years 10000, -1, 0, 9999, ±8.64e15 and the refused forms, both in `convertCell` and through `exportToFile` + import.
-- **3. Field names containing a dot:** partly met. Top-level dotted keys with scalar or array values, collisions with a top-level document, and nested documents holding a dotted key are exported with their values and tested. A top-level dotted key whose value is a non-empty document still loses its value (CR-1).
-- **4. ARCHITECTURE io section:** met. The `UNSUPPORTED` wording is gone. These claims match the code: the CSV header from `csvFields` or the first batch (`CSV_SAMPLE_DOCS` = 1000), the cell rules, `CsvScanner` (blank lines skipped, the record limit counting separators), `csvMapping` with `index`, `CSV_TYPES`, `defaultMapping`, blank cells, `CSV_PREVIEW_ROWS` = 20, and the BSON metadata, options and indexes behavior (`collectionMetadata`, `createWithOptions`, `createDumpIndexes`). One exception: the dotted-name sentence is inaccurate for the case in CR-1.
+- **1. One-column export of an empty value round-trips:** met. `csvLine([''])` writes `""\n` (csv.ts:167), and `CsvScanner` reads it as one empty cell. Tests: csv.spec.ts (scanner round trip), and export.spec.ts with empty, null and missing values, a named dotted column, and collected columns, imported back with the row count kept.
+- **2. Dates outside years 0000-9999:** met. `ISO_DATE` accepts `[+-]\d{6}` and refuses `-000000`. The export writes `toISOString()`, and that output parses back to the same instant (see the probe below). Tests cover years 10000, -1, 0, ±8.64e15, values one ms beyond the limit, extended-year leap days, offsets on extended years, and the export + import round trip.
+- **3. Field names containing a dot:** met. Top-level dotted keys are their own column, with document values written as one Extended JSON column. Colliding top-level documents and nested documents that hold dotted keys are written whole. The behavior is documented in the `collectPaths` comment, in docs/ARCHITECTURE.md and in the task assumption, and the tests cover it.
+- **4. ARCHITECTURE io section:** met. The `UNSUPPORTED` wording is gone. The new CSV export, CSV import and BSON bullets match the code, as already checked in the first review; the only change since then is the corrected dotted-name sentence, which now matches `collectPaths`.
 
-Checks run at a27a8aa4:
-- `npx vitest run packages/backend/src/io/csv packages/backend/src/io/export.spec.ts`: 4 files, 215 tests, all pass.
-- `npx tsx -e` with `collectPaths` / `valueAt` / `cellText` on `{ 'a.b': { c: 1 } }`: the header is `['a.b.c']`, and the cell is `''`. This reproduces CR-1.
+Checks run at 3dae8b2f:
+- `npx vitest run packages/backend/src/io`: 7 files, 461 tests, all pass.
+- `npx tsx -e` differential probe: 300 000 random instants across the full Date range. Each instant was converted with `toISOString()` and parsed back with `convertCell(…, 'date')`, both in `Z` form and in a random `±hhmm` offset form (offset up to ±23:59). Result: 0 mismatches. Spot checks: `-000001-02-29`, `2024-02-30`, `2024-01-01T24:00`, `+999999-12-31`, and one ms beyond either limit are refused; `+000000-02-29`, `-000004-02-29`, `0000-01-01` and `+002024-01-01` are accepted with the correct instants.
+- `npx tsx -e` with `collectPaths` / `valueAt` / `cellText` on the dotted-key shapes listed above: every value appears in some column.
 
 ## P0 Critical
 
@@ -41,12 +47,7 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | A top-level dotted key whose value is a document is flattened into a column that reads nothing (value lost)**
-    - File: `packages/backend/src/io/csv/convert.ts:41-49` (`collectPaths`), `packages/backend/src/io/csv/convert.ts:62` (`valueAt`), `docs/ARCHITECTURE.md:381-384`
-    - Category: Correctness
-    - Problem: `collectPaths` flattens every non-empty plain document whose key is not shadowed and whose children have no dot. That includes a top-level key that itself contains a dot. For `{ "a.b": { c: 1 } }` it adds the column `a.b.c`. `valueAt(doc, 'a.b.c')` looks for the literal top-level key `a.b.c`, finds none, then walks `a` → `b` → `c` and returns `undefined`, so the cell is empty. When the same document also has `a: { b: { c: 9 } }`, the `a.b.c` cell shows the nested `9`, `a` is written whole, and the literal `"a.b"` value appears nowhere. The doc comment ("never lose their value") and the ARCHITECTURE sentence ("a top-level one (`"a.b"`) is its own column") both state otherwise.
-    - Why it matters: Criterion 3 says a dotted field name is exported with its value. For this shape the export still drops data silently, which is the defect io-advanced CR-3 asked to remove.
-    - Suggested fix: Do not recurse into a value whose key contains a dot. Add `!key.includes('.')` to the flatten condition, so the key is one Extended JSON column that `valueAt` reads literally. Add a unit test for `{ "a.b": { c: 1 } }`, with and without a colliding `a: { b: { c: … } }`, and extend the "loses no value" test with this shape.
+None.
 
 ## P3 Low
 
@@ -54,6 +55,6 @@ None.
 
 ## Review conclusion
 
-Material issues found; fix before completing the task.
+No material issues found.
 
-CR-1 leaves acceptance criterion 3 partly unmet. The fix is one condition plus a test. The other three criteria are implemented, documented and tested correctly.
+The fixes for CR-1 and TW-1 are correct and covered by regression tests. All four acceptance criteria are implemented, documented and unit tested at 3dae8b2f.

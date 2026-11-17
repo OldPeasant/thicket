@@ -564,6 +564,97 @@ describe('convertCell', () => {
       }
     });
 
+    describe('calendar arithmetic against the Date calendar', () => {
+      /** The ISO text of a wall-clock UTC time, with the ±YYYYYY year outside 0-9999. */
+      const iso = (y: number, mo: number, d: number, h = 0, mi = 0, s = 0, ms = 0) => {
+        const pad = (v: number, w: number) => String(v).padStart(w, '0');
+        const year = y >= 0 && y <= 9999 ? pad(y, 4) : (y < 0 ? '-' : '+') + pad(Math.abs(y), 6);
+        return `${year}-${pad(mo, 2)}-${pad(d, 2)}T${pad(h, 2)}:${pad(mi, 2)}:${pad(s, 2)}.${pad(ms, 3)}Z`;
+      };
+      /** The same instant through the Date setters (no 0-99 year shift, unlike Date.UTC). */
+      const reference = (y: number, mo: number, d: number, h = 0, mi = 0, s = 0, ms = 0) => {
+        const at = new Date(0);
+        at.setUTCFullYear(y, mo - 1, d);
+        at.setUTCHours(h, mi, s, ms);
+        return at;
+      };
+      const lastDay = (y: number, mo: number) => reference(y, mo + 1, 0).getUTCDate();
+
+      it('agrees on the first and last day of every month around 400-year era boundaries', () => {
+        const years = [
+          -271820, -270001, -2001, -801, -800, -401, -400, -399, -101, -100, -5, -4, -1, 0, 1, 99,
+          100, 399, 400, 401, 1599, 1600, 1601, 1899, 1900, 1969, 1970, 1999, 2000, 2001, 9999,
+          10000, 10399, 10400, 270000, 275759,
+        ];
+        for (const y of years) {
+          for (let mo = 1; mo <= 12; mo++) {
+            for (const d of [1, lastDay(y, mo)]) {
+              const text = iso(y, mo, d, 23, 59, 59, 999);
+              expect(convertCell(text, 'date'), text).toEqual(reference(y, mo, d, 23, 59, 59, 999));
+            }
+          }
+        }
+      });
+
+      it('agrees on seeded random date-times across the whole year range', () => {
+        let seed = 0x2f6b1d3; // fixed seed: the same 3000 cases on every run
+        const next = (max: number) => {
+          seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+          return seed % max;
+        };
+        for (let i = 0; i < 3000; i++) {
+          const y = next(271820 + 275759 + 1) - 271820; // -271820..275759: fully inside the range
+          const mo = next(12) + 1;
+          const d = next(lastDay(y, mo)) + 1;
+          const [h, mi, s, ms] = [next(24), next(60), next(60), next(1000)];
+          const text = iso(y, mo, d, h, mi, s, ms);
+          expect(convertCell(text, 'date'), text).toEqual(reference(y, mo, d, h, mi, s, ms));
+        }
+      });
+
+      it('applies the Gregorian century rule to negative years', () => {
+        for (const y of [-4, -96, -400, -800, -2000, -271820]) {
+          const text = `-${String(-y).padStart(6, '0')}-02-29`;
+          expect(convertCell(text, 'date'), text).toEqual(reference(y, 2, 29));
+        }
+        for (const text of ['-000100-02-29', '-000200-02-29', '-000300-02-29', '-001900-02-29']) {
+          expect(() => convertCell(text, 'date'), text).toThrow(new CellError('is not a date'));
+        }
+        expect(convertCell('-000100-02-28T23:59:59.999Z', 'date')).toEqual(
+          new Date(reference(-100, 3, 1).getTime() - 1),
+        );
+      });
+
+      it('reads 1 to 3 fraction digits as milliseconds and truncates further digits', () => {
+        const base = Date.UTC(2026, 2, 1, 10, 0, 30);
+        for (const [fraction, ms] of [
+          ['0', 0],
+          ['1', 100],
+          ['01', 10],
+          ['001', 1],
+          ['9999', 999],
+          ['0009', 0],
+        ] as const) {
+          const text = `2026-03-01T10:00:30.${fraction}Z`;
+          expect(convertCell(text, 'date'), text).toEqual(new Date(base + ms));
+        }
+      });
+
+      it('adds the fraction after the offset in negative years and at the range edges', () => {
+        expect(convertCell('-000001-06-15T12:00:00.001+01:00', 'date')).toEqual(
+          reference(-1, 6, 15, 11, 0, 0, 1),
+        );
+        expect(convertCell('-271821-04-20T00:00:00.001Z', 'date')).toEqual(new Date(-8.64e15 + 1));
+        expect(convertCell('-271821-04-19T23:00:00.5-01:00', 'date')).toEqual(
+          new Date(-8.64e15 + 500),
+        );
+        expect(convertCell('+275760-09-12T23:59:59.999Z', 'date')).toEqual(new Date(8.64e15 - 1));
+        expect(convertCell('+275760-09-13T00:59:59.999+01:00', 'date')).toEqual(
+          new Date(8.64e15 - 1),
+        );
+      });
+    });
+
     it('reads +000000 as year 0 and applies offsets and time parts to extended years', () => {
       expect(convertCell('+000000-01-01', 'date')).toEqual(convertCell('0000-01-01', 'date'));
       expect(convertCell('+010000-01-01T01:30+01:30', 'date')).toEqual(
