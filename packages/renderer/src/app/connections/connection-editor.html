@@ -128,7 +128,10 @@
         @if (state().droppedSecrets; as dropped) {
           <p class="warning" role="note" data-testid="dropped-secrets">
             Not stored: {{ dropped.join(', ') }} from the connection string. Thicket keeps secrets
-            only in the OS keychain: enter them in the proxy password or key passphrase field.
+            only in the OS keychain.
+            @if (droppedHasField()) {
+              Enter a proxy password or key passphrase in its field below.
+            }
           </p>
         }
         @if (saveError(); as error) {

@@ -62,7 +62,7 @@ import { HostKeyService } from './host-key.service';
             class="btn"
             data-testid="host-key-reject"
             [disabled]="hostKeys.busy()"
-            (click)="hostKeys.answer(false)"
+            (click)="answer(false)"
           >
             Don't trust
           </button>
@@ -71,7 +71,7 @@ import { HostKeyService } from './host-key.service';
             class="btn primary"
             data-testid="host-key-trust"
             [disabled]="hostKeys.busy()"
-            (click)="hostKeys.answer(true)"
+            (click)="answer(true)"
           >
             Trust and connect
           </button>
@@ -105,6 +105,7 @@ export class HostKeyDialog {
 
   private shown: string | null = null;
   private returnFocus: HTMLElement | null = null;
+  private wasBusy = false;
 
   constructor() {
     afterRenderEffect(() => {
@@ -126,13 +127,44 @@ export class HostKeyDialog {
         .querySelector<HTMLElement>('[data-testid="host-key-reject"]')
         ?.focus();
     });
+    // A failed answer (error shown, buttons enabled again): "Don't trust" gets the focus back,
+    // unless the user already moved it to something else in the dialog.
+    afterRenderEffect(() => {
+      const busy = this.hostKeys.busy();
+      const id = this.hostKeys.current()?.prompt.promptId ?? null;
+      const wasBusy = this.wasBusy;
+      this.wasBusy = busy;
+      if (busy || !wasBusy || id === null || id !== this.shown) return;
+      const dialog = this.dialog();
+      const active = this.document.activeElement;
+      if (active === dialog || !(active instanceof Node) || !dialog?.contains(active)) {
+        this.host.nativeElement
+          .querySelector<HTMLElement>('[data-testid="host-key-reject"]')
+          ?.focus();
+      }
+    });
+  }
+
+  /**
+   * Sends the answer. The dialog itself takes the focus first: the buttons are disabled while the
+   * answer is sent, and a disabled focused button would drop the focus out of the dialog (and with
+   * it Escape and the Tab trap).
+   */
+  protected answer(trust: boolean): void {
+    if (this.hostKeys.busy()) return;
+    this.dialog()?.focus();
+    void this.hostKeys.answer(trust);
+  }
+
+  private dialog(): HTMLElement | null {
+    return this.host.nativeElement.querySelector<HTMLElement>('.dialog');
   }
 
   protected onKeydown(event: KeyboardEvent): void {
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
-      void this.hostKeys.answer(false);
+      this.answer(false);
     } else if (event.key === 'Tab' && !event.ctrlKey && !event.metaKey && !event.altKey) {
       const items = Array.from(
         this.host.nativeElement.querySelectorAll<HTMLElement>(

@@ -297,6 +297,9 @@ function uriModel(state: EditorState, password: string | undefined): ConnectionU
     delete model.auth.source;
   } else {
     model.auth.mechanism = state.mechanism;
+    // X.509 always authenticates against $external (the backend sets it); another authSource
+    // only makes the driver refuse the string.
+    if (state.mechanism === 'MONGODB-X509') delete model.auth.source;
     if (nonEmpty(model.username) === undefined) delete model.username;
     if (password !== undefined && model.username !== undefined) model.password = password;
   }
@@ -407,7 +410,9 @@ export function editorProblems(state: EditorState): string[] {
   const ssh = state.ssh;
   if (ssh.enabled) {
     if (ssh.host.trim() === '') problems.push('Enter the SSH server.');
-    if (!validPort(ssh.port)) problems.push('The SSH port is a whole number from 1 to 65535.');
+    if (!validPort(ssh.port ?? SSH_DEFAULT_PORT)) {
+      problems.push('The SSH port is a whole number from 1 to 65535.');
+    }
     if (ssh.username.trim() === '') problems.push('Enter the SSH user name.');
     if (ssh.method === 'privateKey' && nonEmpty(ssh.privateKeyFile) === undefined) {
       problems.push('Choose the SSH private key file.');
@@ -490,7 +495,7 @@ export function profileDraftFromState(state: EditorState): ProfileDraft {
     };
     if (model.username !== undefined) draft.auth.username = model.username;
     const source = nonEmpty(model.auth.source);
-    if (source !== undefined) draft.auth.authSource = source;
+    if (source !== undefined && state.mechanism !== 'MONGODB-X509') draft.auth.authSource = source;
   }
 
   const tls = model.tls;

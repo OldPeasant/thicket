@@ -586,11 +586,14 @@ describe('connection-form.model', () => {
     it('asks for the SSH server, port, user and the key file of the key method', () => {
       expect(editorProblems(ssh({ host: ' ' }))).toEqual(['Enter the SSH server.']);
       expect(editorProblems(ssh({ username: '' }))).toEqual(['Enter the SSH user name.']);
-      for (const port of [undefined, 0, 65536, 22.5]) {
+      for (const port of [0, 65536, 22.5]) {
         expect(editorProblems(ssh({ port })), String(port)).toEqual([
           'The SSH port is a whole number from 1 to 65535.',
         ]);
       }
+      // An empty SSH port means the default 22, like the proxy port's 1080 (review CR-1).
+      expect(editorProblems(ssh({ port: undefined }))).toEqual([]);
+      expect(profileDraftFromState(ssh({ port: undefined })).ssh?.port).toBe(22);
       expect(editorProblems(ssh({ method: 'privateKey' }))).toEqual([
         'Choose the SSH private key file.',
       ]);
@@ -702,6 +705,23 @@ describe('connection-form.model', () => {
       expect(draft.readPreferenceTags).toEqual([[{ name: 'dc', value: 'east' }], []]);
       expect(draft.proxy).toEqual({ host: 'socks.example.test', port: 1081 });
       expect(draft.writeConcern).toEqual({ w: 2, journal: false, wtimeoutMS: 100 });
+    });
+
+    it('X.509 never writes an authSource, also when a pasted URI has one (review CR-2)', () => {
+      const state = applied(
+        withState(),
+        'mongodb://db1.example.test/?tls=true&tlsCertificateKeyFile=%2Ffictitious%2Fc.pem' +
+          '&authMechanism=MONGODB-X509&authSource=admin',
+      );
+      expect(state.mechanism).toBe('MONGODB-X509');
+      const uri = connectionStringText(state).text ?? '';
+      expect(uri).toContain('authMechanism=MONGODB-X509');
+      expect(uri).not.toContain('authSource');
+      expect(profileDraftFromState(state).connectionString).not.toContain('authSource');
+      expect(profileDraftFromState(state).auth).toEqual({
+        mechanism: 'MONGODB-X509',
+        secretMode: 'none',
+      });
     });
 
     it('keeps SSH out of the URI and puts it in the draft (default port 22, key file only for keys)', () => {

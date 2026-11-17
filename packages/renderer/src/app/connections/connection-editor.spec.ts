@@ -569,6 +569,7 @@ describe('ConnectionEditor', () => {
       expect(text('dropped-secrets')).toContain('proxyPassword');
       expect(text('dropped-secrets')).toContain('tlsCertificateKeyFilePassword');
       expect(text('dropped-secrets')).toContain('AWS_SESSION_TOKEN');
+      expect(text('dropped-secrets')).toContain('in its field below');
       await click('tab-uri');
       expect(must<HTMLTextAreaElement>('field-uri').value).not.toContain(SECRET);
 
@@ -854,6 +855,19 @@ describe('ConnectionEditor', () => {
       await click('tab-form');
       expect(el.querySelector('[data-testid="dropped-secrets"]')).toBeNull();
     });
+
+    it('a dropped secret without a field of its own does not point to one (review CR-4)', async () => {
+      await start();
+      await click('tab-uri');
+      await input(
+        must('field-uri'),
+        `mongodb://db.example:27017/?authMechanismProperties=AWS_SESSION_TOKEN:${SECRET}`,
+      );
+      await click('tab-form');
+      expect(text('dropped-secrets')).toContain('AWS_SESSION_TOKEN');
+      expect(text('dropped-secrets')).toContain('only in the OS keychain.');
+      expect(text('dropped-secrets')).not.toContain('field');
+    });
   });
 
   describe('M2: SSH, client certificate, proxy, tags and write concern', () => {
@@ -952,6 +966,19 @@ describe('ConnectionEditor', () => {
       expect(fake.requestsFor('profiles.setSecret').map((r) => r.params)).toEqual([
         { profileId: 'new-id', kind: 'proxyPassword', value: SECRET },
       ]);
+    });
+
+    it('switching to X.509 drops the hidden auth source (review CR-2)', async () => {
+      await start();
+      await change(must<HTMLSelectElement>('field-mechanism'), 'SCRAM-SHA-256');
+      await input(must('field-username'), 'alice');
+      await change(must('field-auth-source'), 'admin');
+      expect(text('uri-preview')).toContain('authSource=admin');
+      await change(must<HTMLSelectElement>('field-mechanism'), 'MONGODB-X509');
+      expect(text('uri-preview')).not.toContain('authSource');
+      // Back to a password mechanism: the field starts empty, not with the hidden old value.
+      await change(must<HTMLSelectElement>('field-mechanism'), 'SCRAM-SHA-256');
+      expect(must<HTMLInputElement>('field-auth-source').value).toBe('');
     });
 
     it('X.509: client certificate, key file and passphrase; URI follows', async () => {
@@ -1228,6 +1255,14 @@ describe('ConnectionEditor', () => {
       );
       await click('save');
       expect(savedDraft().ssh?.port).toBe(2222);
+      // An empty port means the default 22 (review CR-1).
+      await change(must('field-ssh-port'), '');
+      expect(el.querySelector('[data-testid="problems"]')?.textContent ?? '').not.toContain(
+        problem,
+      );
+      await click('save');
+      expect(fake.requestsFor('profiles.save')).toHaveLength(2);
+      expect(savedDraft().ssh?.port).toBe(22);
     });
 
     it('the route shows the proxy hop and the SRV target', async () => {

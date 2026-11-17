@@ -133,6 +133,37 @@ describe('HostKeyDialog', () => {
     expect(must('host-key-trust').hasAttribute('disabled')).toBe(false);
   });
 
+  it('keeps the focus in the dialog while busy and puts it on "Don\'t trust" after an error', async () => {
+    let fail: (() => void) | undefined;
+    fake.handle(
+      'conn.trustHostKey',
+      () =>
+        new Promise((_resolve, reject) => {
+          fail = () => {
+            reject(new Error('known_hosts not writable'));
+          };
+        }),
+    );
+    await ask(prompt());
+    const trust = must('host-key-trust');
+    trust.focus();
+    trust.click();
+    await settle();
+    expect(trust.hasAttribute('disabled')).toBe(true);
+    expect(document.activeElement).toBe(must('host-key-dialog'));
+    fail?.();
+    await settle();
+    expect(find('host-key-error')).not.toBeNull();
+    expect(document.activeElement).toBe(must('host-key-reject'));
+    // Escape works again from there.
+    fake.respond('conn.trustHostKey', {});
+    must('host-key-reject').dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+    );
+    await settle();
+    expect(find('host-key-dialog')).toBeNull();
+  });
+
   describe('test-writer', () => {
     const tab = (shiftKey = false) => {
       const event = new KeyboardEvent('keydown', {

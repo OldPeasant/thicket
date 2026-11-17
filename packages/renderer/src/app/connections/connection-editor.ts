@@ -175,6 +175,12 @@ export class ConnectionEditor {
     () => this.storedSecrets().includes('password') && this.state().secretMode === 'saved',
   );
   protected readonly canSave = computed(() => this.storage()?.level !== 'unavailable');
+  /** Whether a dropped connection-string secret has a field of its own in this editor. */
+  protected readonly droppedHasField = computed(() =>
+    (this.state().droppedSecrets ?? []).some(
+      (name) => name === 'proxyPassword' || name === 'tlsCertificateKeyFilePassword',
+    ),
+  );
   /** Extra secrets the current settings use (their fields are shown, and stored on save). */
   protected readonly secretKinds = computed(() => usedSecretKinds(this.state()));
   /** The SSH tunnel or proxy is on: drawn as the route the connection takes. */
@@ -361,6 +367,8 @@ export class ConnectionEditor {
         delete model.auth.source;
       } else {
         model.auth.mechanism = mechanism;
+        // The authentication database field is hidden for X.509 ($external is implied).
+        if (mechanism === 'MONGODB-X509') delete model.auth.source;
       }
       let secretMode = s.secretMode;
       if (!usesPassword(mechanism)) secretMode = 'none';
@@ -797,7 +805,8 @@ export class ConnectionEditor {
   /**
    * Stores the extra secrets typed for the current settings. Returns what failed, as text.
    * Already stored secrets that the settings no longer use are left alone (the backend ignores
-   * them); a typed field is cleared once its secret is stored.
+   * them). Typed values are kept in the editor (also those already stored) until the whole save
+   * succeeds, so a retry after a partial failure sends them again.
    */
   private async storeSecrets(
     profileId: string,
