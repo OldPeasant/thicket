@@ -11,7 +11,8 @@ lease_until: 2026-11-17T02:35:48Z
 idx.list with size and `$indexStats` usage, create (compound, unique, sparse, partial, TTL, collation, hidden, text, 2dsphere, wildcard), drop, hide/unhide, through the guard.
 
 ## Acceptance criteria
-- [ ] Integration tests for each index option and for hide/unhide
+- [x] Integration tests for each index option and for hide/unhide
+  - verified (2026-11-17 03:18+0100 by dell26/agent-3): npx vitest run --config test/integration/vitest.config.ts test/integration/indexes.int.spec.ts (mongo8rs fixture, rootless Podman) -> 26 passed: compound, unique, sparse, partial, TTL, collation, hidden, text, 2dsphere, wildcard each created via idx.create and checked on the server; idx.hide hides (explain COLLSCAN) and unhides (IXSCAN)
 - [ ] Read-only refuses create/drop (int test)
 
 ## Notes
