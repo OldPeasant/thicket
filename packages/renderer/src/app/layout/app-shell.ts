@@ -1,4 +1,4 @@
-import { NgComponentOutlet } from '@angular/common';
+import { DOCUMENT, NgComponentOutlet } from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -64,13 +64,6 @@ export const SIDEBAR_KEY_STEP = 16;
     '[class.production]': 'production()',
     '[attr.data-production]': 'production() ? "" : null',
     '(document:keydown)': 'onKeydown($event)',
-    // Drag moves and the release are taken from the document, not the splitter: the splitter is a
-    // few pixels wide and follows the pointer, so without pointer capture (which the window does
-    // not always get, seen in e2e runs) the pointer leaves it after a few pixels and the drag
-    // would stop half-way, never saved.
-    '(document:pointermove)': 'dragMove($event)',
-    '(document:pointerup)': 'dragEnd($event, true)',
-    '(document:pointercancel)': 'dragEnd($event, false)',
   },
   template: `
     <aside
@@ -189,8 +182,12 @@ export class AppShell {
   });
 
   private drag: { pointerId: number; startX: number; startWidth: number } | null = null;
+  private readonly document = inject(DOCUMENT);
+  /** Removes the document listeners of the current splitter drag; `null` while no drag runs. */
+  private stopDragListening: (() => void) | null = null;
 
   constructor() {
+    inject(DestroyRef).onDestroy(() => this.stopDragListeners());
     void this.sidebar.init();
     // Following a link (welcome screen, sidebar) shows the routed page instead of a tab, also
     // when it leads to the current URL (the router skips that navigation).
@@ -250,6 +247,36 @@ export class AppShell {
       startWidth: this.sidebar.width(),
     };
     (event.currentTarget as Element | null)?.setPointerCapture?.(event.pointerId);
+    this.listenToDrag();
+  }
+
+  /**
+   * Drag moves and the release are taken from the document, not the splitter: the splitter is a
+   * few pixels wide and follows the pointer, so without pointer capture (which the window does
+   * not always get, seen in e2e runs) the pointer leaves it after a few pixels and the drag
+   * would stop half-way, never saved. The listeners are plain DOM listeners attached only while
+   * a drag runs, so pointer moves outside a drag do not schedule change detection; the preview
+   * is a signal, which schedules rendering by itself.
+   */
+  private listenToDrag(): void {
+    this.stopDragListeners();
+    const move = (event: PointerEvent) => this.dragMove(event);
+    const up = (event: PointerEvent) => this.dragEnd(event, true);
+    const cancel = (event: PointerEvent) => this.dragEnd(event, false);
+    const doc = this.document;
+    doc.addEventListener('pointermove', move);
+    doc.addEventListener('pointerup', up);
+    doc.addEventListener('pointercancel', cancel);
+    this.stopDragListening = () => {
+      doc.removeEventListener('pointermove', move);
+      doc.removeEventListener('pointerup', up);
+      doc.removeEventListener('pointercancel', cancel);
+    };
+  }
+
+  private stopDragListeners(): void {
+    this.stopDragListening?.();
+    this.stopDragListening = null;
   }
 
   protected dragMove(event: PointerEvent): void {
@@ -262,6 +289,7 @@ export class AppShell {
     if (!this.drag || event.pointerId !== this.drag.pointerId) return;
     if (atPointer) this.dragMove(event);
     this.drag = null;
+    this.stopDragListeners();
     this.saveWidth(this.sidebar.width());
   }
 

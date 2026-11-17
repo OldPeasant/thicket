@@ -999,6 +999,55 @@ describe('AppShell', () => {
       expect(fake.requestsFor('app.settings.set')).toHaveLength(0);
     });
 
+    it('listens on the document only during a drag, without duplicates (fixer)', async () => {
+      await start();
+      await settle();
+      const active = new Map<string, Set<EventListenerOrEventListenerObject>>();
+      const types = ['pointermove', 'pointerup', 'pointercancel'];
+      const add = document.addEventListener.bind(document);
+      const remove = document.removeEventListener.bind(document);
+      vi.spyOn(document, 'addEventListener').mockImplementation((type, listener, options) => {
+        if (types.includes(type) && listener) {
+          const set = active.get(type) ?? new Set();
+          set.add(listener);
+          active.set(type, set);
+        }
+        add(type, listener, options);
+      });
+      vi.spyOn(document, 'removeEventListener').mockImplementation((type, listener, options) => {
+        if (listener) active.get(type)?.delete(listener);
+        remove(type, listener, options);
+      });
+      const counts = () => types.map((type) => active.get(type)?.size ?? 0);
+
+      // Moves outside a drag: nothing listens.
+      expect(counts()).toEqual([0, 0, 0]);
+      pointer('pointerdown', 500, { button: 2 });
+      expect(counts()).toEqual([0, 0, 0]);
+      pointer('pointerdown', 500);
+      expect(counts()).toEqual([1, 1, 1]);
+      // A second press during the drag replaces the listeners instead of adding more.
+      pointer('pointerdown', 500);
+      expect(counts()).toEqual([1, 1, 1]);
+      onDocument('pointermove', 540);
+      await settle();
+      expect(width()).toBe('340px');
+      onDocument('pointerup', 540);
+      await settle();
+      expect(counts()).toEqual([0, 0, 0]);
+      expect(stored.sidebarWidth).toBe(340);
+      // A cancel removes them too.
+      pointer('pointerdown', 540);
+      expect(counts()).toEqual([1, 1, 1]);
+      onDocument('pointercancel', 540);
+      expect(counts()).toEqual([0, 0, 0]);
+      // Destroying the shell mid-drag removes them.
+      pointer('pointerdown', 540);
+      expect(counts()).toEqual([1, 1, 1]);
+      harness.fixture.destroy();
+      expect(counts()).toEqual([0, 0, 0]);
+    });
+
     it('a click on the splitter without moving saves nothing', async () => {
       await start();
       pointer('pointerdown', 500);
