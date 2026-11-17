@@ -4,147 +4,159 @@ Date: 2026-11-17
 
 Task: auth-ui-m5 - M5: Connection editor for LDAP, OIDC and AWS
 
-Scope: `git diff 384a448fa59547d3354caf30d43b3d18da210f3f 043e9e6026daede4a61a662621972beca0d2ea87 -- packages test`
-(task code commits b5b55b2 and 043e9e6; the commits in between only touch `tasks/`). Branch `main`,
-HEAD 043e9e6026daede4a61a662621972beca0d2ea87. No uncommitted production changes; the only
-uncommitted files are the test files listed below.
+Scope: `git diff 44fd007c7b65db6629a6a69885662ffc10ae49d1 165f65ee1c30915b7826813f2d66af48cee4701b -- packages test`
+(task commits f1b3148..165f65e on `main`; base = `git merge-base HEAD origin/main`, given by the parent).
+This is the second test-writer pass. The first pass covered the implementation before the fixer; this
+pass focuses on the fixer commit 165f65e (CR-1 stored AWS session token removal, CR-2 "1 second",
+CR-3 ask-hint wording) and re-measures the whole task on the final revision. HEAD
+165f65ee1c30915b7826813f2d66af48cee4701b; the only uncommitted file is the test file listed below.
 
 Requirements:
-- `tasks/auth-ui-m5.md` acceptance criteria and the three recorded ASSUMPTION notes (AWS key ID /
-  secret / session token handling, `$external` mechanisms drop authSource, OIDC sign-in panel).
+- `tasks/auth-ui-m5.md` acceptance criteria and its recorded assumptions (AWS key ID / secret / session token handling, `$external` mechanisms drop authSource, OIDC sign-in panel).
+- `reviews/auth-ui-m5/review.md` findings CR-1..CR-3 and `reviews/auth-ui-m5/fixes.md` (the intended fixed behavior).
 - `SPEC.md` / `docs/ARCHITECTURE.md` ("Coverage", "Conventions": tests next to the code, no secrets in fixtures).
-- Contract `packages/contract/src/conn.ts` (`oidcPrompt`) and `packages/contract/src/profiles.ts` (`OIDC_FLOWS`, auth schema).
-- Parent instructions (model round trips, applyConnectionString, stripUriSecrets, editorProblems, oidc-sign-in spec).
+- Backend behavior the fix relies on: `packages/backend/src/auth/aws/aws.ts` (a stored `awsSessionToken` is sent with any access key ID; nothing is sent on the default credential chain).
 
 ## Test files changed
 
-- `packages/renderer/src/app/connections/connection-form.model.spec.ts` (new describe block "connection-form.model M5: LDAP (PLAIN), OIDC and AWS IAM (test-writer)")
-- `packages/renderer/src/app/connections/oidc-sign-in.spec.ts` (new)
-- `packages/renderer/src/app/layout/app-shell.spec.ts` (one test added)
+- `packages/renderer/src/app/connections/connection-editor.spec.ts` (new describe block "stored AWS session token: edge cases (test-writer)" inside "M5: LDAP, OIDC and AWS IAM", plus one ask-hint test)
 
-No existing test was changed, weakened, skipped or removed. No production file was modified.
+Tests from the first pass (`connection-form.model.spec.ts`, `oidc-sign-in.spec.ts`, `app-shell.spec.ts`) are
+committed (cc14091) and unchanged. No existing test was changed, weakened, skipped or removed. No
+production file was modified.
 
 ## Tests added or updated
 
-Count: 70 (37 model tests, 32 OIDC sign-in service/panel tests, 1 app-shell test)
+Count: 17 (this pass)
 
-Model (`connection-form.model.spec.ts`):
-- mechanism helpers: FORM_MECHANISMS offers PLAIN/OIDC/AWS; `usesExternalSource` true only for X.509, PLAIN, OIDC, AWS, GSSAPI; `usesPassword` includes AWS, not OIDC/GSSAPI; `awsKeys` / `passwordInUse` table incl. whitespace-only key ID; `usedSecretKinds` lists `awsSessionToken` only for AWS with a key ID.
-- LDAP (PLAIN) round trip profile → state → draft (and stable on reload): user and secret mode kept, `$external` and another authSource dropped from form, string and draft; profile without `auth` takes PLAIN from the string with the fallback secret mode; typed LDAP password shown as MASK, never in the draft.
-- OIDC round trip: user name, `oidcFlow` (deviceCode, authCode) and `oidcTrustedEndpoint` kept; default `auto`/false left out of the draft (also when saved explicitly); no user in the string without user name; secret mode always `none`; OIDC settings not saved when another mechanism is chosen.
-- AWS round trip: key ID in `auth.username`, never in the connection string (exact string asserted); typed secret neither masked nor present in string/draft; default chain saved with `none` while the editor keeps the fallback mode, which is saved once a key ID is entered; saved `ask` kept; key ID trimmed, blank = default chain; authSource dropped; a saved string with `AWS_SESSION_TOKEN` loads without it and keeps the key.
-- applyConnectionString: AWS edit keeps key/secret/secret mode; AWS default chain edit adds nothing; unchanged tab text round-trips to the same draft; pasted `key:secret@` replaces both and they leave the string; pasted key without secret clears the old secret; pasted `AWS_SESSION_TOKEN` dropped (reported in `droppedSecrets`) while keys stay; pasted authSource dropped; SCRAM → AWS string does not turn the DB user/password into AWS keys; AWS → SCRAM string does not keep the AWS secret as DB password; PLAIN string moves the password, drops `$external`, `none` becomes `ask`; OIDC string gives secret mode `none`, drops authSource, keeps other mechanism properties and the OIDC form settings; a password pasted with OIDC is never shown or saved.
-- GSSAPI (behavior changed by `usesExternalSource`): not offered by the form, a loaded profile keeps the mechanism and saves no authSource.
-- editorProblems: AWS without key ID (or blank key ID) and AWS with keys are valid; PLAIN needs a user name; OIDC does not.
+Stored AWS session token (CR-1) edge cases, all with fictitious keys/tokens:
+- no remove button when no token is stored; a key ID change then removes nothing;
+- "Keep saved token" undoes the mark (label, `aria-pressed`, hint, placeholder), nothing removed on save;
+- marking the token for removal drops a token typed before: clearSecret, no setSecret;
+- a token typed and deleted again does not bring the removal back (no clearSecret, no setSecret);
+- marked for removal and a changed key ID: clearSecret exactly once;
+- key ID changed back to the saved one, or padded with spaces: token kept (no clearSecret);
+- changed key ID with a new token: setSecret for password and token, no clearSecret;
+- key ID cleared (default credential chain) with the token marked: token field hidden, no clearSecret (the token is unused there);
+- switching away from AWS with the token marked: no clearSecret;
+- after a successful key-change removal the next save does not call clearSecret again; button and hint gone;
+- password setSecret fails after a key change: no clearSecret yet, the hint stays, and the retry removes the old token;
+- clearSecret fails after a key change: error shown, button stays, retry removes it (two calls) and clears the error;
+- editing the connection-string tab keeps the removal mark; a pasted new key ID removes the token on save;
+- loading another profile forgets the removal mark;
+- a removal that finishes after switching to another profile leaves the new profile's stored token shown as saved, with no notice/error (covers `connection-editor.ts:958`);
+- the remove button is disabled when no encryption is available.
 
-OIDC sign-in (`oidc-sign-in.spec.ts`), using `FakeThicketBridge.emit` on `BROADCAST_STREAMS.oidcPrompt` and fake timers with a fixed clock:
-- Service: initial empty state; browser prompt stored as is; other streams / non-data events ignored; device prompt gets `expiresAt`; browser → device fallback with the same promptId replaces it; a repeated prompt shown once; several sign-ins show the latest, hiding it shows the previous; `finished` removes and records ok/failed; `finished` for unknown or hidden sign-ins records nothing; `finished` of one leaves others; a new prompt clears the note; device code expires exactly at `expiresInSeconds`; hide clears its timer; a replacing device prompt does not expire on the old timer; a browser prompt replacing a device prompt cancels the expiry; destroy unsubscribes and clears timers.
-- Panel: nothing shown initially; browser panel (profile name, non-modal dialog role, Copy link → clipboard, "Link copied"); device panel (code, verification page, "10 minutes", Copy code / Copy link); `verificationUriComplete` used for Copy link; refused clipboard shows the alert and claims nothing; browser → device fallback replaces the content and resets the "copied" state; Hide (browser and device) hides without a note, also when `finished` arrives later; "Signed in" note disappears after 4 s; a second "Signed in" note gets its own full 4 s; a failed note stays until Close; a new prompt replaces the note; countdown in minutes (rounded up) from 120 s, seconds below, panel gone at expiry with no interval left; no countdown/timer for the browser flow; no timer left after destroy.
+Ask hint (CR-3): SCRAM still reads "The password above is used for Test connection only" without a session-token sentence.
 
-App shell (`app-shell.spec.ts`): `app-oidc-sign-in` is mounted; with a sign-in shown nothing is inert and Ctrl+W still closes a tab; while the SSH host-key modal is open the panel host is inert, and not after it closes.
+CR-2 ("1 second") is already asserted by the fixer's change to `oidc-sign-in.spec.ts` ("The code expires in 2 seconds." then "1 second."); no further test needed.
 
 ## Requirement coverage
 
 | Requirement | Tests | Command | Result |
 |---|---|---|---|
-| AC1: component tests for each mechanism's fields and URI sync (LDAP/PLAIN) | editor "M5" block (parent): "LDAP: user name and password ...", "LDAP needs a user name", "LDAP from the connection string ..."; model: "LDAP (PLAIN) round trip" (4), applyConnectionString "PLAIN: ...", editorProblems "LDAP needs a user name, OIDC does not" | `cd packages/renderer && npx ng test --coverage ...` (full renderer suite, 85 files) | Pass |
-| AC1: OIDC fields and URI sync | editor "OIDC: optional user name, sign-in flow and trusted endpoint", "OIDC settings of a saved profile ..."; model "OIDC round trip" (6), applyConnectionString "OIDC: ..." (2) | same | Pass |
-| AC1: AWS IAM fields and URI sync | editor "AWS: ..." (5) and "switching to or from AWS ..."; model "AWS IAM round trip" (7), applyConnectionString "AWS: ..." (8 incl. SCRAM/AWS switches), editorProblems "AWS without an access key ID ...", mechanism helpers (5) | same | Pass |
-| AC1 (assumption): OIDC sign-in state panel fed by `oidc.prompt` | `oidc-sign-in.spec.ts` (32), app-shell "hosts the OIDC sign-in panel ..." | `npx ng test --include src/app/connections/oidc-sign-in.spec.ts` and full renderer suite | Pass |
-| AC1 (assumption): secrets (AWS secret, session token) never in string or draft | model "a typed secret access key appears nowhere ...", "AWS: a session token in a pasted string is dropped ...", "a saved AWS profile with a session token ..." | full renderer suite | Pass |
-| AC2: e2e LDAP profile connects against the fixture | `test/e2e/ldap.e2e.ts` "an LDAP profile: created in the editor, tested, saved and connected" | `npm run test:e2e -- ldap.e2e.ts` (Podman fixture, Playwright, real build path) | Pass (1 passed, 7.4 s), run by test-writer at 2026-11-17T03:52Z |
+| AC1: component tests for each mechanism's fields and URI sync (LDAP/PLAIN) | editor "M5" block: "LDAP: user name and password ...", "LDAP needs a user name", "LDAP from the connection string ..."; model "LDAP (PLAIN) round trip" (4), applyConnectionString "PLAIN: ...", editorProblems | `cd packages/renderer && npx ng test --include src/app/connections` and full renderer suite with coverage | Pass |
+| AC1: OIDC fields and URI sync | editor "OIDC: optional user name ...", "OIDC settings of a saved profile ..."; model "OIDC round trip" (6), applyConnectionString "OIDC: ..." (2) | same | Pass |
+| AC1: AWS IAM fields and URI sync | editor "AWS: ..." (5), "switching to or from AWS ...", "Test connection of an AWS draft ..."; model "AWS IAM round trip" (7), applyConnectionString "AWS: ..." (8), editorProblems, mechanism helpers | same | Pass |
+| AC1 / CR-1: a stored AWS session token can be removed, and is removed when the key ID changes | fixer's "stored AWS session token (review fix CR-1)" (5) and this pass's "stored AWS session token: edge cases (test-writer)" (16) | same | Pass |
+| AC1 / CR-3: ask hint names the mechanism's secret | "ask hint names the secret access key ...", "ask hint for SCRAM says \"password\" ..." | same | Pass |
+| AC1 (assumption) / CR-2: OIDC sign-in panel fed by `oidc.prompt`, countdown wording | `oidc-sign-in.spec.ts` (32), app-shell "hosts the OIDC sign-in panel ..." | same | Pass |
+| AC1 (assumption): secrets never in the string or draft | model "a typed secret access key appears nowhere ...", "AWS: a session token in a pasted string is dropped ...", editor "AWS: access key ID, secret access key and session token stay out of the string" | same | Pass |
+| AC2: e2e LDAP profile connects against the fixture | `test/e2e/ldap.e2e.ts` "an LDAP profile: created in the editor, tested, saved and connected" | `npm run test:e2e -- ldap.e2e.ts` (repo root; builds the app, LDAP container fixture via Podman, Playwright) | Pass (1 passed, 7.0 s), run by test-writer 2026-11-17T04:12:06Z-04:12:25Z on the final revision |
 
 ## Focused test execution
 
 Command:
 
-`cd packages/renderer && npx ng test --include src/app/connections/oidc-sign-in.spec.ts --include src/app/connections/connection-form.model.spec.ts`
-and `cd packages/renderer && npx ng test --include src/app/layout/app-shell.spec.ts`
+`cd packages/renderer && npx ng test --include src/app/connections`
 
 Result:
 
-Pass (2 files, 160 tests; app-shell 55 tests). One new test initially failed because of a mistake in
-the test itself (the `finished()` helper always used the first profile name); the test was
-corrected, not the production code.
+Pass (6 files, 318 tests). `connection-editor.spec.ts` alone: Pass. All new tests passed on the first
+run; no production defect surfaced.
 
 ## Full test execution
 
 Command:
 
-`cd packages/renderer && npx ng test --coverage --coverage-include=... (six files, see Coverage)`;
-`npm run lint`; `npm run typecheck -w packages/renderer`
+`npm run check` (repo root: `eslint . --max-warnings 0 && prettier --check .`, typecheck of all workspaces, `vitest run`, renderer `ng test`);
+also the full renderer suite under coverage (see Coverage).
 
 Result:
 
-Pass: renderer 85 files / 2738 tests passed; lint (eslint --max-warnings 0 + prettier --check) passed;
-typecheck (ngc + tsc spec config) passed.
+Pass: lint and typecheck passed; root projects 75 files / 4100 tests passed; renderer 93 files / 3069 tests passed (2026-11-17, about 04:10Z-04:12Z).
 
 ## .taskcheck
 
 Result:
 
-Pass: `sh .taskcheck` (`npm run check`: lint, typecheck, tests) at 2026-11-17T03:52:31Z to 03:54:18Z,
-root projects 73 files / 4038 tests passed, renderer 85 files / 2738 tests passed.
+Pass: `.taskcheck` runs `npm run check` (package.json present); that command passed as above. Not run
+through `tasks.py` (the parent runs `done`).
 
 ## Bugs found
 
-None. No production defect was found against the acceptance criteria or the recorded assumptions.
+None. No production defect was found against the acceptance criteria, the recorded assumptions or the
+CR-1..CR-3 fix intent.
 
-Observation for the parent (not a requirement violation, no failing test kept):
-`packages/renderer/src/app/connections/oidc-sign-in.ts:142` renders "The code expires in 1 seconds."
-for the last second of a device code (plural for 1). Cosmetic, Low; the tests deliberately assert
-2 seconds so they do not encode this wording.
+Design notes for the parent (behavior pinned by the new tests, not defects):
+- Clearing the access key ID (default credential chain) or switching away from AWS discards a removal
+  mark: the token stays stored. That matches the documented rule "only secrets the current settings
+  use are considered", and `aws.ts` ignores the token without a key ID; entering a key ID later
+  removes it on save, because the saved profile then has no `auth.username`.
+- A token typed after "Remove saved token" and then deleted again does not restore the removal mark;
+  the button shows "Remove saved token" again, so the UI matches the state.
 
 ## Coverage
 
 Status: verified (whole-file coverage of the six task-changed TypeScript production files; changed-line coverage measured separately).
 
 Metric: whole-file coverage of task-changed production files.
-Changed-line coverage: measured. Method: added lines from `git diff -U0 384a448 HEAD` for the six
-files intersected with lcov `DA` records (executable, source-mapped lines only; removed lines not
-counted); branches counted from lcov `BRDA` records located on added lines (an approximation
-of changed-branch coverage, reported separately). Result: lines 177/177 (100%); branch records on
-changed lines 163/165 (98.79%), uncovered at `oidc-sign-in.ts:139` and `oidc-sign-in.ts:169` (see table).
+Changed-line coverage: measured. Method: added lines from `git diff -U0 44fd007 HEAD` for the six
+files, intersected with lcov `DA` records (executable, source-mapped lines only; removed lines not
+counted); branch records counted from lcov `BRDA` records on added lines (an approximation of
+changed-branch coverage, reported separately). Result: lines 208/208 (100%); branch records on
+changed lines 194/196 (98.98%), uncovered at `oidc-sign-in.ts:139` and `oidc-sign-in.ts:169`
+(see table). Before this pass's last test, `connection-editor.ts:958` was also uncovered (63/64 in
+that file); the profile-switch test covers it now (64/64).
 
 Evidence:
-- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: auth-ui-m5; base 384a448fa59547d3354caf30d43b3d18da210f3f (given by the parent, = task merge-base); HEAD 043e9e6026daede4a61a662621972beca0d2ea87; task code commits b5b55b2, 043e9e6 (`git log 384a448..HEAD`, other commits only `tasks/`); file scope from `git diff --stat 384a448 HEAD -- packages test`.
-- Source/test snapshot identifier (including uncommitted inputs): HEAD 043e9e6 plus uncommitted test files, sha256: `connection-form.model.spec.ts` 6f8a5f65308023460d9520d5bb04df81a3c27e0ba3a3e4bb49f99f171910b277, `oidc-sign-in.spec.ts` d5c0c08f5b85c3bbd91d715bc7bc9fa59a3ddd777849f7cc5059f122a815e99d, `app-shell.spec.ts` de62f10ccba3db0b1594432263dc2b3eaf74304352ab1309468aca620c70c5fe. Production files unchanged from HEAD (e.g. `connection-form.model.ts` 53ca159f..., `oidc-sign-in.ts` e3499355..., `oidc-sign-in.service.ts` 1a705454...).
-- Exact included files: `src/app/connections/connection-form.model.ts`, `src/app/connections/connection-editor.ts`, `src/app/connections/oidc-sign-in.service.ts`, `src/app/connections/oidc-sign-in.ts`, `src/app/api/api.service.ts`, `src/app/layout/app-shell.ts` (paths relative to `packages/renderer`). Excluded: `connection-editor.html` (Angular template, not instrumented by v8; its behavior is exercised by the editor component tests), `oidc-sign-in.css` (styles, not executable), `connection-editor.spec.ts` and `test/e2e/ldap.e2e.ts` (tests). No renames or deletions in scope.
-- Provider/version, command, working directory, and test selection: Vitest 5.1.0 with @vitest/coverage-v8 5.1.0 via the Angular builder; `npx ng test --coverage --coverage-include='src/app/connections/connection-form.model.ts' --coverage-include='src/app/connections/connection-editor.ts' --coverage-include='src/app/connections/oidc-sign-in.service.ts' --coverage-include='src/app/connections/oidc-sign-in.ts' --coverage-include='src/app/api/api.service.ts' --coverage-include='src/app/layout/app-shell.ts'`; working directory `packages/renderer`; full renderer suite (85 files).
-- Run start/completion time and exit status: started 2026-11-17T03:51:13Z, report written 03:51:46Z; exit status 0; 85 files / 2738 tests passed.
-- Generated report paths and report hashes/run identifier: `packages/renderer/coverage/renderer/coverage-summary.json` sha256 cc9963e714598aa04538a59d12cd69976b3eb0cf2a8e0ab73293817d3ea5af7b; `packages/renderer/coverage/renderer/lcov.info` sha256 2ba2691209770bc78c7e2acd21a0cfa5cdf9f3337b8bb9bc725c8738fb2af54d (Git-ignored).
-- Evidence outputs are fresh and inputs stayed unchanged: report files timestamped 03:51:46Z, after the run start and replacing the previous run (03:49:01Z); all production and test file hashes taken at 03:50:57Z were identical after the run and after `.taskcheck`.
-- Final run after latest test additions and production fixes: yes (no production fixes were made; the run includes all added tests).
+- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: auth-ui-m5; base 44fd007c7b65db6629a6a69885662ffc10ae49d1 (given by the parent, = `git merge-base HEAD origin/main`); HEAD 165f65ee1c30915b7826813f2d66af48cee4701b; task commits f1b3148, 364df71, cc14091, 4d28a6b, 165f65e (`git log 44fd007..165f65e`; cc14091/4d28a6b add tests and reports only); file scope from `git diff --stat 44fd007 165f65e`.
+- Source/test snapshot identifier (including uncommitted inputs): HEAD 165f65e plus uncommitted `packages/renderer/src/app/connections/connection-editor.spec.ts` sha256 055a443070301b9e9cb50a713d9910656140d82a8f0753b1b1f5f47adae5d977. Production files equal HEAD: `connection-editor.ts` e513e985..., `connection-editor.html` 00505948..., `connection-form.model.ts` 661e050c..., `oidc-sign-in.ts` 5c8f9039..., `oidc-sign-in.service.ts` 1a705454..., `api.service.ts` b77b4046..., `app-shell.ts` 0c5c331c....
+- Exact included files (relative to `packages/renderer`): `src/app/connections/connection-form.model.ts`, `src/app/connections/connection-editor.ts`, `src/app/connections/oidc-sign-in.service.ts`, `src/app/connections/oidc-sign-in.ts`, `src/app/api/api.service.ts`, `src/app/layout/app-shell.ts`. Excluded: `connection-editor.html` (Angular template, not instrumented by v8; exercised by the editor component tests), `oidc-sign-in.css` (styles), spec files and `test/e2e/ldap.e2e.ts` (tests), `reviews/` (reports). No renames or deletions in scope.
+- Provider/version, command, working directory, and test selection: Vitest 5.1.0 with @vitest/coverage-v8 via the Angular builder; `npx ng test --coverage --coverage-include='src/app/connections/connection-form.model.ts' --coverage-include='src/app/connections/connection-editor.ts' --coverage-include='src/app/connections/oidc-sign-in.service.ts' --coverage-include='src/app/connections/oidc-sign-in.ts' --coverage-include='src/app/api/api.service.ts' --coverage-include='src/app/layout/app-shell.ts'`; working directory `packages/renderer`; full renderer suite (93 files).
+- Run start/completion time and exit status: started 2026-11-17T04:09:19Z, completed 04:10:04Z; exit status 0; 3069 tests passed.
+- Generated report paths and report hashes/run identifier: `packages/renderer/coverage/renderer/coverage-summary.json` sha256 e986e0fbd821ba915d89eb7330ab2f07d9d9fab6f20880c67e5568b7b7426a65; `packages/renderer/coverage/renderer/lcov.info` sha256 1d0a0b54a19ae668357cdfdc79b36d5d27af6c60b7c7c197c803255cde180b55 (Git-ignored).
+- Evidence outputs are fresh and inputs stayed unchanged: report files written 04:10:04Z, replacing the previous run (04:08:09Z, before the last test was added); the spec hash taken before the run is identical after the run, after `npm run check` and after the e2e run (04:12Z).
+- Final run after latest test additions and production fixes: yes (includes the fixer commit 165f65e and every test of this pass).
 
 Values below use covered/total (percentage); zero-denominator or unsupported metrics are N/A.
 
 | Changed file | Statements | Branches | Functions | Lines |
 |---|---:|---:|---:|---:|
 | `packages/renderer/src/app/connections/connection-form.model.ts` | 341/343 (99.41%) | 346/351 (98.57%) | 45/45 (100%) | 278/279 (99.64%) |
-| `packages/renderer/src/app/connections/connection-editor.ts` | 470/477 (98.53%) | 231/255 (90.58%) | 142/142 (100%) | 386/388 (99.48%) |
+| `packages/renderer/src/app/connections/connection-editor.ts` | 504/511 (98.63%) | 260/284 (91.54%) | 153/153 (100%) | 415/417 (99.52%) |
 | `packages/renderer/src/app/connections/oidc-sign-in.service.ts` | 43/43 (100%) | 17/17 (100%) | 14/14 (100%) | 32/32 (100%) |
-| `packages/renderer/src/app/connections/oidc-sign-in.ts` | 117/118 (99.15%) | 40/42 (95.23%) | 17/17 (100%) | 85/85 (100%) |
+| `packages/renderer/src/app/connections/oidc-sign-in.ts` | 117/118 (99.15%) | 42/44 (95.45%) | 17/17 (100%) | 85/85 (100%) |
 | `packages/renderer/src/app/api/api.service.ts` | 134/135 (99.25%) | 70/71 (98.59%) | 23/23 (100%) | 113/113 (100%) |
 | `packages/renderer/src/app/layout/app-shell.ts` | 122/123 (99.18%) | 78/78 (100%) | 25/26 (96.15%) | 90/90 (100%) |
-| Aggregate (summed counters, 6 measured files; excluded: `connection-editor.html`, `oidc-sign-in.css`) | 1227/1239 (99.03%) | 782/814 (96.06%) | 266/267 (99.62%) | 984/987 (99.69%) |
+| Aggregate (summed counters, 6 measured files; excluded: `connection-editor.html`, `oidc-sign-in.css`) | 1261/1273 (99.05%) | 813/845 (96.21%) | 277/278 (99.64%) | 1013/1016 (99.70%) |
 
-Percentages are the provider's `pct` values from `coverage-summary.json` (two decimals, truncated).
-
-Before the last added tests (run at 03:48:23Z, same six files): model branches 345/351, `oidc-sign-in.ts` statements 116/118 and branches 39/42; the additions covered model line 437 (AWS default-chain edit) and the note-timer paths of the panel.
+Percentages per file are the provider's `pct` values from `coverage-summary.json`; the aggregate is the provider's total over the six included files.
 
 | File and uncovered lines/branch locations | Required behavior or risk | Action/test added or reason left uncovered |
 |---|---|---|
+| `connection-editor.ts:958` (`if (!current()) return failed;` after clearSecret) | CR-1: a token removal finishing after a profile switch must not touch the new profile | Covered now: "a token removal that finishes after switching profiles leaves the new profile alone" |
 | `oidc-sign-in.ts:139` (true branch of `expiresAt === undefined`) | Defensive: `expiry()` is only rendered in the device branch, where `expiresAt` is always set | Justified gap: not reachable through the template |
-| `oidc-sign-in.ts:169` (timer fires after `last` changed) | Defensive guard; the note effect already clears the timer whenever `last` changes | Justified gap; the observable behavior (second note keeps its full time) is tested by "a second Signed in note gets its own full time" |
-| `connection-editor.ts:318, 489` and 24 branch locations (222, 235, 249, 261, 292, 308, 328, 368-386, 401, 420, 488, 586, 618-626, 665, 704, 757, 769, 812) | Pre-existing lines not added by this task (changed-line coverage of the file is 31/31 lines, 35/35 branch records) | Outside the task's changed lines; not chased. Note 222 (mechanism not in the form list) is now reachable only by GSSAPI, whose model behavior is covered by the new GSSAPI test |
-| `connection-form.model.ts:400-401` (non-`ConnectionStringError` message), `523`, `636` | Pre-existing lines (changed-line coverage of the file is 28/28 lines, 71/71 branch records) | Outside the task's changed lines |
-| `api.service.ts:146`, `app-shell.ts` anonymous function 25 | Pre-existing; the task's change in `api.service.ts` is type-only (0 executable changed lines) and `app-shell.ts` changed only the template (1 changed executable line, covered) | Outside the task's changed lines |
+| `oidc-sign-in.ts:169` (timer fires after `last` changed) | Defensive guard; the note effect clears the timer whenever `last` changes | Justified gap; observable behavior tested by "a second Signed in note gets its own full time" |
+| `connection-editor.ts:322, 493` and branch locations 226, 239, 253, 265, 296, 312, 332, 372-390, 405, 424, 492, 617, 649-657, 696, 735, 788, 800, 845 | Pre-existing lines not added by this task (changed-line coverage of the file is 62/62 lines, 64/64 branch records) | Outside the task's changed lines; not chased |
+| `connection-form.model.ts:400-401`, `523`, `636` | Pre-existing lines (changed-line coverage of the file is 28/28 lines, 71/71 branch records) | Outside the task's changed lines |
+| `api.service.ts:146`, `app-shell.ts` one anonymous function | Pre-existing; the task's change in `api.service.ts` is type-only (0 executable changed lines), `app-shell.ts` changed only the template (1 executable changed line, covered) | Outside the task's changed lines |
 
 ## Unable to test
 
 - Copy-to-clipboard against the real Electron clipboard: tested with a stubbed `navigator.clipboard` (success and refusal), as other renderer specs do. No follow-up needed.
-- OIDC and AWS end-to-end connections against real identity providers / AWS: not part of this task's criteria (AC2 names only LDAP); the panel is tested from the broadcast contract. No follow-up for this task.
-- The visual layout of the panel (CSS) is not asserted by unit tests.
+- OIDC and AWS end-to-end connections against real identity providers / AWS, and the real keychain `clearSecret`: not part of this task's criteria (AC2 names only LDAP); the editor is tested against the fake bridge's `profiles.clearSecret`. No follow-up for this task.
+- The visual layout of the panel and the new "password-row" for the session token (CSS) is not asserted by unit tests.
 
 ## Summary
 

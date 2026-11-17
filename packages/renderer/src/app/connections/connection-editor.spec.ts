@@ -1801,6 +1801,256 @@ describe('ConnectionEditor', () => {
       });
     });
 
+    describe('stored AWS session token: edge cases (test-writer)', () => {
+      const clearCalls = () => fake.requestsFor('profiles.clearSecret').map((r) => r.params);
+      const tokenField = () => must<HTMLInputElement>('field-secret-awsSessionToken');
+      const removeButton = () => el.querySelector('[data-testid="remove-aws-session-token"]');
+      const TOKEN_CLEARED = { profileId: 'p1', kind: 'awsSessionToken' };
+
+      beforeEach(() => {
+        stored = saved({
+          connectionString: 'mongodb://aws.example:27017/?authMechanism=MONGODB-AWS',
+          auth: { mechanism: 'MONGODB-AWS', username: 'AKIAOLD', secretMode: 'saved' },
+        });
+        fake.handle('profiles.get', () => ({
+          profile: stored,
+          storedSecrets: ['password', 'awsSessionToken'],
+        }));
+        fake.respond('profiles.clearSecret', {});
+      });
+
+      it('no remove button when no token is stored', async () => {
+        fake.handle('profiles.get', () => ({ profile: stored, storedSecrets: ['password'] }));
+        await start('p1');
+        expect(tokenField().placeholder).toBe('none');
+        expect(removeButton()).toBeNull();
+        await input(must('field-username'), 'AKIANEW');
+        await click('save');
+        expect(clearCalls()).toHaveLength(0);
+      });
+
+      it('"Keep saved token" undoes the mark: nothing is removed on save', async () => {
+        await start('p1');
+        expect(must('remove-aws-session-token').getAttribute('aria-pressed')).toBe('false');
+        await click('remove-aws-session-token');
+        expect(text('remove-aws-session-token')).toBe('Keep saved token');
+        expect(must('remove-aws-session-token').getAttribute('aria-pressed')).toBe('true');
+        await click('remove-aws-session-token');
+        expect(text('remove-aws-session-token')).toBe('Remove saved token');
+        expect(must('remove-aws-session-token').getAttribute('aria-pressed')).toBe('false');
+        expect(el.querySelector('[data-testid="aws-token-removed"]')).toBeNull();
+        expect(tokenField().placeholder).toBe('Saved; type to replace it');
+        await click('save');
+        expect(clearCalls()).toHaveLength(0);
+        expect(removeButton()).not.toBeNull();
+      });
+
+      it('marking the token for removal drops a token typed before', async () => {
+        await start('p1');
+        await input(tokenField(), 'TYPED-TOKEN');
+        await click('remove-aws-session-token');
+        expect(tokenField().value).toBe('');
+        await click('save');
+        expect(clearCalls()).toEqual([TOKEN_CLEARED]);
+        expect(secretsSet()).toHaveLength(0);
+      });
+
+      it('a typed token that is deleted again does not bring the removal back', async () => {
+        await start('p1');
+        await click('remove-aws-session-token');
+        await input(tokenField(), 'X');
+        await input(tokenField(), '');
+        expect(el.querySelector('[data-testid="aws-token-removed"]')).toBeNull();
+        expect(text('remove-aws-session-token')).toBe('Remove saved token');
+        await click('save');
+        expect(clearCalls()).toHaveLength(0);
+        expect(secretsSet()).toHaveLength(0);
+      });
+
+      it('marked for removal and a changed key ID: the token is removed once', async () => {
+        await start('p1');
+        await click('remove-aws-session-token');
+        await input(must('field-username'), 'AKIANEW');
+        await input(must('field-password'), 'new-secret');
+        await click('save');
+        expect(clearCalls()).toEqual([TOKEN_CLEARED]);
+      });
+
+      it('a key ID changed back to the saved one, or only padded with spaces, keeps the token', async () => {
+        await start('p1');
+        await input(must('field-username'), 'AKIANEW');
+        await input(must('field-username'), '  AKIAOLD  ');
+        await click('save');
+        expect(savedDraft().auth).toMatchObject({ username: 'AKIAOLD' });
+        expect(clearCalls()).toHaveLength(0);
+      });
+
+      it('a changed key ID with a new token stores the token and removes nothing', async () => {
+        await start('p1');
+        await input(must('field-username'), 'AKIANEW');
+        await input(must('field-password'), 'new-secret');
+        await input(tokenField(), 'NEW-TOKEN');
+        await click('save');
+        expect(clearCalls()).toHaveLength(0);
+        expect(secretsSet()).toEqual([
+          expect.objectContaining({ kind: 'password', value: 'new-secret' }),
+          expect.objectContaining({ kind: 'awsSessionToken', value: 'NEW-TOKEN' }),
+        ]);
+      });
+
+      it('the default credential chain (key ID cleared) leaves the unused token alone', async () => {
+        await start('p1');
+        await click('remove-aws-session-token');
+        await input(must('field-username'), '');
+        expect(el.querySelector('[data-testid="field-secret-awsSessionToken"]')).toBeNull();
+        await click('save');
+        expect(savedDraft().auth).toEqual({ mechanism: 'MONGODB-AWS', secretMode: 'none' });
+        expect(clearCalls()).toHaveLength(0);
+      });
+
+      it('switching away from AWS with the token marked removes nothing', async () => {
+        await start('p1');
+        await click('remove-aws-session-token');
+        await change(must<HTMLSelectElement>('field-mechanism'), 'SCRAM-SHA-256');
+        await input(must('field-username'), 'dbuser');
+        await click('save');
+        expect(savedDraft().auth).toMatchObject({ mechanism: 'SCRAM-SHA-256' });
+        expect(clearCalls()).toHaveLength(0);
+      });
+
+      it('after a successful removal, or a key change, the next save removes nothing again', async () => {
+        await start('p1');
+        await input(must('field-username'), 'AKIANEW');
+        await input(must('field-password'), 'new-secret');
+        await click('save');
+        expect(clearCalls()).toEqual([TOKEN_CLEARED]);
+        expect(removeButton()).toBeNull();
+        expect(el.querySelector('[data-testid="aws-token-removed"]')).toBeNull();
+
+        await input(must('field-password'), 'newer-secret');
+        await click('save');
+        expect(fake.requestsFor('profiles.save')).toHaveLength(2);
+        expect(clearCalls()).toHaveLength(1);
+      });
+
+      it('a failed password store after a key change: the retry still removes the old token', async () => {
+        fake.fail('profiles.setSecret', {
+          code: 'INTERNAL',
+          message: 'keychain locked (fictitious)',
+        });
+        await start('p1');
+        await input(must('field-username'), 'AKIANEW');
+        await input(must('field-password'), 'new-secret');
+        await click('save');
+        expect(text('save-error')).toContain('Saved, but the password could not be stored');
+        // The profile now has the new key ID, but the old key's token is still stored.
+        expect(clearCalls()).toHaveLength(0);
+        expect(text('aws-token-removed')).toContain('removed on save');
+
+        fake.respond('profiles.setSecret', { secureStorage: true });
+        await click('save');
+        expect(clearCalls()).toEqual([TOKEN_CLEARED]);
+        expect(el.querySelector('[data-testid="save-error"]')).toBeNull();
+      });
+
+      it('a failed clearSecret after a key change: the retry removes the token again', async () => {
+        fake.fail('profiles.clearSecret', {
+          code: 'INTERNAL',
+          message: 'keychain locked (fictitious)',
+        });
+        await start('p1');
+        await input(must('field-username'), 'AKIANEW');
+        await input(must('field-password'), 'new-secret');
+        await click('save');
+        expect(text('save-error')).toContain(
+          'Saved, but the AWS session token could not be removed',
+        );
+        expect(removeButton()).not.toBeNull();
+
+        fake.respond('profiles.clearSecret', {});
+        await click('save');
+        expect(clearCalls()).toEqual([TOKEN_CLEARED, TOKEN_CLEARED]);
+        expect(el.querySelector('[data-testid="save-error"]')).toBeNull();
+        expect(removeButton()).toBeNull();
+      });
+
+      it('editing the connection string keeps the mark; a pasted new key ID removes the token', async () => {
+        await start('p1');
+        await click('remove-aws-session-token');
+        await click('tab-uri');
+        await input(
+          must<HTMLTextAreaElement>('field-uri'),
+          'mongodb://aws2.example:27017/?authMechanism=MONGODB-AWS',
+        );
+        await click('tab-form');
+        expect(text('aws-token-removed')).toContain('removed on save');
+        await click('remove-aws-session-token');
+        expect(el.querySelector('[data-testid="aws-token-removed"]')).toBeNull();
+
+        await click('tab-uri');
+        await input(
+          must<HTMLTextAreaElement>('field-uri'),
+          'mongodb://AKIAPASTED:pasted-secret@aws2.example:27017/?authMechanism=MONGODB-AWS',
+        );
+        await click('tab-form');
+        await click('save');
+        expect(savedDraft().auth).toMatchObject({ username: 'AKIAPASTED' });
+        expect(clearCalls()).toEqual([TOKEN_CLEARED]);
+      });
+
+      it('loading another profile forgets the removal mark', async () => {
+        await start('p1');
+        await click('remove-aws-session-token');
+        fake.handle('profiles.get', ({ profileId }) => ({
+          profile: { ...stored, id: profileId, name: 'Other' },
+          storedSecrets: ['password', 'awsSessionToken'],
+        }));
+        fixture.componentRef.setInput('id', 'p2');
+        await settle();
+        expect(must<HTMLInputElement>('field-name').value).toBe('Other');
+        expect(el.querySelector('[data-testid="aws-token-removed"]')).toBeNull();
+        await click('save');
+        expect(clearCalls()).toHaveLength(0);
+      });
+
+      it('a token removal that finishes after switching profiles leaves the new profile alone', async () => {
+        fake.handle('profiles.get', ({ profileId }) => ({
+          profile: { ...stored, id: profileId, name: `Name ${profileId}` },
+          storedSecrets: ['password', 'awsSessionToken'],
+        }));
+        let release: (() => void) | undefined;
+        fake.handle(
+          'profiles.clearSecret',
+          () =>
+            new Promise((resolve) => {
+              release = () => resolve({});
+            }),
+        );
+        await start('p1');
+        await click('remove-aws-session-token');
+        await click('save');
+        expect(release).toBeDefined();
+        fixture.componentRef.setInput('id', 'p2');
+        await settle();
+        release?.();
+        await settle();
+        expect(clearCalls()).toEqual([TOKEN_CLEARED]);
+        expect(must<HTMLInputElement>('field-name').value).toBe('Name p2');
+        // p2 still has its stored token: the p1 removal must not mark it as gone.
+        expect(tokenField().placeholder).toBe('Saved; type to replace it');
+        expect(text('remove-aws-session-token')).toBe('Remove saved token');
+        expect(el.querySelector('[data-testid="aws-token-removed"]')).toBeNull();
+        expect(el.querySelector('[data-testid="saved-notice"]')).toBeNull();
+        expect(el.querySelector('[data-testid="save-error"]')).toBeNull();
+      });
+
+      it('the remove button is disabled when no encryption is available', async () => {
+        storage = { level: 'unavailable', backend: 'basic_text', defaultSecretMode: 'ask' };
+        await start('p1');
+        expect(must<HTMLButtonElement>('remove-aws-session-token').disabled).toBe(true);
+      });
+    });
+
     it('ask hint names the secret access key and says the session token is stored', async () => {
       await start();
       await change(must<HTMLSelectElement>('field-mechanism'), 'MONGODB-AWS');
@@ -1811,6 +2061,15 @@ describe('ConnectionEditor', () => {
       await change(must<HTMLSelectElement>('field-mechanism'), 'PLAIN');
       await check('secret-ask');
       expect(text('ask-hint')).toContain('The LDAP password above');
+      expect(text('ask-hint')).not.toContain('session token');
+    });
+
+    it('ask hint for SCRAM says "password" and does not mention a session token (test-writer)', async () => {
+      await start();
+      await change(must<HTMLSelectElement>('field-mechanism'), 'SCRAM-SHA-256');
+      await input(must('field-username'), 'dbuser');
+      await check('secret-ask');
+      expect(text('ask-hint')).toMatch(/^The password above is used for Test connection only/);
       expect(text('ask-hint')).not.toContain('session token');
     });
 
