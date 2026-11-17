@@ -17,3 +17,4 @@ Console tab: multi-line input, history, autocompletion, document output in the e
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 04:27+0100 by dell26/agent-3): Console history is kept in memory per open shell tab (500 entries), not persisted across restarts: the spec only says 'history'.
+- ASSUMPTION (2026-11-17 04:27+0100 by dell26/agent-3): One shell tab per connection (id shell:<profileId>), opened from 'Open shell' in the connection's or a database's context menu; the database item starts the new session in that database, an open tab is just selected.
