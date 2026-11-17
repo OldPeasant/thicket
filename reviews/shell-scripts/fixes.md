@@ -79,3 +79,58 @@ Remaining unresolved findings:
 ## Final status
 
 All validated findings fixed and validation passed.
+
+---
+
+# Round 2
+
+Date: 2026-11-17
+
+Task: shell-scripts (run a script file in the mongosh console)
+
+Scope: current task; finding CR-3 (reviews/shell-scripts/review.md "Round 2"), as passed on by the parent worker. Reviewed HEAD b32e49cc.
+
+## Fixed findings
+
+### CR-3 — The byte order mark check uses an invisible literal character
+
+Files changed:
+- `packages/renderer/src/app/console/scripts/script-file.ts`
+- `packages/renderer/src/app/console/scripts/script-file.spec.ts`
+
+Problem:
+`code.startsWith(...)` in `readScriptFile` held a raw U+FEFF character (bytes EF BB BF) between the quotes, so it read as `startsWith('')`. The spec used the same invisible literal in three test strings.
+
+Fix:
+Replaced the literal character with the JavaScript escape sequence for U+FEFF (backslash, `uFEFF`) in the production check (1 occurrence) and in the spec (3 occurrences: the BOM-drop test and the two BOM-only empty-file cases). Behavior is unchanged; both files are now ASCII-only.
+
+Validation:
+- `grep -cP '\x{FEFF}'` on both files — 0 matches; `od -c script-file.ts | grep '357 273 277'` — no match; Node scan for any non-ASCII character in both files — 0
+- `cd packages/renderer && npx ng test --include='src/app/console/**/*.spec.ts'` — Pass (3 files, 143 tests)
+
+## Not fixed
+
+None.
+
+## Validation summary
+
+Focused tests:
+- `cd packages/renderer && npx ng test --include='src/app/console/**/*.spec.ts'` — Pass (3 files, 143 tests)
+- `npx prettier --check` on the 2 changed files — Pass
+- `npx eslint` on the 2 changed files — Pass
+
+Full test suite:
+- Not run (escape-only change in one string comparison and its spec; the parent worker runs `.taskcheck` before `done`)
+
+Lint/type-check/build:
+- prettier and eslint on the changed files — Pass; full type check not run (no type-relevant change)
+
+`.taskcheck`:
+- Not run (left to the parent worker)
+
+Remaining unresolved findings:
+0
+
+## Final status
+
+All validated findings fixed and validation passed.

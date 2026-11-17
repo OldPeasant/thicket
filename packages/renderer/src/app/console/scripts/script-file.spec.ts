@@ -85,7 +85,7 @@ describe('readScriptFile', () => {
   });
 
   it('drops a UTF-8 byte order mark', async () => {
-    const script = await readScriptFile(file('bom.js', '﻿print(1)'));
+    const script = await readScriptFile(file('bom.js', '\uFEFFprint(1)'));
     expect(script.code).toBe('print(1)');
     expect(script.lines).toBe(1);
   });
@@ -122,7 +122,7 @@ describe('readScriptFile', () => {
   });
 
   it('refuses an empty, blank or BOM-only file', async () => {
-    for (const text of ['', '   \n\t\r\n', '﻿', '﻿  \n']) {
+    for (const text of ['', '   \n\t\r\n', '\uFEFF', '\uFEFF  \n']) {
       await expect(readScriptFile(file('empty.mongodb', text))).rejects.toThrow(
         'empty.mongodb is empty',
       );

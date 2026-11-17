@@ -55,7 +55,7 @@ export async function readScriptFile(file: ScriptSource): Promise<ScriptFile> {
     throw new Error(`${file.name} could not be read`);
   }
   // A UTF-8 byte order mark is not JavaScript.
-  if (code.startsWith('﻿')) code = code.slice(1);
+  if (code.startsWith('\uFEFF')) code = code.slice(1);
   if (code.trim() === '') throw new Error(`${file.name} is empty`);
   return { name: file.name, code, lines: countLines(code) };
 }
