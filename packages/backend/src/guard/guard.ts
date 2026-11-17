@@ -45,8 +45,11 @@ export function checkWrite(method: string, profile: GuardedProfile, params: Writ
   }
 }
 
-/** Stages that make an aggregation pipeline write. */
-const WRITING_STAGES = ['$out', '$merge'];
+/**
+ * Stages that make an aggregation pipeline write (the one list: `agg` refuses them in previews and
+ * explains them only in `queryPlanner` mode).
+ */
+export const WRITING_STAGES: readonly string[] = ['$out', '$merge'];
 
 /**
  * Whether an `agg.run` pipeline (canonical EJSON text) writes: true when any stage is `$out` or

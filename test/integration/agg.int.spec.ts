@@ -207,6 +207,26 @@ describe('agg.previewStage', () => {
     expect(limited.docs).toHaveLength(5);
   });
 
+  it('previews a pipeline whose first $match uses $text (it must stay the first stage)', async () => {
+    const notes = direct.db(DB).collection('notes');
+    const rows: Document[] = [
+      { _id: 1, body: 'black coffee', n: 1 },
+      { _id: 2, body: 'green tea', n: 2 },
+      { _id: 3, body: 'coffee with milk', n: 3 },
+    ];
+    await notes.insertMany(rows);
+    await notes.createIndex({ body: 'text' });
+    const stages = [{ $match: { $text: { $search: 'coffee' } } }, { $sort: { _id: 1 } }];
+    const { docs } = await backend.call('agg.previewStage', {
+      profileId: 'plain',
+      db: DB,
+      coll: 'notes',
+      pipeline: ejson(stages),
+      sampleSize: 10,
+    });
+    expect(docs.map((t) => Number((BSON.EJSON.parse(t) as Document)['_id']))).toEqual([1, 3]);
+  });
+
   it('refuses $out and $merge', async () => {
     const error = await failure(
       backend.call('agg.previewStage', { ...target(), pipeline: ejson([{ $out: 'nope' }]) }),

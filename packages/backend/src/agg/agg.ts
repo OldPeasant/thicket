@@ -1,7 +1,7 @@
 import type { ParsedParamsOf, ResultOf } from '@thicket/contract';
 import type { Document } from 'mongodb';
 
-import { canonical, toBrowseError } from '../../src/browse/browse';
+import { canonical, toBrowseError } from '../browse/browse';
 import type { ClientLike } from '../connections/manager';
 import {
   DEFAULT_EVENT_BATCH,
@@ -10,6 +10,7 @@ import {
   parseDocument,
   parseEjson,
 } from '../docs/query/query';
+import { WRITING_STAGES } from '../guard/guard';
 import { RpcError } from '../server/rpc';
 
 /**
@@ -21,9 +22,6 @@ import { RpcError } from '../server/rpc';
  * profile before the handler runs. `previewStage` never writes (such stages are refused) and
  * `explain` runs them only in `queryPlanner` mode, which does not execute the pipeline.
  */
-
-/** Stages that write their input to a collection. */
-export const WRITING_STAGES: readonly string[] = ['$out', '$merge'];
 
 /**
  * Stages that must come first in a pipeline: the preview's sample `$limit` goes after them.
@@ -86,6 +84,17 @@ export function parsePipeline(text: string): Document[] {
 
 const stageName = (stage: Document): string => Object.keys(stage)[0] ?? '';
 
+/**
+ * Whether a stage must stay the first one: a {@link FIRST_STAGES} stage, or a `$match` with a
+ * top-level `$text` (MongoDB accepts `$text` only in the first stage).
+ */
+function mustComeFirst(stage: Document): boolean {
+  const name = stageName(stage);
+  if (FIRST_STAGES.includes(name)) return true;
+  const filter: unknown = stage[name];
+  return name === '$match' && isPlainDocument(filter) && '$text' in filter;
+}
+
 /** Whether a parsed pipeline has a `$out` or `$merge` stage. */
 export function writesTo(pipeline: readonly Document[]): boolean {
   return pipeline.some((stage) => WRITING_STAGES.includes(stageName(stage)));
@@ -146,10 +155,10 @@ export async function streamAggregate(
 
 /**
  * The pipeline a stage preview runs: a `$limit` of `sampleSize` input documents (after a stage
- * that must come first, such as `$geoNear`), the given stages, and a `$limit` of `limit` output
- * documents. `$out`/`$merge` are refused (`INVALID_PARAMS`): a preview never writes. The sample
- * is the first documents in natural order, not `$sample`, so the same input gives the same
- * preview each time.
+ * that must come first, such as `$geoNear` or a `$match` with `$text`), the given stages, and a
+ * `$limit` of `limit` output documents. `$out`/`$merge` are refused (`INVALID_PARAMS`): a preview
+ * never writes. The sample is the first documents in natural order, not `$sample`, so the same
+ * input gives the same preview each time.
  */
 export function previewPipeline(
   stages: readonly Document[],
@@ -163,7 +172,7 @@ export function previewPipeline(
     );
   }
   const first = stages[0];
-  const leading = first !== undefined && FIRST_STAGES.includes(stageName(first)) ? 1 : 0;
+  const leading = first !== undefined && mustComeFirst(first) ? 1 : 0;
   return [
     ...stages.slice(0, leading),
     { $limit: sampleSize },

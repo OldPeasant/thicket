@@ -208,6 +208,22 @@ describe('previewPipeline', () => {
     ]);
   });
 
+  it('puts the sample $limit after a first $match with a top-level $text', () => {
+    const text = { $match: { $text: { $search: 'coffee' }, qty: { $gt: 1 } } };
+    expect(previewPipeline([text, group], 10, 4)).toEqual([
+      text,
+      { $limit: 10 },
+      group,
+      { $limit: 4 },
+    ]);
+  });
+
+  it('a $match without a top-level $text keeps the sample first', () => {
+    const nested = { $match: { $or: [{ $text: { $search: 'x' } }] } };
+    expect(previewPipeline([match, group], 10, 4)[0]).toEqual({ $limit: 10 });
+    expect(previewPipeline([nested], 10, 4)).toEqual([{ $limit: 10 }, nested, { $limit: 4 }]);
+  });
+
   it('a must-be-first stage later in the pipeline does not move the sample', () => {
     const geoNear = { $geoNear: { near: [0, 0], distanceField: 'd' } };
     expect(previewPipeline([match, geoNear], 10, 4)).toEqual([

@@ -337,6 +337,19 @@ function closedWhileConnecting(): RpcError {
   return new RpcError('CANCELLED', 'The connection was closed while connecting');
 }
 
+/** True while `client` is still the open connection of the profile (not closed or replaced). */
+export function isOpenClient(
+  manager: ConnectionManager,
+  profileId: string,
+  client: unknown,
+): boolean {
+  try {
+    return manager.client(profileId) === client;
+  } catch {
+    return false;
+  }
+}
+
 /** Rejects with `CANCELLED` as soon as `signal` aborts (the operation itself runs on). */
 export function abortable<T>(operation: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (!signal) return operation;
