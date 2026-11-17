@@ -104,7 +104,8 @@ export async function startFixture(
     // directConnection: the replica set member is known as localhost:27017 inside the container,
     // which is not reachable from the host; the driver must not try to discover it.
     const uri = `mongodb://${host}:${port}/?directConnection=true`;
-    if (spec.replicaSet) await initiateReplicaSet(uri);
+    // A TLS replica set (the e2e demo's stand-in for Atlas) is initiated over TLS with the test CA.
+    if (spec.replicaSet) await initiateReplicaSet(uri, spec.tls ? certs?.caCert : undefined);
     return {
       container: started,
       info: {
@@ -122,9 +123,15 @@ export async function startFixture(
   }
 }
 
-/** Initiates the single-member set and waits until the member is a writable primary. */
-async function initiateReplicaSet(uri: string): Promise<void> {
-  const client = new MongoClient(uri, { serverSelectionTimeoutMS: 30_000 });
+/**
+ * Initiates the single-member set and waits until the member is a writable primary. `caCert`
+ * (PEM): connect with TLS, trusting that CA.
+ */
+async function initiateReplicaSet(uri: string, caCert?: string): Promise<void> {
+  const client = new MongoClient(uri, {
+    serverSelectionTimeoutMS: 30_000,
+    ...(caCert === undefined ? {} : { tls: true, ca: caCert }),
+  });
   try {
     const admin = client.db('admin');
     await admin.command({

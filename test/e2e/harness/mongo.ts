@@ -9,9 +9,10 @@ import {
   startFixture,
   type FixtureInfo,
   type FixtureName,
+  type FixtureSpec,
 } from '../../integration/fixtures/mongo.ts';
 
-export type { FixtureInfo, FixtureName };
+export type { FixtureInfo, FixtureName, FixtureSpec };
 
 /** A MongoDB fixture of the integration harness, started for e2e tests. */
 export interface E2EMongo extends FixtureInfo {
@@ -35,11 +36,18 @@ export async function containerRuntimeUnavailable(): Promise<string | undefined>
  * whose certificate is written to a temp file that `stop()` deletes.
  */
 export async function startMongo(name: FixtureName): Promise<E2EMongo> {
+  return startMongoSpec(FIXTURE_SPECS[name]);
+}
+
+/**
+ * Starts a fixture from its spec, also one the integration global setup doesn't start (e.g. the
+ * TLS replica set of the M1 demo suite, `{ version: '8', replicaSet: true, tls: true }`).
+ */
+export async function startMongoSpec(spec: FixtureSpec): Promise<E2EMongo> {
   // Rootless Podman can't run Ryuk; `stop()` removes the container instead.
   if (process.env['DOCKER_HOST']?.includes('podman'))
     process.env['TESTCONTAINERS_RYUK_DISABLED'] ??= 'true';
 
-  const spec = FIXTURE_SPECS[name];
   let certDir: string | undefined;
   let tlsCaFile: string | undefined;
   let certs;

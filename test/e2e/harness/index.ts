@@ -7,4 +7,11 @@ export {
   type E2EFixtures,
   type E2EWorkerFixtures,
 } from './fixtures';
-export { containerRuntimeUnavailable, startMongo, type E2EMongo, type FixtureName } from './mongo';
+export {
+  containerRuntimeUnavailable,
+  startMongo,
+  startMongoSpec,
+  type E2EMongo,
+  type FixtureName,
+  type FixtureSpec,
+} from './mongo';
