@@ -1,11 +1,11 @@
 ---
 title: Round the Test connection latency; status bar shows the active tab's connection
-status: in_progress
+status: done
 owner: felix/agent-2
 deps: []
 touches: [packages/renderer/src/app/connections/connection-editor.html,packages/renderer/src/app/layout]
 prio: 2
-lease_until: 2026-11-17T05:50:32Z
+lease_until: 
 ---
 ## Goal
 Two UI bugs seen in the M1 demo screenshots (reviews/m1-e2e/, task m1-e2e).
@@ -19,3 +19,4 @@ Two UI bugs seen in the M1 demo screenshots (reviews/m1-e2e/, task m1-e2e).
 ## Notes
 Found during m1-e2e review (finding CR-3).
 - ASSUMPTION (2026-11-17 06:21+0100 by felix/agent-2): Latency below 0.5 ms shows 'Connected in < 1 ms' instead of '0 ms'; status bar shows the active tab's connection only for tabs whose data.profileId names a known profile, otherwise it keeps StatusService.connection() (start page, dev tabs).
+- done by felix/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 97s on 66cb71810; criteria verified 2/2
