@@ -3,7 +3,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ClientConfig } from '../connections/options';
 import { RpcError } from '../server/rpc';
-import { RESTARTED_TEXT, ShellHost, type ShellHostOptions, type WorkerLike } from './host';
+import {
+  CRASHED_TEXT,
+  RESTARTED_TEXT,
+  ShellHost,
+  type ShellHostOptions,
+  type WorkerLike,
+} from './host';
 import type { FromWorker, ToWorker } from './protocol';
 
 /** Fictitious secrets; none of them is a real credential. */
@@ -255,6 +261,13 @@ describe('ShellHost.eval', () => {
     expect(error.code).toBe('NOT_FOUND');
   });
 
+  it('answers an unknown session with a rejected promise, not a synchronous throw', async () => {
+    const { host } = setup();
+    let result: Promise<number> | undefined;
+    expect(() => (result = host.eval('nope', '1', () => undefined))).not.toThrow();
+    expect((await rejection(result as Promise<number>)).code).toBe('NOT_FOUND');
+  });
+
   it('queues evaluations of a session: the next starts after the previous ended', async () => {
     const { host, workers } = setup();
     const { sessionId } = await host.open('p1', CONFIG, undefined);
@@ -445,15 +458,21 @@ describe('ShellHost.eval', () => {
     expect(c.outputs).toEqual([{ kind: 'print', text: RESTARTED_TEXT }]);
   });
 
-  it('a worker that dies during an evaluation ends it; the next one restarts with a notice', async () => {
+  it('a worker that dies during an evaluation ends it with an error; the next one restarts without a second notice', async () => {
     const { host, workers } = setup();
     const { sessionId } = await host.open('p1', CONFIG, 'shop');
     const worker = workers[0] as FakeWorker;
-    const running = host.eval(sessionId, 'crash()', () => undefined);
-    await lastEval(worker);
+    const dying = collector();
+    const running = host.eval(sessionId, 'crash()', dying.emit);
+    const { id: crashId } = await lastEval(worker);
+    worker.reply({ type: 'output', id: crashId, output: { kind: 'print', text: 'before' } });
     worker.exit(1);
-    // The evaluation settles instead of waiting forever.
-    await running.catch(() => undefined);
+    // The evaluation ends (does not wait forever) with the reason as its error output.
+    await expect(running).resolves.toBe(2);
+    expect(dying.outputs).toEqual([
+      { kind: 'print', text: 'before' },
+      { kind: 'error', text: CRASHED_TEXT },
+    ]);
     const c = collector();
     const next = host.eval(sessionId, '1', c.emit);
     await vi.waitFor(() => expect(workers).toHaveLength(2));
@@ -462,12 +481,25 @@ describe('ShellHost.eval', () => {
     const { id } = await lastEval(replacement);
     replacement.reply({ type: 'evalDone', id });
     await next;
-    expect(c.outputs).toEqual([
-      { kind: 'print', text: 'The shell stopped unexpectedly: it was restarted.' },
-    ]);
+    // The user was told by the error already.
+    expect(c.outputs).toEqual([]);
   });
 
-  it('an evaluation cancelled while its worker restarts is not run (CANCELLED)', async () => {
+  it('a worker that dies while idle: the next evaluation restarts it and shows the notice', async () => {
+    const { host, workers } = setup();
+    const { sessionId } = await host.open('p1', CONFIG, undefined);
+    (workers[0] as FakeWorker).exit(1);
+    const c = collector();
+    const next = host.eval(sessionId, '1', c.emit);
+    await vi.waitFor(() => expect(workers).toHaveLength(2));
+    const replacement = workers[1] as FakeWorker;
+    const { id } = await lastEval(replacement);
+    replacement.reply({ type: 'evalDone', id });
+    await expect(next).resolves.toBe(0);
+    expect(c.outputs).toEqual([{ kind: 'print', text: CRASHED_TEXT }]);
+  });
+
+  it('an evaluation cancelled while its worker restarts is not run and stops the restart (CANCELLED)', async () => {
     const replacement = new FakeWorker(false);
     const { host, workers } = setup();
     const { sessionId } = await host.open('p1', CONFIG, undefined);
@@ -477,15 +509,19 @@ describe('ShellHost.eval', () => {
     const running = host.eval(sessionId, 'db.c.drop()', () => undefined, controller.signal);
     await vi.waitFor(() => expect(replacement.of('open')).toHaveLength(1));
     controller.abort();
-    replacement.reply({ type: 'opened', db: 'test' });
+    // The abort does not wait for the slow start: the new worker is terminated.
     expect((await rejection(running)).code).toBe('CANCELLED');
+    expect(replacement.terminated).toBe(1);
     expect(replacement.of('eval')).toEqual([]);
-    // The replacement is kept for the next input.
-    const next = host.eval(sessionId, '1', () => undefined);
-    const { id } = await lastEval(replacement);
-    replacement.reply({ type: 'evalDone', id });
+    // The next input starts another worker and still gets the notice.
+    const c = collector();
+    const next = host.eval(sessionId, '1', c.emit);
+    await vi.waitFor(() => expect(workers).toHaveLength(2));
+    const fresh = workers[1] as FakeWorker;
+    const { id } = await lastEval(fresh);
+    fresh.reply({ type: 'evalDone', id });
     await expect(next).resolves.toBe(0);
-    expect(workers).toHaveLength(1);
+    expect(c.outputs).toEqual([{ kind: 'print', text: CRASHED_TEXT }]);
   });
 
   it('a failed restart fails the evaluation; the next evaluation tries again', async () => {
@@ -562,9 +598,9 @@ describe('ShellHost.complete', () => {
     });
   });
 
-  it('answers CANCELLED when the worker exits meanwhile', async () => {
+  it('answers CANCELLED when the worker exits meanwhile; the next completion restarts it', async () => {
     const { host, workers } = setup();
-    const { sessionId } = await host.open('p1', CONFIG, undefined);
+    const { sessionId } = await host.open('p1', CONFIG, 'shop');
     const worker = workers[0] as FakeWorker;
     const answer = host.complete(sessionId, 'db.');
     await vi.waitFor(() => expect(worker.of('complete')).toHaveLength(1));
@@ -573,11 +609,46 @@ describe('ShellHost.complete', () => {
       code: 'CANCELLED',
       message: 'The shell was restarted',
     });
-    // While the session waits for its replacement (next eval), completion answers CANCELLED.
-    expect(await rejection(host.complete(sessionId, 'db.'))).toMatchObject({
-      code: 'CANCELLED',
-      message: 'The shell is restarting',
-    });
+    // The next completion does not wait for an evaluation: it starts the replacement.
+    const again = host.complete(sessionId, 'db.c.fi');
+    await vi.waitFor(() => expect(workers).toHaveLength(2));
+    const replacement = workers[1] as FakeWorker;
+    expect(replacement.of('open')[0]?.db).toBe('shop');
+    await vi.waitFor(() => expect(replacement.of('complete')).toHaveLength(1));
+    const { id } = replacement.of('complete')[0] as { id: number };
+    replacement.reply({ type: 'completions', id, completions: ['db.c.find'] });
+    await expect(again).resolves.toEqual(['db.c.find']);
+    // The restart notice is not lost: the next evaluation shows it, once.
+    const c = collector();
+    const next = host.eval(sessionId, '1', c.emit);
+    const evalMessage = await lastEval(replacement);
+    replacement.reply({ type: 'evalDone', id: evalMessage.id });
+    await next;
+    expect(c.outputs).toEqual([{ kind: 'print', text: CRASHED_TEXT }]);
+    expect(workers).toHaveLength(2);
+  });
+
+  it('a completion and an evaluation during a restart share one replacement worker', async () => {
+    const replacement = new FakeWorker(false);
+    const { host, workers } = setup();
+    const { sessionId } = await host.open('p1', CONFIG, undefined);
+    (workers[0] as FakeWorker).exit(1);
+    setupQueue(host, replacement);
+    const answer = host.complete(sessionId, 'db.');
+    const c = collector();
+    const running = host.eval(sessionId, '1', c.emit);
+    await vi.waitFor(() => expect(replacement.of('open')).toHaveLength(1));
+    replacement.reply({ type: 'opened', db: 'test' });
+    await vi.waitFor(() => expect(replacement.of('complete')).toHaveLength(1));
+    const { id } = replacement.of('complete')[0] as { id: number };
+    replacement.reply({ type: 'completions', id, completions: ['db.c'] });
+    await expect(answer).resolves.toEqual(['db.c']);
+    const evalMessage = await lastEval(replacement);
+    replacement.reply({ type: 'evalDone', id: evalMessage.id });
+    await running;
+    expect(c.outputs).toEqual([{ kind: 'print', text: CRASHED_TEXT }]);
+    // Only the first worker came from the default factory: no second replacement.
+    expect(workers).toHaveLength(1);
   });
 
   it('answers CANCELLED when the request is cancelled', async () => {
@@ -669,6 +740,19 @@ describe('ShellHost.close / closeProfile / closeAll', () => {
     expect((await rejection(queued)).code).toBe('NOT_FOUND');
     for (const worker of workers) expect(worker.terminated).toBeGreaterThanOrEqual(1);
     expect(workers.flatMap((w) => w.of('eval')).map((m) => m.code)).toEqual(['first']);
+    // No replacement worker was started (and connected) for the queued evaluation.
+    expect(workers).toHaveLength(1);
+  });
+
+  it('a running evaluation of a closed session ends with an error output', async () => {
+    const { host, workers } = setup();
+    const { sessionId } = await host.open('p1', CONFIG, undefined);
+    const c = collector();
+    const running = host.eval(sessionId, 'db.slow.find()', c.emit);
+    await lastEval(workers[0] as FakeWorker);
+    await host.close(sessionId);
+    await expect(running).resolves.toBe(1);
+    expect(c.outputs).toEqual([{ kind: 'error', text: 'The shell session was closed' }]);
   });
 
   it('closing a session while its worker restarts terminates the replacement (NOT_FOUND)', async () => {

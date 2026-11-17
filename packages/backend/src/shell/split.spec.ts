@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { splitShellInput } from './split';
+import { EXIT_TEXT, isExitCommand, splitShellInput } from './split';
 
 describe('splitShellInput', () => {
   it.each([
@@ -96,8 +96,48 @@ describe('splitShellInput', () => {
     ]);
   });
 
+  it.each([
+    ['show dbs // list them\n1', ['show dbs', '\n1']],
+    ['it // more\nx', ['it', '\nx']],
+    ['it//more\nx', ['it', '\nx']],
+    ['exit // bye', ['exit']],
+    ['use test /* first */\ndb.c.find()', ['use test', '\ndb.c.find()']],
+    ['use test /* a */ /* b */; x', ['use test', ' x']],
+    ['show profile 5 // last 5', ['show profile 5']],
+    ['quit /* now */', ['quit']],
+  ])('trailing comments end a command and are dropped: %j', (input, pieces) => {
+    expect(splitShellInput(input)).toEqual(pieces);
+  });
+
+  it.each([
+    // Code after a block comment on the line is not a command form.
+    'use test /* c */ db.x',
+    // A block comment that does not end on the line.
+    'use test /* open\n*/',
+  ])('not a command with trailing code or an open comment: %j', (input) => {
+    expect(splitShellInput(input)).toEqual([input]);
+  });
+
   it('drops empty input', () => {
     expect(splitShellInput('')).toEqual([]);
     expect(splitShellInput(' ;\n ; ')).toEqual([]);
+  });
+});
+
+describe('isExitCommand', () => {
+  it('recognises the exit and quit pieces of splitShellInput', () => {
+    const pieces = splitShellInput('exit // bye\n1 + 1\nquit;');
+    expect(pieces.map(isExitCommand)).toEqual([true, false, true]);
+  });
+
+  it.each(['exit()', 'quit(1)', 'exitCode', 'x = exit', 'exit 1', ''])(
+    'not the command: %j',
+    (piece) => {
+      expect(isExitCommand(piece)).toBe(false);
+    },
+  );
+
+  it('tells the user to close the tab instead', () => {
+    expect(EXIT_TEXT).toContain('close the shell tab');
   });
 });

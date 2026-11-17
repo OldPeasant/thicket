@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 
 import {
   ConnectionManager,
+  EXIT_TEXT,
   RESTARTED_TEXT,
   RpcClient,
   RpcError,
@@ -213,6 +214,23 @@ describe('shell.eval', () => {
     expect(results(outcome).at(-1)?.text).toBe(DB);
   });
 
+  it('exit / quit / exit() are refused and leave the session working', async () => {
+    const { sessionId: own } = await backend.call('shell.open', { profileId: PROFILE.id, db: DB });
+    const exited = await backend.evaluate(own, 'exit');
+    expect(exited.error).toBeUndefined();
+    expect(exited.outputs).toEqual([{ kind: 'print', text: EXIT_TEXT }]);
+    const quit = await backend.evaluate(own, 'quit // bye\n1 + 1');
+    expect(quit.outputs[0]).toEqual({ kind: 'print', text: EXIT_TEXT });
+    expect(results(quit).at(-1)?.text).toBe('2');
+    const called = await backend.evaluate(own, 'exit()');
+    expect(called.outputs).toEqual([{ kind: 'error', text: `Error: ${EXIT_TEXT}` }]);
+    // The client was not closed: the server is still reachable.
+    const next = await backend.evaluate(own, '1 + 1; db.c.countDocuments({})');
+    expect(next.outputs.filter((o) => o.kind === 'error')).toEqual([]);
+    expect(results(next).at(-1)?.text).toMatch(/^\d+$/);
+    await backend.call('shell.close', { sessionId: own });
+  });
+
   it('answers NOT_FOUND for an unknown session', async () => {
     const error = await failure(backend.call('shell.eval', { sessionId: 'nope', code: '1' }));
     expect(error.code).toBe('NOT_FOUND');
@@ -235,6 +253,28 @@ describe('interrupt', () => {
     expect(outcome.error?.code).toBe('CANCELLED');
     expect(elapsed).toBeLessThan(2000);
     // A fresh runtime on the same database, and the user is told.
+    expect(next.outputs[0]).toEqual({ kind: 'print', text: RESTARTED_TEXT });
+    expect(results(next)[0]?.text).toBe(DB);
+    await backend.call('shell.close', { sessionId });
+  });
+
+  it('completion works right after the worker was restarted; the notice comes with the next eval', async () => {
+    const { sessionId } = await backend.call('shell.open', { profileId: PROFILE.id, db: DB });
+    const { streamId } = await backend.call('shell.eval', {
+      sessionId,
+      code: 'print("looping"); while (true) {}',
+    });
+    await backend.firstOutput(streamId);
+    backend.clientPort.send({ cancel: streamId });
+    expect((await backend.finished(streamId)).error?.code).toBe('CANCELLED');
+    const code = 'db.c.fi';
+    const { completions } = await backend.call('shell.complete', {
+      sessionId,
+      code,
+      cursor: code.length,
+    });
+    expect(completions).toContain('db.c.find');
+    const next = await backend.evaluate(sessionId, 'db.getName()');
     expect(next.outputs[0]).toEqual({ kind: 'print', text: RESTARTED_TEXT });
     expect(results(next)[0]?.text).toBe(DB);
     await backend.call('shell.close', { sessionId });

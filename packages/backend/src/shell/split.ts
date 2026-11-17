@@ -80,7 +80,13 @@ export function splitShellInput(code: string): string[] {
   return pieces;
 }
 
-const COMMAND = /^(use|show|it|exit|quit)(?=$|[\s;])([^\S\n]+[^\s;]+)*[^\S\n]*(?:;|(?=\n)|$)/;
+/**
+ * A shell command statement on one line: the command word, its arguments (none starts a comment),
+ * then optional trailing comments (`// ...` to the end of the line, `/* ... *\/` on the line),
+ * ended by `;`, a line break or the end of the input. Group 1 is the command without comments.
+ */
+const COMMAND =
+  /^((use|show|it|exit|quit)(?=$|[\s;]|\/[/*])(?:[^\S\n]+(?!\/[/*])[^\s;]+)*)[^\S\n]*(?:(?:\/\*.*?\*\/|\/\/.*)[^\S\n]*)*(?:;|(?=\n)|$)/;
 
 /** The shell command statement at `index`, if one starts there. */
 function commandAt(code: string, index: number): { text: string; end: number } | undefined {
@@ -88,8 +94,9 @@ function commandAt(code: string, index: number): { text: string; end: number } |
   while (at < code.length && (code[at] === ' ' || code[at] === '\t' || code[at] === '\r')) at++;
   const match = COMMAND.exec(code.slice(at, lineEnd(code, at)));
   if (!match) return undefined;
-  const word = match[1] as string;
-  const text = match[0].replace(/;$/, '').trim();
+  const word = match[2] as string;
+  // The comments are dropped: mongosh's evaluator would take their words as arguments.
+  const text = (match[1] as string).trim();
   const args = text.slice(word.length).trim().split(/\s+/).filter(Boolean);
   // `it`, `exit` and `quit` take no argument; `use` exactly one; `show` one or two.
   if ((word === 'it' || word === 'exit' || word === 'quit') && args.length > 0) return undefined;
@@ -98,6 +105,19 @@ function commandAt(code: string, index: number): { text: string; end: number } |
   // An identifier argument; JS such as `use = 1` or `show + x` is not a command.
   if (!args.every((arg) => /^[^=+\-*/%&|^!<>?:,()[\]{}'"`.]/.test(arg))) return undefined;
   return { text, end: at + match[0].length };
+}
+
+/** Told instead of running `exit` / `quit` (or calling `exit()` / `quit()`). */
+export const EXIT_TEXT =
+  'exit and quit are not available in the Thicket console: close the shell tab instead.';
+
+/**
+ * Whether a piece of `splitShellInput` is the `exit` or `quit` command. The console does not pass
+ * these to mongosh: its `exit()` closes the session's client before anything can stop it, which
+ * would leave the session broken.
+ */
+export function isExitCommand(piece: string): boolean {
+  return /^(?:exit|quit)$/.test(piece.trim());
 }
 
 function lineEnd(code: string, index: number): number {

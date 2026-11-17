@@ -49,14 +49,24 @@ interface Session {
   pending: Map<number, (message: Incoming) => void>;
   /** Evaluations run one after another, like input in a REPL. */
   queue: Promise<unknown>;
-  /** Set once the worker died (crash or terminate): a replacement is started on next use. */
-  dead?: { reason: string };
+  /**
+   * Set once the worker died (crash or terminate): the next eval or completion starts a
+   * replacement. `told`: the evaluation that saw the death already reported `reason` as its error.
+   */
+  dead?: { reason: string; told?: boolean };
+  /** The replacement worker being started (shared by an eval and completions). */
+  restarting?: Promise<void>;
+  /** Restart notice for the next evaluation (a completion may have restarted the worker). */
+  notice?: string;
   closed: boolean;
 }
 
 /** Messages of `ShellHost.eval` outputs about the session itself (not from mongosh). */
 export const RESTARTED_TEXT =
   'The evaluation did not stop when interrupted: the shell was restarted, its variables are lost.';
+/** Error of an evaluation whose worker crashed (the next input gets a fresh worker). */
+export const CRASHED_TEXT = 'The shell stopped unexpectedly: it was restarted.';
+const CLOSED_TEXT = 'The shell session was closed';
 
 let nextRequestId = 1;
 
@@ -122,7 +132,12 @@ export class ShellHost {
     emit: (output: ShellOutput) => void,
     signal?: AbortSignal,
   ): Promise<number> {
-    const session = this.session(sessionId);
+    let session: Session;
+    try {
+      session = this.session(sessionId);
+    } catch (error) {
+      return Promise.reject(error as Error);
+    }
     const run = session.queue.then(() => this.runEval(session, code, emit, signal));
     session.queue = run.catch(() => undefined);
     return run;
@@ -134,9 +149,15 @@ export class ShellHost {
     emit: (output: ShellOutput) => void,
     signal: AbortSignal | undefined,
   ): Promise<number> {
+    // Closed while queued: no worker is started for it.
+    if (session.closed) throw notFound(session.id);
     if (signal?.aborted) throw cancelled();
-    await this.ensureWorker(session, emit);
+    await this.ensureWorker(session, signal);
     if (signal?.aborted) throw cancelled();
+    if (session.notice !== undefined) {
+      emit({ kind: 'print', text: session.notice });
+      delete session.notice;
+    }
     const id = nextRequestId++;
     let count = 0;
     let interrupted = false;
@@ -148,7 +169,16 @@ export class ShellHost {
             count++;
             emit(message.output);
           }
-        } else if (message.type === 'evalDone' || message.type === 'exit') {
+        } else if (message.type === 'evalDone') {
+          resolve();
+        } else if (message.type === 'exit') {
+          // The worker died under the evaluation: it ends with the reason as its error (an
+          // interrupted one is answered CANCELLED, the notice then comes with the next input).
+          if (!interrupted && session.dead) {
+            count++;
+            emit({ kind: 'error', text: session.dead.reason });
+            session.dead.told = true;
+          }
           resolve();
         }
       });
@@ -181,7 +211,11 @@ export class ShellHost {
   /** Completions for the input before the cursor. */
   async complete(sessionId: string, code: string, signal?: AbortSignal): Promise<string[]> {
     const session = this.session(sessionId);
-    if (session.dead) throw new RpcError('CANCELLED', 'The shell is restarting');
+    // A dead worker is replaced (its restart notice waits for the next evaluation). The restart
+    // is not tied to this request: cancelling the completion only stops waiting for it.
+    if (session.dead || session.restarting) {
+      await abortable(this.ensureWorker(session, undefined), signal);
+    }
     const id = nextRequestId++;
     const answer = new Promise<string[]>((resolve, reject) => {
       session.pending.set(id, (message) => {
@@ -253,7 +287,7 @@ export class ShellHost {
       worker.postMessage({ type: 'close' });
       await closed;
     }
-    this.kill(session, 'The shell session was closed');
+    this.kill(session, CLOSED_TEXT);
     await worker.terminate().catch(() => undefined);
     this.log(`shell ${session.id} closed`);
   }
@@ -280,25 +314,45 @@ export class ShellHost {
     });
     worker.on('exit', () => {
       if (session.worker !== worker || session.dead) return;
-      session.dead = { reason: 'The shell stopped unexpectedly: it was restarted.' };
+      session.dead = { reason: session.closed ? CLOSED_TEXT : CRASHED_TEXT };
       this.flush(session);
     });
   }
 
-  /** Replaces a dead worker (telling the user, through `emit`, that the session restarted). */
-  private async ensureWorker(session: Session, emit: (output: ShellOutput) => void): Promise<void> {
-    if (!session.dead) return;
-    const { reason } = session.dead;
-    const { worker, db } = await this.startWorker(session.id, session.config, session.db);
+  /**
+   * Replaces a dead worker; the restart notice is kept in `session.notice` for the next
+   * evaluation (unless the evaluation that saw the death already reported it). One restart at a
+   * time: a second caller waits for the running one. An abort of `signal` (the evaluation that
+   * started the restart) stops it and terminates the new worker; the session stays dead.
+   */
+  private ensureWorker(session: Session, signal: AbortSignal | undefined): Promise<void> {
+    if (session.restarting) return abortable(session.restarting, signal);
+    if (!session.dead) return Promise.resolve();
+    const restarting = this.restart(session, session.dead, signal);
+    session.restarting = restarting;
+    const clear = () => {
+      if (session.restarting === restarting) delete session.restarting;
+    };
+    restarting.then(clear, clear);
+    return restarting;
+  }
+
+  private async restart(
+    session: Session,
+    dead: { reason: string; told?: boolean },
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    if (session.closed) throw notFound(session.id);
+    const { worker, db } = await this.startWorker(session.id, session.config, session.db, signal);
     if (session.closed) {
-      await worker.terminate();
-      throw new RpcError('NOT_FOUND', `No shell session ${session.id}`);
+      await worker.terminate().catch(() => undefined);
+      throw notFound(session.id);
     }
     session.worker = worker;
     session.db = db;
     delete session.dead;
+    if (!dead.told) session.notice = dead.reason;
     this.attach(session, worker);
-    emit({ kind: 'print', text: reason });
   }
 
   private async startWorker(
@@ -333,6 +387,10 @@ export class ShellHost {
       throw error;
     }
   }
+}
+
+function notFound(sessionId: string): RpcError {
+  return new RpcError('NOT_FOUND', `No shell session ${sessionId}`);
 }
 
 function cancelled(): RpcError {

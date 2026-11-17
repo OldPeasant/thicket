@@ -9,7 +9,7 @@ import { ShellEvaluator } from '@mongosh/shell-evaluator';
 import type { MongoClientOptions } from 'mongodb';
 
 import { errorOutput, printOutput, resultOutput, type ShellResultLike } from './output.ts';
-import { splitShellInput } from './split.ts';
+import { EXIT_TEXT, isExitCommand, splitShellInput } from './split.ts';
 
 // The mongosh packages are CommonJS: named imports work in Node's ESM loader (cjs-module-lexer;
 // the worker runs from source in tests) and in the esbuild bundle alike.
@@ -56,6 +56,14 @@ export class ShellRuntime {
         throw new Error('Interactive prompts are not supported in the Thicket console');
       },
     });
+    // mongosh's exit() closes the session's client before its onExit listener runs: replace the
+    // functions (the `exit`/`quit` commands are caught in evaluateAll), the session stays usable.
+    const noExit = () => {
+      throw new Error(EXIT_TEXT);
+    };
+    const globals = this.context as Record<string, unknown>;
+    globals['exit'] = noExit;
+    globals['quit'] = noExit;
   }
 
   /** Connects with the profile's driver configuration and switches to `db` when given. */
@@ -103,6 +111,10 @@ export class ShellRuntime {
   private async evaluateAll(code: string, emit: (output: ShellOutput) => void): Promise<void> {
     this.emit = emit;
     for (const piece of splitShellInput(code)) {
+      if (isExitCommand(piece)) {
+        emit({ kind: 'print', text: EXIT_TEXT });
+        continue;
+      }
       const before = this.db();
       try {
         const result = (await this.evaluator.customEval(
