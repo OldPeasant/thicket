@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "task": "ci-windows-macos",
+  "reviewed_revision": "9ad19862f9dc75ef363f379a4cfe6e1e24f0cab1",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/ci-windows-macos/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/ci-windows-macos/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/ci-windows-macos/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "TW-1",
+      "source": "test-writer",
+      "severity": "Medium",
+      "disposition": "fixed",
+      "note": "socks close(): socket.closed shortcut resolved before the socket's close event; removed, close() always waits for close"
+    },
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "accepted",
+      "note": "On Windows an inherited Git Bash SSH_AUTH_SOCK now overrides Pageant; deliberate, recorded as a task assumption"
+    },
+    {
+      "id": "CR-2",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "accepted",
+      "note": "OIDC test maps any late-redirect error to closed; the key check (only code-1 reaches /token) still holds"
+    }
+  ],
+  "validation": [
+    { "command": "cd packages/backend && npx vitest run src/ssh src/io/bson src/auth/oidc", "result": "pass" },
+    { "command": "npm run check", "result": "pass" }
+  ]
+}
