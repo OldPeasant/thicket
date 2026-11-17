@@ -11,7 +11,8 @@ lease_until: 2026-11-17T01:53:49Z
 agg.run (streamed, paged), previewStage (pipeline up to stage n on a sample), explain for find and aggregate, createView; `$out`/`$merge` treated as writes through the guard.
 
 ## Acceptance criteria
-- [ ] Integration tests: preview of stage 2 of 3 matches running the first 2 stages; explain returns winning plan
+- [x] Integration tests: preview of stage 2 of 3 matches running the first 2 stages; explain returns winning plan
+  - verified (2026-11-17 02:37+0100 by dell26/agent-1): npx vitest run --config test/integration/vitest.config.ts agg.int (mongo 8 replica set container via Podman) -> 15 passed; 'preview of stage 2 of 3 matches running the first 2 stages' compares agg.previewStage output with a direct driver aggregate of STAGES[0..1]; explain tests assert queryPlanner.winningPlan (find: IXSCAN) and aggregate winningPlan
 - [ ] `$out` on read-only refused; on production requires confirmed (int test)
 
 ## Notes
