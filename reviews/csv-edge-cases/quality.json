@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "task": "csv-edge-cases",
+  "reviewed_revision": "c698660e5b53f1914a523495928449d4bd9a9fab",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/csv-edge-cases/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/csv-edge-cases/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/csv-edge-cases/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "R1-CR-1",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "first review: a top-level dotted key holding a document was flattened and lost its value; collectPaths no longer flattens dotted keys (fixes.md CR-1, commit 3dae8b2f)"
+    },
+    {
+      "id": "TW-1",
+      "source": "test-writer",
+      "severity": "Low",
+      "disposition": "fixed",
+      "note": "offset dates at the Date range edges were refused; date() now validates parts and computes millis arithmetically (fixes.md TW-1, commit 3dae8b2f)"
+    }
+  ],
+  "validation": [
+    { "command": "npx vitest run packages/backend/src/io", "result": "pass" },
+    { "command": "npm run check", "result": "pass" }
+  ]
+}
