@@ -96,7 +96,7 @@
 
 .plot {
   position: relative;
-  padding-left: 3rem;
+  padding-left: 4.75rem;
 }
 
 .area {
@@ -114,7 +114,8 @@ svg {
 .tick {
   position: absolute;
   left: 0;
-  width: 2.5rem;
+  width: 4.25rem;
+  white-space: nowrap;
   text-align: right;
   font-family: var(--font-mono);
   font-size: 0.8em;

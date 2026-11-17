@@ -140,7 +140,7 @@ select {
   font-family: var(--font-mono);
   font-size: 1.5em;
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .tile small {
