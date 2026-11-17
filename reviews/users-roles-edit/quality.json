@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "task": "users-roles-edit",
+  "reviewed_revision": "c77c019ea904e476c434a24a27ec27093c57cf3c",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/users-roles-edit/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/users-roles-edit/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/users-roles-edit/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "R1-CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "Round 1: confirm-dialog password hiding and editor change diff untested; covered by operation.spec.ts 'user and role changes', principal-editor.spec.ts and users-edit.model.spec.ts."},
+    {"id": "R1-CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "Round 1: no @admin role suggestions for custom roles outside admin (forRole input)."},
+    {"id": "R1-CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "Round 1: grant field keeps the typed role until the grant succeeds (clearOnPick/clear())."},
+    {"id": "R1-CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "Round 1: change() finishing after the tab switched database shows no stale notice and does not reload."},
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "Test strength only: the view rebuilds the grant field after a successful grant, so no test isolates the view's clear() call; clear() itself and the refused-grant path (text kept) are tested, behavior is correct."}
+  ],
+  "validation": [
+    {"command": "npx vitest run --config test/integration/vitest.config.ts test/integration/users-edit.int.spec.ts (16 tests, mongo8 fixture)", "result": "pass"},
+    {"command": "npm run build -w packages/renderer && npm run build -w apps/desktop && npx playwright test test/e2e/users-edit.e2e.ts (MongoDB 8 --auth)", "result": "pass"},
+    {"command": "cd packages/renderer && npx ng test --include='src/app/admin/users/**/*.spec.ts' (152 tests)", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}
