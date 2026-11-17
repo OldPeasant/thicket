@@ -209,6 +209,24 @@ const SAMPLES: { [M in MethodName]: { valid: ParamsOf<M>; invalid: unknown } } =
     invalid: { ...NS, fileToken: '' },
   },
 
+  'gridfs.buckets': { valid: { profileId: P, db: 'shop' }, invalid: { profileId: P } },
+  'gridfs.files': {
+    valid: { profileId: P, db: 'shop', bucket: 'fs', nameContains: 'pdf', skip: 0, limit: 50 },
+    invalid: { profileId: P, db: 'shop', bucket: 'fs', limit: 1001 },
+  },
+  'gridfs.download': {
+    valid: { profileId: P, db: 'shop', bucket: 'fs', id: OID },
+    invalid: { profileId: P, db: 'shop', bucket: 'fs', id: ' ' },
+  },
+  'gridfs.upload': {
+    valid: { profileId: P, db: 'shop', bucket: 'fs', contentType: 'application/pdf' },
+    invalid: { profileId: P, db: 'shop', bucket: 'f$s' },
+  },
+  'gridfs.delete': {
+    valid: { profileId: P, db: 'shop', bucket: 'fs', id: OID },
+    invalid: { profileId: P, db: 'shop', bucket: '', id: OID },
+  },
+
   'shell.open': { valid: { profileId: P, db: 'shop' }, invalid: { db: 'shop' } },
   'shell.eval': {
     valid: { sessionId: 's1', code: 'db.orders.countDocuments()' },
@@ -323,6 +341,8 @@ const EXPECTED_WRITES = [
   'idx.drop',
   'idx.hide',
   'io.import',
+  'gridfs.upload',
+  'gridfs.delete',
   'admin.killOp',
 ].sort();
 
@@ -341,6 +361,7 @@ describe('method table', () => {
         'conn',
         'db',
         'docs',
+        'gridfs',
         'history',
         'idx',
         'io',

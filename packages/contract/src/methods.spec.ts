@@ -292,6 +292,40 @@ const RESULTS: { [M in MethodName]: { valid: ResultOf<M>; invalid: unknown } } =
   },
   'io.import': { valid: { streamId: 's4' }, invalid: { streamId: 4 } },
 
+  'gridfs.buckets': {
+    valid: { buckets: [{ name: 'fs', files: 3, hasChunks: true }] },
+    invalid: { buckets: [{ name: 'fs', files: -1, hasChunks: true }] },
+  },
+  'gridfs.files': {
+    valid: {
+      files: [
+        {
+          id: '{"$oid":"64b7f0c2a1b2c3d4e5f60718"}',
+          filename: 'a.pdf',
+          length: 10,
+          chunkSize: 261120,
+          uploadDate: '2026-01-01T00:00:00.000Z',
+          contentType: 'application/pdf',
+          metadata: '{"owner":"x"}',
+        },
+      ],
+      total: 1,
+    },
+    invalid: {
+      files: [{ id: '', filename: 'a', length: 1, chunkSize: 1, uploadDate: '' }],
+      total: 1,
+    },
+  },
+  'gridfs.download': {
+    valid: { streamId: 's7', path: '/tmp/a.pdf' },
+    invalid: { streamId: '', path: null },
+  },
+  'gridfs.upload': {
+    valid: { streamId: null, fileName: null, sizeBytes: null },
+    invalid: { streamId: 's8', fileName: 'a.pdf' },
+  },
+  'gridfs.delete': { valid: { deleted: true }, invalid: { deleted: 'yes' } },
+
   'shell.open': { valid: { sessionId: 'sh1', db: 'test' }, invalid: { sessionId: '', db: 'test' } },
   'shell.eval': { valid: { streamId: 's5' }, invalid: null },
   'shell.complete': {
@@ -379,6 +413,14 @@ const STREAMS: { [M in StreamMethodName]: { valid: StreamDataOf<M>[]; invalid: u
   'io.export': {
     valid: [{ processed: 10, failed: 0, errors: [] }],
     invalid: [{ processed: -1, failed: 0, errors: [] }],
+  },
+  'gridfs.download': {
+    valid: [{ bytes: 10, totalBytes: 20 }],
+    invalid: [{ bytes: -1, totalBytes: 20 }],
+  },
+  'gridfs.upload': {
+    valid: [{ bytes: 20, totalBytes: 20, fileId: '{"$oid":"64b7f0c2a1b2c3d4e5f60718"}' }],
+    invalid: [{ bytes: 20 }],
   },
   'io.import': {
     valid: [

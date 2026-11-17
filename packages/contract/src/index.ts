@@ -9,6 +9,7 @@ import { connMethods } from './conn';
 import { dbMethods } from './db';
 import type { MethodDef, Route } from './define';
 import { docsMethods } from './docs';
+import { gridfsMethods } from './gridfs';
 import { historyMethods } from './history';
 import type { ErrorInfo } from './errors';
 import { idxMethods } from './idx';
@@ -30,6 +31,7 @@ export * from './define';
 export * from './docs';
 export * from './envelope';
 export * from './errors';
+export * from './gridfs';
 export * from './history';
 export * from './idx';
 export * from './io';
@@ -49,6 +51,7 @@ export const methods = {
   ...idxMethods,
   ...schemaMethods,
   ...ioMethods,
+  ...gridfsMethods,
   ...shellMethods,
   ...adminMethods,
   ...pipelinesMethods,
