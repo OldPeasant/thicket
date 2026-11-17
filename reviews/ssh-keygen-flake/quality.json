@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "task": "ssh-keygen-flake",
+  "reviewed_revision": "590b3f4f3d968e0ee3c1deb53862d3898028b7e1",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/ssh-keygen-flake/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/ssh-keygen-flake/review.md"},
+    "fixer": {"status": "not_required", "reason": "test-writer found no bugs and the code review reported no findings"}
+  },
+  "fixes_required": false,
+  "findings": [],
+  "validation": [
+    {"command": "npm run check", "result": "pass"},
+    {"command": "cd packages/backend && npx vitest run src/ssh/testing.spec.ts", "result": "pass"},
+    {"command": "npx vitest run --config test/integration/vitest.config.ts test/integration/ssh.int.spec.ts", "result": "pass"},
+    {"command": "node packages/backend/keyloop.tmp.ts (5000 x generateTestKeyPair -> 0 unparseable)", "result": "pass"}
+  ]
+}
