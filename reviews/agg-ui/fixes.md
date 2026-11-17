@@ -180,3 +180,106 @@ Remaining unresolved findings:
 ## Final status
 
 All validated findings fixed and validation passed.
+
+# Round 2
+
+Date: 2026-11-17
+
+Task: agg-ui (aggregation builder UI), second review round (`reviews/agg-ui/review.md`, CR-6 and CR-7)
+
+Scope: the two approved P3 findings CR-6 and CR-7 of the current task
+
+## Fixed findings
+
+### CR-6 — In text mode, a Run refused for a text parse error keeps the earlier result and run error
+
+Files changed:
+- `packages/renderer/src/app/aggregation/aggregation-view.ts`
+- `packages/renderer/src/app/aggregation/aggregation-view.spec.ts`
+
+Problem:
+`run()` returned early when `applyText()` failed. The result of an earlier, different pipeline and any
+earlier `agg-run-error` stayed on screen, unlike every other refused or failed Run.
+
+Fix:
+When `applyText()` fails, `run()` now sets `runError` and `result` to `null` before it returns. It adds
+no second message, because the text error under the text area is already shown. New spec test
+"a Run refused for a full-text parse error clears the earlier result and run error", placed next to
+"a Run refused for a stage error clears the earlier result". It covers both an earlier result and an
+earlier run error.
+
+Validation:
+- `cd packages/renderer && npx ng test --include='src/app/aggregation/**/*.spec.ts'` — Pass
+
+### CR-7 — The preview-count live region is created together with its text
+
+Files changed:
+- `packages/renderer/src/app/aggregation/aggregation-view.html`
+- `packages/renderer/src/app/aggregation/aggregation-view.ts`
+- `packages/renderer/src/app/aggregation/aggregation-view.css`
+- `packages/renderer/src/app/aggregation/aggregation-view.spec.ts`
+
+Problem:
+`aria-live="polite"` was on `agg-preview-count`, which exists only inside `@case ('ok')`. Each preview
+goes through `loading`, so Angular recreated the region together with its text, and screen readers
+usually do not announce that.
+
+Fix:
+- Each `agg-stage-preview` now starts with a persistent, visually hidden
+  `<p class="sr-only" data-testid="agg-preview-live" aria-live="polite">`, placed outside the `@if`/`@switch`.
+- Its text comes from the new `previewStatus(id)`. It holds the count ("N documents from a sample"),
+  "Loading preview…" or "Preview failed: <message>". For stages without a preview (disabled, invalid,
+  `$out`/`$merge`), the text is empty.
+- The document `<pre>` list and the visible count are outside the live region.
+- `aria-live` was removed from `agg-preview-count`.
+- The visible count and the live text use the same new `countText(docs)` helper.
+- No global visually-hidden class exists in the renderer. Components each define their own `.sr-only`
+  (`sidebar-tree.css`, `tab-bar.css`, `connection-editor.css`). The same rule was copied into
+  `aggregation-view.css`, and `.preview` got `position: relative` to contain it. There are no color
+  literals.
+- The spec test was renamed to "announces the preview status in a live region that persists across
+  preview reloads". It checks:
+  - there is exactly one live region per preview;
+  - it contains no documents;
+  - it is the same DOM element across the loading, ok (count) and error states of a reload;
+  - its text in each of those states.
+  The stage-error part of the old test is now its own test, "does not re-announce stage errors while
+  typing", and is unchanged.
+
+Validation:
+- `cd packages/renderer && npx ng test --include='src/app/aggregation/**/*.spec.ts'` — Pass
+
+## Not fixed
+
+None.
+
+## Validation summary
+
+Focused tests:
+- `cd packages/renderer && npx ng test --include='src/app/aggregation/**/*.spec.ts'` — Pass (2 files,
+  78 tests)
+- `npx eslint src/app/aggregation/` (renderer) — Pass. `npx prettier --check src/app/aggregation/` first
+  reported formatting in the spec file. After `prettier --write` on that file, it passes.
+
+Full test suite:
+- `npm run check` (repository root) — Pass. Renderer: 74 files, 2243 tests.
+
+Lint/type-check/build:
+- Included in `npm run check` (eslint `--max-warnings 0`, `prettier --check`, typecheck) — Pass
+
+`.taskcheck`:
+- Pass. `.taskcheck` runs `npm run check`, which passed (above).
+
+Not run: `npm run test:e2e`. No existing test id was changed or removed. The only new test id is
+`agg-preview-live`.
+
+Notes for the parent:
+- Production code changed after the second review. A new test-writer and code-reviewer pass is
+  needed on the final code.
+
+Remaining unresolved findings:
+0
+
+## Final status
+
+All validated findings fixed and validation passed.

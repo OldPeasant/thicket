@@ -150,6 +150,9 @@
               }
             </div>
             <div class="preview" data-testid="agg-stage-preview">
+              <p class="sr-only" data-testid="agg-preview-live" aria-live="polite">
+                {{ previewStatus(stage.id) }}
+              </p>
               @if (!stage.enabled) {
                 <p class="note">Disabled: the pipeline skips this stage.</p>
               } @else if (p && !p.ok) {
@@ -167,12 +170,8 @@
                 @switch (preview?.state) {
                   @case ('ok') {
                     @if (preview?.state === 'ok' && preview.docs; as docs) {
-                      <p class="count" data-testid="agg-preview-count" aria-live="polite">
-                        {{
-                          docs.length === 0
-                            ? 'No documents'
-                            : docs.length + (docs.length === 1 ? ' document' : ' documents')
-                        }}
+                      <p class="count" data-testid="agg-preview-count">
+                        {{ countText(docs) }}
                         <span class="faint">from a sample</span>
                       </p>
                       @for (doc of docs; track $index) {

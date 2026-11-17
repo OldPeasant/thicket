@@ -1079,6 +1079,37 @@ describe('AggregationView', () => {
       expect(q('agg-results')).toBeNull();
     });
 
+    it('a Run refused for a full-text parse error clears the earlier result and run error', async () => {
+      const runBadText = async () => {
+        await click(get('agg-mode-text'));
+        const area = get<HTMLTextAreaElement>('agg-text');
+        area.value = '[{ $match: { a: 1 } }, { $limit: }]';
+        area.dispatchEvent(new Event('input'));
+        await click(get('agg-run'));
+        expect(get('agg-text-error').textContent).toMatch(/line 1/);
+      };
+      await click(get('agg-run'));
+      expect(q('agg-results')).not.toBeNull();
+      await runBadText();
+      expect(q('agg-results')).toBeNull();
+      expect(q('agg-run-error')).toBeNull();
+
+      // An earlier run error goes too: the text error under the text area is the only message.
+      const area = get<HTMLTextAreaElement>('agg-text');
+      area.value = '[]';
+      area.dispatchEvent(new Event('input'));
+      await click(get('agg-mode-stages'));
+      fake.handle('agg.run', () => {
+        setTimeout(() => fake.failStream('s-bad', { code: 'SERVER_ERROR', message: 'bad' }));
+        return { streamId: 's-bad' };
+      });
+      await click(get('agg-run'));
+      expect(get('agg-run-error').textContent).toContain('bad');
+      await runBadText();
+      expect(q('agg-run-error')).toBeNull();
+      expect(q('agg-results')).toBeNull();
+    });
+
     it('Next pages the collection that produced the result after the tab is pointed elsewhere', async () => {
       total = RESULT_PAGE_SIZE * 2;
       await click(get('agg-run'));
@@ -1207,12 +1238,38 @@ describe('AggregationView', () => {
     expect(get('agg-code').textContent).not.toContain('$match');
   });
 
-  it('announces only the preview count, and does not re-announce stage errors while typing', async () => {
+  it('announces the preview status in a live region that persists across preview reloads', async () => {
     const preview = inStage(0, 'agg-stage-preview');
+    const live = inStage(0, 'agg-preview-live');
     expect(preview.hasAttribute('aria-live')).toBe(false);
-    expect(inStage(0, 'agg-preview-count').getAttribute('aria-live')).toBe('polite');
-    expect(preview.querySelector('[aria-live]')).toBe(inStage(0, 'agg-preview-count'));
+    expect(live.getAttribute('aria-live')).toBe('polite');
+    expect(preview.querySelectorAll('[aria-live]')).toHaveLength(1);
+    expect(live.textContent?.trim()).toBe('1 document from a sample');
+    // The documents and the visible count are not in the live region.
+    expect(live.querySelector('pre')).toBeNull();
+    expect(inStage(0, 'agg-preview-count').hasAttribute('aria-live')).toBe(false);
 
+    // A reload keeps the same live element and only changes its text.
+    let answer: (value: { docs: string[] }) => void = () => undefined;
+    fake.handle(
+      'agg.previewStage',
+      () => new Promise<{ docs: string[] }>((resolve) => (answer = resolve)),
+    );
+    await setBody(0, '{ a: 1 }');
+    expect(inStage(0, 'agg-preview-live')).toBe(live);
+    expect(live.textContent?.trim()).toBe('Loading preview…');
+    answer({ docs: [] });
+    await settle();
+    expect(inStage(0, 'agg-preview-live')).toBe(live);
+    expect(live.textContent?.trim()).toBe('No documents from a sample');
+
+    fake.fail('agg.previewStage', { code: 'SERVER_ERROR', message: 'preview broke' });
+    await setBody(0, '{ a: 2 }');
+    expect(inStage(0, 'agg-preview-live')).toBe(live);
+    expect(live.textContent?.trim()).toMatch(/^Preview failed: [\s\S]*preview broke$/);
+  });
+
+  it('does not re-announce stage errors while typing', async () => {
     await setBody(0, '{ a: ');
     const error = inStage(0, 'agg-stage-error');
     expect(error.hasAttribute('role')).toBe(false);

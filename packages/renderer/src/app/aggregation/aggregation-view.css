@@ -329,6 +329,7 @@
 }
 
 .preview {
+  position: relative;
   min-width: 0;
   max-height: 11rem;
   overflow: auto;
@@ -342,6 +343,16 @@
 .stage.disabled .preview {
   background: transparent;
   border-style: dashed;
+}
+
+/* The live region of a preview: read by screen readers, not shown. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .count {

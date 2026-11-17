@@ -427,6 +427,24 @@ export class AggregationView {
     this.previews.update((map) => new Map(map).set(id, preview));
   }
 
+  /** The count line of a preview that read `docs`. */
+  protected countText(docs: readonly string[]): string {
+    if (docs.length === 0) return 'No documents';
+    return docs.length + (docs.length === 1 ? ' document' : ' documents');
+  }
+
+  /**
+   * What the persistent live region of a stage's preview announces: the count, the loading note
+   * or the preview error. Empty for stages without a preview. The documents are never announced.
+   */
+  protected previewStatus(id: number): string {
+    if (!this.previewPlans().has(id)) return '';
+    const preview = this.previews().get(id);
+    if (preview?.state === 'ok') return `${this.countText(preview.docs)} from a sample`;
+    if (preview?.state === 'error') return `Preview failed: ${preview.message}`;
+    return 'Loading preview…';
+  }
+
   protected skippedText(id: number): string | null {
     const skipped = this.previewPlans().get(id)?.skipped ?? [];
     if (skipped.length === 0) return null;
@@ -444,7 +462,12 @@ export class AggregationView {
 
   /** Runs the pipeline as it is now and shows the first page of its result. */
   async run(): Promise<void> {
-    if (this.mode() === 'text' && !this.applyText()) return;
+    if (this.mode() === 'text' && !this.applyText()) {
+      // The text error is shown already; only drop the result of an earlier, different pipeline.
+      this.runError.set(null);
+      this.result.set(null);
+      return;
+    }
     const pipeline = this.pipeline();
     if (pipeline === null) {
       this.failRun(this.fixFirst());
