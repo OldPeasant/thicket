@@ -40,7 +40,12 @@ function setup(profiles: Profile[], secrets: Record<string, Record<string, strin
 
 function ldapProfile(
   id: string,
-  extra: { username?: string; connectionString?: string; secretMode?: 'saved' | 'ask' } = {},
+  extra: {
+    username?: string;
+    connectionString?: string;
+    secretMode?: 'saved' | 'ask';
+    authSource?: string;
+  } = {},
 ): Profile {
   return {
     id,
@@ -50,6 +55,7 @@ function ldapProfile(
       mechanism: 'PLAIN',
       secretMode: extra.secretMode ?? 'saved',
       ...(extra.username !== undefined ? { username: extra.username } : {}),
+      ...(extra.authSource !== undefined ? { authSource: extra.authSource } : {}),
     },
     serverSelectionTimeoutMS: 5_000,
     readOnly: false,
@@ -115,6 +121,32 @@ describe('LDAP (PLAIN)', () => {
     expect(error.message).not.toContain(wrong);
     expect(logs.join('\n')).not.toContain(wrong);
     expect(manager.statusOf(p.id).state).not.toBe('connected');
+  });
+
+  it('authenticates against $external even with authSource/authMechanism set elsewhere', async () => {
+    const url = new URL(ldap.uri);
+    url.searchParams.set('authSource', 'admin');
+    url.searchParams.set('authMechanism', 'SCRAM-SHA-256');
+    const p = ldapProfile('other-source', {
+      username: ldap.username,
+      connectionString: url.toString(),
+      authSource: 'admin',
+    });
+    const { manager } = setup([p], { [p.id]: { password: ldap.password } });
+    await manager.open(p.id, undefined);
+    expect(await authenticatedUser(manager, p.id)).toEqual([
+      { user: ldap.username, db: '$external' },
+    ]);
+  });
+
+  it('answers AUTH_FAILED for a wrong password typed at connect (secretMode ask)', async () => {
+    const wrong = `${ldap.password}-typo`;
+    const p = ldapProfile('ask-wrong', { username: ldap.username, secretMode: 'ask' });
+    const { manager, logs } = setup([p]);
+    const error = await failure(manager.test({ profileId: p.id }, wrong));
+    expect(error.code).toBe('AUTH_FAILED');
+    expect(error.message).not.toContain(wrong);
+    expect(logs.join('\n')).not.toContain(wrong);
   });
 
   it('answers AUTH_FAILED for a user the directory does not know', async () => {

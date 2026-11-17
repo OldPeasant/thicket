@@ -53,6 +53,15 @@ describe('ldapAuthOptions', () => {
     expect(options.auth?.username).toBe('alice');
   });
 
+  it("uses the password typed at connect with secretMode 'ask'", () => {
+    const options = ldapAuthOptions(
+      auth({ username: 'alice', secretMode: 'ask' }),
+      { password: PASSWORD },
+      undefined,
+    );
+    expect(options.auth).toEqual({ username: 'alice', password: PASSWORD });
+  });
+
   it('answers AUTH_FAILED without a user name', () => {
     const error = errorOf(() => ldapAuthOptions(auth(), { password: PASSWORD }, undefined));
     expect(error?.code).toBe('AUTH_FAILED');

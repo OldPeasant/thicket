@@ -176,6 +176,69 @@ describe('clientConfig', () => {
     expect(() => new MongoClient(uri, options)).not.toThrow();
   });
 
+  it('PLAIN: the driver resolves the decoded URI user against $external, overriding URI auth options', () => {
+    const { uri, options } = clientConfig(
+      draft({
+        connectionString:
+          'mongodb://carol%40corp.example.test@db.example.test:27017/?authSource=admin&authMechanism=SCRAM-SHA-256',
+        auth: { mechanism: 'PLAIN', secretMode: 'saved' },
+      }),
+      { password: PASSWORD },
+    );
+    expect(options.auth).toEqual({ username: 'carol@corp.example.test', password: PASSWORD });
+    const credentials = new MongoClient(uri, options).options.credentials;
+    expect(credentials?.mechanism).toBe('PLAIN');
+    expect(credentials?.source).toBe('$external');
+    expect(credentials?.username).toBe('carol@corp.example.test');
+    expect(credentials?.password).toBe(PASSWORD);
+  });
+
+  it('PLAIN: keeps the TLS options next to the LDAP credentials', () => {
+    const { options } = clientConfig(
+      draft({
+        auth: { mechanism: 'PLAIN', username: 'alice', secretMode: 'ask' },
+        tls: { enabled: true, caFile: '/fictitious/ca.pem' },
+      }),
+      { password: PASSWORD },
+    );
+    expect(options).toMatchObject({
+      tls: true,
+      tlsCAFile: '/fictitious/ca.pem',
+      authMechanism: 'PLAIN',
+      authSource: '$external',
+      auth: { username: 'alice', password: PASSWORD },
+    });
+  });
+
+  it.each([
+    ['no password', { username: 'alice', secretMode: 'saved' as const }, {}],
+    [
+      "secretMode 'none'",
+      { username: 'alice', secretMode: 'none' as const },
+      { password: PASSWORD },
+    ],
+    ['no user name anywhere', { secretMode: 'saved' as const }, { password: PASSWORD }],
+  ])('PLAIN: answers AUTH_FAILED with %s', (_case, auth, secrets) => {
+    const error = errorOf(() =>
+      clientConfig(draft({ auth: { mechanism: 'PLAIN', ...auth } }), secrets),
+    );
+    expect(error?.code).toBe('AUTH_FAILED');
+    expect(error?.message).not.toContain(PASSWORD);
+  });
+
+  it('PLAIN: an unparseable connection string without a profile user is AUTH_FAILED, not a crash', () => {
+    const error = errorOf(() =>
+      clientConfig(
+        draft({
+          connectionString: 'mongodb://',
+          auth: { mechanism: 'PLAIN', secretMode: 'saved' },
+        }),
+        { password: PASSWORD },
+      ),
+    );
+    expect(error?.code).toBe('AUTH_FAILED');
+  });
+
   it.each(['GSSAPI', 'MONGODB-OIDC'] as const)(
     'answers UNSUPPORTED for mechanism %s',
     (mechanism) => {
