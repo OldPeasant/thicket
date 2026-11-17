@@ -15,6 +15,7 @@ shell.open/eval/complete/close per connection following docs/mongosh.md; output 
 ## Acceptance criteria
 - [x] Integration tests: `use test; db.c.insertOne({a:1}); db.c.find()` returns the document as EJSON
   - verified (2026-11-17 03:42+0100 by dell26/agent-1): npx vitest run --config test/integration/vitest.config.ts test/integration/shell.int.spec.ts --reporter=verbose (MongoDB container via Podman, merged HEAD 369c532) -> 17 passed incl. 'shell.eval > use test; db.c.insertOne({a:1}); db.c.find() returns the document as EJSON'
+  - verified (2026-11-17 04:19+0100 by dell26/agent-3): npx vitest run --config test/integration/vitest.config.ts test/integration/shell.int.spec.ts --reporter=verbose (MongoDB container via Podman, HEAD 8fd9c3f merged with origin/main b739b48) -> 18 passed incl. 'use test; db.c.insertOne({a:1}); db.c.find() returns the document as EJSON'
 - [x] Interrupt stops `while(true){}` within 2 s (int test)
   - verified (2026-11-17 03:42+0100 by dell26/agent-1): npx vitest run --config test/integration/vitest.config.ts test/integration/shell.int.spec.ts --reporter=verbose (MongoDB container via Podman, merged HEAD 369c532) -> 17 passed incl. 'interrupt > stops while(true){} within 2 s and the session goes on' (1.7 s)
 - [x] complete('db.c.fi') suggests `find`, `findOne` (test)
