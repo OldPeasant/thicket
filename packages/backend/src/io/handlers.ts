@@ -8,7 +8,7 @@ import type {
   ResultOf,
 } from '@thicket/contract';
 
-import type { ConnectionManager } from '../connections/manager';
+import { streamOnConnection, type ConnectionManager } from '../connections/manager';
 import { RpcError, type Handler, type HandlerContext } from '../server/rpc';
 import { exportCommand, exportToFile } from './export';
 import { importFile, previewFile, type TextImportFormat } from './import';
@@ -66,7 +66,8 @@ function needStreams(context: HandlerContext, method: string) {
  * chosen with `main`'s native dialog; a cancelled dialog answers `streamId: null` / `null`. The
  * renderer only ever gets an opaque `fileToken` for the chosen import file. Export and import run
  * as streams of `IoProgress` events on the profile's open connection; a cancel stops them (the
- * server operation is killed, a partial export file removed). `io.import` is a write: the backend
+ * server operation is killed, a partial export file removed), and so does `conn.close` before it
+ * closes the client (the stream ends `CANCELLED`). `io.import` is a write: the backend
  * wraps it with the write guard like every other write handler.
  */
 export function ioHandlers(
@@ -104,11 +105,14 @@ export function ioHandlers(
       );
       if (file === null) return { streamId: null, path: null };
       const client = manager.client(p.profileId);
+      // `conn.close` cancels the export and waits for its cleanup (killOp, partial file removal).
       const streamId = openStream((sink) =>
-        exportToFile(client, p, file, {
-          signal: sink.signal,
-          progress: (progress) => sink.send(progress),
-        }),
+        streamOnConnection(manager, p.profileId, client, sink.signal, (signal) =>
+          exportToFile(client, p, file, {
+            signal,
+            progress: (progress) => sink.send(progress),
+          }),
+        ),
       );
       return { streamId, path: file };
     },
@@ -140,17 +144,20 @@ export function ioHandlers(
         throw new RpcError('INVALID_PARAMS', 'csvMapping is only for CSV files');
       }
       const client = manager.client(p.profileId);
-      const streamId = openStream(async (sink) => {
-        const result = await importFile(client, chosen.file, chosen.format, {
-          db: p.db,
-          coll: p.coll,
-          ...(p.ordered !== undefined ? { ordered: p.ordered } : {}),
-          ...(p.stopOnError !== undefined ? { stopOnError: p.stopOnError } : {}),
-          signal: sink.signal,
-          progress: (progress) => sink.send(progress),
-        });
-        return result.inserted;
-      });
+      // `conn.close` cancels the import and waits for it to stop before the client closes.
+      const streamId = openStream((sink) =>
+        streamOnConnection(manager, p.profileId, client, sink.signal, async (signal) => {
+          const result = await importFile(client, chosen.file, chosen.format, {
+            db: p.db,
+            coll: p.coll,
+            ...(p.ordered !== undefined ? { ordered: p.ordered } : {}),
+            ...(p.stopOnError !== undefined ? { stopOnError: p.stopOnError } : {}),
+            signal,
+            progress: (progress) => sink.send(progress),
+          });
+          return result.inserted;
+        }),
+      );
       return { streamId };
     },
   };

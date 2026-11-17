@@ -589,6 +589,26 @@ export function isOpenClient(
   }
 }
 
+/**
+ * Runs a stream's producer `work` on `client`, the profile's open connection, so that `conn.close`
+ * cancels it ({@link ConnectionManager.cancelOnClose}: its cleanup runs before the client closes).
+ * Whatever the work fails with once its connection was closed (or replaced) ends it `CANCELLED`.
+ */
+export async function streamOnConnection<T>(
+  manager: ConnectionManager,
+  profileId: string,
+  client: ClientLike,
+  signal: AbortSignal | undefined,
+  work: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  try {
+    return await manager.cancelOnClose(profileId, client, signal, work);
+  } catch (error) {
+    if (!isOpenClient(manager, profileId, client)) throw connectionClosed();
+    throw error;
+  }
+}
+
 /** Rejects with `CANCELLED` as soon as `signal` aborts (the operation itself runs on). */
 export function abortable<T>(operation: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (!signal) return operation;
