@@ -15,7 +15,8 @@ Release run 44136477833 (tag v0.1.0-rc.2, 2026-11-17) failed in the "Smoke test 
   - verified (2026-11-17 19:10+0100 by dell26/agent-1): npm run dist -w apps/desktop -- --linux AppImage; then npx playwright test -c test/e2e/smoke/playwright.config.ts installer.smoke.ts --repeat-each 10 with APPIMAGE_EXTRACT_AND_RUN=1 THICKET_SMOKE_MONGO=1 THICKET_SMOKE_INSTALLER=<that AppImage> (headless Ozone, no xvfb here; all CPUs busy to mimic a slow runner). Before (main): 20 passed but 20/20 tests left their thicket-smoke-userdata-* folder in tmpdir, because the app recreated it after rm. Probe: on SIGTERM the AppImage runtime exits after ~1 ms while its process group lives on 0.1-4.4 s and writes 4-9 entries into userData (ENOTEMPTY when that overlaps rm, as in run 44136477833). After (78a8fd70): 20 passed, 0 ENOTEMPTY, 0 folders left; same without load before the fix: 20 passed.
 - [~] A release-like run on GitHub passes the Linux smoke step: the `bundle` job in check.yml or the smoke step on this task's `wip/` branch, if one runs it; otherwise skip with reason and a human checks the next tag
   - skipped (2026-11-17 18:57+0100 by dell26/agent-1): check.yml's bundle job runs scripts/smoke-packaged.mjs on linux-unpacked, not test/e2e/smoke/installer.smoke.ts on the AppImage; release.yml runs only on v* tags, which agents don't push. A human checks the Linux 'Smoke test installer' step on the next tag.
-- [ ] `npm run check` passes
+- [x] `npm run check` passes
+  - verified (2026-11-17 19:17+0100 by dell26/agent-1): npm run check at e1e4c755 (lint, tsc, workspace + renderer unit tests) -> passed (renderer 125 files / 4137 tests); also run by test-writer on the same tree -> CHECK_OK
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
