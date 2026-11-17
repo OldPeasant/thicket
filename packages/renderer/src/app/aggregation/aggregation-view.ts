@@ -18,6 +18,7 @@ import {
 } from '@thicket/core/bson';
 import { CODEGEN_LANGUAGES, type CodegenLanguage, generateCode } from '@thicket/core/codegen';
 import { printShellSyntax } from '@thicket/core/shellsyntax';
+import type { SavedPipeline, SavedStage } from '@thicket/contract';
 import type { Subscription } from 'rxjs';
 
 import { ApiError, describeError } from '../api/api-error';
@@ -33,6 +34,7 @@ import {
   parseStage,
   printPipeline,
   type Stage,
+  stageFromDocument,
   type StageError,
   STAGE_TEMPLATES,
   templateBody,
@@ -254,6 +256,19 @@ export class AggregationView {
   protected readonly viewName = signal('');
   protected readonly viewMessage = signal<{ error: boolean; text: string } | null>(null);
 
+  /** Saved-pipelines panel (`pipelines.*`, stored by `main` in `pipelines.json`). */
+  protected readonly savedOpen = signal(false);
+  /** The saved pipelines of the collection; `null` until read. */
+  protected readonly savedList = signal<readonly SavedPipeline[] | null>(null);
+  protected readonly savedListError = signal<string | null>(null);
+  /** The name to save under (the opened or last saved pipeline's name). */
+  protected readonly savedName = signal('');
+  protected readonly savedMessage = signal<{ error: boolean; text: string } | null>(null);
+  /** The saved pipeline being renamed, with the name typed so far. */
+  protected readonly renaming = signal<{ pipelineId: string; name: string } | null>(null);
+  /** Id of the saved pipeline whose Delete waits for a second click. */
+  protected readonly deleting = signal<string | null>(null);
+
   constructor() {
     // A new builder starts with one $match stage.
     this.stages.set([this.newStage('$match')]);
@@ -264,10 +279,17 @@ export class AggregationView {
       if (this.mode() === 'text') untracked(() => this.pausePreviews());
       else untracked(() => this.schedulePreviews(plans, target));
     });
-    // A plan explains one collection: pointing the tab elsewhere closes it.
+    // A plan explains one collection: pointing the tab elsewhere closes it. Saved pipelines are
+    // per collection too: the list is read again for the new one.
     effect(() => {
       this.target();
-      untracked(() => this.closeExplain());
+      untracked(() => {
+        this.closeExplain();
+        this.savedList.set(null);
+        this.renaming.set(null);
+        this.deleting.set(null);
+        if (this.savedOpen()) void this.loadSaved();
+      });
     });
     inject(DestroyRef).onDestroy(() => {
       clearTimeout(this.previewTimer);
@@ -697,6 +719,165 @@ export class AggregationView {
       if (e instanceof ApiError && e.code === 'CANCELLED') return;
       this.viewMessage.set({ error: true, text: describeError(e) });
     }
+  }
+
+  // Saved pipelines
+
+  protected toggleSaved(): void {
+    this.savedOpen.update((open) => !open);
+    this.savedMessage.set(null);
+    this.renaming.set(null);
+    this.deleting.set(null);
+    if (this.savedOpen()) void this.loadSaved();
+  }
+
+  /** Reads the saved pipelines of the tab's collection. */
+  private async loadSaved(): Promise<void> {
+    const target = this.target();
+    if (target.profileId === '') return;
+    try {
+      const { pipelines } = await this.api.request('pipelines.list', target);
+      if (!this.sameTarget(target)) return;
+      this.savedList.set(pipelines);
+      this.savedListError.set(null);
+    } catch (e) {
+      if (!this.sameTarget(target)) return;
+      this.savedListError.set(describeError(e));
+    }
+  }
+
+  private sameTarget(target: { profileId: string; db: string; coll: string }): boolean {
+    const now = this.target();
+    return now.profileId === target.profileId && now.db === target.db && now.coll === target.coll;
+  }
+
+  /**
+   * Every stage, disabled ones too, as canonical EJSON; refused when one has an error (a saved
+   * pipeline holds parsed stages only).
+   */
+  private savedStages(): { ok: true; stages: SavedStage[] } | { ok: false; message: string } {
+    const stages: SavedStage[] = [];
+    for (const [index, stage] of this.stages().entries()) {
+      const parsed = this.parsed().get(stage.id);
+      if (!parsed?.ok) {
+        return { ok: false, message: `Fix stage ${index + 1} first: it has an error.` };
+      }
+      stages.push({ stage: stringifyEJson(parsed.stage), enabled: stage.enabled });
+    }
+    return { ok: true, stages };
+  }
+
+  /**
+   * Saves the pipeline as it is now (disabled stages included) under the typed name; a saved
+   * pipeline of this collection with that name (ignoring case) is replaced.
+   */
+  async savePipeline(event?: Event): Promise<void> {
+    event?.preventDefault();
+    const name = this.savedName().trim();
+    if (name === '') {
+      this.savedMessage.set({ error: true, text: 'Type a name for the pipeline.' });
+      return;
+    }
+    if (this.mode() === 'text' && !this.applyText()) {
+      this.savedMessage.set({ error: true, text: 'Fix the pipeline text first: it has an error.' });
+      return;
+    }
+    const stages = this.savedStages();
+    if (!stages.ok) {
+      this.savedMessage.set({ error: true, text: stages.message });
+      return;
+    }
+    const target = this.target();
+    const replaces = (this.savedList() ?? []).some(
+      (p) => p.name.toLocaleLowerCase() === name.toLocaleLowerCase(),
+    );
+    try {
+      const { saved } = await this.api.request('pipelines.save', {
+        ...target,
+        name,
+        stages: stages.stages,
+      });
+      this.savedName.set(saved.name);
+      this.savedMessage.set({
+        error: false,
+        text: `${replaces ? 'Replaced' : 'Saved'} "${saved.name}".`,
+      });
+      await this.loadSaved();
+    } catch (e) {
+      this.savedMessage.set({ error: true, text: describeError(e) });
+    }
+  }
+
+  /** Loads a saved pipeline into the builder (the stage list), replacing the current stages. */
+  openSaved(saved: SavedPipeline): boolean {
+    const stages: Stage[] = [];
+    for (const [index, { stage, enabled }] of saved.stages.entries()) {
+      let doc: BsonDocument;
+      try {
+        doc = parseEJsonDocument(stage);
+      } catch {
+        doc = { type: 'object', fields: [] };
+      }
+      if (doc.fields.length !== 1) {
+        this.savedMessage.set({
+          error: true,
+          text: `"${saved.name}" cannot be opened: stage ${index + 1} is not readable.`,
+        });
+        return false;
+      }
+      stages.push(stageFromDocument(doc, this.nextId++, enabled));
+    }
+    this.mode.set('stages');
+    this.textError.set(null);
+    this.stages.set(stages);
+    this.closeExplain();
+    this.savedName.set(saved.name);
+    this.savedMessage.set({ error: false, text: `Opened "${saved.name}".` });
+    return true;
+  }
+
+  protected startRename(saved: SavedPipeline): void {
+    this.deleting.set(null);
+    this.renaming.set({ pipelineId: saved.pipelineId, name: saved.name });
+  }
+
+  protected async renameSaved(event?: Event): Promise<void> {
+    event?.preventDefault();
+    const renaming = this.renaming();
+    if (renaming === null) return;
+    const name = renaming.name.trim();
+    if (name === '') {
+      this.savedMessage.set({ error: true, text: 'Type a name for the pipeline.' });
+      return;
+    }
+    try {
+      const { saved } = await this.api.request('pipelines.rename', {
+        pipelineId: renaming.pipelineId,
+        name,
+      });
+      this.renaming.set(null);
+      this.savedMessage.set({ error: false, text: `Renamed to "${saved.name}".` });
+      await this.loadSaved();
+    } catch (e) {
+      this.savedMessage.set({ error: true, text: describeError(e) });
+    }
+  }
+
+  protected async deleteSaved(saved: SavedPipeline): Promise<void> {
+    try {
+      await this.api.request('pipelines.delete', { pipelineId: saved.pipelineId });
+      this.deleting.set(null);
+      this.savedMessage.set({ error: false, text: `Deleted "${saved.name}".` });
+      await this.loadSaved();
+    } catch (e) {
+      this.savedMessage.set({ error: true, text: describeError(e) });
+    }
+  }
+
+  protected stageCount(saved: SavedPipeline): string {
+    const n = saved.stages.length;
+    const off = saved.stages.filter((s) => !s.enabled).length;
+    return `${n} ${n === 1 ? 'stage' : 'stages'}${off > 0 ? `, ${off} disabled` : ''}`;
   }
 
   protected inputValue(event: Event): string {

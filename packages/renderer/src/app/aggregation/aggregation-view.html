@@ -51,6 +51,16 @@
       <button
         type="button"
         class="btn quiet"
+        data-testid="agg-saved"
+        title="Save this pipeline under a name, or open a saved one"
+        [attr.aria-pressed]="savedOpen()"
+        (click)="toggleSaved()"
+      >
+        Saved…
+      </button>
+      <button
+        type="button"
+        class="btn quiet"
         data-testid="agg-create-view"
         [appWriteControl]="target().profileId"
         [attr.aria-pressed]="viewOpen()"
@@ -294,6 +304,133 @@
           <pre class="code-out" data-testid="agg-code">{{ c.text }}</pre>
         } @else {
           <p class="error" data-testid="agg-code-error">{{ c.message }}</p>
+        }
+      </section>
+    }
+
+    @if (savedOpen()) {
+      <section class="panel saved" data-testid="agg-saved-panel" aria-label="Saved pipelines">
+        <form class="view-form" (submit)="savePipeline($event)">
+          <label>
+            Name
+            <input
+              data-testid="agg-save-name"
+              spellcheck="false"
+              autocomplete="off"
+              maxlength="200"
+              [value]="savedName()"
+              (input)="savedName.set(inputValue($event))"
+            />
+          </label>
+          <button type="submit" class="btn run" data-testid="agg-save-submit">Save pipeline</button>
+          <span class="faint hint">Same name: the saved pipeline is replaced.</span>
+        </form>
+        @if (savedMessage(); as m) {
+          <p
+            [class.error]="m.error"
+            [class.ok]="!m.error"
+            role="status"
+            data-testid="agg-saved-message"
+          >
+            {{ m.text }}
+          </p>
+        }
+        @if (savedListError(); as error) {
+          <p class="error" role="alert" data-testid="agg-saved-list-error">{{ error }}</p>
+        } @else if (savedList(); as list) {
+          @if (list.length === 0) {
+            <p class="note" data-testid="agg-saved-empty">
+              No saved pipelines for {{ target().db }}.{{ target().coll }} yet.
+            </p>
+          } @else {
+            <ul class="saved-list" data-testid="agg-saved-list">
+              @for (p of list; track p.pipelineId) {
+                <li class="saved-item" data-testid="agg-saved-item">
+                  @let r = renaming();
+                  @if (r && r.pipelineId === p.pipelineId) {
+                    <form class="view-form rename" (submit)="renameSaved($event)">
+                      <input
+                        data-testid="agg-rename-name"
+                        spellcheck="false"
+                        autocomplete="off"
+                        maxlength="200"
+                        [attr.aria-label]="'New name for ' + p.name"
+                        [value]="r.name"
+                        (input)="
+                          renaming.set({ pipelineId: p.pipelineId, name: inputValue($event) })
+                        "
+                      />
+                      <button type="submit" class="btn" data-testid="agg-rename-submit">
+                        Rename
+                      </button>
+                      <button
+                        type="button"
+                        class="btn quiet"
+                        data-testid="agg-rename-cancel"
+                        (click)="renaming.set(null)"
+                      >
+                        Cancel
+                      </button>
+                    </form>
+                  } @else {
+                    <span class="saved-name" data-testid="agg-saved-name">{{ p.name }}</span>
+                    <span class="faint">{{ stageCount(p) }}</span>
+                    <span class="saved-tools">
+                      <button
+                        type="button"
+                        class="btn"
+                        data-testid="agg-saved-open"
+                        [attr.aria-label]="'Open ' + p.name"
+                        (click)="openSaved(p)"
+                      >
+                        Open
+                      </button>
+                      <button
+                        type="button"
+                        class="btn quiet"
+                        data-testid="agg-saved-rename"
+                        [attr.aria-label]="'Rename ' + p.name"
+                        (click)="startRename(p)"
+                      >
+                        Rename
+                      </button>
+                      @if (deleting() === p.pipelineId) {
+                        <button
+                          type="button"
+                          class="btn stop"
+                          data-testid="agg-saved-delete-confirm"
+                          [attr.aria-label]="'Really delete ' + p.name"
+                          (click)="deleteSaved(p)"
+                        >
+                          Delete
+                        </button>
+                        <button
+                          type="button"
+                          class="btn quiet"
+                          data-testid="agg-saved-delete-cancel"
+                          (click)="deleting.set(null)"
+                        >
+                          Keep
+                        </button>
+                      } @else {
+                        <button
+                          type="button"
+                          class="btn quiet"
+                          data-testid="agg-saved-delete"
+                          [attr.aria-label]="'Delete ' + p.name"
+                          (click)="renaming.set(null); deleting.set(p.pipelineId)"
+                        >
+                          Delete…
+                        </button>
+                      }
+                    </span>
+                  }
+                </li>
+              }
+            </ul>
+          }
+        } @else {
+          <p class="note">Loading saved pipelines…</p>
         }
       </section>
     }

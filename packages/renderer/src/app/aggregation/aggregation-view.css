@@ -500,6 +500,42 @@
   flex-basis: 100%;
 }
 
+/* Saved pipelines */
+.saved .view-form .hint {
+  margin: 0;
+}
+
+.saved-list {
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+
+.saved-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.saved-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.saved-tools {
+  display: inline-flex;
+  gap: 0.25rem;
+  margin-left: auto;
+}
+
+.saved .rename {
+  flex: 1;
+}
+
 .run-error {
   margin-bottom: 0.75rem;
 }

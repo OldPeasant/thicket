@@ -1,5 +1,7 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
+import { type MethodName, parseParams, type SavedPipeline } from '@thicket/contract';
+import { stringifyEJson } from '@thicket/core/bson';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
@@ -9,6 +11,7 @@ import { ConfirmService } from '../safety/confirm.service';
 import { ProfileSafetyService } from '../safety/profile-safety.service';
 import { READ_ONLY_HINT } from '../safety/write-control.directive';
 import { AggregationView, PREVIEW_DEBOUNCE_MS, RESULT_PAGE_SIZE } from './aggregation-view';
+import { parseStage } from './pipeline.model';
 
 const TAB: WorkspaceTab = {
   id: 'aggregation:p1:shop.orders',
@@ -1834,6 +1837,266 @@ describe('AggregationView', () => {
       await settle();
       await click(get('agg-explain'));
       expect(explains()).toHaveLength(1);
+    });
+  });
+
+  describe('saved pipelines', () => {
+    /** `pipelines.json` of the fake `main`: params are checked against the contract. */
+    let saved: SavedPipeline[];
+
+    beforeEach(() => {
+      saved = [];
+      let n = 0;
+      const ns = (p: { profileId: string; db: string; coll: string }) =>
+        `${p.profileId}/${p.db}/${p.coll}`;
+      const valid = (method: MethodName, params: unknown) => {
+        const parsed = parseParams(method, params);
+        if (!parsed.ok) throw new Error(parsed.error.message);
+      };
+      fake.handle('pipelines.list', (params) => {
+        valid('pipelines.list', params);
+        return {
+          pipelines: saved
+            .filter((p) => ns(p) === ns(params))
+            .sort((a, b) => a.name.localeCompare(b.name)),
+        };
+      });
+      fake.handle('pipelines.save', (params) => {
+        valid('pipelines.save', params);
+        const { profileId, db, coll, name, stages } = params;
+        const index = saved.findIndex(
+          (p) => ns(p) === ns(params) && p.name.toLowerCase() === name.toLowerCase(),
+        );
+        const entry: SavedPipeline = {
+          pipelineId: saved[index]?.pipelineId ?? `pl-${++n}`,
+          name,
+          profileId,
+          db,
+          coll,
+          stages,
+          updatedAt: '2026-11-17T04:00:00.000Z',
+        };
+        if (index < 0) saved.push(entry);
+        else saved[index] = entry;
+        return { saved: entry };
+      });
+      fake.handle('pipelines.rename', (params) => {
+        valid('pipelines.rename', params);
+        const entry = saved.find((p) => p.pipelineId === params.pipelineId);
+        if (!entry) return { error: { code: 'NOT_FOUND', message: 'No saved pipeline' } };
+        const taken = saved.some(
+          (p) =>
+            p !== entry &&
+            ns(p) === ns(entry) &&
+            p.name.toLowerCase() === params.name.toLowerCase(),
+        );
+        if (taken) {
+          return {
+            error: {
+              code: 'CONFLICT',
+              message: `A saved pipeline named "${params.name}" already exists for this collection`,
+            },
+          };
+        }
+        entry.name = params.name;
+        return { saved: entry };
+      });
+      fake.handle('pipelines.delete', (params) => {
+        valid('pipelines.delete', params);
+        saved = saved.filter((p) => p.pipelineId !== params.pipelineId);
+        return {};
+      });
+    });
+
+    const type = async (id: string, text: string, root: ParentNode = el()) => {
+      const input = root.querySelector<HTMLInputElement>(`[data-testid="${id}"]`);
+      if (!input) throw new Error(`no ${id}`);
+      input.value = text;
+      input.dispatchEvent(new Event('input'));
+      await settle();
+    };
+    const savedNames = () => all('agg-saved-name').map((e) => e.textContent?.trim());
+    const savedItem = (name: string) => {
+      const item = all('agg-saved-item').find(
+        (i) => i.querySelector('[data-testid="agg-saved-name"]')?.textContent?.trim() === name,
+      );
+      if (!item) throw new Error(`no saved pipeline ${name}`);
+      return item;
+    };
+    const inItem = (name: string, id: string) => {
+      const found = savedItem(name).querySelector<HTMLElement>(`[data-testid="${id}"]`);
+      if (!found) throw new Error(`no ${id} in ${name}`);
+      return found;
+    };
+    const saveAs = async (name: string) => {
+      if (q('agg-saved-panel') === null) await click(get('agg-saved'));
+      await type('agg-save-name', name);
+      await click(get('agg-save-submit'));
+    };
+    /**
+     * The builder's stages as operator, parsed stage (canonical EJSON) and enabled flag. A
+     * reopened stage is the same stage reprinted in shell syntax, so its text may differ.
+     */
+    const builder = () =>
+      view.stages().map((s) => {
+        const parsed = parseStage(s);
+        return {
+          operator: s.operator,
+          stage: parsed.ok ? stringifyEJson(parsed.stage) : `error: ${parsed.error.message}`,
+          enabled: s.enabled,
+        };
+      });
+
+    it('saves a pipeline with a disabled stage and reopens it in a new builder tab', async () => {
+      await buildDemo();
+      await click(inStage(1, 'agg-stage-enabled'));
+      expect(view.stages().map((s) => s.enabled)).toEqual([true, false, true]);
+      const built = builder();
+
+      await saveAs('Open orders by customer');
+      expect(get('agg-saved-message').textContent).toContain('Saved "Open orders by customer"');
+      const [request] = fake.requestsFor('pipelines.save');
+      expect(request?.params).toEqual({
+        profileId: 'p1',
+        db: 'shop',
+        coll: 'orders',
+        name: 'Open orders by customer',
+        stages: [
+          { stage: '{"$match":{"status":"open"}}', enabled: true },
+          {
+            stage: '{"$group":{"_id":"$customer","total":{"$sum":"$total"}}}',
+            enabled: false,
+          },
+          { stage: '{"$sort":{"total":{"$numberInt":"-1"}}}', enabled: true },
+        ],
+      });
+      expect(savedNames()).toEqual(['Open orders by customer']);
+      expect(
+        inItem('Open orders by customer', 'agg-saved-open').closest('li')?.textContent,
+      ).toContain('3 stages, 1 disabled');
+
+      // Close the tab; a new builder tab of the collection starts with one $match stage.
+      fixture.destroy();
+      fixture = TestBed.createComponent(AggregationView);
+      view = fixture.componentInstance;
+      view.debounceMs = 0;
+      fixture.componentRef.setInput('tab', TAB);
+      await settle();
+      expect(builder()).toEqual([{ operator: '$match', stage: '{"$match":{}}', enabled: true }]);
+
+      await click(get('agg-saved'));
+      expect(savedNames()).toEqual(['Open orders by customer']);
+      await click(inItem('Open orders by customer', 'agg-saved-open'));
+      expect(builder()).toEqual(built);
+      expect(built.map((s) => s.operator)).toEqual(['$match', '$group', '$sort']);
+      // Each argument is shown again in shell syntax.
+      expect(view.stages()[0]?.body).toContain('status: "open"');
+      expect(all('agg-stage-enabled').map((c) => (c as HTMLInputElement).checked)).toEqual([
+        true,
+        false,
+        true,
+      ]);
+      expect(get<HTMLInputElement>('agg-save-name').value).toBe('Open orders by customer');
+      // The reopened pipeline runs without its disabled stage.
+      await click(get('agg-run'));
+      expect(operators(runs().at(-1)?.['pipeline'])).toEqual(['$match', '$sort', '$limit']);
+    });
+
+    it('opening from the full-text mode goes back to the stage list', async () => {
+      await setBody(0, '{ a: 1 }');
+      await saveAs('A');
+      await click(get('agg-mode-text'));
+      expect(view.mode()).toBe('text');
+      await click(inItem('A', 'agg-saved-open'));
+      expect(view.mode()).toBe('stages');
+      expect(builder()).toEqual([
+        { operator: '$match', stage: '{"$match":{"a":{"$numberInt":"1"}}}', enabled: true },
+      ]);
+    });
+
+    it('saving in full-text mode saves the text as typed, disabled lines included', async () => {
+      await click(get('agg-mode-text'));
+      const area = get<HTMLTextAreaElement>('agg-text');
+      area.value = '[\n  { $match: { a: 1 } },\n  //- { $limit: 5 },\n]';
+      area.dispatchEvent(new Event('input'));
+      await settle();
+      await saveAs('From text');
+      expect(saved[0]?.stages).toEqual([
+        { stage: '{"$match":{"a":{"$numberInt":"1"}}}', enabled: true },
+        { stage: '{"$limit":{"$numberInt":"5"}}', enabled: false },
+      ]);
+    });
+
+    it('refuses to save without a name or with a stage that has an error (disabled too)', async () => {
+      await click(get('agg-saved'));
+      await click(get('agg-save-submit'));
+      expect(get('agg-saved-message').textContent).toContain('Type a name');
+      await click(get('agg-add-stage'));
+      await setBody(1, '{ broken: ');
+      await click(inStage(1, 'agg-stage-enabled'));
+      await saveAs('Broken');
+      expect(get('agg-saved-message').textContent).toContain('Fix stage 2 first');
+      expect(fake.requestsFor('pipelines.save')).toHaveLength(0);
+    });
+
+    it('saving under a taken name replaces that pipeline', async () => {
+      await saveAs('Mine');
+      await setBody(0, '{ b: 2 }');
+      await saveAs('mine');
+      expect(get('agg-saved-message').textContent).toContain('Replaced "mine"');
+      expect(saved).toHaveLength(1);
+      expect(savedNames()).toEqual(['mine']);
+    });
+
+    it('lists the pipelines of this collection only', async () => {
+      saved.push({
+        pipelineId: 'other',
+        name: 'Elsewhere',
+        profileId: 'p1',
+        db: 'shop',
+        coll: 'customers',
+        stages: [],
+        updatedAt: '2026-11-17T04:00:00.000Z',
+      });
+      await click(get('agg-saved'));
+      expect(get('agg-saved-empty').textContent).toContain('shop.orders');
+      expect(fake.requestsFor('pipelines.list').at(-1)?.params).toEqual({
+        profileId: 'p1',
+        db: 'shop',
+        coll: 'orders',
+      });
+    });
+
+    it('renames a saved pipeline; a taken name shows the error', async () => {
+      await saveAs('First');
+      await saveAs('Second');
+      await click(inItem('First', 'agg-saved-rename'));
+      await type('agg-rename-name', 'second');
+      await click(get('agg-rename-submit'));
+      expect(get('agg-saved-message').textContent).toContain('already exists');
+      await type('agg-rename-name', 'Primary');
+      await click(get('agg-rename-submit'));
+      expect(get('agg-saved-message').textContent).toContain('Renamed to "Primary"');
+      expect(savedNames()).toEqual(['Primary', 'Second']);
+    });
+
+    it('deletes a saved pipeline after a second click', async () => {
+      await saveAs('Gone');
+      await saveAs('Kept');
+      await click(inItem('Gone', 'agg-saved-delete'));
+      await click(inItem('Gone', 'agg-saved-delete-cancel'));
+      expect(savedNames()).toEqual(['Gone', 'Kept']);
+      await click(inItem('Gone', 'agg-saved-delete'));
+      await click(inItem('Gone', 'agg-saved-delete-confirm'));
+      expect(get('agg-saved-message').textContent).toContain('Deleted "Gone"');
+      expect(savedNames()).toEqual(['Kept']);
+      expect(saved.map((p) => p.name)).toEqual(['Kept']);
+    });
+
+    it('a failed list shows its error', async () => {
+      fake.fail('pipelines.list', { code: 'INTERNAL', message: 'EACCES: pipelines.json' });
+      await click(get('agg-saved'));
+      expect(get('agg-saved-list-error').textContent).toContain('EACCES');
     });
   });
 });
