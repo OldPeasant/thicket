@@ -125,6 +125,8 @@ const host = new BackendHost<MessagePortMain>({
     utilityProcess.fork(path.join(distDir, 'backend.cjs'), [], {
       serviceName: 'Thicket backend',
       stdio: 'inherit',
+      // The backend keeps the SSH `known_hosts` in userData.
+      env: { ...process.env, THICKET_USER_DATA: app.getPath('userData') },
     }),
   createChannel: () => new MessageChannelMain(),
   servePrivileged: (port) =>

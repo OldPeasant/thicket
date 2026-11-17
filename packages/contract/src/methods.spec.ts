@@ -120,6 +120,7 @@ const RESULTS: { [M in MethodName]: { valid: ResultOf<M>; invalid: unknown } } =
       connections: [{ profileId: P, state: 'error', error: { code: 'X', message: 'm' } }],
     },
   },
+  'conn.trustHostKey': { valid: {}, invalid: [] },
   'conn.serverInfo': { valid: SERVER, invalid: { ...SERVER, topology: 'mesh' } },
 
   'db.listDatabases': {

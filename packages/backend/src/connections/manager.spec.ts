@@ -1,14 +1,16 @@
-import type { Profile, ProfileDraft } from '@thicket/contract';
+import type { ConnStatus, Profile, ProfileDraft } from '@thicket/contract';
 import type { Document, MongoClientOptions } from 'mongodb';
 import { describe, expect, it, vi } from 'vitest';
 
 import { RpcError } from '../server/rpc';
+import { KnownHosts, type SshTunnel } from '../ssh';
 import {
   ConnectionManager,
   isOpenClient,
   readServerInfo,
   topologyOf,
   type ClientLike,
+  type ConnectionManagerDeps,
 } from './manager';
 
 /** Fictitious secrets; none of them is a real credential. */
@@ -73,6 +75,8 @@ interface SetupOptions {
   secrets?: Record<string, Record<string, string> | null>;
   loadSecrets?: (profileId: string) => Promise<Record<string, string> | null>;
   clients?: FakeClient[];
+  /** Enables SSH tunnels with this opener. */
+  openTunnel?: NonNullable<ConnectionManagerDeps['openTunnel']>;
 }
 
 function setup(options: SetupOptions = {}) {
@@ -104,6 +108,15 @@ function setup(options: SetupOptions = {}) {
     },
     log: (message) => logs.push(message),
     now: () => (clock += 7),
+    ...(options.openTunnel
+      ? {
+          openTunnel: options.openTunnel,
+          ssh: {
+            knownHosts: new KnownHosts('/nonexistent/known_hosts'),
+            confirmHostKey: () => Promise.resolve(false),
+          },
+        }
+      : {}),
   });
   return { manager, created, logs, loadProfile, loadSecrets };
 }
@@ -445,7 +458,7 @@ describe('ConnectionManager.open / close / status', () => {
     expect(created).toEqual([]);
   });
 
-  it('UNSUPPORTED profiles (SSH) fail before a client is created', async () => {
+  it('SSH profiles without an SSH environment fail UNSUPPORTED before a client is created', async () => {
     const { manager, created } = setup({
       profiles: {
         p1: savedProfile('p1', {
@@ -1311,6 +1324,205 @@ describe('ConnectionManager MONGODB-AWS (task aws-auth)', () => {
     expect(other.loadSecrets).not.toHaveBeenCalled();
     expect(error.code).toBe('AUTH_FAILED');
     expect(other.created).toEqual([]);
+  });
+});
+
+describe('ConnectionManager SSH tunnels', () => {
+  const SSH = {
+    host: 'bastion.example.test',
+    port: 22,
+    username: 'ops',
+    method: 'password' as const,
+  };
+  const PROXY = {
+    proxyHost: '127.0.0.1',
+    proxyPort: 40999,
+    proxyUsername: 'tunnel-user',
+    proxyPassword: 'tunnel-pass',
+  };
+
+  function fakeTunnel() {
+    const tunnel = {
+      proxy: PROXY,
+      openChannels: () => 0,
+      close: vi.fn(() => Promise.resolve()),
+    } satisfies SshTunnel;
+    return tunnel;
+  }
+
+  function sshSetup(
+    open: NonNullable<ConnectionManagerDeps['openTunnel']>,
+    clients?: FakeClient[],
+  ) {
+    return setup({
+      profiles: { p1: savedProfile('p1', { ssh: SSH }) },
+      secrets: { p1: { password: STORED_PASSWORD, sshPassword: 'fictitious-ssh-Pw4' } },
+      openTunnel: open,
+      ...(clients ? { clients } : {}),
+    });
+  }
+
+  it('opens the tunnel with the stored SSH secrets and closes it with the connection', async () => {
+    const tunnel = fakeTunnel();
+    const open = vi.fn(() => Promise.resolve(tunnel));
+    const { manager, created } = sshSetup(open);
+    await manager.open('p1', undefined);
+    expect(open).toHaveBeenCalledWith(
+      SSH,
+      expect.objectContaining({ sshPassword: 'fictitious-ssh-Pw4' }),
+      expect.anything(),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(created[0]?.options).toMatchObject(PROXY);
+    expect(tunnel.close).not.toHaveBeenCalled();
+    await manager.close('p1');
+    expect(created[0]?.client.close).toHaveBeenCalled();
+    expect(tunnel.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the tunnel when the driver cannot connect', async () => {
+    const tunnel = fakeTunnel();
+    const failing = fakeClient(() => Promise.reject(new Error('connect ECONNREFUSED')));
+    const { manager } = sshSetup(() => Promise.resolve(tunnel), [failing]);
+    await rejection(manager.open('p1', undefined));
+    expect(tunnel.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('an SSH failure leaves the connection in error without creating a client', async () => {
+    const { manager, created } = sshSetup(() =>
+      Promise.reject(new RpcError('SSH_ERROR', 'SSH authentication failed')),
+    );
+    expect((await rejection(manager.open('p1', undefined))).code).toBe('SSH_ERROR');
+    expect(created).toEqual([]);
+    expect(manager.statusOf('p1')).toMatchObject({ state: 'error', error: { code: 'SSH_ERROR' } });
+  });
+
+  it('close() while the tunnel opens aborts it and answers CANCELLED', async () => {
+    let seen: AbortSignal | undefined;
+    const { manager, created } = sshSetup((_ssh, _secrets, _env, options) => {
+      seen = options?.signal;
+      return new Promise((_resolve, reject) => {
+        options?.signal?.addEventListener('abort', () =>
+          reject(new RpcError('CANCELLED', 'cancelled')),
+        );
+      });
+    });
+    const opening = manager.open('p1', undefined);
+    await vi.waitFor(() => expect(seen).toBeDefined());
+    await manager.close('p1');
+    expect(seen?.aborted).toBe(true);
+    expect((await rejection(opening)).code).toBe('CANCELLED');
+    expect(created).toEqual([]);
+    expect(manager.statusOf('p1').state).toBe('disconnected');
+  });
+
+  it('conn.test closes its tunnel after the test', async () => {
+    const tunnel = fakeTunnel();
+    const { manager } = sshSetup(() => Promise.resolve(tunnel));
+    await manager.test({ profileId: 'p1' }, undefined);
+    expect(tunnel.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('conn.test closes its tunnel when the driver client cannot be created (CR-2)', async () => {
+    const tunnel = fakeTunnel();
+    const manager = new ConnectionManager({
+      loadProfile: () => Promise.resolve(savedProfile('p1', { ssh: SSH })),
+      loadSecrets: () =>
+        Promise.resolve({ password: STORED_PASSWORD, sshPassword: 'fictitious-ssh-Pw4' }),
+      createClient: () => {
+        throw new Error('directConnection option requires exactly one host');
+      },
+      openTunnel: () => Promise.resolve(tunnel),
+      ssh: {
+        knownHosts: new KnownHosts('/nonexistent/known_hosts'),
+        confirmHostKey: () => Promise.resolve(false),
+      },
+    });
+    await expect(manager.test({ profileId: 'p1' }, undefined)).rejects.toThrow(/directConnection/);
+    expect(tunnel.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('a tunnel lost while connected → error state broadcast, client closed, next open rebuilds (CR-3)', async () => {
+    const tunnels: ReturnType<typeof fakeTunnel>[] = [];
+    const closedHooks: (() => void)[] = [];
+    const statuses: ConnStatus[] = [];
+    const created: FakeClient[] = [];
+    const manager = new ConnectionManager({
+      loadProfile: () => Promise.resolve(savedProfile('p1', { ssh: SSH })),
+      loadSecrets: () => Promise.resolve({ password: STORED_PASSWORD }),
+      createClient: () => {
+        const client = fakeClient();
+        created.push(client);
+        return client;
+      },
+      openTunnel: (_ssh, _secrets, _env, options) => {
+        const tunnel = fakeTunnel();
+        tunnels.push(tunnel);
+        if (options?.onClosed) closedHooks.push(options.onClosed);
+        return Promise.resolve(tunnel);
+      },
+      onStatus: (status) => statuses.push(status),
+      ssh: {
+        knownHosts: new KnownHosts('/nonexistent/known_hosts'),
+        confirmHostKey: () => Promise.resolve(false),
+      },
+    });
+    await manager.open('p1', undefined);
+    expect(closedHooks).toHaveLength(1);
+    expect(statuses).toEqual([]);
+
+    closedHooks[0]?.();
+    await vi.waitFor(() => expect(created[0]?.close).toHaveBeenCalled());
+    expect(manager.statusOf('p1')).toMatchObject({
+      state: 'error',
+      error: {
+        code: 'SSH_ERROR',
+        message: expect.stringMatching(/SSH tunnel was closed/) as unknown,
+      },
+    });
+    expect(statuses).toEqual([manager.statusOf('p1')]);
+    expect(() => manager.client('p1')).toThrow(RpcError);
+
+    // Open again: a new tunnel and a new client, connected.
+    expect((await manager.open('p1', undefined)).state).toBe('connected');
+    expect(tunnels).toHaveLength(2);
+    expect(created).toHaveLength(2);
+    expect(manager.client('p1')).toBe(created[1]);
+    // A late hook of the old tunnel changes nothing.
+    closedHooks[0]?.();
+    expect(manager.statusOf('p1').state).toBe('connected');
+    await manager.close('p1');
+    expect(tunnels[1]?.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses SSH together with a SOCKS5 proxy before opening a tunnel', async () => {
+    const open = vi.fn(() => Promise.resolve(fakeTunnel()));
+    const { manager } = setup({
+      profiles: {
+        p1: savedProfile('p1', { ssh: SSH, proxy: { host: 'proxy.example.test', port: 1080 } }),
+      },
+      openTunnel: open,
+    });
+    expect((await rejection(manager.open('p1', undefined))).code).toBe('INVALID_PARAMS');
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("the profile's connectTimeoutMS is the SSH handshake timeout; without it the tunnel's default applies", async () => {
+    const open = vi.fn<NonNullable<ConnectionManagerDeps['openTunnel']>>(() =>
+      Promise.resolve(fakeTunnel()),
+    );
+    const { manager } = setup({
+      profiles: {
+        timed: savedProfile('timed', { ssh: SSH, connectTimeoutMS: 7_500 }),
+        plain: savedProfile('plain', { ssh: SSH }),
+      },
+      secrets: { timed: { password: STORED_PASSWORD }, plain: { password: STORED_PASSWORD } },
+      openTunnel: open,
+    });
+    await manager.open('timed', undefined);
+    await manager.open('plain', undefined);
+    expect(open.mock.calls[0]?.[3]).toMatchObject({ readyTimeoutMS: 7_500 });
+    expect(open.mock.calls[1]?.[3]).not.toHaveProperty('readyTimeoutMS');
   });
 });
 

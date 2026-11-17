@@ -7,6 +7,7 @@ import {
   type ParamsOf,
   type ResultOf,
   type SettingsChanged,
+  type SshHostKeyPrompt,
   type StreamDataOf,
   type StreamMethodName,
   type ThemeInfo,
@@ -41,6 +42,7 @@ export interface BroadcastPayloads {
   [BROADCAST_STREAMS.connStatus]: ConnStatus;
   [BROADCAST_STREAMS.theme]: ThemeInfo;
   [BROADCAST_STREAMS.settingsChanged]: SettingsChanged;
+  [BROADCAST_STREAMS.sshHostKey]: SshHostKeyPrompt;
 }
 
 export type BroadcastStream = keyof BroadcastPayloads;
