@@ -11,7 +11,8 @@ lease_until: 2026-11-17T04:05:22Z
 Per database: users with roles, roles with privileges and inherited roles (read-only).
 
 ## Acceptance criteria
-- [ ] Integration test against a fixture with custom roles
+- [x] Integration test against a fixture with custom roles
+  - verified (2026-11-17 04:46+0100 by dell26/agent-2): npm run test:int -- users-roles (mongo8 fixture via Podman; custom roles orderReader/orderClerk inheriting a custom and built-in role, users alice/bob/carol) -> 10 passed
 - [ ] Component tests for the views
 
 ## Notes
