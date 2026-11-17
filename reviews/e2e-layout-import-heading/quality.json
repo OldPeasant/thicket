@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "task": "e2e-layout-import-heading",
+  "reviewed_revision": "4ed165c79046d7f60b190c53c87b24a8ab9fef01",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/e2e-layout-import-heading/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/e2e-layout-import-heading/review.md" },
+    "fixer": {
+      "status": "not_required",
+      "reason": "code-reviewer reported no findings (both rounds) and test-writer found no production bugs"
+    }
+  },
+  "fixes_required": false,
+  "findings": [],
+  "validation": [
+    {
+      "command": "cd packages/renderer && npx ng test --include=src/app/connections/import/import-export-page.spec.ts",
+      "result": "pass (18/18)"
+    },
+    { "command": "npm run test:e2e -- layout.e2e.ts", "result": "pass (6/6)" },
+    { "command": "npm run check", "result": "pass" }
+  ]
+}
