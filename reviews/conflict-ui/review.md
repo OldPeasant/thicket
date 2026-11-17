@@ -77,3 +77,65 @@ None.
 Material issues found; fix before completing the task.
 
 Notes: acceptance criterion 1 is covered by `test/e2e/conflict.e2e.ts` (real Electron app and MongoDB container, driver changes the document between load and save, asserts the side-by-side view and the stored result); criterion 2 is covered by service, component and e2e tests for Overwrite, Keep server version and Merge manually. Neither criterion has `tasks.py verify` evidence recorded yet; the parent must record it. The line diff (`line-diff.ts`), `DocumentEdits.resolve`, the deleted-document re-insert path, `_id` check for merges, read-only/production gating via `WriteControl`/`WriteGuard`, and busy handling were reviewed and found consistent with existing code.
+
+# Code Review (round 2)
+
+Date: 2026-11-17
+
+Task: conflict-ui - M1: Conflict resolution view
+
+Scope: the task's final code at HEAD `a5c421e`: `git diff 2a62fc45..a5c421e -- packages/renderer test/e2e`, limited to the task's commits (18731a9, 58079e8, 409217e, 983eded, de37747, d43641b, a3fb370, 3859765, 5bb379c, a5c421e). Changes merged from main by other tasks (the `io-basic-ui` import/export panels in `packages/renderer/src/app/io`, the io lines of `collection-view.ts`/`.html`, `test/e2e/io.e2e.ts`, backend aggregation files) are excluded. No uncommitted changes.
+
+Reviewed revision: a5c421e
+
+Requirements:
+- `tasks/conflict-ui.md` acceptance criteria and the three recorded assumptions in its Notes
+- `SPEC.md` M1 "Conflict detection", demo step 7
+- `docs/ARCHITECTURE.md`, `docs/QUALITY.md`, `AGENTS.md`
+- Round-1 findings above; `reviews/conflict-ui/fixes.md` rounds 1-3 (CR-1..CR-6, TW-2, TW-3); `reviews/conflict-ui/tests.md` rounds 1-4 (including observation O-R4-1)
+
+Git range:
+- Branch: main
+- HEAD: a5c421e
+- Base/start: 2a62fc45bc886a9153dc8258561d921c397d2606
+- Commits reviewed: 10 task commits (listed in Scope)
+
+Summary: 0 P0, 0 P1, 0 P2, 1 P3
+
+## Status of round-1 findings
+
+- CR-1 (P1, dotted projection unsets hidden sub-fields): Resolved. `isTopLevelProjection` (`document-actions.service.ts:597-621`) accepts only whole top-level 0/1/boolean projections; `resolveBlocker` (`:212-220`) returns `'projection'` for any partial document whose active projection is not top-level-only, that was edited under such a projection (`hidesSubFields`, sticky in `edit-session.ts:123-124` and carried through undo, redo and rebase), or whose projection was cleared. `overwrite` and `saveMerged` refuse via `refuseResolve` (`:167`, `:260`), and the view hides both actions and explains why (`conflict-view.ts:70-75`, `:165`, `:177`). Both production edit call sites pass the flag (`collection-view.ts:401`, `raw-editor.ts:284`). The TW-2 variant (dotted projection replaced by a top-level one before resolving) is covered by the sticky flag, and TW-3 (server-added sub-field inside a field loaded whole is unset, matching assumption 1) by `5bb379c`. The re-insert path is still refused under any projection (`:244-248`).
+- CR-2 (P2, baseline moved before the write): Resolved. `send` (`:289-339`) computes the diff with `pendingSave` without touching the session and calls `saved()` (rebase or discard) only after the write and read-back succeeded. `DocumentEdits.resolve` was removed. Service tests cover a production cancel, a read-only refusal, SERVER_ERROR and a new CONFLICT leaving original, current and undo history unchanged.
+- CR-3 (P2, unreadable detail shown as deleted): Resolved. `SaveConflict.current` is `undefined` for unknown; `failed` (awaited inside `write`, so the key stays busy) re-reads with `docs.get` without a projection, mapping `doc: null`/`NOT_FOUND` to deleted and other failures to unknown (`:429-471`). The view has a distinct "unknown" state offering only Keep server version; `readBack` no longer clears the page when it has nothing to fall back to.
+- CR-4 (P3, `{}` server version without edits): Resolved. Without an entry the server version is shown unfiltered (`conflict-view.ts:418-422`) and the projection note is hidden.
+- CR-5 (P3, merge id per tab): Resolved. `uid` input, `collection-view.html` passes `uid + '-conflicts'`, ids built as `uid() + '-merge-' + $index`.
+- CR-6 (P3, differences not exposed to assistive technology): Resolved. Visually hidden "Changed: ", "Only in your version: ", "Only on the server: " prefixes per differing cell (`conflict-view.ts:361-371`).
+
+O-R4-1 (test-writer round 4): confirmed. In `save` the `loaded` argument equals `original`, so `unsetsUnloaded` cannot be true; in `resolveWith` the `hidesSubFields` arm is unreachable because `refuseResolve` runs first. The check is inert defense in depth, does no harm and matches the assumptions; keeping it is acceptable and is not reported as a finding.
+
+## P0 Critical
+
+None.
+
+## P1 High
+
+None.
+
+## P2 Medium
+
+None.
+
+## P3 Low
+
+- [ ] **CR-7 | The merge editor's open state is not reset when its conflict goes away or changes to "deleted"**
+    - File: `packages/renderer/src/app/document/conflict/conflict-view.ts:343-345` (state), `:112`, `:136` (template), `:403-412` (`saveMerged`); conflicts dropped outside the view in `packages/renderer/src/app/document/document-actions.service.ts:135-145` (`revert`, `revertAll`) and `:334` (a plain Save succeeding); silent refusal at `:166`
+    - Category: Correctness
+    - Problem: `mergeKey` and `mergeText` are reset only by Cancel merge, Keep server version and a successful Save merged. Two reachable states follow from that. (a) With the merge editor open, the user reverts the document from the document header or the edit bar (or saves it from the edit bar and that succeeds); the conflict disappears but `mergeKey` stays. If the same document conflicts again later, its conflict view opens with the merge editor already open and prefilled with the old text (based on the edits the user reverted), and Keep server version / Overwrite are hidden behind Cancel merge. (b) With the merge editor open, Save merged gets a new CONFLICT because the document was deleted meanwhile; the view switches to "Deleted on the server" but keeps the merge editor and its Save button, and `saveMerged` then returns `false` at `document-actions.service.ts:166` without any message, so clicking it does nothing; "Keep it deleted" and "Insert your version again" stay hidden until the user clicks Cancel merge.
+    - Why it matters: Stale content offered for a write, and a button that silently does nothing. The user sees the text before saving and can cancel, so no silent data loss; it is a usability and consistency defect in the resolution flow.
+    - Suggested fix: Derive the open editor from the current conflicts (e.g. close it in `items`/an effect when `mergeKey` is no longer a conflict key or its state is not `changed`), or reset it when the conflict for `mergeKey` changes; add a component test for revert-while-merging and for a deletion reported by Save merged.
+
+## Review conclusion
+
+No material issues found.
+
+Notes: all round-1 findings and the test-writer findings TW-2 and TW-3 are resolved in the code at a5c421e, and their tests assert behaviour (requests sent, session state, rendered actions) rather than implementation details. Acceptance criterion 1 is covered by `test/e2e/conflict.e2e.ts` (Electron app and a MongoDB container; the driver changes the document between load and save and the side-by-side view is asserted); criterion 2 by that e2e (Overwrite, Keep server version, Merge manually, each checked against the stored document) plus service and component tests. The test-writer's round-4 report records an e2e run on the final code. I re-ran `cd packages/renderer && npx ng test --include='src/app/document/**/*.spec.ts' --include='src/app/collection/**/*.spec.ts' --include='src/app/raw-editor/**/*.spec.ts'` at a5c421e: 13 files, 693 tests passed. I did not run the e2e or `npm run check` myself. Evidence for both criteria must still be recorded by the parent with `tasks.py verify`; the criteria in `tasks/conflict-ui.md` are not yet checked off. CR-7 is optional to fix before completion. No secrets, unsafe rendering (all output uses Angular interpolation), or write paths bypassing `WriteGuard`/`WriteControl` were found.
