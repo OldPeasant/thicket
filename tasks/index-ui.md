@@ -5,7 +5,7 @@ owner: dell26/agent-1
 deps: [index-backend,collection-view]
 touches: [packages/renderer/src/app/indexes]
 prio: 2
-lease_until: 2026-11-17T03:24:43Z
+lease_until: 2026-11-17T03:29:44Z
 ---
 ## Goal
 Indexes tab per collection: list with stats, create dialog with all options, drop with confirm, hide/unhide. Use the frontend-design skill for the visual direction; respect the Business and Tron tokens (no hard-coded colors).
