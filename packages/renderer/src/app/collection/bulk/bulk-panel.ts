@@ -37,8 +37,7 @@ interface BulkPreview {
 
 /** What the last bulk write reported. */
 export type BulkOutcome =
-  | { mode: 'update'; matched: number; modified: number }
-  | { mode: 'delete'; deleted: number };
+  { mode: 'update'; matched: number; modified: number } | { mode: 'delete'; deleted: number };
 
 let nextUid = 0;
 
@@ -63,6 +62,11 @@ export class BulkPanel {
   readonly closed = output();
   /** Documents were updated or deleted: the tab reads its page again. */
   readonly changed = output<BulkOutcome>();
+  /**
+   * `true` once a confirmed write is sent, `false` when it has ended. While it runs the panel can't
+   * be closed: the tab keeps it open too (the toolbar toggles are disabled).
+   */
+  readonly writing = output<boolean>();
 
   private readonly api = inject(ApiService);
   private readonly guard = inject(WriteGuard);
@@ -74,6 +78,8 @@ export class BulkPanel {
   protected readonly preview = signal<BulkPreview | null>(null);
   protected readonly outcome = signal<BulkOutcome | null>(null);
   protected readonly error = signal<string | null>(null);
+  /** A confirmed write was sent and has not answered yet: it can't be withdrawn any more. */
+  protected readonly sending = signal(false);
 
   protected readonly parsedUpdate = computed(() => parseUpdate(this.updateText()));
   /** The update's error, shown once something was typed (or Preview was pressed). */
@@ -126,9 +132,15 @@ export class BulkPanel {
   });
 
   private controller: AbortController | null = null;
+  private destroyed = false;
 
   constructor() {
-    inject(DestroyRef).onDestroy(() => this.controller?.abort());
+    // Cancels a running preview or withdraws an open confirm dialog. A sent write is not cancelled:
+    // killing an updateMany/deleteMany midway would leave an unknown part of it applied.
+    inject(DestroyRef).onDestroy(() => {
+      this.destroyed = true;
+      this.controller?.abort();
+    });
   }
 
   protected setMode(mode: BulkMode): void {
@@ -176,7 +188,9 @@ export class BulkPanel {
 
   /**
    * Sends the write of the current preview through `WriteGuard`. Over 1 000 documents the confirm
-   * dialog asks for the collection name, for updates as for deletes.
+   * dialog asks for the collection name, for updates as for deletes. Closing the panel withdraws
+   * the confirm dialog; once confirmed, the write is sent without a cancel signal and the panel
+   * can't be closed until it answers.
    */
   async execute(): Promise<void> {
     const preview = this.current();
@@ -196,23 +210,27 @@ export class BulkPanel {
       if (preview.mode === 'update') {
         const update = this.update();
         if (update === null) return;
-        const result = await this.guard.run(
+        const approved = await this.guard.approve(
           'docs.updateMany',
           { ...base, update, expectedCount: expected },
           { ...options, signal: controller.signal },
         );
+        this.sent();
+        const result = await this.api.request('docs.updateMany', approved);
         outcome = { mode: 'update', matched: result.matched, modified: result.modified };
       } else {
-        const result = await this.guard.run(
+        const approved = await this.guard.approve(
           'docs.deleteMany',
           { ...base, expectedCount: expected },
           { ...options, signal: controller.signal },
         );
+        this.sent();
+        const result = await this.api.request('docs.deleteMany', approved);
         outcome = { mode: 'delete', deleted: result.deleted };
       }
       this.preview.set(null);
       this.outcome.set(outcome);
-      this.changed.emit(outcome);
+      if (!this.destroyed) this.changed.emit(outcome);
     } catch (error) {
       const apiError = ApiError.from(error);
       if (apiError.code === 'CANCELLED') return;
@@ -235,7 +253,9 @@ export class BulkPanel {
     this.controller?.abort();
   }
 
+  /** Closes the panel; refused while a sent write runs (the Close button is disabled then). */
   protected close(): void {
+    if (this.sending()) return;
     this.controller?.abort();
     this.closed.emit();
   }
@@ -260,10 +280,20 @@ export class BulkPanel {
     return controller;
   }
 
+  /** The write was confirmed and is sent now. */
+  private sent(): void {
+    this.sending.set(true);
+    this.writing.emit(true);
+  }
+
   private end(controller: AbortController): void {
     if (this.controller !== controller) return;
     this.controller = null;
     this.phase.set('idle');
+    if (this.sending()) {
+      this.sending.set(false);
+      if (!this.destroyed) this.writing.emit(false);
+    }
   }
 
   private fail(error: unknown): void {

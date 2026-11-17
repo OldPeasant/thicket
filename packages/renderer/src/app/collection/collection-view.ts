@@ -165,6 +165,12 @@ export class CollectionView {
   protected readonly explainParams = signal<ExplainParams | null>(null);
   /** The open import, export or bulk update/delete panel. */
   protected readonly ioPanel = signal<'export' | 'import' | 'bulk' | null>(null);
+  /** The bulk panel sent a confirmed write that has not answered yet. */
+  protected readonly bulkWriting = signal(false);
+  /** While a bulk write runs the panel stays open: the export/import/bulk toggles are disabled. */
+  protected readonly ioLocked = computed(
+    () => this.bulkWriting() && this.ioPanel() === 'bulk' && !this.readOnly(),
+  );
 
   /** Reopening the tab gives a new tab object; only a changed namespace runs the query again. */
   protected readonly target = computed(
@@ -342,7 +348,11 @@ export class CollectionView {
     // Read-only profiles show the documents without editing controls.
     effect(() => {
       const readOnly = this.safety.readOnly(this.target().profileId)();
-      untracked(() => this.editMode.setReadOnly(readOnly));
+      untracked(() => {
+        this.editMode.setReadOnly(readOnly);
+        // A read-only profile removes the bulk panel: it reports no more about its write.
+        if (readOnly) this.bulkWriting.set(false);
+      });
     });
     // The table view shows one row per document: the root table (path '') starts horizontal
     // (the explorer's default is one row per field). The user can still flip it.
@@ -559,6 +569,7 @@ export class CollectionView {
   }
 
   protected toggleIo(panel: 'export' | 'import' | 'bulk'): void {
+    if (this.ioLocked()) return;
     this.ioPanel.update((open) => (open === panel ? null : panel));
   }
 

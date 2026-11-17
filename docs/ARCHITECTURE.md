@@ -654,9 +654,11 @@ Contract layout (`packages/contract/src/`):
   and collation (sort/limit don't apply). The update is shell syntax (operators only, or a
   pipeline; `parseUpdate`). Preview = `docs.previewMany` (count + 5-document sample); the write is
   only possible for a current preview (changing mode, update or applied query makes it stale) and
-  goes through `WriteGuard.run` with `expectedCount` = the previewed count; over
-  `TYPE_TO_CONFIRM_ABOVE` the collection name must be typed, for updates as for deletes. A
-  `CONFLICT` (more matches now) asks for a new preview. e2e: `test/e2e/bulk.e2e.ts`.
+  goes through `WriteGuard.approve` with `expectedCount` = the previewed count; over
+  `TYPE_TO_CONFIRM_ABOVE` the collection name must be typed, for updates as for deletes. Once
+  confirmed, the write is sent without a cancel signal (a killed bulk write would be partly
+  applied): the panel can't be closed and the tab's Export/Import/bulk toggles are disabled until
+  it answers (`writing` output). A `CONFLICT` (more matches now) asks for a new preview. e2e: `test/e2e/bulk.e2e.ts`.
 
 ## Install (development)
 All OSes: Node 24 LTS, 24.15.0 or newer (Angular 22 and jsdom require it), with npm, git, Python 3

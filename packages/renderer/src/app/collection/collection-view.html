@@ -232,6 +232,7 @@
         class="btn quiet"
         data-testid="io-export"
         [attr.aria-pressed]="ioPanel() === 'export'"
+        [disabled]="ioLocked()"
         (click)="toggleIo('export')"
       >
         Export…
@@ -242,6 +243,7 @@
           class="btn quiet"
           data-testid="io-import"
           [attr.aria-pressed]="ioPanel() === 'import'"
+          [disabled]="ioLocked()"
           (click)="toggleIo('import')"
         >
           Import…
@@ -252,6 +254,7 @@
           data-testid="bulk-open"
           title="Update or delete every document the filter matches, after a preview"
           [attr.aria-pressed]="ioPanel() === 'bulk'"
+          [disabled]="ioLocked()"
           (click)="toggleIo('bulk')"
         >
           Update/Delete many…
@@ -311,6 +314,7 @@
           [query]="results.query()"
           (closed)="ioPanel.set(null)"
           (changed)="bulkChanged()"
+          (writing)="bulkWriting.set($event)"
         />
       }
     }

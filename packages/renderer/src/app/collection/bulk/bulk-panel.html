@@ -15,7 +15,8 @@
       class="icon-btn close"
       data-testid="bulk-close"
       aria-label="Close bulk update and delete"
-      title="Close"
+      [title]="sending() ? 'Close (not while the write runs)' : 'Close'"
+      [disabled]="sending()"
       (click)="close()"
     >
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
@@ -85,8 +86,9 @@
           Confirming asks you to type the collection name.
         }
       } @else if (stale()) {
-        The preview showed <span class="matched">{{ matchedText() }}</span> documents for
-        different settings. Preview again before running.
+        The preview showed <span class="matched">{{ matchedText() }}</span>
+        {{ preview()?.matched === 1 ? 'document' : 'documents' }} for different settings. Preview
+        again before running.
       } @else if (outcome(); as o) {
         <span data-testid="bulk-outcome">{{ outcomeText(o) }}</span>
       } @else {
@@ -127,9 +129,7 @@
   @if (current(); as p) {
     @if (p.sample.length) {
       <details class="sample" data-testid="bulk-sample" open>
-        <summary>
-          Sample: first {{ p.sample.length }} of {{ matchedText() }}
-        </summary>
+        <summary>Sample: first {{ p.sample.length }} of {{ matchedText() }}</summary>
         <div class="docs">
           @for (doc of p.sample; track $index) {
             <pre class="doc" data-testid="bulk-sample-doc">{{ doc }}</pre>

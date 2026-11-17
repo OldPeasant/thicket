@@ -324,6 +324,108 @@ describe('BulkPanel', () => {
     expect(fake.cancels).toHaveLength(1);
   });
 
+  /** Makes `docs.deleteMany` wait until the returned function answers it. */
+  const holdDelete = () => {
+    let answer: (deleted: number) => void = () => undefined;
+    fake.handle(
+      'docs.deleteMany',
+      () =>
+        new Promise((resolve) => {
+          answer = (deleted) => resolve({ deleted });
+        }),
+    );
+    return (deleted: number) => answer(deleted);
+  };
+
+  /** Previews a delete of 500 documents and opens the confirm dialog. */
+  const openDeleteConfirm = async () => {
+    matching = 500;
+    get('bulk-mode-delete').click();
+    await settle();
+    get('bulk-preview').click();
+    await settle();
+    get('bulk-execute').click();
+    await settle();
+    expect(confirm.current()).not.toBeNull();
+  };
+
+  it('closing the panel while the confirm dialog is open withdraws it and sends nothing', async () => {
+    let closed = 0;
+    fixture.componentInstance.closed.subscribe(() => closed++);
+    await openDeleteConfirm();
+    expect(get<HTMLButtonElement>('bulk-close').disabled).toBe(false);
+    get('bulk-close').click();
+    await settle();
+    expect(closed).toBe(1);
+    expect(confirm.current()).toBeNull();
+    expect(fake.requestsFor('docs.deleteMany')).toHaveLength(0);
+  });
+
+  it('a confirmed write can not be closed or cancelled while it runs; the outcome arrives', async () => {
+    const answer = holdDelete();
+    let closed = 0;
+    const writing: boolean[] = [];
+    fixture.componentInstance.closed.subscribe(() => closed++);
+    fixture.componentInstance.writing.subscribe((w) => writing.push(w));
+    await openDeleteConfirm();
+    expect(writing).toEqual([]);
+    get('confirm-ok', dlg()).click();
+    await settle();
+    expect(fake.requestsFor('docs.deleteMany')).toHaveLength(1);
+    expect(writing).toEqual([true]);
+    const close = get<HTMLButtonElement>('bulk-close');
+    expect(close.disabled).toBe(true);
+    // Even a forced close (the button is disabled) neither closes nor cancels the write.
+    (fixture.componentInstance as unknown as { close(): void }).close();
+    await settle();
+    expect(closed).toBe(0);
+    expect(fake.cancels).toEqual([]);
+
+    answer(500);
+    await settle();
+    expect(writing).toEqual([true, false]);
+    expect(outcomes).toEqual([{ mode: 'delete', deleted: 500 }]);
+    expect(text(get('bulk-outcome'))).toBe('Deleted 500 documents.');
+    expect(get<HTMLButtonElement>('bulk-close').disabled).toBe(false);
+  });
+
+  it('a failed write ends the running state: the panel can be closed again', async () => {
+    const writing: boolean[] = [];
+    fixture.componentInstance.writing.subscribe((w) => writing.push(w));
+    fake.fail('docs.deleteMany', { code: 'SERVER_ERROR', message: 'write failed (fictitious)' });
+    await openDeleteConfirm();
+    get('confirm-ok', dlg()).click();
+    await settle();
+    expect(writing).toEqual([true, false]);
+    expect(get<HTMLButtonElement>('bulk-close').disabled).toBe(false);
+  });
+
+  it('destroying the panel does not cancel a write that was already sent', async () => {
+    const answer = holdDelete();
+    await openDeleteConfirm();
+    get('confirm-ok', dlg()).click();
+    await settle();
+    expect(fake.requestsFor('docs.deleteMany')).toHaveLength(1);
+    fixture.destroy();
+    await dialog.whenStable();
+    expect(fake.cancels).toEqual([]);
+    answer(500);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The destroyed panel emits nothing.
+    expect(outcomes).toEqual([]);
+  });
+
+  it('the stale status says "document" for a preview of one', async () => {
+    matching = 1;
+    get('bulk-mode-delete').click();
+    await settle();
+    get('bulk-preview').click();
+    await settle();
+    get('bulk-mode-update').click();
+    await settle();
+    expect(text(get('bulk-status'))).toContain('The preview showed 1 document for different');
+  });
+
   it.each([
     ['update', 'Nothing to update.'],
     ['delete', 'Nothing to delete.'],

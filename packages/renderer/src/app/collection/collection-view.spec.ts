@@ -901,6 +901,50 @@ describe('CollectionView', () => {
     expect(lastFind()).toMatchObject({ coll: 'orders', filter: '{}' });
   });
 
+  it('keeps the bulk panel open while a confirmed write runs: the toolbar toggles are disabled', async () => {
+    let answerDelete: (deleted: number) => void = () => undefined;
+    fake.respond('docs.previewMany', { matched: 3, sample: docs(1, 3) });
+    fake.handle(
+      'docs.deleteMany',
+      () =>
+        new Promise((resolve) => {
+          answerDelete = (deleted) => resolve({ deleted });
+        }),
+    );
+    const confirm = TestBed.inject(ConfirmService);
+    click('bulk-open');
+    await settle();
+    click('bulk-mode-delete');
+    await settle();
+    click('bulk-preview');
+    await settle();
+    click('bulk-execute');
+    await settle();
+    // The confirm dialog is open, nothing is sent: the toggles still work.
+    expect(get<HTMLButtonElement>('bulk-open').disabled).toBe(false);
+    confirm.answer(true);
+    await settle();
+    expect(fake.requestsFor('docs.deleteMany')).toHaveLength(1);
+    for (const id of ['bulk-open', 'io-export', 'io-import', 'bulk-close']) {
+      expect(get<HTMLButtonElement>(id).disabled).toBe(true);
+    }
+    // A click that gets through anyway changes nothing.
+    (fixture.componentInstance as unknown as { toggleIo(p: string): void }).toggleIo('bulk');
+    await settle();
+    expect(q('bulk-panel')).not.toBeNull();
+    expect(fake.cancels).toEqual([]);
+
+    answerDelete(3);
+    await settle();
+    expect(finds()).toHaveLength(2);
+    for (const id of ['bulk-open', 'io-export', 'io-import', 'bulk-close']) {
+      expect(get<HTMLButtonElement>(id).disabled).toBe(false);
+    }
+    click('bulk-open');
+    await settle();
+    expect(q('bulk-panel')).toBeNull();
+  });
+
   /** Opens the import panel, chooses a file and imports it into `coll`; the stream ends at once. */
   const importInto = async (coll: string) => {
     fake.respond('io.previewImport', {
