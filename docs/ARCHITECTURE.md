@@ -184,7 +184,20 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   (else the server takes the certificate subject). The client certificate is a PEM bundle
   (`tls.certificateKeyFile` → `tlsCertificateKeyFile`) or certificate + `tls.keyFile`, which
   `clientConfig()` reads itself (driver `cert`/`key`/`passphrase`; unreadable → `TLS_ERROR`);
-  the key passphrase is the `tlsKeyPassphrase` secret. `proxy` → `proxyHost`/`proxyPort`
+  the key passphrase is the `tlsKeyPassphrase` secret.
+  MONGODB-AWS (task aws-auth, `packages/backend/src/auth/aws/`, always `authSource: '$external'`):
+  driver 7 takes AWS credentials only from `authMechanismProperties.AWS_CREDENTIAL_PROVIDER` (a
+  user/password or `AWS_SESSION_TOKEN` is refused, so a user name in the URI is `AUTH_FAILED`).
+  With `auth.username` (the access key ID) the secret access key is the `password` secret (typed at
+  connect, or the stored `password` kind: the profile's primary secret and what the connection
+  editor saves; with `secretMode: 'ask'` only the typed one). It wins over a stored
+  `awsSecretAccessKey`, which is only a fallback for `secretMode: 'saved'`. An optional
+  `awsSessionToken` is added; the credentials are given
+  as a static provider (missing secret or `secretMode: 'none'` → `AUTH_FAILED`). Without a user name
+  the driver uses the default chain (`fromNodeProviderChain()` of `@aws-sdk/credential-providers`,
+  a backend dependency the driver needs for MONGODB-AWS at all: environment, SSO, shared
+  config/`AWS_PROFILE`, web identity, ECS/EC2 role); a chain without credentials is a `MongoAWSError`
+  → `AUTH_FAILED`. Real Atlas verification is the human task `aws-verify`. `proxy` → `proxyHost`/`proxyPort`
   (+ `proxyUsername` and the `proxyPassword` secret; a user without a stored password is
   `AUTH_FAILED`) through the `socks` package (a backend dependency the driver loads lazily).
   `readPreferenceTags` (contract: tag sets as `{ name, value }` pairs, no free-form records) and

@@ -1154,6 +1154,179 @@ describe('ConnectionManager proxy and X.509 (task x509-proxy)', () => {
   });
 });
 
+describe('ConnectionManager MONGODB-AWS (task aws-auth)', () => {
+  /** Fictitious AWS values; none of them is a real credential. */
+  const KEY_ID = 'AKIAFICTITIOUSKEY123';
+  const AWS_SECRET = 'fictitious/aws+Secret+Key9';
+  const AWS_TOKEN = 'fictitious-aws-session-Token8';
+
+  function awsProfile(id: string, auth: Partial<NonNullable<Profile['auth']>> = {}): Profile {
+    return savedProfile(id, {
+      connectionString: 'mongodb+srv://cluster0.example.test/?retryWrites=true',
+      auth: { mechanism: 'MONGODB-AWS', username: KEY_ID, secretMode: 'saved', ...auth },
+    });
+  }
+
+  async function credentialsOf(options: MongoClientOptions | undefined): Promise<unknown> {
+    const provider = options?.authMechanismProperties?.AWS_CREDENTIAL_PROVIDER;
+    expect(provider).toBeTypeOf('function');
+    return provider?.();
+  }
+
+  function awsError(message: string): Error {
+    return Object.assign(new Error(message), { name: 'MongoAWSError' });
+  }
+
+  it('open: the stored secret access key and session token reach the credential provider', async () => {
+    const { manager, created, loadSecrets } = setup({
+      profiles: { p1: awsProfile('p1') },
+      secrets: { p1: { awsSecretAccessKey: AWS_SECRET, awsSessionToken: AWS_TOKEN } },
+    });
+    await expect(manager.open('p1', undefined)).resolves.toMatchObject({ state: 'connected' });
+    expect(loadSecrets).toHaveBeenCalledWith('p1');
+    const options = created[0]?.options;
+    expect(created[0]?.uri).toBe('mongodb+srv://cluster0.example.test/?retryWrites=true');
+    expect(options).toMatchObject({ authMechanism: 'MONGODB-AWS', authSource: '$external' });
+    expect(options?.auth).toBeUndefined();
+    expect(await credentialsOf(options)).toEqual({
+      accessKeyId: KEY_ID,
+      secretAccessKey: AWS_SECRET,
+      sessionToken: AWS_TOKEN,
+    });
+    // The secrets travel only inside the provider closure, never as plain option values.
+    expect(JSON.stringify(options)).not.toContain(AWS_SECRET);
+    expect(JSON.stringify(options)).not.toContain(AWS_TOKEN);
+    await manager.close('p1');
+  });
+
+  it('open: the stored secret and token never reach log lines, the error or the status', async () => {
+    const client = fakeClient(() =>
+      Promise.reject(awsError(`STS refused ${KEY_ID} / ${AWS_SECRET} with token ${AWS_TOKEN}`)),
+    );
+    const { manager, logs } = setup({
+      profiles: { p1: awsProfile('p1') },
+      secrets: { p1: { awsSecretAccessKey: AWS_SECRET, awsSessionToken: AWS_TOKEN } },
+      clients: [client],
+    });
+    const error = await rejection(manager.open('p1', undefined));
+    expect(error.code).toBe('AUTH_FAILED');
+    for (const text of [error.message, manager.statusOf('p1').error?.message ?? '', ...logs]) {
+      expect(text).not.toContain(AWS_SECRET);
+      expect(text).not.toContain(AWS_TOKEN);
+    }
+    expect(error.message).toContain('****');
+    expect(logs.some((line) => line.includes('AUTH_FAILED'))).toBe(true);
+    expect(manager.statusOf('p1')).toMatchObject({
+      state: 'error',
+      error: { code: 'AUTH_FAILED' },
+    });
+    expect(client.close).toHaveBeenCalled();
+  });
+
+  it('test: a typed secret is used and masked in the logs, and wins over the stored one', async () => {
+    const typed = 'fictitious-typed-aws-Secret7';
+    const client = fakeClient(() => Promise.reject(awsError(`signature for ${typed} rejected`)));
+    const { manager, created, logs } = setup({
+      profiles: { p1: awsProfile('p1') },
+      secrets: { p1: { awsSecretAccessKey: AWS_SECRET } },
+      clients: [client],
+    });
+    const error = await rejection(manager.test({ profileId: 'p1' }, typed));
+    expect(error.code).toBe('AUTH_FAILED');
+    expect(error.message).not.toContain(typed);
+    for (const line of logs) expect(line).not.toContain(typed);
+    expect(await credentialsOf(created[0]?.options)).toEqual({
+      accessKeyId: KEY_ID,
+      secretAccessKey: typed,
+    });
+  });
+
+  it("secretMode 'ask': the stored secret access key is not used; the typed one is", async () => {
+    const asked = setup({
+      profiles: { p1: awsProfile('p1', { secretMode: 'ask' }) },
+      secrets: { p1: { awsSecretAccessKey: AWS_SECRET } },
+    });
+    const error = await rejection(asked.manager.open('p1', undefined));
+    expect(error.code).toBe('AUTH_FAILED');
+    expect(error.message).toContain(KEY_ID);
+    expect(error.message).not.toContain(AWS_SECRET);
+    expect(asked.created).toEqual([]);
+
+    const typed = setup({
+      profiles: { p1: awsProfile('p1', { secretMode: 'ask' }) },
+      secrets: { p1: { awsSecretAccessKey: AWS_SECRET } },
+    });
+    await typed.manager.open('p1', 'fictitious-typed-aws-Secret7');
+    expect(await credentialsOf(typed.created[0]?.options)).toMatchObject({
+      secretAccessKey: 'fictitious-typed-aws-Secret7',
+    });
+    await typed.manager.close('p1');
+  });
+
+  it('a saved access key ID without a stored secret answers AUTH_FAILED before creating a client', async () => {
+    const { manager, created } = setup({
+      profiles: { p1: awsProfile('p1') },
+      secrets: { p1: null },
+    });
+    const error = await rejection(manager.open('p1', undefined));
+    expect(error.code).toBe('AUTH_FAILED');
+    expect(created).toEqual([]);
+    expect(manager.statusOf('p1')).toMatchObject({
+      state: 'error',
+      error: { code: 'AUTH_FAILED' },
+    });
+  });
+
+  it('default chain: no provider and no secrets are passed; a chain failure is AUTH_FAILED', async () => {
+    const chainFailure = Object.assign(new Error('Could not load credentials from any providers'), {
+      name: 'MongoServerSelectionError',
+      cause: awsError('Could not load credentials from any providers'),
+    });
+    const client = fakeClient(() => Promise.reject(chainFailure));
+    const { manager, created } = setup({
+      profiles: {
+        p1: savedProfile('p1', { auth: { mechanism: 'MONGODB-AWS', secretMode: 'none' } }),
+      },
+      secrets: { p1: { password: STORED_PASSWORD, awsSecretAccessKey: AWS_SECRET } },
+      clients: [fakeClient(), client],
+    });
+    await manager.open('p1', undefined);
+    const options = created[0]?.options;
+    expect(options).toMatchObject({ authMechanism: 'MONGODB-AWS', authSource: '$external' });
+    expect(options?.auth).toBeUndefined();
+    expect(options?.authMechanismProperties).toBeUndefined();
+    expect(JSON.stringify(options)).not.toContain(AWS_SECRET);
+    expect(JSON.stringify(options)).not.toContain(STORED_PASSWORD);
+    await manager.close('p1');
+
+    const error = await rejection(manager.open('p1', undefined));
+    expect(error.code).toBe('AUTH_FAILED');
+    expect(error.message).toMatch(/^Authentication failed: /);
+  });
+
+  it('a draft with an id and the same AWS auth gets the stored secret; another key ID gets none', async () => {
+    const same = setup({
+      profiles: { p1: awsProfile('p1') },
+      secrets: { p1: { awsSecretAccessKey: AWS_SECRET, awsSessionToken: AWS_TOKEN } },
+    });
+    await same.manager.test({ profile: { ...awsProfile('p1') } }, undefined);
+    expect(await credentialsOf(same.created[0]?.options)).toMatchObject({
+      secretAccessKey: AWS_SECRET,
+      sessionToken: AWS_TOKEN,
+    });
+
+    const other = setup({
+      profiles: { p1: awsProfile('p1') },
+      secrets: { p1: { awsSecretAccessKey: AWS_SECRET, awsSessionToken: AWS_TOKEN } },
+    });
+    const changed: ProfileDraft = awsProfile('p1', { username: 'AKIAOTHERFICTITIOUS1' });
+    const error = await rejection(other.manager.test({ profile: changed }, undefined));
+    expect(other.loadSecrets).not.toHaveBeenCalled();
+    expect(error.code).toBe('AUTH_FAILED');
+    expect(other.created).toEqual([]);
+  });
+});
+
 describe('ConnectionManager SSH tunnels', () => {
   const SSH = {
     host: 'bastion.example.test',
@@ -1350,6 +1523,133 @@ describe('ConnectionManager SSH tunnels', () => {
     await manager.open('plain', undefined);
     expect(open.mock.calls[0]?.[3]).toMatchObject({ readyTimeoutMS: 7_500 });
     expect(open.mock.calls[1]?.[3]).not.toHaveProperty('readyTimeoutMS');
+  });
+});
+
+describe('ConnectionManager MONGODB-AWS through an SSH tunnel (task aws-auth, after ssh-tunnel)', () => {
+  /** Fictitious values; none of them is a real credential. */
+  const KEY_ID = 'AKIAFICTITIOUSKEY789';
+  const AWS_SECRET = 'fictitious/aws+Secret+Key3';
+  const AWS_TOKEN = 'fictitious-aws-session-Token2';
+  const SSH = {
+    host: 'bastion.example.test',
+    port: 22,
+    username: 'ops',
+    method: 'password' as const,
+  };
+  const PROXY = {
+    proxyHost: '127.0.0.1',
+    proxyPort: 40777,
+    proxyUsername: 'tunnel-user',
+    proxyPassword: 'fictitious-tunnel-Pw6',
+  };
+
+  function awsSshProfile(id: string, auth: Partial<NonNullable<Profile['auth']>> = {}): Profile {
+    return savedProfile(id, {
+      connectionString: 'mongodb+srv://cluster0.example.test/?retryWrites=true',
+      auth: { mechanism: 'MONGODB-AWS', username: KEY_ID, secretMode: 'saved', ...auth },
+      ssh: SSH,
+    });
+  }
+
+  function tunnelOpener() {
+    const tunnel = {
+      proxy: PROXY,
+      openChannels: () => 0,
+      close: vi.fn(() => Promise.resolve()),
+    } satisfies SshTunnel;
+    const open = vi.fn<NonNullable<ConnectionManagerDeps['openTunnel']>>(() =>
+      Promise.resolve(tunnel),
+    );
+    return { tunnel, open };
+  }
+
+  it('open: the driver gets the tunnel proxy and the AWS credential provider together', async () => {
+    const { tunnel, open } = tunnelOpener();
+    const { manager, created } = setup({
+      profiles: { p1: awsSshProfile('p1') },
+      secrets: {
+        p1: {
+          awsSecretAccessKey: AWS_SECRET,
+          awsSessionToken: AWS_TOKEN,
+          sshPassword: 'fictitious-ssh-Pw5',
+        },
+      },
+      openTunnel: open,
+    });
+    await expect(manager.open('p1', undefined)).resolves.toMatchObject({ state: 'connected' });
+    expect(open).toHaveBeenCalledTimes(1);
+    const options = created[0]?.options;
+    expect(options).toMatchObject({
+      ...PROXY,
+      authMechanism: 'MONGODB-AWS',
+      authSource: '$external',
+    });
+    expect(options?.auth).toBeUndefined();
+    expect(await options?.authMechanismProperties?.AWS_CREDENTIAL_PROVIDER?.()).toEqual({
+      accessKeyId: KEY_ID,
+      secretAccessKey: AWS_SECRET,
+      sessionToken: AWS_TOKEN,
+    });
+    await manager.close('p1');
+    expect(tunnel.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('open: a missing AWS secret after the tunnel opened is AUTH_FAILED and closes the tunnel', async () => {
+    const { tunnel, open } = tunnelOpener();
+    const { manager, created } = setup({
+      profiles: { p1: awsSshProfile('p1') },
+      secrets: { p1: { sshPassword: 'fictitious-ssh-Pw5' } },
+      openTunnel: open,
+    });
+    const error = await rejection(manager.open('p1', undefined));
+    expect(error.code).toBe('AUTH_FAILED');
+    expect(error.message).toContain(KEY_ID);
+    expect(created).toEqual([]);
+    expect(tunnel.close).toHaveBeenCalledTimes(1);
+    expect(manager.statusOf('p1')).toMatchObject({
+      state: 'error',
+      error: { code: 'AUTH_FAILED' },
+    });
+  });
+
+  it('test: a user name in the connection string is AUTH_FAILED and closes the tunnel', async () => {
+    const { tunnel, open } = tunnelOpener();
+    const profile = {
+      ...awsSshProfile('p1'),
+      connectionString: `mongodb://${KEY_ID}@db.example.test:27017/?authMechanism=MONGODB-AWS`,
+    };
+    const { manager, created } = setup({
+      profiles: { p1: profile },
+      secrets: { p1: { awsSecretAccessKey: AWS_SECRET } },
+      openTunnel: open,
+    });
+    const error = await rejection(manager.test({ profileId: 'p1' }, undefined));
+    expect(error.code).toBe('AUTH_FAILED');
+    expect(error.message).toContain('connection string');
+    expect(created).toEqual([]);
+    expect(tunnel.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('test: a MongoAWSError through the tunnel is AUTH_FAILED, masked, and the tunnel is closed', async () => {
+    const { tunnel, open } = tunnelOpener();
+    const failing = fakeClient(() =>
+      Promise.reject(
+        Object.assign(new Error(`STS refused ${KEY_ID} / ${AWS_SECRET}`), {
+          name: 'MongoAWSError',
+        }),
+      ),
+    );
+    const { manager, logs } = setup({
+      profiles: { p1: awsSshProfile('p1') },
+      secrets: { p1: { awsSecretAccessKey: AWS_SECRET } },
+      openTunnel: open,
+      clients: [failing],
+    });
+    const error = await rejection(manager.test({ profileId: 'p1' }, undefined));
+    expect(error.code).toBe('AUTH_FAILED');
+    for (const text of [error.message, ...logs]) expect(text).not.toContain(AWS_SECRET);
+    expect(tunnel.close).toHaveBeenCalledTimes(1);
   });
 });
 

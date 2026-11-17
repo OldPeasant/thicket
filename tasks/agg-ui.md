@@ -5,14 +5,16 @@ owner: felix/agent-1
 deps: [agg-backend,collection-view,codegen,raw-editor]
 touches: [packages/renderer/src/app/aggregation]
 prio: 2
-lease_until: 2026-11-17T02:39:23Z
+lease_until: 2026-11-17T02:54:36Z
 ---
 ## Goal
 Stage list (add/remove/reorder/disable), each stage in shell syntax with live preview, full-text mode, run with paging, save pipelines, export code, create view. Use the frontend-design skill for the visual direction; respect the Business and Tron tokens (no hard-coded colors).
 
 ## Acceptance criteria
-- [ ] e2e: demo step 8 ($match → $group → $sort, preview per stage, export as shell and Node)
-- [ ] Component tests: reorder/disable updates the pipeline; syntax error blocks preview of that stage only
+- [x] e2e: demo step 8 ($match → $group → $sort, preview per stage, export as shell and Node)
+  - verified (2026-11-17 03:29+0100 by felix/agent-1): npm run test:e2e -- aggregation (builds renderer + desktop, Playwright Electron, test/e2e/aggregation.e2e.ts against the e2e Mongo fixture) at 14aed95 -> 1 passed: $match→$group→$sort, preview per stage, run matches driver aggregate, shell and Node export
+- [x] Component tests: reorder/disable updates the pipeline; syntax error blocks preview of that stage only
+  - verified (2026-11-17 03:29+0100 by felix/agent-1): cd packages/renderer && npx ng test --include='src/app/aggregation/**/*.spec.ts' at 14aed95 -> 80 passed, incl. 'reordering stages changes the pipeline that runs and the previews', 'a disabled stage is left out of the pipeline and of later previews', 'a syntax error blocks the preview of that stage only'
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
