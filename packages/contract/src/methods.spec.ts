@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import {
+  CSV_TYPES,
   METHOD_NAMES,
   WRITE_METHODS,
   conflictDetail,
@@ -862,5 +863,48 @@ describe('method names', () => {
     expect(route('io.previewImport')).toBe('backend');
     expect(route('io.export')).toBe('backend');
     expect(route('conn.test')).toBe('backend');
+  });
+});
+
+describe('CSV import and export params', () => {
+  const IMPORT = { ...NS, fileToken: 'tok-1' };
+  const entry = { column: 'qty', path: 'stock.qty', bsonType: 'int' };
+
+  it('io.import accepts a csvMapping entry with or without its header index', () => {
+    expect(parseParams('io.import', { ...IMPORT, csvMapping: [entry] }).ok).toBe(true);
+    expect(parseParams('io.import', { ...IMPORT, csvMapping: [{ ...entry, index: 0 }] }).ok).toBe(
+      true,
+    );
+    expect(
+      parseParams('io.import', { ...IMPORT, csvMapping: [{ ...entry, column: '', index: 7 }] }).ok,
+    ).toBe(true);
+  });
+
+  it.each(CSV_TYPES)('io.import accepts the CSV type %s', (bsonType) => {
+    expect(parseParams('io.import', { ...IMPORT, csvMapping: [{ ...entry, bsonType }] }).ok).toBe(
+      true,
+    );
+  });
+
+  it.each([
+    ['a negative index', { ...entry, index: -1 }],
+    ['a fractional index', { ...entry, index: 1.5 }],
+    ['an index as text', { ...entry, index: '2' }],
+    ['a type that is no CSV type', { ...entry, bsonType: 'integer' }],
+    ['an empty path', { ...entry, path: '' }],
+    ['an unknown key', { ...entry, type: 'int' }],
+  ])('io.import refuses a csvMapping entry with %s', (_what, bad) => {
+    expect(parseParams('io.import', { ...IMPORT, csvMapping: [bad] }).ok).toBe(false);
+  });
+
+  it('io.import refuses an empty csvMapping (no column would be imported)', () => {
+    expect(parseParams('io.import', { ...IMPORT, csvMapping: [] }).ok).toBe(false);
+  });
+
+  it('io.export refuses empty csvFields and an empty field path', () => {
+    const base = { ...NS, source: { kind: 'find', filter: '{}' }, format: 'csv' };
+    expect(parseParams('io.export', { ...base, csvFields: ['_id', 'address.city'] }).ok).toBe(true);
+    expect(parseParams('io.export', { ...base, csvFields: [] }).ok).toBe(false);
+    expect(parseParams('io.export', { ...base, csvFields: [''] }).ok).toBe(false);
   });
 });

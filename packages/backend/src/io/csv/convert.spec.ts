@@ -396,6 +396,76 @@ describe('convertCell', () => {
     ])('refuses %j, which is neither ISO 8601 nor epoch millis', (text) => {
       expect(() => convertCell(text, 'date')).toThrow(new CellError('is not a date'));
     });
+
+    it('accepts February 29 in a leap year only', () => {
+      expect(convertCell('2024-02-29', 'date')).toEqual(new Date(Date.UTC(2024, 1, 29)));
+      expect(convertCell('2000-02-29T12:00Z', 'date')).toEqual(new Date(Date.UTC(2000, 1, 29, 12)));
+      for (const text of ['2025-02-29', '1900-02-29', '2026-04-31', '2026-00-10', '2026-01-00']) {
+        expect(() => convertCell(text, 'date'), text).toThrow(new CellError('is not a date'));
+      }
+    });
+
+    it('accepts the last valid time parts and refuses an offset minute of 60', () => {
+      expect(convertCell('2026-12-31T23:59:59.999Z', 'date')).toEqual(
+        new Date(Date.UTC(2026, 11, 31, 23, 59, 59, 999)),
+      );
+      expect(convertCell('2026-03-01T10:00+23:59', 'date')).toEqual(
+        new Date(Date.UTC(2026, 2, 1, 10, 0) - (23 * 60 + 59) * 60_000),
+      );
+      for (const text of ['2026-03-01T10:00+01:60', '2026-03-01T10:00-0060']) {
+        expect(() => convertCell(text, 'date'), text).toThrow(new CellError('is not a date'));
+      }
+    });
+
+    it('an offset may move the instant to another UTC day or year', () => {
+      expect(convertCell('2026-01-01T00:30+01:00', 'date')).toEqual(
+        new Date(Date.UTC(2025, 11, 31, 23, 30)),
+      );
+      expect(convertCell('2025-12-31T22:00-0300', 'date')).toEqual(
+        new Date(Date.UTC(2026, 0, 1, 1, 0)),
+      );
+    });
+
+    it('reads a comma as the decimal sign of the seconds fraction', () => {
+      expect(convertCell('2026-03-01T10:00:30,25Z', 'date')).toEqual(
+        new Date(Date.UTC(2026, 2, 1, 10, 0, 30, 250)),
+      );
+    });
+
+    it('reads years below 100 as written (no 19xx shift)', () => {
+      const expected = new Date(0);
+      expected.setUTCFullYear(99, 0, 1);
+      expect(convertCell('0099-01-01', 'date')).toEqual(expected);
+      expect((convertCell('0001-06-15T00:00Z', 'date') as Date).getUTCFullYear()).toBe(1);
+    });
+
+    it('trims spaces around a date cell', () => {
+      expect(convertCell('  2026-03-01T10:00Z \t', 'date')).toEqual(
+        new Date(Date.UTC(2026, 2, 1, 10, 0)),
+      );
+    });
+
+    it('accepts epoch millis up to the largest JavaScript date and refuses one beyond', () => {
+      expect(convertCell('8640000000000000', 'date')).toEqual(new Date(8.64e15));
+      expect(convertCell('-8640000000000000', 'date')).toEqual(new Date(-8.64e15));
+      expect(() => convertCell('8640000000000001', 'date')).toThrow(new CellError('is not a date'));
+    });
+
+    it('gives the same instant whatever the host time zone says', () => {
+      // The parser only uses UTC methods; a local-time parse would differ by the host offset.
+      const original = process.env['TZ'];
+      try {
+        const results = ['UTC', 'America/New_York', 'Asia/Kolkata'].map((tz) => {
+          process.env['TZ'] = tz;
+          return (convertCell('2026-07-01T08:00', 'date') as Date).getTime();
+        });
+        expect(new Set(results).size).toBe(1);
+        expect(results[0]).toBe(Date.UTC(2026, 6, 1, 8));
+      } finally {
+        if (original === undefined) delete process.env['TZ'];
+        else process.env['TZ'] = original;
+      }
+    });
   });
 
   describe('objectId', () => {
@@ -471,6 +541,42 @@ describe('resolveMapping', () => {
     expect(defaultMapping(['a', 'a', 'a.b'])).toEqual([
       { index: 0, column: 'a', path: ['a'], type: 'auto' },
     ]);
+  });
+
+  it('the default skips a parent name after its nested names, and takes a name after an invalid one', () => {
+    expect(defaultMapping(['a.b', 'a.c', 'a', 'a.b.c']).map((c) => c.column)).toEqual([
+      'a.b',
+      'a.c',
+    ]);
+    // `x.` is left out, so it takes nothing away from `x`.
+    expect(defaultMapping(['x.', 'x', 'x.y'])).toEqual([
+      { index: 1, column: 'x', path: ['x'], type: 'auto' },
+    ]);
+    expect(defaultMapping([])).toEqual([]);
+  });
+
+  it('a unique name may be given with its index, and an unnamed column by its index', () => {
+    expect(
+      resolveMapping(header, [
+        { column: 'qty', index: 1, path: 'qty', bsonType: 'int' },
+        { column: '', index: 2, path: 'unnamed', bsonType: 'string' },
+      ]),
+    ).toEqual([
+      { index: 1, column: 'qty', path: ['qty'], type: 'int' },
+      { index: 2, column: '', path: ['unnamed'], type: 'string' },
+    ]);
+  });
+
+  it('both columns of a repeated name can be imported, each by its index', () => {
+    const repeated = ['name', 'qty', 'name'];
+    const columns = resolveMapping(repeated, [
+      { column: 'name', index: 0, path: 'first', bsonType: 'string' },
+      { column: 'name', index: 2, path: 'second', bsonType: 'string' },
+    ]);
+    expect(recordToDocument(['Ann', '3', 'Bob'], 2, repeated, columns)).toEqual({
+      first: 'Ann',
+      second: 'Bob',
+    });
   });
 
   it('a repeated header name is chosen by its index, and refused by its name alone', () => {

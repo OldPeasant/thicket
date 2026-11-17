@@ -150,6 +150,30 @@ describe('defaultCsvRows', () => {
     expect(csvMappingProblem(rows)).toBeNull();
   });
 
+  it('includes the same columns as the backend default mapping for the same header', () => {
+    // Backend defaultMapping(['a','a','a.b','x.','.y','c.d','c','cd','n']) takes indexes 0,5,7,8.
+    const rows = defaultCsvRows(['a', 'a', 'a.b', 'x.', '.y', 'c.d', 'c', 'cd', 'n'], []);
+    expect(csvMapping(rows).map((m) => [m.index, m.column])).toEqual([
+      [0, 'a'],
+      [5, 'c.d'],
+      [7, 'cd'],
+      [8, 'n'],
+    ]);
+  });
+
+  it('leaves out a parent name after its nested names, and takes a name after an invalid one', () => {
+    expect(defaultCsvRows(['a.b', 'a.c', 'a'], []).map((r) => r.include)).toEqual([
+      true,
+      true,
+      false,
+    ]);
+    expect(defaultCsvRows(['x.', 'x', 'x.y'], []).map((r) => r.include)).toEqual([
+      false,
+      true,
+      false,
+    ]);
+  });
+
   it('has empty examples without rows or for a short first row', () => {
     expect(defaultCsvRows(['a', 'b'], []).map((r) => r.example)).toEqual(['', '']);
     expect(defaultCsvRows(['a', 'b'], [['1']]).map((r) => r.example)).toEqual(['1', '']);

@@ -888,6 +888,15 @@ describe('CSV import', () => {
       ]);
     });
 
+    it(`reads on for a sampleSize above ${String(CSV_PREVIEW_ROWS)} rows, keeping the rows capped`, async () => {
+      const rows = Array.from({ length: CSV_PREVIEW_ROWS + 10 }, (_, i) => `${String(i)}\n`);
+      const file = await fileWith('big-sample.csv', `n\n${rows.join('')}`);
+      const preview = await previewFile(file, 'csv', CSV_PREVIEW_ROWS + 5);
+      expect(preview.csvRows).toHaveLength(CSV_PREVIEW_ROWS);
+      expect(preview.sample).toHaveLength(CSV_PREVIEW_ROWS + 5);
+      expect(preview.sample.at(-1)).toBe(`{"n":{"$numberInt":"${String(CSV_PREVIEW_ROWS + 4)}"}}`);
+    });
+
     it('keeps the cells of a row that does not parse but leaves it out of the sample', async () => {
       const file = await fileWith('long.csv', 'a,b\n1,2,3\n4,5\n');
       const preview = await previewFile(file, 'csv');
@@ -943,6 +952,18 @@ describe('CSV import', () => {
       const preview = await previewFile(file, 'csv');
       expect(preview.csvColumns).toEqual(columns);
       expect(preview.csvRows).toHaveLength(1);
+    });
+
+    it('builds the sample of a repeated or overlapping header from the first column only', async () => {
+      const file = await fileWith(
+        'mixed-preview.csv',
+        'name,qty,name,address,address.city,No.\nWidget,3,Gadget,Main St,Springfield,7\n',
+      );
+      const preview = await previewFile(file, 'csv');
+      expect(preview.csvRows).toEqual([['Widget', '3', 'Gadget', 'Main St', 'Springfield', '7']]);
+      expect(preview.sample).toEqual([
+        '{"name":"Widget","qty":{"$numberInt":"3"},"address":"Main St"}',
+      ]);
     });
   });
 
@@ -1011,6 +1032,19 @@ describe('CSV import', () => {
       expect(server.names()).toEqual([]);
     });
 
+    it('refuses an index that does not hold the named column before inserting anything', async () => {
+      const file = await fileWith('shifted.csv', 'name,qty,name\nfirst,3,second\n');
+      const server = dumpServer();
+      const { result } = await importAs(server.client, file, 'csv', {
+        csvMapping: [{ column: 'name', index: 1, path: 'name', bsonType: 'string' }],
+      });
+      expect(result).toMatchObject({
+        code: 'INVALID_PARAMS',
+        message: 'The file has no column "name" at index 1',
+      });
+      expect(server.names()).toEqual([]);
+    });
+
     it('refuses a mapping naming a column the file lacks before inserting anything', async () => {
       const file = await fileWith('m.csv', 'a,b\n1,2\n');
       const server = dumpServer();
@@ -1063,6 +1097,18 @@ describe('CSV import', () => {
         message: 'Line 4: text after a closing quote',
       });
       expect(server.inserted()).toEqual(['{"a":{"$numberInt":"1"}}', '{"a":{"$numberInt":"2"}}']);
+    });
+
+    it('an aborted signal cancels the import before any row is inserted', async () => {
+      const file = await fileWith('cancel.csv', 'n\n1\n2\n');
+      const controller = new AbortController();
+      controller.abort();
+      const server = dumpServer();
+      const { result } = await importAs(server.client, file, 'csv', {
+        signal: controller.signal,
+      });
+      expect(result).toMatchObject({ code: 'CANCELLED' });
+      expect(server.names()).toEqual([]);
     });
 
     it('an empty CSV file imports nothing, also with a mapping', async () => {
@@ -1142,6 +1188,18 @@ describe('BSON import', () => {
   });
 
   describe('importFile', () => {
+    it('an aborted signal cancels the import before any document is inserted', async () => {
+      const file = await dump('cancel.bson', dumpBytes());
+      const controller = new AbortController();
+      controller.abort();
+      const server = dumpServer();
+      const { result } = await importAs(server.client, file, 'bson', {
+        signal: controller.signal,
+      });
+      expect(result).toMatchObject({ code: 'CANCELLED' });
+      expect(server.names()).toEqual([]);
+    });
+
     it('without metadata inserts the documents exactly as dumped and nothing else', async () => {
       const file = await dump('orders.bson', dumpBytes());
       const server = dumpServer();

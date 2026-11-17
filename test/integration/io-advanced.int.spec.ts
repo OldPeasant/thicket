@@ -370,6 +370,68 @@ describe('CSV', () => {
     expect(await coll('bad_stop').countDocuments()).toBe(1);
   });
 
+  it('a CSV export of documents with mixed shapes previews and imports back', async () => {
+    // `a` is a scalar in one document and a nested document in the other: columns a and a.b.
+    await direct
+      .db(DB)
+      .collection<{ _id: Int32 } & Document>('mixed')
+      .insertMany([
+        { _id: new Int32(1), a: new Int32(5), n: 'x' },
+        { _id: new Int32(2), a: { b: new Int32(6) }, n: 'y' },
+      ]);
+    const file = path.join(dir, 'mixed.csv');
+    const exported = await exportTo(file, { coll: 'mixed', format: 'csv' });
+    expect(exported.error).toBeUndefined();
+    expect((await readFile(file, 'utf8')).split('\n')[0]).toBe('_id,a,n,a.b');
+
+    // The `a` column holds the nested document as Extended JSON text, `a.b` its field.
+    expect((await readFile(file, 'utf8')).split('\n')[2]).toBe('2,"{""b"":6}",y,6');
+
+    // Without a mapping the overlapping `a.b` column is left out (the first one wins), so the
+    // preview and the import work; `auto` keeps the nested document's text as a string.
+    const auto = await importFrom(file, 'csv', 'mixed_auto');
+    expect(auto.preview.csvColumns).toEqual(['_id', 'a', 'n', 'a.b']);
+    expect(auto.preview.sample).toHaveLength(2);
+    expect(auto.outcome.error).toBeUndefined();
+    expect(await canonicalDocs('mixed_auto')).toEqual([
+      '{"_id":{"$numberInt":"1"},"a":{"$numberInt":"5"},"n":"x"}',
+      '{"_id":{"$numberInt":"2"},"a":"{\\"b\\":6}","n":"y"}',
+    ]);
+
+    // Mapping `a` as Extended JSON gives both shapes back exactly.
+    const mapped = await importFrom(file, 'csv', 'mixed_mapped', {
+      csvMapping: [
+        { column: '_id', path: '_id', bsonType: 'int' },
+        { column: 'a', path: 'a', bsonType: 'json' },
+        { column: 'n', path: 'n', bsonType: 'string' },
+      ],
+    });
+    expect(mapped.outcome.error).toBeUndefined();
+    expect(await canonicalDocs('mixed_mapped')).toEqual(await canonicalDocs('mixed'));
+  });
+
+  it('imports the second of two equally named columns by its index', async () => {
+    const file = path.join(dir, 'repeated.csv');
+    await writeFile(file, 'id,name,name\n1,first,second\n');
+    const byIndex = await importFrom(file, 'csv', 'repeated', {
+      csvMapping: [
+        { column: 'id', path: '_id', bsonType: 'int' },
+        { column: 'name', index: 2, path: 'name', bsonType: 'string' },
+      ],
+    });
+    expect(byIndex.outcome.error).toBeUndefined();
+    expect(await canonicalDocs('repeated')).toEqual(['{"_id":{"$numberInt":"1"},"name":"second"}']);
+
+    const byName = await importFrom(file, 'csv', 'repeated_refused', {
+      csvMapping: [{ column: 'name', path: 'name', bsonType: 'string' }],
+    });
+    expect(byName.outcome.error).toMatchObject({
+      code: 'INVALID_PARAMS',
+      message: 'The file has more than one column "name": choose one by its index',
+    });
+    expect(await coll('repeated_refused').countDocuments()).toBe(0);
+  });
+
   it('refuses a mapping that names a column the file does not have', async () => {
     const file = path.join(dir, 'cols.csv');
     await writeFile(file, 'a,b\n1,2\n');

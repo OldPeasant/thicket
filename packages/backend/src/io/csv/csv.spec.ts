@@ -251,6 +251,27 @@ describe('CsvScanner', () => {
     it('a record of separators at the limit is still read', () => {
       expect(cells(scan(',,,,\n', 4))).toEqual([['', '', '', '', '']]);
     });
+
+    it('counts cell text and separators but not the quotes around a cell', () => {
+      // "ab","c" is ab + , + c = 4 characters of the record.
+      expect(cells(scan('"ab","c"\n', 4))).toEqual([['ab', 'c']]);
+      expect(() => scan('"ab","c"\n', 3)).toThrow(/Line 1: a record is longer than 3 characters/);
+    });
+
+    it('a line of separators fed in many small chunks hits the limit too', () => {
+      const scanner = new CsvScanner(10);
+      const feedAll = () => {
+        for (let i = 0; i < 100; i++) scanner.feed(',,,');
+      };
+      expect(feedAll).toThrow(/Line 1: a record is longer than 10 characters/);
+    });
+
+    it('the separator count starts anew with every record', () => {
+      expect(cells(scan(',,,,\n,,,,\n', 4))).toEqual([
+        ['', '', '', '', ''],
+        ['', '', '', '', ''],
+      ]);
+    });
   });
 });
 
