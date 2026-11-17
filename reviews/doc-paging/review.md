@@ -4,33 +4,44 @@ Date: 2026-11-17
 
 Task: doc-paging - M1: Paging inside documents
 
-Scope: committed task change `git diff f316c01..HEAD`, excluding `tasks/` and `reviews/` (34 files: backend `docs.find` slicing, contract, collection view/results, explorer pager, page/slice services, component and e2e tests, architecture notes). Uncommitted working-tree changes (new and modified spec files, apparently from the test-writer) are not part of this review.
+Scope: re-review of the final code. Committed task change `git diff a068f5479b252045ad88e3ec77956e565e3eb45c..52ba7e02b8830716c87ee3b506e5a136905d7319`, excluding `tasks/` and `reviews/` (47 files). The fix commits 158b959, 32bf828 and 52ba7e0 were checked in detail (`git diff a4191c8..HEAD`). The working tree was clean.
 
 Requirements:
-- tasks/doc-paging.md acceptance criteria and recorded assumptions
+- tasks/doc-paging.md acceptance criteria and the three recorded assumptions
 - SPEC.md "Paging inside a document"
-- docs/ARCHITECTURE.md "Paging inside documents" and conventions
+- docs/ARCHITECTURE.md "Paging inside documents"
 - AGENTS.md, docs/QUALITY.md
-- Parent instructions (design summary)
+- Previous review (CR-1..CR-6), reviews/doc-paging/fixes.md, reviews/doc-paging/tests.md
+- Parent instructions
 
 Git range:
 - Branch: main
-- HEAD: 3105a90
-- Base/start: f316c01455bdefa19e021cd70e0ff9106c3a3b8b
-- Commits reviewed: 4 (21e2923, 6e9a82e, 4079c19, 3105a90)
+- HEAD: 52ba7e02b8830716c87ee3b506e5a136905d7319
+- Base/start: a068f5479b252045ad88e3ec77956e565e3eb45c (`git merge-base HEAD origin/main`)
+- Commits reviewed: 8 (dc1bf2b, 670ffdb, 6539f25, ea897c5, a4191c8, 158b959, 32bf828, 52ba7e0)
 
 Commands run:
-- `git log --oneline f316c01..HEAD`, `git diff --stat` / `git diff f316c01..HEAD -- <paths>` -> 4 commits, 34 files
-- `npx vitest run packages/backend/src/docs/query/query.spec.ts` -> 106 passed
-- `cd packages/renderer && npx ng test --include src/app/explorer/doc-paging.spec.ts` -> 12 passed
-- `python tasks.py verify doc-paging` -> both criteria still unverified (no evidence recorded yet; the parent records it after review)
-- e2e (`test/e2e/doc-paging.e2e.ts`) read, not run by the reviewer
+- `git log --oneline origin/main..HEAD` -> 8 commits, all starting with "doc-paging:"
+- `git diff --stat a068f54..HEAD -- . ':!tasks' ':!reviews'` -> 47 files, +2773/-531
+- `git diff a4191c8..HEAD` (production and spec changes of the fix commits) -> read in full
+- `npx vitest run packages/backend/src/docs/query/query.spec.ts packages/contract/src/index.spec.ts` -> 2 files, 442 passed
+- `cd packages/renderer && npx ng test --include src/app/explorer/doc-paging.spec.ts --include src/app/collection/collection-view.spec.ts --include src/app/collection/collection-results.service.spec.ts --include src/app/document/document-actions.service.spec.ts --include src/app/document/table-editing.spec.ts --include src/app/explorer/services/array-slice.service.spec.ts --include src/app/explorer/services/page.service.spec.ts --include src/app/raw-editor/raw-editor-collection.spec.ts` -> 8 files, 225 passed
+- The reviewer did not re-run the e2e (`test/e2e/doc-paging.e2e.ts`; it needs a renderer/desktop build and the mongo8 container). tests.md records a run: 1 passed, the document opened in 227 ms, and the profiler showed the `$slice` reads `[100,100]`, `[39900,100]`, `[49900,100]`. The test file has not changed since the previous review, which found its design matches criterion 2.
 
 Acceptance criteria assessment:
-1. Component tests: `packages/renderer/src/app/explorer/doc-paging.spec.ts` covers a 2 000-item array with pager, first/prev/next/last, jump to page 7 (plus invalid and out-of-range input), and an edit on page 7 that survives paging away and back with the array intact. Met by the code; evidence still to be recorded.
-2. e2e: `test/e2e/doc-paging.e2e.ts` seeds a 50 000-item document (~2 MB, above the 1 MiB threshold), asserts the first page shows within 2 s, and uses the server profiler as the command log to assert exactly the `$slice` reads `[100,100]`, `[39900,100]`, `[49900,100]`. A server-side profiler is a reasonable "network log". The test design matches the criterion; evidence of a run still has to be recorded.
+1. Component tests: `doc-paging.spec.ts` covers a 2 000-item array with a pager, first/previous/next/last, jumping to a page (including invalid input), an edit on page 7 that survives paging away and back, and a new test that deletes the right item on page 7. They passed locally (in the run above). Met.
+2. e2e: the test design matches the criterion. The run is recorded by the test-writer (see above). The parent must record the evidence with `tasks.py verify`.
 
-Summary: 0 P0, 0 P1, 4 P2, 2 P3
+## Status of previous findings
+
+- CR-1 (sparse-array memo miss on the first page): **Resolved.** `ArraySliceService.page()` now caches in-memory windows per registered array (`inMemory` WeakMap, `array-slice.service.ts:73-89`), so `JsonTableComponent.arr` (`json-table.component.ts:240`) hits its memo on the loaded first page. A regression test is in `array-slice.service.spec.ts`. Unregistered arrays still get a new object each time, but they don't go through the sparse path, so this doesn't matter.
+- CR-2 (read-back after Save): **Resolved.** `readBack` asks `docs.get` with `sliceAbove` when `slicedOf(key)` reports cut arrays (`document-actions.service.ts:293-311`). It passes on the returned `sliced`, and keeps the previous `sliced` when the read-back fails. `patchDocument` stores the entry (`collection-results.service.ts:269-288`). Three view tests cover the successful cut read-back with paging afterwards, a small document read back whole, and a failed read-back that keeps the pager and the partial flag. A new edge case from this fix is CR-7.
+- CR-3 (cut arrays without `_id`): **Resolved.** `sliceLargeArrays` returns documents without `_id` unchanged (`query.ts:338`). A unit test covers it with and without an `{_id: 0}` projection.
+- CR-4 (missing wiring tests): **Resolved.** I checked the tests tests.md maps to each item: per-batch index and fromEnd in query.spec.ts, the batch-offset mapping across 3 batches and `slice` params in collection-results.service.spec.ts, `docs.getSlice` params in collection-view.spec.ts, the contract schema tests, and the new raw-editor partial test. All are present and passing.
+- CR-5 (inner page state never reset): **Resolved** for new result pages and re-run queries. `pageLoads` is bumped in `pageArrived` only, and `CollectionView` clears `PageService` in an effect (`collection-view.ts:333-339`). `PageService.clear()` resets live signals before forgetting them. The view test shows no extra `docs.getSlice` after a re-run. When a document is deleted from the page, the rows below still take over the row-indexed page state. Collapse state, which was there before this task, behaves the same way, so this is not reported.
+- CR-6 (refusal wording): **Resolved.** Without an active projection, Save now shows `PARTIAL_REFUSED` (`document-actions.service.ts:124-128, 340-344`). The optional "partly loaded" marker in the raw view and raw editor was not added. The previous review called it optional, so it is not reported again.
+
+Summary: 0 P0, 0 P1, 0 P2, 1 P3
 
 ## P0 Critical
 
@@ -42,59 +53,23 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | Sparse-array memo never hits on the loaded first page; every `arr` access rebuilds a total-length array**
-    - File: `packages/renderer/src/app/explorer/services/array-slice.service.ts:70` and `packages/renderer/src/app/explorer/json-table/json-table.component.ts:234-247`
-    - Category: Quality
-    - Problem: `ArraySliceService.page()` returns a new object (`{ items: arr.slice(start, end), error: null }`) on every call while the window lies within the loaded items. `JsonTableComponent.arr` memoises on `memo.page === page`, so on the first page (the page shown when a large document opens, and whenever the user returns to it) the memo always misses and `arr` allocates `new Array(total)` (50 000 slots in the e2e) and copies the loaded items again. The template reads `arr` many times per change detection (`arr[i]` per row and cell, `hasCell`, `cell`, `cellForceVisible` -> `arrForce`, `isArrayOfObjects`, `hasNonObjectItems`, `keyInfo`). Every rebuild also gives a new identity, so `keyMemo` and `arrForceMemo` miss as well, and `keyInfo` runs `for (const item of arr)` over all 50 000 slots, holes included.
-    - Why it matters: Change detection on the very view this task optimises costs on the order of hundreds of total-length allocations and scans per pass. It grows with the array's total length, not the page size. The e2e only measures the first render with two columns, so it does not catch this.
-    - Suggested fix: Cache the in-memory page in `ArraySliceService.page()` too (store it in `entry.pages` under its key, or memoise on `start`/`end`). Alternatively, memoise `arr` on `(loaded, start, end, page.items)` instead of the page object's identity.
-
-- [ ] **CR-2 | After Save the large document is read back whole, and a failed read-back marks the cut document as whole**
-    - File: `packages/renderer/src/app/collection/collection-results.service.ts:265-278` (with `packages/renderer/src/app/document/document-actions.service.ts:283-298`)
-    - Category: Correctness / Integration
-    - Problem: `patchDocument` assumes "the new version is the whole document" and clears `sliced[index]`. Two paths break that assumption:
-        - Read-back succeeds: `readBack` calls `docs.get` without `sliceAbove`, so saving any field of a 50 000-item document sends the whole ~2 MB document to the renderer. The arrays then lose their getSlice paging and become fully editable. This contradicts SPEC ("instead of sending the whole document") for every saved large document.
-        - Read-back fails: the catch shows `saved`, which is the cut document (100 items). Because `sliced[index]` is now `undefined`, the cut array is no longer registered or locked, `isPartial` turns false, and the UI presents a 100-item array as complete and editable. A later edit of that array is stopped only by the `$eq` conflict filter. The user then gets a confusing conflict instead of the read-only state.
-    - Why it matters: The large-document protection is lost after the first save, and the failure path shows truncated data as if it were complete.
-    - Suggested fix: Read back with `sliceAbove` (the same `nestedPageSize`) and carry the returned `sliced` into the page. Or keep `sliced[index]` when the read-back fails, or when the patched document still has the cut arrays. Add a test for both paths.
-
-- [ ] **CR-3 | Arrays are cut even when the renderer cannot page them (result without `_id`)**
-    - File: `packages/backend/src/docs/query/query.ts:328-352` and `packages/renderer/src/app/collection/collection-view.ts:446-452`
-    - Category: Correctness / Integration
-    - Problem: `sliceLargeArrays` cuts long top-level arrays regardless of whether the document carries `_id`. With a projection such as `{"_id": 0}`, `_id` is not mentioned for `items`, so the array is still cut. In the renderer, `documentKey(loaded)` is then `null`, so `treeOf` registers nothing. The explorer shows a plain 100-item array with no pager total, no slice note and no lock, as if it were the whole array. The raw view shows the same truncated data.
-    - Why it matters: Data is silently misrepresented: the user sees 100 of 50 000 items with nothing indicating truncation, and `docs.getSlice` (which needs `_id`) cannot recover the rest.
-    - Suggested fix: Do not cut documents without `_id` in `sliceLargeArrays` (simplest; `getSlice` cannot address them anyway). Or show a "partly loaded" marker in the renderer when `sliced` is set but no source can be registered. Add a test.
-
-- [ ] **CR-4 | No tests for the `docs.find` slice wiring between backend, contract and renderer**
-    - File: `packages/backend/src/docs/query/query.ts:372-389`, `packages/renderer/src/app/collection/collection-results.service.ts:359-372`, `packages/renderer/src/app/collection/collection-view.ts:262-269,436-473`, `packages/contract/src/docs.ts:41-48,91-102`
-    - Category: Tests
-    - Problem: The committed tests cover `sliceLargeArrays` alone, the explorer with a hand-registered `ArraySliceService`, and the e2e happy path. Nothing tests these parts:
-        - `streamFind` with `slice`: the per-chunk `index` with `batchSize`, the reverse/`fromEnd` path, and omitting `sliced` when nothing was cut.
-        - `CollectionResults`: mapping `sliced` across several stream batches (`docs.length + s.index`), `findParams` sending `slice`, and `patchDocument` keeping `sliced` aligned on delete.
-        - `CollectionView.treeOf` / `sliceSource`: registration and the `docs.getSlice` params.
-        - `isPartial`: feeding Save and the raw editor.
-        - The contract schemas: `slice` params and `sliced` batch entries (valid and invalid).
-    - Why it matters: These off-by-one and index-alignment paths are what the e2e (one document, one batch) cannot exercise. A regression would silently attach slices to the wrong document.
-    - Suggested fix: Add focused unit tests for the paths above. Uncommitted spec changes in the working tree, such as `collection-results.service.spec.ts`, may already cover part of this. Make sure they are committed and cover the batch-offset mapping.
+None.
 
 ## P3 Low
 
-- [ ] **CR-5 | Page state keyed by row index is never reset, so a new result page inherits the previous document's inner page**
-    - File: `packages/renderer/src/app/explorer/services/page.service.ts:9-39` (uids from `packages/renderer/src/app/collection/collection-view.html:368` and the table's `cellUid(i, k)`)
-    - Category: Correctness
-    - Problem: Keys are row-index based (`uid + '-' + $index`, `cellUid(i, 'items')`). `PageService.clear()` has no caller, and the collection view keeps one instance across result pages and query re-runs. After paging the result to the next documents, or re-running the query, row *i*'s array opens on the page the previous document in that row was on. For a large document this also fires a `docs.getSlice` immediately.
-    - Why it matters: The user sees an unexpected mid-array page on a different document, and an unnecessary server read happens.
-    - Suggested fix: Call `pages.clear()` when a new result page arrives (for example from `CollectionView` on `results.page()` changes), or key page state by document `_id` plus path.
+- [ ] **CR-7 | The read-back with `sliceAbove` cuts arrays with all-digit field names, which `docs.getSlice` cannot page**
+    - File: `packages/backend/src/docs/query/query.ts:524` (`getDocument`), reached through `packages/renderer/src/app/document/document-actions.service.ts:305`
+    - Category: Integration
+    - Problem: `sliceLargeArrays` (`docs.find`) skips top-level arrays whose field name is all digits, because `getSlice`'s `pathParts` refuses numeric components (`INVALID_PARAMS`). `getDocument` skips only names with `.` or a leading `$`. Since CR-2, saving a large document reads it back with `sliceAbove`. An array such as `"2024": [...]` with more than `above` items came whole and editable from `docs.find`, but after Save it comes back cut and is listed in `sliced`. `CollectionView.treeOf` then registers it, and every page past the first fails in `docs.getSlice` with `INVALID_PARAMS`. The array is also locked and read-only now. Before this task no renderer path called `docs.get` with `sliceAbove`, so this change is the first to reach this path.
+    - Why it matters: Field names that are all digits are rare. Where they occur, an array becomes unpageable and read-only after a plain Save, and it behaved differently before the Save.
+    - Suggested fix: Add the same `/^\d+$/` exclusion to `getDocument`'s slicing loop, matching `sliceLargeArrays`, and add a `getDocument` unit test for it. Alternatively, make `pathParts` accept numeric top-level names. The current restriction exists for array indexes, which do not apply to a top-level field.
 
-- [ ] **CR-6 | Large-document refusal and raw views are worded for projections only**
-    - File: `packages/renderer/src/app/document/document-actions.service.ts:323-325`
-    - Category: Quality
-    - Problem: When `partial` comes from cut arrays (no projection active), Save refuses with "with a projection active ... Clear the projection and edit again", which is wrong advice. The raw editor and raw view also show the cut array (first 100 items) with no marker that it is incomplete.
-    - Why it matters: Misleading guidance; the user cannot act on it.
-    - Suggested fix: Use a message that covers large documents ("this document was loaded partly ..."). Optionally, add a note in the raw editor/view when the document has cut arrays.
+## Notes for the parent (not findings)
+
+- The scope lines in tests.md and fixes.md name commit hashes from before the latest rebase (`2656cdb..2ce5939`, `eb68a3a`/`05b3a3f`). The code they describe matches the current HEAD by content. Under docs/QUALITY.md "Freshness" this is fine, but `quality.json`'s `reviewed_revision` must name the current hash.
 
 ## Review conclusion
 
-Material issues found; fix before completing the task.
+No material issues found.
 
-Both acceptance criteria are addressed by the committed tests (the component spec passes locally; the e2e design matches the criterion, and its run evidence must still be recorded with `tasks.py verify`). The P2 findings concern resilience and performance of the large-document path: the first-page memo miss (CR-1), the post-save read-back defeating slicing and losing the partial marker (CR-2), cut arrays that cannot be paged without `_id` (CR-3), and missing tests for the find/slice wiring (CR-4). They should be fixed or explicitly dispositioned before `done`.
+All six previous findings are resolved in the current code, and the focused backend, contract and renderer suites pass (442 and 225 tests). The only new finding, CR-7, is a low-priority edge case for field names that are all digits. It can be fixed now or recorded as a follow-up. Before `done`, the parent still has to record evidence for both criteria with `tasks.py verify`.
