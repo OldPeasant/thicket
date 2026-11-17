@@ -15,7 +15,8 @@ import {
  * Handlers of `docs.find` (streamed), `docs.count`, `docs.estimatedCount`, `docs.get` and
  * `docs.getSlice` on the profile's open connection (`NOT_CONNECTED` otherwise). A cancel of the
  * request (or of the find's stream) answers `CANCELLED` and kills the server operation and its
- * cursor. A find stream whose connection was closed (`conn.close`) meanwhile ends `CANCELLED`.
+ * cursor. `conn.close` cancels a running find stream the same way (it ends `CANCELLED`, its server
+ * operation is killed before the client closes).
  */
 export function docsQueryHandlers(manager: ConnectionManager): Record<string, Handler> {
   return {
@@ -26,7 +27,10 @@ export function docsQueryHandlers(manager: ConnectionManager): Record<string, Ha
       const built = buildFind(p);
       const streamId = c.openStream(async (sink) => {
         try {
-          return await streamFind(client, p, (batch) => sink.send(batch), sink.signal, built);
+          // `conn.close` aborts the find and waits for its cleanup (killOp/killCursors) first.
+          return await manager.cancelOnClose(p.profileId, client, sink.signal, (signal) =>
+            streamFind(client, p, (batch) => sink.send(batch), signal, built),
+          );
         } catch (error) {
           // `conn.close` cancels the profile's streams: whatever the closed client failed with.
           if (!isOpenClient(manager, p.profileId, client)) {

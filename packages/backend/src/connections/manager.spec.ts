@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { RpcError } from '../server/rpc';
 import { KnownHosts, type SshTunnel } from '../ssh';
 import {
+  CLOSE_CANCEL_GRACE_MS,
   ConnectionManager,
   isOpenClient,
   readServerInfo,
@@ -1744,5 +1745,289 @@ describe('ConnectionManager.configOf (task shell-backend)', () => {
       password: 'fictitious-rotated-Pw4',
     });
     await manager.close('p1');
+  });
+});
+
+describe('ConnectionManager.cancelOnClose', () => {
+  it('close aborts the running work and waits for it before closing the client', async () => {
+    const { manager, created } = setup();
+    await manager.open('p1', undefined);
+    const client = created[0]?.client as FakeClient;
+    const order: string[] = [];
+    client.close.mockImplementation(() => {
+      order.push('client closed');
+      return Promise.resolve();
+    });
+    const running = manager.cancelOnClose('p1', client, undefined, (signal) => {
+      return new Promise<number>((_, reject) => {
+        signal.addEventListener('abort', () => {
+          // The cleanup (killOp) still has the open client.
+          setTimeout(() => {
+            order.push('work cleaned up');
+            reject(new RpcError('CANCELLED', 'cancelled'));
+          }, 10);
+        });
+      });
+    });
+    running.catch(() => undefined);
+    await manager.close('p1');
+    expect(order).toEqual(['work cleaned up', 'client closed']);
+    await expect(running).rejects.toMatchObject({ code: 'CANCELLED' });
+  });
+
+  it('passes the caller signal through and returns the work result', async () => {
+    const { manager, created } = setup();
+    await manager.open('p1', undefined);
+    const client = created[0]?.client as FakeClient;
+    await expect(
+      manager.cancelOnClose('p1', client, undefined, () => Promise.resolve(7)),
+    ).resolves.toBe(7);
+    const caller = new AbortController();
+    let seen: AbortSignal | undefined;
+    const running = manager.cancelOnClose('p1', client, caller.signal, (signal) => {
+      seen = signal;
+      return new Promise((_, reject) =>
+        signal.addEventListener('abort', () => reject(new Error('aborted'))),
+      );
+    });
+    caller.abort();
+    await expect(running).rejects.toThrow('aborted');
+    expect(seen?.aborted).toBe(true);
+    // Finished work is not waited for by a later close.
+    await manager.close('p1');
+    expect(client.close).toHaveBeenCalledWith(true);
+  });
+
+  it('refuses work for a client that is not the open connection', async () => {
+    const { manager, created } = setup();
+    await manager.open('p1', undefined);
+    const client = created[0]?.client as FakeClient;
+    const work = vi.fn(() => Promise.resolve(1));
+    const error = await rejection(manager.cancelOnClose('p2', client, undefined, work));
+    expect(error).toMatchObject({ code: 'CANCELLED', message: 'The connection was closed' });
+    await manager.close('p1');
+    await rejection(manager.cancelOnClose('p1', client, undefined, work));
+    expect(work).not.toHaveBeenCalled();
+  });
+
+  it('closes the client after the grace time when the work does not settle', async () => {
+    vi.useFakeTimers();
+    try {
+      const { manager, created } = setup();
+      await manager.open('p1', undefined);
+      const client = created[0]?.client as FakeClient;
+      void manager.cancelOnClose(
+        'p1',
+        client,
+        undefined,
+        () => new Promise<never>(() => undefined),
+      );
+      const closing = manager.close('p1');
+      await vi.advanceTimersByTimeAsync(CLOSE_CANCEL_GRACE_MS - 1);
+      expect(client.close).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await closing;
+      expect(client.close).toHaveBeenCalledWith(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('ConnectionManager.cancelOnClose (edge cases)', () => {
+  /** A work whose cleanup after an abort finishes (rejects CANCELLED) only once `release` runs. */
+  function slowCleanupWork(order: string[], label: string) {
+    const cleanup = deferred();
+    const work = (signal: AbortSignal) =>
+      new Promise<never>((_, reject) => {
+        signal.addEventListener('abort', () => {
+          void cleanup.promise.then(() => {
+            order.push(`${label} cleaned up`);
+            reject(new RpcError('CANCELLED', 'The operation was cancelled'));
+          });
+        });
+      });
+    return { work, release: () => cleanup.resolve() };
+  }
+
+  /** Lets pending promise callbacks and short timers run. */
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+  it('a work that throws synchronously rejects with its error and is not waited for by close', async () => {
+    vi.useFakeTimers();
+    try {
+      const { manager, created } = setup();
+      await manager.open('p1', undefined);
+      const client = created[0]?.client as FakeClient;
+      const boom = new Error('synchronous boom');
+      const work = vi.fn((): Promise<never> => {
+        throw boom;
+      });
+      await expect(manager.cancelOnClose('p1', client, undefined, work)).rejects.toBe(boom);
+      expect(work).toHaveBeenCalledTimes(1);
+      // No timer advanced: close does not wait for a grace time.
+      await manager.close('p1');
+      expect(client.close).toHaveBeenCalledWith(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a caller signal that is already aborted gives the work an aborted signal', async () => {
+    const { manager, created } = setup();
+    await manager.open('p1', undefined);
+    const client = created[0]?.client as FakeClient;
+    const caller = new AbortController();
+    caller.abort();
+    let seen: boolean | undefined;
+    await expect(
+      manager.cancelOnClose('p1', client, caller.signal, (signal) => {
+        seen = signal.aborted;
+        return Promise.resolve('ran');
+      }),
+    ).resolves.toBe('ran');
+    expect(seen).toBe(true);
+    await manager.close('p1');
+  });
+
+  it('a caller abort after the work settled no longer reaches the work signal', async () => {
+    const { manager, created } = setup();
+    await manager.open('p1', undefined);
+    const client = created[0]?.client as FakeClient;
+    const caller = new AbortController();
+    let seen: AbortSignal | undefined;
+    await manager.cancelOnClose('p1', client, caller.signal, (signal) => {
+      seen = signal;
+      return Promise.resolve(1);
+    });
+    caller.abort();
+    expect(seen?.aborted).toBe(false);
+    await manager.close('p1');
+  });
+
+  it('close waits for a work the caller aborted already while its cleanup still runs', async () => {
+    const { manager, created } = setup();
+    await manager.open('p1', undefined);
+    const client = created[0]?.client as FakeClient;
+    const order: string[] = [];
+    client.close.mockImplementation(() => {
+      order.push('client closed');
+      return Promise.resolve();
+    });
+    const caller = new AbortController();
+    const slow = slowCleanupWork(order, 'work');
+    const running = manager.cancelOnClose('p1', client, caller.signal, slow.work);
+    running.catch(() => undefined);
+    caller.abort();
+    const closing = manager.close('p1');
+    await settle();
+    // The cleanup has not finished: the client is still open.
+    expect(client.close).not.toHaveBeenCalled();
+    slow.release();
+    await closing;
+    expect(order).toEqual(['work cleaned up', 'client closed']);
+    await expect(running).rejects.toMatchObject({ code: 'CANCELLED' });
+  });
+
+  it('close cancels every running work of the profile and waits for all of them', async () => {
+    const { manager, created } = setup();
+    await manager.open('p1', undefined);
+    const client = created[0]?.client as FakeClient;
+    const order: string[] = [];
+    client.close.mockImplementation(() => {
+      order.push('client closed');
+      return Promise.resolve();
+    });
+    const a = slowCleanupWork(order, 'a');
+    const b = slowCleanupWork(order, 'b');
+    const runA = manager.cancelOnClose('p1', client, undefined, a.work);
+    const runB = manager.cancelOnClose('p1', client, undefined, b.work);
+    runA.catch(() => undefined);
+    runB.catch(() => undefined);
+    const closing = manager.close('p1');
+    b.release();
+    await settle();
+    expect(client.close).not.toHaveBeenCalled();
+    a.release();
+    await closing;
+    expect(order).toEqual(['b cleaned up', 'a cleaned up', 'client closed']);
+    await expect(runA).rejects.toMatchObject({ code: 'CANCELLED' });
+    await expect(runB).rejects.toMatchObject({ code: 'CANCELLED' });
+  });
+
+  it('closing one profile does not cancel the work of another', async () => {
+    const { manager, created } = setup();
+    await manager.open('p1', undefined);
+    await manager.open('p2', undefined);
+    const client2 = created[1]?.client as FakeClient;
+    let aborted = false;
+    const finish = deferred<string>();
+    const running = manager.cancelOnClose('p2', client2, undefined, (signal) => {
+      signal.addEventListener('abort', () => (aborted = true));
+      return finish.promise;
+    });
+    await manager.close('p1');
+    expect(aborted).toBe(false);
+    expect(client2.close).not.toHaveBeenCalled();
+    finish.resolve('done');
+    await expect(running).resolves.toBe('done');
+    await manager.close('p2');
+  });
+
+  it('closeAll cancels the running work before closing the clients', async () => {
+    const { manager, created } = setup();
+    await manager.open('p1', undefined);
+    const client = created[0]?.client as FakeClient;
+    const order: string[] = [];
+    client.close.mockImplementation(() => {
+      order.push('client closed');
+      return Promise.resolve();
+    });
+    const slow = slowCleanupWork(order, 'work');
+    const running = manager.cancelOnClose('p1', client, undefined, slow.work);
+    running.catch(() => undefined);
+    const closing = manager.closeAll();
+    slow.release();
+    await closing;
+    expect(order).toEqual(['work cleaned up', 'client closed']);
+  });
+
+  it('refuses work while the profile is still connecting', async () => {
+    const connecting = deferred();
+    const client = fakeClient(() => connecting.promise);
+    const { manager } = setup({ clients: [client] });
+    const opening = manager.open('p1', undefined);
+    await vi.waitFor(() => expect(client.connect).toHaveBeenCalled());
+    const work = vi.fn(() => Promise.resolve(1));
+    const error = await rejection(manager.cancelOnClose('p1', client, undefined, work));
+    expect(error).toMatchObject({ code: 'CANCELLED', message: 'The connection was closed' });
+    expect(work).not.toHaveBeenCalled();
+    connecting.resolve();
+    await opening;
+    await manager.close('p1');
+  });
+
+  it('a work that settles after the grace time still answers its own outcome', async () => {
+    vi.useFakeTimers();
+    try {
+      const { manager, created } = setup();
+      await manager.open('p1', undefined);
+      const client = created[0]?.client as FakeClient;
+      const late = deferred<never>();
+      const running = manager.cancelOnClose('p1', client, undefined, () => late.promise);
+      running.catch(() => undefined);
+      const closing = manager.close('p1');
+      await vi.advanceTimersByTimeAsync(CLOSE_CANCEL_GRACE_MS);
+      await closing;
+      expect(client.close).toHaveBeenCalledWith(true);
+      late.reject(new Error('Topology is closed'));
+      await expect(running).rejects.toThrow('Topology is closed');
+      // The profile opens and closes again without waiting for the old work.
+      await manager.open('p1', undefined);
+      await manager.close('p1');
+      expect(created[1]?.client.close).toHaveBeenCalledWith(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
