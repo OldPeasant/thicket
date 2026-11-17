@@ -27,6 +27,20 @@ extraResources:
 
 artifactName: thicket-${version}-${os}-${arch}.${ext}
 
+# Electron fuses (@electron/fuses, flipped in the packaged binary before signing): the shipped
+# executable cannot be turned into a plain Node runtime (ELECTRON_RUN_AS_NODE, NODE_OPTIONS,
+# --inspect) and only runs the app.asar next to it. The backend runs in a utilityProcess, which
+# needs none of these. Asar integrity validation works on macOS and Windows (electron-builder
+# writes the hash into Info.plist / the exe resources); Linux ignores that fuse. With
+# --inspect off, Playwright's Electron driver cannot attach to a packaged build: the smoke test
+# (scripts/smoke-packaged.mjs) uses the Chromium DevTools protocol of the renderer instead.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  onlyLoadAppFromAsar: true
+  enableEmbeddedAsarIntegrityValidation: true
+
 linux:
   target: [AppImage, deb, rpm]
   category: Development

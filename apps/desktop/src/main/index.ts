@@ -4,8 +4,8 @@
  *
  * Environment:
  * - `THICKET_DEV_SERVER`: load the renderer from this URL (the `ng serve` origin) instead.
- * - `THICKET_RENDERER_DIR`: folder of the built renderer (default `packages/renderer/dist`, or
- *   `resources/renderer` in a packaged app).
+ * - `THICKET_RENDERER_DIR`: folder of the built renderer (default `packages/renderer/dist`).
+ *   A packaged app ignores both and serves `resources/renderer` (`rendererSource`).
  * - `THICKET_USER_DATA`: use this folder as Electron's `userData` (settings.json ...), for tests.
  */
 import { fromMainPort, serve } from '@thicket/backend';
@@ -46,18 +46,18 @@ import {
   resolveAppFile,
   withCspHeader,
 } from './security';
+import { rendererSource } from './renderer-source';
 import { openWindow } from './window';
 
 const log = (message: string) => console.log(`[main] ${message}`);
 
 const distDir = __dirname;
-const devServer = process.env['THICKET_DEV_SERVER'] || undefined;
-// Packaged (electron-builder): the renderer is an extra resource next to app.asar.
-const rendererDir =
-  process.env['THICKET_RENDERER_DIR'] ||
-  (app.isPackaged
-    ? path.join(process.resourcesPath, 'renderer')
-    : path.resolve(distDir, '..', '..', '..', 'packages', 'renderer', 'dist'));
+const { devServer, rendererDir } = rendererSource({
+  packaged: app.isPackaged,
+  env: process.env,
+  resourcesPath: process.resourcesPath,
+  distDir,
+});
 const csp = contentSecurityPolicy(devServer);
 
 const userDataOverride = process.env['THICKET_USER_DATA'];

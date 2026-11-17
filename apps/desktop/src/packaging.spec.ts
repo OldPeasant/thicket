@@ -5,7 +5,7 @@
  * (see docs/ARCHITECTURE.md "Packaging").
  */
 import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { crc32, inflateSync } from 'node:zlib';
 
@@ -13,6 +13,8 @@ import { getConfig, validateConfiguration } from 'app-builder-lib/out/util/confi
 import { DebugLogger } from 'builder-util';
 import type { Configuration, FileSet, TargetConfiguration } from 'electron-builder';
 import { beforeAll, describe, expect, it } from 'vitest';
+
+import { rendererSource } from './main/renderer-source';
 
 const desktopDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repoDir = resolve(desktopDir, '..', '..');
@@ -125,8 +127,14 @@ describe('electron-builder.yml', () => {
     expect(resolve(desktopDir, renderer?.from ?? '')).toBe(
       resolve(repoDir, 'packages', 'renderer', 'dist'),
     );
-    const main = readFileSync(resolve(desktopDir, 'src', 'main', 'index.ts'), 'utf8');
-    expect(main).toContain("path.join(process.resourcesPath, 'renderer')");
+    const resourcesPath = resolve('/opt/Thicket/resources');
+    const packaged = rendererSource({
+      packaged: true,
+      env: {},
+      resourcesPath,
+      distDir: desktopDir,
+    });
+    expect(packaged.rendererDir).toBe(join(resourcesPath, renderer?.to ?? ''));
   });
 
   it('rebuilds native modules for Electron and unpacks them from the asar', () => {
@@ -136,6 +144,18 @@ describe('electron-builder.yml', () => {
 
   it('names artifacts thicket-<version>-<os>-<arch>.<ext>', () => {
     expect(config.artifactName).toBe('thicket-${version}-${os}-${arch}.${ext}');
+  });
+
+  it('flips the Electron fuses: no Node mode, NODE_OPTIONS or --inspect; asar only, validated', () => {
+    expect(config.electronFuses).toEqual({
+      runAsNode: false,
+      enableNodeOptionsEnvironmentVariable: false,
+      enableNodeCliInspectArguments: false,
+      onlyLoadAppFromAsar: true,
+      enableEmbeddedAsarIntegrityValidation: true,
+    });
+    // Fuses only apply to an asar app (electron-builder's default, which must not be turned off).
+    expect(config.asar).not.toBe(false);
   });
 });
 

@@ -29,6 +29,7 @@
     "dist:dir": "npm run build -w @thicket/renderer && node scripts/build.mjs && electron-builder --config electron-builder.yml --publish never --dir"
   },
   "devDependencies": {
+    "@electron/fuses": "^1.8.0",
     "@thicket/backend": "0.0.0",
     "@thicket/contract": "0.0.0",
     "@thicket/core": "0.0.0",
