@@ -416,16 +416,22 @@ export class SidebarTree {
           run: () => this.tree.openShell(id),
         },
         {
+          id: 'watch',
+          label: 'Watch changes',
+          disabled: !connected,
+          run: () => this.tree.openWatch(id),
+        },
+        {
           id: 'current-ops',
           label: 'Current operations',
           disabled: !connected,
           run: () => this.tree.openCurrentOps(id),
         },
         {
-          id: 'watch',
-          label: 'Watch changes',
+          id: 'server-stats',
+          label: 'Server stats',
           disabled: !connected,
-          run: () => this.tree.openWatch(id),
+          run: () => this.tree.openServerStats(id),
         },
         {
           id: 'create-db',

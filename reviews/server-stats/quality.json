@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "task": "server-stats",
+  "reviewed_revision": "e48cc2d641a802702124b300f6ad4b39bc7b7af5",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/server-stats/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/server-stats/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/server-stats/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "capture.mjs drops $-named fields like the backend; $clusterTime removed from repl-set-status fixture; regression test in server-stats.model.spec.ts"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "showPoint comment no longer claims keyboard support"},
+    {"id": "TW-1", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "unused formatRate removed from ServerStatsView"}
+  ],
+  "validation": [
+    {"command": "npm run test:int -- server-stats", "result": "pass"},
+    {"command": "npm run test:e2e -- server-stats", "result": "pass"},
+    {"command": "npx vitest run packages/backend/src/admin/stats", "result": "pass"},
+    {"command": "cd packages/renderer && npx ng test --include='src/app/admin/stats/**/*.spec.ts'", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}

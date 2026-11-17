@@ -677,6 +677,27 @@ Contract layout (`packages/contract/src/`):
   through `WriteGuard.run` with `alwaysConfirm`, then reads again. `currentop.model.ts` reduces
   the EJSON entries. e2e: `test/e2e/currentop.e2e.ts`.
 
+## Server stats (`packages/renderer/src/app/admin/stats`, backend `src/admin/stats`)
+- Tab kind `serverstats`, id `serverStatsTabId(profileId)`, data `ServerStatsTabData`
+  (`profileId`); opened by "Server stats" (`menu-server-stats`) in the sidebar's connection menu
+  (`SidebarTreeService.openServerStats`).
+- Backend `admin.serverStatus`: `serverStatus` on `admin` (the connection's default server).
+  Fields named `$…` are left out at any depth (`metrics.operatorCounters.match.$regex`, …):
+  canonical EJSON would read `{"$regex": …}` back as a regular expression and fail.
+  `admin.replSetStatus`: `replSetGetStatus`; `status: null` on a standalone
+  (`NoReplicationEnabled`) or mongos (`CommandNotFound`), other refusals are errors.
+  `dbStats` is `db.stats`. Int tests `test/integration/server-stats.int.spec.ts`.
+- Renderer: `serverStatus` + `replSetStatus` every 1/2/5/10 s (default 2) or never, the next read
+  after the previous answer. `server-stats.model.ts` (pure) reduces a sample, turns two samples
+  into per-second rates over the `uptimeMillis` difference and keeps 120 points (a restart, i.e.
+  counters going back, or another host starts over). Charts (`StatsChart`, inline SVG, one axis,
+  hover tooltip, legend with the latest value): operations/s by type, connections, resident
+  memory, network bytes/s; series colors are the validated categorical palette in
+  `stats-chart.css`. Replica set members with state (icon + word), lag behind the primary, ping,
+  sync source. `dbStats` of every database (`db.listDatabases`, 4 `db.stats` at a time) on open
+  and on "Reload", not live. Component tests use recorded `serverStatus`/`replSetGetStatus`
+  (`fixtures/*.json`, `fixtures/capture.mjs`).
+
 ## Watch changes (`packages/renderer/src/app/watch`, backend `src/admin/watch`)
 - Tab kind `watch`, id `watchTabId(profileId, db?, coll?)`, data `WatchTabData` (`profileId`,
   `db?`, `coll?`; no `db` = the whole deployment); opened by "Watch changes" in the sidebar's

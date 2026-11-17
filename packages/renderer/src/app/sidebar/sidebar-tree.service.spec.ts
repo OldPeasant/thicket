@@ -979,6 +979,35 @@ describe('SidebarTreeService', () => {
       });
     });
 
+    it('openServerStats opens the server stats tab of a connection with the production flag', () => {
+      tree.openServerStats('prod');
+      expect(ws.active()).toEqual({
+        id: 'serverstats:prod',
+        kind: 'serverstats',
+        title: 'Server stats',
+        detail: 'Profile prod',
+        production: true,
+        data: { profileId: 'prod' },
+      });
+    });
+
+    it('openServerStats twice selects the existing tab; another connection gets its own tab', () => {
+      tree.openServerStats('p1');
+      tree.openServerStats('p2');
+      tree.openServerStats('p1');
+      expect(ws.tabs().map((t) => t.id)).toEqual(['serverstats:p1', 'serverstats:p2']);
+      expect(ws.active()?.id).toBe('serverstats:p1');
+    });
+
+    it('openServerStats of an unknown profile falls back to its id', () => {
+      tree.openServerStats('gone');
+      expect(ws.active()).toMatchObject({
+        id: 'serverstats:gone',
+        detail: 'gone',
+        production: false,
+      });
+    });
+
     it('openWatch opens the change-stream tab of a deployment with the production flag', () => {
       tree.openWatch('prod');
       expect(ws.active()).toEqual({

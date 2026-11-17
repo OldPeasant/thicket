@@ -1,0 +1,401 @@
+{
+  "host": "6fd415c26bce",
+  "version": "8.2.12",
+  "process": "mongod",
+  "pid": {
+    "$numberLong": "1"
+  },
+  "uptime": {
+    "$numberInt": "23"
+  },
+  "uptimeMillis": {
+    "$numberLong": "22451"
+  },
+  "localTime": {
+    "$date": {
+      "$numberLong": "1794897901273"
+    }
+  },
+  "asserts": {
+    "regular": {
+      "$numberInt": "0"
+    },
+    "warning": {
+      "$numberInt": "0"
+    },
+    "msg": {
+      "$numberInt": "0"
+    },
+    "user": {
+      "$numberInt": "112"
+    },
+    "tripwire": {
+      "$numberInt": "0"
+    },
+    "rollovers": {
+      "$numberInt": "0"
+    }
+  },
+  "connections": {
+    "current": {
+      "$numberInt": "2"
+    },
+    "available": {
+      "$numberInt": "209713"
+    },
+    "totalCreated": {
+      "$numberInt": "2"
+    },
+    "rejected": {
+      "$numberInt": "0"
+    },
+    "active": {
+      "$numberInt": "1"
+    },
+    "queuedForEstablishment": {
+      "$numberLong": "0"
+    },
+    "establishmentRateLimit": {
+      "rejected": {
+        "$numberLong": "0"
+      },
+      "exempted": {
+        "$numberLong": "0"
+      },
+      "interruptedDueToClientDisconnect": {
+        "$numberLong": "0"
+      }
+    },
+    "threaded": {
+      "$numberInt": "2"
+    },
+    "exhaustIsMaster": {
+      "$numberLong": "0"
+    },
+    "exhaustHello": {
+      "$numberLong": "0"
+    },
+    "awaitingTopologyChanges": {
+      "$numberLong": "0"
+    },
+    "loadBalanced": {
+      "$numberLong": "0"
+    }
+  },
+  "mem": {
+    "bits": {
+      "$numberInt": "64"
+    },
+    "resident": {
+      "$numberInt": "225"
+    },
+    "virtual": {
+      "$numberInt": "3957"
+    },
+    "supported": true,
+    "secureAllocByteCount": {
+      "$numberInt": "0"
+    },
+    "secureAllocBytesInPages": {
+      "$numberInt": "0"
+    }
+  },
+  "network": {
+    "bytesIn": {
+      "$numberLong": "1560"
+    },
+    "bytesOut": {
+      "$numberLong": "2459"
+    },
+    "physicalBytesIn": {
+      "$numberLong": "1560"
+    },
+    "physicalBytesOut": {
+      "$numberLong": "2459"
+    },
+    "egress": {
+      "bytesIn": {
+        "$numberLong": "0"
+      },
+      "bytesOut": {
+        "$numberLong": "0"
+      },
+      "physicalBytesIn": {
+        "$numberLong": "0"
+      },
+      "physicalBytesOut": {
+        "$numberLong": "0"
+      },
+      "numRequests": {
+        "$numberLong": "0"
+      }
+    },
+    "numSlowDNSOperations": {
+      "$numberLong": "0"
+    },
+    "numSlowSSLOperations": {
+      "$numberLong": "0"
+    },
+    "numRequests": {
+      "$numberLong": "6"
+    },
+    "tcpFastOpen": {
+      "kernelSetting": {
+        "$numberLong": "1"
+      },
+      "serverSupported": false,
+      "clientSupported": false,
+      "accepted": {
+        "$numberLong": "0"
+      }
+    },
+    "compression": {
+      "snappy": {
+        "compressor": {
+          "bytesIn": {
+            "$numberLong": "0"
+          },
+          "bytesOut": {
+            "$numberLong": "0"
+          }
+        },
+        "decompressor": {
+          "bytesIn": {
+            "$numberLong": "0"
+          },
+          "bytesOut": {
+            "$numberLong": "0"
+          }
+        }
+      },
+      "zstd": {
+        "compressor": {
+          "bytesIn": {
+            "$numberLong": "0"
+          },
+          "bytesOut": {
+            "$numberLong": "0"
+          }
+        },
+        "decompressor": {
+          "bytesIn": {
+            "$numberLong": "0"
+          },
+          "bytesOut": {
+            "$numberLong": "0"
+          }
+        }
+      },
+      "zlib": {
+        "compressor": {
+          "bytesIn": {
+            "$numberLong": "0"
+          },
+          "bytesOut": {
+            "$numberLong": "0"
+          }
+        },
+        "decompressor": {
+          "bytesIn": {
+            "$numberLong": "0"
+          },
+          "bytesOut": {
+            "$numberLong": "0"
+          }
+        }
+      }
+    },
+    "ingressRequestRateLimiter": {
+      "rejectedAdmissions": {
+        "$numberLong": "0"
+      },
+      "successfulAdmissions": {
+        "$numberLong": "6"
+      },
+      "exemptedAdmissions": {
+        "$numberLong": "0"
+      },
+      "attemptedAdmissions": {
+        "$numberLong": "6"
+      },
+      "totalAvailableTokens": {
+        "$numberLong": "9223372036854776000"
+      }
+    },
+    "serviceExecutors": {
+      "passthrough": {
+        "threadsRunning": {
+          "$numberInt": "2"
+        },
+        "clientsInTotal": {
+          "$numberInt": "2"
+        },
+        "clientsRunning": {
+          "$numberInt": "2"
+        },
+        "clientsWaitingForData": {
+          "$numberInt": "0"
+        }
+      },
+      "inline": {
+        "threadsRunning": {
+          "$numberInt": "0"
+        },
+        "clientsInTotal": {
+          "$numberInt": "0"
+        },
+        "clientsRunning": {
+          "$numberInt": "0"
+        },
+        "clientsWaitingForData": {
+          "$numberInt": "0"
+        }
+      }
+    },
+    "listenerProcessingTime": {
+      "durationMicros": {
+        "$numberLong": "433"
+      }
+    },
+    "connsRejectedDueToMaxPendingProxyProtocolHeader": {
+      "$numberLong": "0"
+    }
+  },
+  "opcounters": {
+    "insert": {
+      "$numberLong": "2"
+    },
+    "query": {
+      "$numberLong": "23"
+    },
+    "update": {
+      "$numberLong": "0"
+    },
+    "delete": {
+      "$numberLong": "0"
+    },
+    "getmore": {
+      "$numberLong": "0"
+    },
+    "command": {
+      "$numberLong": "10"
+    }
+  },
+  "opcountersRepl": {
+    "insert": {
+      "$numberLong": "0"
+    },
+    "query": {
+      "$numberLong": "0"
+    },
+    "update": {
+      "$numberLong": "0"
+    },
+    "delete": {
+      "$numberLong": "0"
+    },
+    "getmore": {
+      "$numberLong": "0"
+    },
+    "command": {
+      "$numberLong": "0"
+    }
+  },
+  "repl": {
+    "topologyVersion": {
+      "processId": {
+        "$oid": "6afbf7d60511c15ed4f09289"
+      },
+      "counter": {
+        "$numberLong": "6"
+      }
+    },
+    "hosts": ["localhost:27017"],
+    "setName": "rs0",
+    "setVersion": {
+      "$numberInt": "1"
+    },
+    "isWritablePrimary": true,
+    "secondary": false,
+    "primary": "localhost:27017",
+    "me": "localhost:27017",
+    "electionId": {
+      "$oid": "7fffffff0000000000000001"
+    },
+    "lastWrite": {
+      "opTime": {
+        "ts": {
+          "$timestamp": {
+            "t": 1794897901,
+            "i": 17
+          }
+        },
+        "t": {
+          "$numberLong": "1"
+        }
+      },
+      "lastWriteDate": {
+        "$date": {
+          "$numberLong": "1794897901000"
+        }
+      },
+      "majorityOpTime": {
+        "ts": {
+          "$timestamp": {
+            "t": 1794897901,
+            "i": 17
+          }
+        },
+        "t": {
+          "$numberLong": "1"
+        }
+      },
+      "majorityWriteDate": {
+        "$date": {
+          "$numberLong": "1794897901000"
+        }
+      }
+    },
+    "primaryOnlyServices": {},
+    "rbid": {
+      "$numberInt": "1"
+    },
+    "userWriteBlockMode": {
+      "$numberInt": "1"
+    },
+    "userWriteBlockReason": {
+      "$numberInt": "0"
+    },
+    "userWriteBlockModeCounters": {
+      "Unspecified": {
+        "$numberInt": "0"
+      },
+      "ClusterToClusterMigrationInProgress": {
+        "$numberInt": "0"
+      },
+      "DiskUseThresholdExceeded": {
+        "$numberInt": "0"
+      }
+    }
+  },
+  "storageEngine": {
+    "name": "wiredTiger",
+    "supportsCommittedReads": true,
+    "oldestRequiredTimestampForCrashRecovery": {
+      "$timestamp": {
+        "t": 1794897901,
+        "i": 1
+      }
+    },
+    "dropPendingIdents": {
+      "$numberLong": "0"
+    },
+    "supportsSnapshotReadConcern": true,
+    "readOnly": false,
+    "persistent": true,
+    "backupCursorOpen": false
+  },
+  "ok": {
+    "$numberInt": "1"
+  }
+}
