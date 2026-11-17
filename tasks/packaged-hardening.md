@@ -13,7 +13,8 @@ defaults, so `ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS` and loading code outside the
 `THICKET_DEV_SERVER` / `THICKET_RENDERER_DIR` still change what a packaged app loads.
 
 ## Acceptance criteria
-- [ ] `electronFuses` in electron-builder.yml: RunAsNode off, EnableNodeOptionsEnvironmentVariable off, OnlyLoadAppFromAsar on, EnableEmbeddedAsarIntegrityValidation where supported; decide on EnableNodeCliInspectArguments (the Playwright smoke test `scripts/smoke-packaged.mjs` needs inspect — keep it working or replace it)
+- [x] `electronFuses` in electron-builder.yml: RunAsNode off, EnableNodeOptionsEnvironmentVariable off, OnlyLoadAppFromAsar on, EnableEmbeddedAsarIntegrityValidation where supported; decide on EnableNodeCliInspectArguments (the Playwright smoke test `scripts/smoke-packaged.mjs` needs inspect — keep it working or replace it)
+  - verified (2026-11-17 06:08+0100 by dell26/agent-3): apps/desktop/electron-builder.yml electronFuses: runAsNode false, enableNodeOptionsEnvironmentVariable false, enableNodeCliInspectArguments false (decision: off; smoke-packaged.mjs rewritten to attach via CDP --remote-debugging-port), onlyLoadAppFromAsar true, enableEmbeddedAsarIntegrityValidation true (mac/win; Linux ignores). npm run dist:dir -w apps/desktop -> 'executing @electron/fuses'; smoke fuse-wire read of release/linux-unpacked/thicket -> RunAsNode/EnableNodeOptionsEnvironmentVariable/EnableNodeCliInspectArguments DISABLE, OnlyLoadAppFromAsar/EnableEmbeddedAsarIntegrityValidation ENABLE; packaging.spec.ts asserts the config (npm run check -> pass)
 - [ ] Packaged app ignores THICKET_DEV_SERVER and THICKET_RENDERER_DIR (tests/test-only overrides only in dev)
 - [ ] `npm run dist:dir -w apps/desktop` + `node scripts/smoke-packaged.mjs release/linux-unpacked/thicket` -> smoke OK; `ELECTRON_RUN_AS_NODE=1 release/linux-unpacked/thicket -e 1` does not run Node
 
