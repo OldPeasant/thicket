@@ -756,4 +756,57 @@ describe('CollectionView', () => {
     expect(fake.requestsFor('io.previewImport')).toHaveLength(0);
     expect(fake.requestsFor('io.import')).toHaveLength(0);
   });
+
+  it('exports the applied query; a second click on Export… closes the panel', async () => {
+    type('query-filter', '{ status: "open" }');
+    click('query-run');
+    await settle();
+    click('io-export');
+    await settle();
+    expect(q('io-export')?.getAttribute('aria-pressed')).toBe('true');
+    expect(q('export-command')?.textContent).toContain('db.orders.find({ status: "open" })');
+
+    click('io-export');
+    await settle();
+    expect(q('export-panel')).toBeNull();
+    expect(q('io-export')?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  /** Opens the import panel, chooses a file and imports it into `coll`; the stream ends at once. */
+  const importInto = async (coll: string) => {
+    fake.respond('io.previewImport', {
+      fileToken: 'tok-1',
+      fileName: 'orders-sample.json',
+      sizeBytes: 64,
+      sample: docs(1, 2),
+    });
+    fake.handle('io.import', () => {
+      setTimeout(() => {
+        fake.data('io.import', 'imp1', { processed: 2, failed: 0, errors: [] });
+        fake.end('imp1');
+      });
+      return { streamId: 'imp1' };
+    });
+    fake.respond('coll.list', { collections: [] });
+    click('io-import');
+    await settle();
+    click('import-choose');
+    await settle();
+    type('import-coll', coll);
+    click('import-start');
+    await settle();
+    expect(q('import-status')?.getAttribute('data-phase')).toBe('done');
+  };
+
+  it('an import into the tab collection shows the new documents (the query runs again)', async () => {
+    await importInto('orders');
+    expect(finds()).toHaveLength(2);
+    expect(lastFind()).toMatchObject({ coll: 'orders', filter: '{}' });
+    expect(lastFind()['skip'] ?? 0).toBe(0);
+  });
+
+  it('an import into another collection leaves the shown page alone', async () => {
+    await importInto('orders_copy');
+    expect(finds()).toHaveLength(1);
+  });
 });
