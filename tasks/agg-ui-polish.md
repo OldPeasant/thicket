@@ -11,7 +11,8 @@ lease_until: 2026-11-17T04:09:35Z
 Follow-ups from the agg-ui review (reviews/agg-ui/review.md CR-8, CR-9).
 
 ## Acceptance criteria
-- [ ] Component test: the per-stage preview live region names its stage ("Stage N: …") and stays silent while loading (CR-8)
+- [x] Component test: the per-stage preview live region names its stage ("Stage N: …") and stays silent while loading (CR-8)
+  - verified (2026-11-17 04:53+0100 by felix/agent-2): cd packages/renderer && npx ng test --include src/app/aggregation/aggregation-view.spec.ts -> 104 passed; live-region tests assert 'Stage N: <count> from a sample' / 'Stage N: preview failed: …' and empty text while loading (incl. 3-stage reload with out-of-order answers)
 - [ ] Component test: no agg.preview requests are sent while the builder is in full-text mode, and returning to stage mode does not re-preview stages whose pipeline prefix did not change (CR-9)
 
 ## Notes
