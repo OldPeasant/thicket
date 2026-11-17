@@ -347,6 +347,52 @@ describe('Operation cancel with a driver cursor', () => {
     ]);
   });
 
+  it.each([
+    ['first batch', 0],
+    ['getMore', 1],
+  ])(
+    'cancel during the %s, close() at once: the cursor is closed only after the batch settles',
+    async (_name, pendingCall) => {
+      const pending = deferred<Step>();
+      const client = profileClient(killable, (i) =>
+        i < pendingCall ? ready({ docs: docs(1), more: true }) : pending.promise,
+      );
+      const controller = new AbortController();
+      const op = new Operation(client, 'shop', 'orders', controller.signal);
+      const fetching = op.open({ find: 'orders' });
+      if (pendingCall === 0) {
+        await vi.waitFor(() => expect(client.cursors[0]?.calls).toContain('hasNext'));
+      } else {
+        await fetching;
+      }
+      const batch = pendingCall === 0 ? fetching : op.more();
+      await vi.waitFor(() =>
+        expect(client.cursors[0]?.calls.filter((c) => c === 'hasNext')).toHaveLength(
+          pendingCall + 1,
+        ),
+      );
+      controller.abort();
+      expect((await rejection(batch)).code).toBe('CANCELLED');
+      await vi.waitFor(() => expect(commandsOf(client)).toContain('killOp'));
+
+      // The caller closes the operation at once: the cursor must not be closed under the
+      // pending batch (the driver would end its session and skip killCursors, leaking it).
+      let closed = false;
+      const closing = op.close().then(() => {
+        closed = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(closed).toBe(false);
+      expect(client.cursors[0]?.calls).not.toContain('close');
+
+      pending.resolve({ docs: docs(2), more: true });
+      await closing;
+      expect(client.cursors).toHaveLength(1);
+      expect(client.cursors[0]?.calls.filter((c) => c === 'close')).toHaveLength(1);
+      expect(client.cursors[0]?.calls.at(-1)).toBe('close');
+    },
+  );
+
   it('cancel during a getMore that then fails still closes the cursor', async () => {
     const second = deferred<Step>();
     const client = profileClient(killable, (i) =>
