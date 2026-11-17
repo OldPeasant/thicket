@@ -247,6 +247,20 @@ describe('windowOpenHandler: update notice release link', () => {
     await vi.waitFor(() => expect(log).toHaveBeenCalledWith(expect.stringContaining('no browser')));
   });
 
+  it('opens nothing for non-tag release URLs, http or a path escaping /releases/tag/ (test-writer)', () => {
+    const openExternal = vi.fn(() => Promise.resolve());
+    for (const url of [
+      'https://github.com/OldPeasant/thicket/releases/latest',
+      'https://github.com/OldPeasant/thicket/releases/tag/../download/v1.0.0/Thicket.exe',
+      'http://github.com/OldPeasant/thicket/releases/tag/v1.0.0',
+      'https://user@github.com/OldPeasant/thicket/releases/tag/v1.0.0',
+      'not a url',
+    ]) {
+      expect(windowOpenHandler(url, openExternal)).toEqual({ action: 'deny' });
+    }
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
   it('a browser failure without a log is swallowed (test-writer)', async () => {
     let rejected = false;
     const openExternal = () => {

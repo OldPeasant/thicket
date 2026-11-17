@@ -187,6 +187,22 @@ describe('UpdateChecker edge cases (test-writer)', () => {
     ...extra,
   });
 
+  it('skips a release whose html_url is not a tag page and reports the newest one that is', async () => {
+    const download = 'https://github.com/OldPeasant/thicket/releases/download/v0.5.0/Thicket.exe';
+    const body = [
+      entry('v0.5.0', { html_url: download }),
+      entry('v0.4.0', { html_url: 'https://github.com/OldPeasant/thicket/releases/latest' }),
+      entry('v0.3.0'),
+    ];
+    const result = await checker('0.2.0', recorded(body)).instance.check();
+    expect(result).toEqual({
+      current: '0.2.0',
+      latest: '0.3.0',
+      updateAvailable: true,
+      url: page('v0.3.0'),
+    });
+  });
+
   it('picks the newest stable release by version, not by list order or text order', async () => {
     const body = [entry('v0.9.0'), entry('v0.10.0'), entry('v0.2.0')];
     const result = await checker('0.9.0', recorded(body)).instance.check();
