@@ -18,9 +18,9 @@
   ],
   "notes": "Post-merge re-run: test-writer found no production bugs and added 7 tests (watch handler registration in backend.spec.ts, watch tab view in app.spec.ts, malformed change events in watch.model.spec.ts); code-reviewer reviewed merge resolutions and the added tests at b5e20dde. Fixer not required for the re-run (no actionable findings).",
   "validation": [
-    {"command": "npx vitest run --config test/integration/vitest.config.ts test/integration/change-streams.int.spec.ts (Podman, mongo8rs + mongo8), re-run by test-writer at 5182f3c9", "result": "pass (10 passed)"},
-    {"command": "cd packages/renderer && npx ng test --include='src/app/app.spec.ts' --include='src/app/watch/**/*.spec.ts' (at b5e20dde)", "result": "pass (41 passed)"},
-    {"command": "npx vitest run packages/backend/src/server/backend.spec.ts (at b5e20dde)", "result": "pass (58 passed)"},
+    {"command": "npx vitest run --config test/integration/vitest.config.ts test/integration/change-streams.int.spec.ts (Podman, mongo8rs + mongo8), re-run by test-writer at 5182f3c9 -> 10 passed", "result": "pass"},
+    {"command": "cd packages/renderer && npx ng test --include='src/app/app.spec.ts' --include='src/app/watch/**/*.spec.ts' (at b5e20dde) -> 41 passed", "result": "pass"},
+    {"command": "npx vitest run packages/backend/src/server/backend.spec.ts (at b5e20dde) -> 58 passed", "result": "pass"},
     {"command": "npm run check at b5e20dde", "result": "pass"}
   ]
 }
