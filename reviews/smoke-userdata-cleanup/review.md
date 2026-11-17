@@ -4,32 +4,33 @@ Date: 2026-11-17
 
 Task: smoke-userdata-cleanup - Release: Linux smoke test fails removing the app's user-data folder
 
-Scope: `git diff e98271ff..78a8fd70 -- test/` (the whole task: `test/e2e/harness/processes.ts` (new), `test/e2e/harness/fixtures.ts`, `test/e2e/smoke/installer.smoke.ts`, `test/e2e/smoke/processes.smoke.ts` (new)). This is the second review round. The first round reviewed the harness change only, at an earlier, pre-rebase revision. Uncommitted edits to `processes.smoke.ts` in the working tree (a test-writer is still working on it) are out of scope.
+Scope: `git diff 350bcb6684121196d4a7f5324d27f92b6b4de3b7..d32f1c59 -- test/`. This covers the whole task: `test/e2e/harness/processes.ts` (new), `test/e2e/harness/fixtures.ts`, `test/e2e/smoke/installer.smoke.ts` and `test/e2e/smoke/processes.smoke.ts` (new). This is the third review round. It checks the second round's CR-2 and reviews the final code again in full. Only committed code is reviewed. The working tree was clean at the time of review.
 
 Requirements:
 - tasks/smoke-userdata-cleanup.md (goal and acceptance criteria)
 - AGENTS.md (OS-neutral code and tests, no timing-dependent asserts, `.taskcheck` must finish)
 - docs/ARCHITECTURE.md and the existing harness conventions
-- reviews/smoke-userdata-cleanup/fixes.md (the fix for CR-1/TW-1)
+- reviews/smoke-userdata-cleanup/review.md (second round) and fixes.md
 
 Git range:
 - Branch: main
-- HEAD: 78a8fd70c102b75adbb492071ea4c8afe6238397
-- Base/start: e98271ff8ff39f87dc57dd94fc4a10c95e12ff35
-- Commits reviewed: 3 (e6b6e616, 621690b5, 78a8fd70)
+- HEAD: d32f1c59e5c011a446aea7aa6baa0c18f4dc90c2
+- Base/start: 350bcb6684121196d4a7f5324d27f92b6b4de3b7
+- Commits reviewed: 5 (4039e23b, df2f71f6, 4fc52fc1, 0986e8a8, d32f1c59). 0986e8a8 changes only `reviews/`. The code changes are in the other four.
 
-Summary: 0 P0, 0 P1, 0 P2, 1 P3
+Summary: 0 P0, 0 P1, 0 P2, 0 P3
 
-## Status of the first-round finding
+## Status of the second-round finding
 
-- **CR-1 (first round) | `endProcessTree` never signalled a non-detached POSIX child: resolved in 78a8fd70.**
-  On POSIX, when no process group with the child's pid exists, `endProcessTree` now handles the child on its own (`processes.ts:78-88`). It returns at once if the child has already exited. Otherwise it sends SIGTERM if `terminate` is set, waits up to `graceMs`, then sends SIGKILL and waits up to 5 s more. Checks:
-    - Correctness: the early `exited(child)` return is safe. A group leader stays a group member until it is reaped, even as a zombie. libuv reaps it with `waitpid` and runs Node's `onexit` callback, which sets `exitCode`/`signalCode`, in the same native call, so no JavaScript runs in between. "Group not alive and child not marked exited" therefore means the child is still running outside its own group.
-    - Detached path: nothing changed except the order of checks. In the old code, a group that was already empty went through `waitForProcessGroupExit` (immediate) and `waitForExit` (immediate, because the leader had been reaped). The new branch returns at the same point. When the group is alive, the code still runs SIGTERM to the group, waits for the group, sends SIGKILL after `graceMs`, and waits for the child.
-    - Teardown hang: every wait in the new branch has a limit (`graceMs` + 5 s). The harness fixture (`terminate: false`) and the smoke fixture both still stay well inside the 60 s test timeout.
-    - Windows: the `win32` branch is unchanged and comes before the new code.
-    - The JSDoc and the `signalGroup` catch comment now describe the real behaviour, so the misleading comment is gone.
-    - Regression test: `processes.smoke.ts:259` ("ends a running child that was not detached") runs on every OS. On POSIX it would have failed before the fix: the child would still be running after the 5 s wait. It now passes.
+- **CR-2 (second round) | The SIGKILL escalation for a non-detached child had no test. Resolved in d32f1c59.**
+  d32f1c59 adds the describe block "endProcessTree with a child that leads no process group (POSIX)" (`processes.smoke.ts:220-313`). It contains five tests:
+    - **SIGTERM path:** the child exits from its SIGTERM handler (`exitCode === 0`) and the `sigterm` marker exists.
+    - **SIGKILL escalation:** a child ignores SIGTERM. With `graceMs: 300`, the test asserts that the `sigterm` marker exists and that `signalCode === 'SIGKILL'`. This exercises `processes.ts:83-86`. If the code returned after the first wait, the child would still be running with `signalCode === null` and the test would fail.
+    - **`terminate: false` with a stuck child:** the test asserts SIGKILL and no `sigterm` marker.
+    - **`terminate: false` with a child that exits by itself within `graceMs`:** the test asserts `exitCode === 4` and `signalCode === null`, so the child was waited for and not killed.
+    - **Child that has already exited:** the test wraps `child.kill` and asserts that no signal is sent.
+
+  `startLoneChild` waits for a `ready` file. The child writes that file only after it installs its SIGTERM handler, so the handler cannot race with startup. The helper also asserts the precondition: `processGroupAlive(pid)` is `false` for the non-detached child, so the new branch is actually the one under test. The block is skipped on Windows, with the reason given in the skip.
 
 ## P0 Critical
 
@@ -45,23 +46,27 @@ None.
 
 ## P3 Low
 
-- [ ] **CR-2 | The SIGKILL escalation of the new non-detached branch has no test**
-    - File: `test/e2e/harness/processes.ts:83` (tests: `test/e2e/smoke/processes.smoke.ts:247-299`)
-    - Category: Tests
-    - Problem: The only non-detached test uses a child that SIGTERM ends, so lines 83-86 (wait `graceMs`, then SIGKILL) never run. The same is true of `terminate: false` with a non-detached child. Both "terminate: false kills a child still running after graceMs" and the SIGKILL group test use detached children on POSIX.
-    - Why it matters: This escalation is what keeps a stuck non-detached child from leaking. A regression there, such as returning after the first wait, would go unnoticed.
-    - Suggested fix: Add a POSIX case that spawns a non-detached child which ignores SIGTERM (`process.on('SIGTERM', () => undefined)`). Call `endProcessTree(child, { graceMs: 300 })` and assert `child.signalCode === 'SIGKILL'`. Run it with `terminate: false` too if that is cheap.
+None.
 
 ## Notes (verified, no finding)
 
-- Root cause: unchanged since the first round and still correct. The old `killTree` resolved on the AppImage runtime's `exit`, which happens about 1 ms after SIGTERM. `endProcessTree` instead polls `kill(-pgid, 0)` until the group is empty, and `removeAppDir` adds `rm` retries (`maxRetries: 10`, `retryDelay: 200`) as a second line of defence. In both fixtures, the folder fixture is torn down after the app fixture that depends on it.
-- Test quality (`processes.smoke.ts`, committed revision):
-    - Readiness is awaited, not slept. The tests poll a pid file that is written atomically with tmp and rename, and wait for the `spawn` and `exit` events. The child installs its SIGTERM handler before it spawns the grandchild, and the grandchild installs its handler before it writes its pid file. So "SIGTERM was sent" and "ignored SIGTERM" cannot race with startup.
-    - Timing only appears as margins, never as the expected result. The 500 ms linger and the 300 ms `graceMs` stay far below the 10 s default and the 5 s SIGKILL wait. In the "still writing" `rm` test, the writer stops after 2 s at most, and `removeAppDir` keeps retrying for about 11 s. The asserts check outcomes (marker files, `signalCode`, pid and group liveness), not durations.
-    - Leaks: `afterEach` SIGKILLs the child's group, the child and the grandchild, and removes every temp folder with retries, even when an assert fails.
-    - OS-neutrality: paths use `path.join` and `os.tmpdir()`. The process-group tests are skipped on Windows with a reason, and the any-OS tests choose `detached` by platform.
-- The cleanups call `process.kill` with SIGKILL on pids whose processes may already have exited. In theory the pid could have been reused within milliseconds. This is not reported as a finding, because sequential pid allocation makes it practically impossible inside a test's lifetime.
-- Not run by this reviewer: the working tree holds uncommitted test-writer edits to `processes.smoke.ts`, so a local run would not test the committed revision. Validation evidence comes from fixes.md (`processes.smoke.ts` + `installed-app.smoke.ts`: 44 passed; `npm run check` passed). Acceptance criteria #1 and #3 must still be recorded with `tasks.py verify` by the parent worker. #2 is already skipped with a reason.
+- **Root cause and fix**, checked again on the final code:
+    - The old `killTree` in `installer.smoke.ts` resolved on the AppImage runtime's `exit`. That event fires about 1 ms after SIGTERM, while Electron and its helpers in the same process group keep writing into userData.
+    - `endProcessTree` (`processes.ts:61-97`) waits until `kill(-pgid, 0)` reports the group empty. It escalates to SIGKILL after `graceMs`, and every wait has a limit (`graceMs` + 5 s + 5 s).
+    - `removeAppDir` adds `rm` retries (`maxRetries: 10`, `retryDelay: 200`) as the second line of defence the task asks for.
+    - Teardown order is correct in both fixtures. The folder fixture is torn down after the app fixture that depends on it, and the comments at `fixtures.ts:65` and `installer.smoke.ts:72` say so.
+    - The harness fixture (`fixtures.ts:99-101`) calls `endProcessTree(app.process(), { terminate: false })` after `app.close()`. This matches the task's "check `test/e2e/harness` for the same pattern". Playwright's `_electron.launch` spawns the app detached on POSIX, so the group wait applies there.
+- **Windows:** the `win32` branch of `endProcessTree` keeps the old `taskkill /T /F` behaviour. It adds a bounded `waitForExit` and a SIGKILL fallback, and the `taskkill` spawn has an `error` listener. The removed `killTree` had no such listener.
+- **OS-neutrality:** the tests build paths with `path.join` and `os.tmpdir()`, and POSIX-only blocks are skipped on Windows with a reason. The "any OS" tests choose `detached` by platform.
+- **Timing:** the asserts check outcomes (marker files, `exitCode`/`signalCode`, pid and group liveness), never durations. Both "SIGTERM was sent first" tests (the group variant and the new lone-child one) assume that the child's SIGTERM handler writes its marker within the 300 ms `graceMs`. That is a margin, not the measured result. The handler is a single synchronous `writeFileSync`, and the second round already accepted the same pattern for the group test. So this is not reported as a finding.
+- **Cleanup:** `afterEach` SIGKILLs every spawned child (and its group, if the child was detached) and every grandchild, and removes every temp folder with retries, even when an assert fails.
+- **Reviewer run:** `npx playwright test -c test/e2e/smoke/playwright.config.ts processes.smoke.ts --output=/tmp/cr-final --repeat-each 3` at d32f1c59 (Linux) gave 60 passed (24.7 s).
+- **Not run by this reviewer:**
+    - ESLint. The permission to run it was denied.
+    - `npm run check`.
+    - The AppImage smoke runs.
+
+  The parent worker must record acceptance criterion #3 (`npm run check`) with `tasks.py verify`. #1 is already verified, and #2 is already skipped with a reason. The macOS and Windows CI results for `wip/smoke-userdata-cleanup` were not checked here.
 
 ## Review conclusion
 

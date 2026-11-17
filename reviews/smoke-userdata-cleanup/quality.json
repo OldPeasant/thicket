@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "task": "smoke-userdata-cleanup",
+  "reviewed_revision": "e1e4c755ef7fad370c6440382df62d3cbddfe309",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/smoke-userdata-cleanup/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/smoke-userdata-cleanup/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/smoke-userdata-cleanup/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "endProcessTree never signalled a non-detached POSIX child; fixed by fixer in 40c8596e"},
+    {"id": "TW-1", "source": "test-writer", "severity": "P3", "disposition": "fixed",
+     "note": "same issue as CR-1 (failing test 'ends a running child that was not detached'); fixed in 40c8596e"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "SIGKILL escalation for a non-detached child had no test; tests added in e1e4c755, confirmed by the final review"}
+  ],
+  "validation": [
+    {"command": "npx playwright test -c test/e2e/smoke/playwright.config.ts processes.smoke.ts installed-app.smoke.ts --repeat-each=3", "result": "pass"},
+    {"command": "npm run lint", "result": "pass"},
+    {"command": "npx tsc -p tsconfig.json", "result": "pass"},
+    {"command": "npm run check (.taskcheck)", "result": "pass"}
+  ]
+}
