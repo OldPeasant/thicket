@@ -18,6 +18,7 @@ import {
   parseResult,
   profile,
   profileDraft,
+  roleRef,
   request,
   response,
   route,
@@ -251,6 +252,63 @@ const SAMPLES: { [M in MethodName]: { valid: ParamsOf<M>; invalid: unknown } } =
     valid: { profileId: P, db: 'admin', builtin: true },
     invalid: { profileId: P, db: 'admin', builtin: 'no' },
   },
+  'admin.createUser': {
+    valid: {
+      profileId: P,
+      db: 'shop',
+      user: 'carl',
+      password: 'pw',
+      roles: [{ role: 'read', db: 'shop' }],
+      customData: '{"team":"ops"}',
+    },
+    invalid: { profileId: P, db: 'shop', user: 'carl', password: 'pw', roles: ['read'] },
+  },
+  'admin.updateUser': {
+    valid: { profileId: P, db: 'shop', user: 'carl', roles: [], confirmed: true },
+    invalid: { profileId: P, db: 'shop', user: '' },
+  },
+  'admin.dropUser': {
+    valid: { profileId: P, db: 'shop', user: 'carl' },
+    invalid: { profileId: P, db: 'shop' },
+  },
+  'admin.createRole': {
+    valid: { profileId: P, db: 'shop', role: 'clerk', privileges: '[]', roles: [] },
+    invalid: { profileId: P, db: 'shop', role: 'clerk', privileges: [], roles: [] },
+  },
+  'admin.updateRole': {
+    valid: { profileId: P, db: 'shop', role: 'clerk', privileges: '[]' },
+    invalid: { profileId: P, db: 'shop', role: 'clerk', roles: [{ role: 'read' }] },
+  },
+  'admin.dropRole': {
+    valid: { profileId: P, db: 'shop', role: 'clerk' },
+    invalid: { profileId: P, db: 'shop', role: '' },
+  },
+  'admin.grantRoles': {
+    valid: {
+      profileId: P,
+      db: 'shop',
+      kind: 'user',
+      name: 'carl',
+      roles: [{ role: 'read', db: 'shop' }],
+    },
+    invalid: { profileId: P, db: 'shop', kind: 'user', name: 'carl', roles: [] },
+  },
+  'admin.revokeRoles': {
+    valid: {
+      profileId: P,
+      db: 'shop',
+      kind: 'role',
+      name: 'clerk',
+      roles: [{ role: 'read', db: 'shop' }],
+    },
+    invalid: {
+      profileId: P,
+      db: 'shop',
+      kind: 'group',
+      name: 'x',
+      roles: [{ role: 'read', db: 'shop' }],
+    },
+  },
   'admin.serverStatus': { valid: { profileId: P }, invalid: {} },
   'admin.replSetStatus': { valid: { profileId: P }, invalid: { profileId: P, all: true } },
   'admin.watch': {
@@ -345,6 +403,14 @@ const EXPECTED_WRITES = [
   'gridfs.upload',
   'gridfs.delete',
   'admin.killOp',
+  'admin.createUser',
+  'admin.updateUser',
+  'admin.dropUser',
+  'admin.createRole',
+  'admin.updateRole',
+  'admin.dropRole',
+  'admin.grantRoles',
+  'admin.revokeRoles',
 ].sort();
 
 const table: Record<string, MethodDef> = methods;
@@ -576,7 +642,8 @@ function walk(
   out: Finding[],
   local = false,
 ): void {
-  if (schema === profileDraft || schema === profile) local = true;
+  // Role references (`{ role, db }`) are names, not server documents.
+  if (schema === profileDraft || schema === profile || schema === roleRef) local = true;
   const isDoc = docField && !local;
   const kind = ejsonSchemas.get(schema);
   if (kind) {
