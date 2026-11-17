@@ -128,6 +128,16 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   something, broadcasts `app.settings.changed` (payload `SettingsChanged`) to every window through
   `Broadcaster` (`src/main/broadcast.ts`) on the window's main port. `THICKET_USER_DATA` overrides
   Electron's `userData` folder (tests).
+- Update notice (`src/update/`, `UpdateChecker`, contract `app.checkForUpdate`, routed to main):
+  main asks `api.github.com/repos/OldPeasant/thicket/releases` and reports the newest release that
+  is neither a draft, flagged pre-release nor has a pre-release tag; only `html_url`s below
+  `https://github.com/OldPeasant/thicket/releases/` are used. Failures (offline, timeout, HTTP
+  error, odd body) are silent (logged, "no update"); successes are cached for 1 h. With the
+  `checkForUpdates` setting off no request is made; an unpackaged app (dev, tests, version 0.0.0)
+  doesn't check unless `THICKET_UPDATE_CHECK=1`. The window-open handler opens exactly those
+  release pages with `shell.openExternal` (and still denies the window). The renderer's
+  `UpdateNoticeService` (`app/update/`) checks at start and every 24 h while the setting is on
+  and shows `UpdateNotice`, a non-modal card in the shell.
 - Query history (`src/history/`, `HistoryStore`, contract `history.*`, routed to main):
   `userData/history/<sha-256 of [profileId, db, coll]>.json` per collection (`{ version: 1,
   profileId, db, coll, entries: [{ query, at }] }`, newest first, at most `HISTORY_LIMIT` = 50;

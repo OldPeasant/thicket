@@ -25,6 +25,7 @@ import { ConfirmDialog } from '../safety/confirm-dialog';
 import { SidebarTree } from '../sidebar/sidebar-tree';
 import { SidebarTreeService } from '../sidebar/sidebar-tree.service';
 import { ConfirmService } from '../safety/confirm.service';
+import { UpdateNotice } from '../update/update-notice';
 import { SidebarWidthService } from './sidebar-width.service';
 import { StatusBar } from './status-bar';
 import { StatusService, type StatusConnection } from './status.service';
@@ -58,6 +59,7 @@ export const SIDEBAR_KEY_STEP = 16;
     SidebarTree,
     StatusBar,
     TabBar,
+    UpdateNotice,
   ],
   host: {
     '[style.--sidebar-width.px]': 'sidebar.width()',
@@ -121,6 +123,7 @@ export const SIDEBAR_KEY_STEP = 16;
       [connection]="tabConnection()"
       [attr.inert]="modal() ? '' : null"
     />
+    <app-update-notice [attr.inert]="modal() ? '' : null" />
     <app-confirm-dialog />
     <app-host-key-dialog />
     <app-oidc-sign-in [attr.inert]="modal() ? '' : null" />
