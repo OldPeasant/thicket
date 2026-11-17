@@ -609,6 +609,23 @@ Contract layout (`packages/contract/src/`):
   not first, collation with a text or 2d key, …) next to the field; Cancel is disabled while a
   create runs; a live preview shows the `createIndex(…)` call. e2e: `test/e2e/indexes.e2e.ts`.
 
+## Explain plan viewer (`packages/renderer/src/app/explain`)
+- **Explain** on the collection query bar (`query-explain`: the parsed query bar as an
+  `agg.explain` find) and in the aggregation builder (`agg-explain`: the enabled stages; a pipeline
+  with `$out`/`$merge` only with `queryPlanner`) opens `ExplainPanel` (`app-explain-panel`) under
+  the bar; it asks `agg.explain` (backend default `executionStats`) again for each Explain, aborting
+  the previous request.
+- `explain.model.ts` (pure): `summarizeExplain(canonical EJSON)` → stage tree (output on top,
+  scans as leaves), totals (returned, keys/docs examined, time), indexes used, COLLSCAN flag.
+  Classic (`executionStats.executionStages`), slot-based (`explainVersion` 2: tree from
+  `winningPlan.queryPlan`, numbers of the outermost SBE stage with the same `planNodeId`),
+  aggregate `stages` (a chain with `$cursor` holding the query tree) and sharded outputs.
+- `ExplainPlan` shows the verdict, totals and tree (flow bar per stage: examined vs returned);
+  "Raw output" shows the explain document in the explorer (`ExplainRaw`, read-only, own explorer
+  services). Fixtures captured from mongo 8.2 with `explain/fixtures/capture.mjs`. e2e:
+  `test/e2e/explain.e2e.ts` (demo step 9; the index is created with `idx.create` until the Indexes
+  tab exists).
+
 ## Write safety in the renderer (`packages/renderer/src/app/safety`)
 - Every write UI sends writes through `WriteGuard.run(method, params, options)` (or `approve()`,
   which returns the params to send, e.g. for `agg.run` with `$out` over `ApiService.stream`).
