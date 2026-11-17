@@ -597,6 +597,75 @@ describe('Editing documents in a collection tab', () => {
       expect(updates()).toHaveLength(1);
     });
 
+    it('hides Overwrite and Merge for a document edited under a projection cleared since', async () => {
+      const projection = get<HTMLInputElement>('query-projection');
+      projection.value = '{ total: 1, qty: 1 }';
+      projection.dispatchEvent(new Event('input'));
+      await click('query-run');
+      await typeInto(0, 'total', '15');
+      // The projection is cleared and the query run again; the unsaved edit survives.
+      projection.value = '';
+      projection.dispatchEvent(new Event('input'));
+      await click('query-run');
+      expect(fake.requestsFor('docs.find').at(-1)?.params).not.toHaveProperty('projection');
+      expect(text('edit-count')).toBe('1 change');
+      fake.fail('docs.update', {
+        code: 'CONFLICT',
+        message: 'x',
+        detail: { current: orderText(1, 99, 1) },
+      });
+      await click('edit-save');
+      expect(text('conflict-title')).toBe('Changed on the server since you loaded it');
+      expect(text('conflict-note')).toMatch(/^Overwrite and Merge manually are not available/);
+      expect(q('conflict-overwrite')).toBeNull();
+      expect(q('conflict-merge')).toBeNull();
+      expect(button('conflict-keep-server').disabled).toBe(false);
+    });
+
+    // TW-2 through the UI: edited under a dotted projection, then a top-level projection is run.
+    it('never unsets a sub-field hidden when the document was edited, after a top-level projection is run', async () => {
+      const withAddr = (total: number, addr: string) =>
+        `{"_id":{"$numberInt":"1"},"total":{"$numberInt":"${total}"},"addr":${addr}}`;
+      let page = withAddr(10, '{"city":"Bonn"}');
+      let streams = 100;
+      fake.handle('docs.find', () => {
+        const id = `s${++streams}`;
+        setTimeout(() => {
+          fake.data('docs.find', id, { docs: [page] });
+          fake.end(id, { delivered: 1 });
+        });
+        return { streamId: id };
+      });
+      const projection = get<HTMLInputElement>('query-projection');
+      projection.value = '{ total: 1, "addr.city": 1 }';
+      projection.dispatchEvent(new Event('input'));
+      await click('query-run');
+      await typeInto(0, 'total', '15');
+      // A top-level projection: the server now returns the whole addr; the unsaved edit stays.
+      page = withAddr(10, '{"city":"Bonn","street":"Hauptstr. 1"}');
+      projection.value = '{ total: 1, addr: 1 }';
+      projection.dispatchEvent(new Event('input'));
+      await click('query-run');
+      expect(text('edit-count')).toBe('1 change');
+      fake.fail('docs.update', {
+        code: 'CONFLICT',
+        message: 'x',
+        detail: { current: withAddr(99, '{"city":"Bonn","street":"Hauptstr. 1"}') },
+      });
+      await click('edit-save');
+      fake.respond('docs.update', { modified: true });
+      expect(text('conflict-title')).toBe('Changed on the server since you loaded it');
+      const overwrite = q<HTMLButtonElement>('conflict-overwrite');
+      if (overwrite !== null) {
+        overwrite.click();
+        await settle();
+      }
+      // Either Overwrite is not offered, or it leaves addr.street alone.
+      for (const update of updates().slice(1)) {
+        expect(String(update['update'])).not.toContain('street');
+      }
+    });
+
     it('with a projection shows the whole server version once every edit was undone', async () => {
       const projection = get<HTMLInputElement>('query-projection');
       projection.value = '{ total: 1, qty: 1 }';
