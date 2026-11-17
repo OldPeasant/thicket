@@ -8,7 +8,7 @@ import {
   parseEJsonDocument,
   stringifyEJson,
 } from '@thicket/core/bson';
-import type { DocumentDiff } from '@thicket/core/diff';
+import { bsonEquals, type DocumentDiff } from '@thicket/core/diff';
 import { printShellSyntax } from '@thicket/core/shellsyntax';
 
 import { ApiError, ApiService, describeError } from '../api';
@@ -163,6 +163,91 @@ export class DocumentActions {
     this.edits.discardAll();
     this.conflictMap.set(new Map());
     this.messageState.set(null);
+  }
+
+  /**
+   * Conflict "Overwrite": writes the local version over the server's current version. It is
+   * saved as the diff from the server version with that version's values as the conflict check,
+   * so a newer server change conflicts again. A document deleted on the server is inserted again.
+   */
+  async overwrite(key: string): Promise<boolean> {
+    const entry = this.edits.get(key);
+    if (entry === undefined) return false;
+    return this.resolveWith(key, entry.current);
+  }
+
+  /**
+   * Conflict "Merge manually": saves `merged` (edited from both versions) over the server's
+   * current version, with the same conflict check as `overwrite`. It must keep the `_id`.
+   */
+  async saveMerged(key: string, merged: BsonDocument): Promise<boolean> {
+    const conflict = this.conflictMap().get(key);
+    if (conflict === undefined || conflict.current === null) return false;
+    const id = idOf(conflict.current);
+    const mergedId = idOf(merged);
+    if (id === null || mergedId === null || !bsonEquals(id, mergedId)) {
+      this.messageState.set({
+        kind: 'error',
+        text: 'Not saved: the merged document must keep the _id of the document.',
+      });
+      return false;
+    }
+    return this.resolveWith(key, merged);
+  }
+
+  /**
+   * Conflict "Keep server version": discards the local edits and shows the server's current
+   * version (read again, with the query's projection).
+   */
+  async keepServer(key: string): Promise<void> {
+    const conflict = this.conflictMap().get(key);
+    if (conflict === undefined) return;
+    this.edits.discard(key);
+    this.dropConflict(key);
+    this.messageState.set({
+      kind: 'info',
+      text: 'Kept the server version; your edits are discarded.',
+    });
+    if (conflict.current === null) this.requireHost().documentChanged(key, null);
+    else await this.readBack(key, key, conflict.current);
+  }
+
+  /** The document under `key` may be partial: it was edited or is shown with a projection. */
+  isPartial(key: string): boolean {
+    return (this.edits.get(key)?.partial ?? false) || this.requireHost().projection() !== undefined;
+  }
+
+  private async resolveWith(key: string, local: BsonDocument): Promise<boolean> {
+    const conflict = this.conflictMap().get(key);
+    const entry = this.edits.get(key);
+    if (conflict === undefined || this.isBusy(key)) return false;
+    const host = this.requireHost();
+    const partial = this.isPartial(key);
+    if (conflict.current === null) {
+      if (partial) {
+        this.messageState.set({ kind: 'error', text: PROJECTION_REINSERT_REFUSED });
+        return false;
+      }
+      const params = { profileId: host.profileId, db: host.db, coll: host.coll };
+      return this.write('Not inserted', key, async () => {
+        await this.guard.run('docs.insert', { ...params, docs: [stringifyEJson(local)] });
+        this.edits.discard(key);
+        this.dropConflict(key);
+        this.messageState.set({ kind: 'info', text: 'Inserted your version again.' });
+        await this.readBack(key, key, local);
+      });
+    }
+    // With a projection only the fields the user saw are compared, so hidden ones stay as they are.
+    const base = partial
+      ? visibleFields(conflict.current, entry === undefined ? [local] : [entry.original, local])
+      : conflict.current;
+    if (bsonEquals(base, local)) {
+      // Nothing left to write: the server already has this version.
+      await this.keepServer(key);
+      return true;
+    }
+    this.edits.resolve(key, base, local);
+    return this.save(key);
   }
 
   /** Deletes the loaded document `doc` after the confirm dialog; its unsaved edits go too. */
@@ -323,6 +408,16 @@ export class DocumentActions {
 const PROJECTION_REFUSED =
   'Not saved: with a projection active, this edit would replace data the projection hides. ' +
   'Clear the projection and edit again.';
+
+const PROJECTION_REINSERT_REFUSED =
+  'Not inserted: with a projection active only part of the document is loaded. ' +
+  'Clear the projection and edit again.';
+
+/** `doc` with only the top-level fields that one of `shown` has (keeps `doc`'s field order). */
+export function visibleFields(doc: BsonDocument, shown: readonly BsonDocument[]): BsonDocument {
+  const keys = new Set(shown.flatMap((d) => d.fields.map((f) => f.key)));
+  return { type: 'object', fields: doc.fields.filter((f) => keys.has(f.key)) };
+}
 
 /**
  * With a query projection the loaded document may be partial, so a save must not replace what

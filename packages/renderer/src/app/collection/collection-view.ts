@@ -14,6 +14,7 @@ import { type BsonDocument, parseEJsonDocument, stringifyEJson } from '@thicket/
 import { printShellSyntax } from '@thicket/core/shellsyntax';
 
 import {
+  ConflictView,
   DocumentActions,
   DocumentEdits,
   DocumentHeader,
@@ -87,6 +88,7 @@ const numberFormat = new Intl.NumberFormat();
     JsonExplorerComponent,
     JsonFormComponent,
     EditBar,
+    ConflictView,
     DocumentHeader,
     DraftDocuments,
     RawEditor,

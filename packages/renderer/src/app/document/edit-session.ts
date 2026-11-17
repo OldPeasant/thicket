@@ -163,6 +163,19 @@ export class DocumentEdits {
     this.redoStack.update((s) => s.filter((step) => step.key !== key));
   }
 
+  /**
+   * Resolving a conflict: `base` (the server's current version) becomes the document's baseline
+   * and `current` its edited version, so Save sends the diff from the server version with its
+   * values as the conflict check. Its steps leave the undo and redo history. `partial` stays as
+   * it was (or is `false` for a document without edits).
+   */
+  resolve(key: string, base: BsonDocument, current: BsonDocument): void {
+    const partial = this.entries().get(key)?.partial ?? false;
+    this.apply(key, base, current, partial);
+    this.undoStack.update((s) => s.filter((step) => step.key !== key));
+    this.redoStack.update((s) => s.filter((step) => step.key !== key));
+  }
+
   /** Discards every unsaved edit (Revert all). */
   discardAll(): void {
     this.entries.set(new Map());

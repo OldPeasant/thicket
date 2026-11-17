@@ -1,3 +1,4 @@
+export * from './conflict';
 export * from './document-actions.service';
 export * from './document-header';
 export * from './draft-documents';

@@ -405,6 +405,145 @@ describe('DocumentActions', () => {
     });
   });
 
+  describe('conflict resolution', () => {
+    /** Edits order 1 (total 10 → 15) and saves it into a conflict with `server`. */
+    async function conflictWith(server: string | null): Promise<void> {
+      fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: server } });
+      edits.edit(order(1), order(1, 15));
+      expect(await actions.save(keyOf(1))).toBe(false);
+      fake.respond('docs.update', { modified: true });
+      fake.respond('docs.replace', { modified: true });
+      fake.respond('docs.insert', { insertedIds: [keyOf(1)] });
+      fake.requests.length = 0;
+    }
+
+    it('overwrite writes the local version with the new server version as the conflict check', async () => {
+      await conflictWith(orderText(1, 77, 3));
+      expect(await actions.overwrite(keyOf(1))).toBe(true);
+      expect(params('docs.update')).toEqual([
+        {
+          profileId: 'p1',
+          db: 'shop',
+          coll: 'orders',
+          id: keyOf(1),
+          update: '{"$set":{"total":{"$numberInt":"15"},"qty":{"$numberInt":"1"}}}',
+          expected: '{"total":{"$eq":{"$numberInt":"77"}},"qty":{"$eq":{"$numberInt":"3"}}}',
+        },
+      ]);
+      expect(actions.conflicts().size).toBe(0);
+      expect(edits.modified()).toBe(false);
+      expect(changed.at(-1)?.[0]).toBe(keyOf(1));
+    });
+
+    it('overwrite reports a new conflict when the server changed again', async () => {
+      await conflictWith(orderText(1, 77));
+      fake.fail('docs.update', {
+        code: 'CONFLICT',
+        message: 'x',
+        detail: { current: orderText(1, 88) },
+      });
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      const conflict = actions.conflicts().get(keyOf(1));
+      expect(stringifyEJson(conflict?.current as BsonDocument)).toBe(orderText(1, 88));
+      expect(stringifyEJson(edits.get(keyOf(1))?.current as BsonDocument)).toBe(orderText(1, 15));
+    });
+
+    it('overwrite inserts the local version again when the server deleted it', async () => {
+      await conflictWith(null);
+      expect(await actions.overwrite(keyOf(1))).toBe(true);
+      expect(params('docs.insert')).toEqual([
+        { profileId: 'p1', db: 'shop', coll: 'orders', docs: [orderText(1, 15)] },
+      ]);
+      expect(actions.conflicts().size).toBe(0);
+      expect(edits.modified()).toBe(false);
+    });
+
+    it('overwrite refuses to insert a document loaded with a projection', async () => {
+      await conflictWith(null);
+      projection = '{"total":{"$numberInt":"1"}}';
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      expect(fake.requests).toHaveLength(0);
+      expect(actions.message()?.text).toMatch(/^Not inserted: with a projection/);
+    });
+
+    it('overwrite with a projection compares only the loaded fields (hidden ones are not unset)', async () => {
+      const loaded = parseEJsonDocument('{"_id":{"$numberInt":"1"},"total":{"$numberInt":"10"}}');
+      fake.fail('docs.update', {
+        code: 'CONFLICT',
+        message: 'x',
+        detail: { current: orderText(1, 77, 3) },
+      });
+      edits.edit(
+        loaded,
+        parseEJsonDocument('{"_id":{"$numberInt":"1"},"total":{"$numberInt":"15"}}'),
+        true,
+      );
+      await actions.save(keyOf(1));
+      fake.respond('docs.update', { modified: true });
+      fake.requests.length = 0;
+      expect(await actions.overwrite(keyOf(1))).toBe(true);
+      expect(params('docs.update')[0]).toMatchObject({
+        update: '{"$set":{"total":{"$numberInt":"15"}}}',
+        expected: '{"total":{"$eq":{"$numberInt":"77"}}}',
+      });
+    });
+
+    it('keepServer discards the edits and shows the server version', async () => {
+      await conflictWith(orderText(1, 77));
+      await actions.keepServer(keyOf(1));
+      expect(fake.requestsFor('docs.update')).toHaveLength(0);
+      expect(edits.modified()).toBe(false);
+      expect(actions.conflicts().size).toBe(0);
+      expect(changed.at(-1)).toEqual([keyOf(1), orderText(1, 99, 99)]);
+      expect(actions.message()?.text).toMatch(/Kept the server version/);
+    });
+
+    it('keepServer of a deleted document removes it from the page', async () => {
+      await conflictWith(null);
+      await actions.keepServer(keyOf(1));
+      expect(changed.at(-1)).toEqual([keyOf(1), null]);
+      expect(edits.modified()).toBe(false);
+    });
+
+    it('saveMerged saves the merged document over the server version', async () => {
+      await conflictWith(orderText(1, 77, 3));
+      expect(await actions.saveMerged(keyOf(1), order(1, 15, 3))).toBe(true);
+      expect(params('docs.update')).toEqual([
+        expect.objectContaining({
+          update: '{"$set":{"total":{"$numberInt":"15"}}}',
+          expected: '{"total":{"$eq":{"$numberInt":"77"}}}',
+        }),
+      ]);
+      expect(actions.conflicts().size).toBe(0);
+      expect(edits.modified()).toBe(false);
+    });
+
+    it('saveMerged equal to the server version writes nothing and keeps it', async () => {
+      await conflictWith(orderText(1, 77, 3));
+      expect(await actions.saveMerged(keyOf(1), order(1, 77, 3))).toBe(true);
+      expect(fake.requestsFor('docs.update')).toHaveLength(0);
+      expect(actions.conflicts().size).toBe(0);
+      expect(edits.modified()).toBe(false);
+    });
+
+    it('saveMerged refuses a document with another _id', async () => {
+      await conflictWith(orderText(1, 77));
+      expect(await actions.saveMerged(keyOf(1), order(2, 15))).toBe(false);
+      expect(fake.requests).toHaveLength(0);
+      expect(actions.message()?.text).toMatch(/must keep the _id/);
+      expect(actions.conflicts().size).toBe(1);
+    });
+
+    it('does nothing for a key without a conflict', async () => {
+      edits.edit(order(1), order(1, 15));
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      expect(await actions.saveMerged(keyOf(1), order(1, 15))).toBe(false);
+      await actions.keepServer(keyOf(1));
+      expect(fake.requests).toHaveLength(0);
+      expect(edits.isModified(keyOf(1))).toBe(true);
+    });
+  });
+
   describe('saveAll', () => {
     it('saves every edited document, one update each, and counts them', async () => {
       edits.edit(order(1), order(1, 15));
