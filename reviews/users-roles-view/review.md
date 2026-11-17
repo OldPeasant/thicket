@@ -4,22 +4,22 @@ Date: 2026-11-17
 
 Task: users-roles-view - M6 (Should): Users and roles viewer
 
-Scope: all committed changes of the task after the rebase onto main, `git diff 62aa9cd..096eefe` (62aa9cd is the merge-base with origin/main). This review covers the whole task again, not only the fixes, and adds a check of how the task fits with code that main gained since the first review: the `indexes` tab kind, the sidebar's drop/rename tab closing, and closing tabs when a profile is removed.
+Scope: all committed changes of the task after the rebase onto main, `git diff 62aa9cd..4b9c7b7` (62aa9cd is the merge-base with origin/main). This review covers the whole task again, not only the fixes. It also checks how the task fits with code that main gained since the first review: the `indexes` tab kind, the sidebar closing tabs on drop and rename, and closing tabs when a profile is removed. 4b9c7b7 adds one new code change since revision 096eefe: a test in `packages/renderer/src/app/app.spec.ts`. Its other changes are review reports only.
 
 Requirements:
 - tasks/users-roles-view.md (acceptance criteria and recorded assumptions)
 - SPEC.md M6 "Users and roles: read-only view per database (privileges, inherited roles)"
 - packages/contract/src/admin.ts (`admin.users`, `admin.roles` contract)
 - docs/ARCHITECTURE.md, AGENTS.md
-- Existing conventions (`indexesTabId` / `aggregationTabId` next to their views, `SidebarTreeService.closeTabs`, `ConnectionsPage` profile removal)
+- Existing conventions (`indexesTabId` / `aggregationTabId` next to their views, `SidebarTreeService.closeTabs`, `ConnectionsPage` profile removal, `TAB_VIEWS` / `provideTabView`)
 - Instructions from the parent worker (rebase context, integration with main)
 
 Git range:
 - Branch: main
-- HEAD: 096eefe401fe144cb7b1abfa3db58ac361988233
+- HEAD: 4b9c7b7ab6bd7cb32092f47f3d3a01915aac2f3d
 - Base/start: 62aa9cda12109876a24c3621abdc10c0dca3b22a
-- Commits reviewed: 7 (a170ecd, 559520d, 8337d70, 83938a6, 53cebf5, 096dab4, 096eefe; 096eefe changes only reviews/)
-- Uncommitted changes: the working tree has an uncommitted change to `packages/renderer/src/app/app.spec.ts` (13 added lines). It is not part of the reviewed range and was not reviewed.
+- Commits reviewed: 8 (a170ecd, 559520d, 8337d70, 83938a6, 53cebf5, 096dab4, 096eefe, 4b9c7b7). 096eefe changes only reviews/. 4b9c7b7 adds one test and updates reports in reviews/.
+- Uncommitted changes: none, apart from this report.
 
 Summary: 0 P0, 0 P1, 0 P2, 0 P3
 
@@ -41,6 +41,19 @@ None.
 
 ## Notes (verified, no finding)
 
+- New test (4b9c7b7), `App › registers exactly one view per tab kind, including indexes and users`.
+  It configures TestBed with the real `appConfig.providers` and injects the multi-provider token
+  `TAB_VIEWS`. It then checks three things:
+  - every kind is registered only once;
+  - `indexes` maps to `IndexesView`;
+  - `users` maps to `UsersRolesView`.
+
+  This guards exactly the result of the rebase conflict in `app.config.ts`. A lost registration,
+  or a duplicate registration of the same kind, would make the test fail. A duplicate matters
+  because `AppShell.viewFor` takes the first match, so a second view for a kind would be ignored
+  without any error. The test checks behavior through the public token, not implementation
+  details. Run result: `cd packages/renderer && npx ng test --include='src/app/app.spec.ts'` -> 5
+  passed.
 - Rebase union: `TabKind` in `layout/workspace.service.ts` is
   `'collection' | 'aggregation' | 'indexes' | 'shell' | 'admin' | 'users'`, and `app.config.ts`
   registers `IndexesView` and `UsersRolesView` together with the existing views. Neither side of
@@ -88,11 +101,11 @@ None.
      built-in role `read`. Users `alice`, `bob` (holding a role on another database) and `carol`
      (with restrictions) cover the main cases. Users and roles are dropped in `afterAll`. The
      recorded evidence names the command and the result (10 passed).
-  2. Component tests for the views: `users-roles-view.spec.ts`, `users-roles.model.spec.ts`, and
-     the sidebar specs for the menu item and `openUsers`. The recorded evidence names the command
-     and the result.
+  2. Component tests for the views: `users-roles-view.spec.ts`, `users-roles.model.spec.ts`, the
+     sidebar specs for the menu item and `openUsers`, and now the `appConfig` registration test.
+     The recorded evidence names the command and the result.
 - Docs: the "Users and roles" section in `docs/ARCHITECTURE.md` matches the code.
 
 ## Review conclusion
 
-No material issues found. Reviewed revision: 096eefe401fe144cb7b1abfa3db58ac361988233.
+No material issues found. Reviewed revision: 4b9c7b7ab6bd7cb32092f47f3d3a01915aac2f3d.
