@@ -65,7 +65,7 @@ Problem:
 `ValidatorChanges.version(target)` read one signal holding the whole map, so every collection tab's check effect re-ran on any save.
 
 Fix:
-`ValidatorChanges` now keeps a `Map<string, WritableSignal<number>>` with one signal per namespace key, created lazily. `version(target)` reads only that collection's signal. The public API (`version`, `changed`) is unchanged.
+`ValidatorChanges` now keeps a Map from namespace key to a writable number signal, with one signal per namespace key, created lazily. `version(target)` reads only that collection's signal. The public API (`version`, `changed`) is unchanged.
 
 Validation:
 - New spec "notifies readers of the changed collection only" (validator-marks.service.spec.ts): a computed that reads `version(T)` does not re-run when another collection changes — Pass
