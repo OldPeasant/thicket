@@ -19,3 +19,4 @@ defaults, so `ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS` and loading code outside the
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md (Electron shell, Packaging).
+- ASSUMPTION (2026-11-17 06:07+0100 by dell26/agent-3): EnableNodeCliInspectArguments fuse is OFF; the packaged smoke test was rewritten to attach over CDP (--remote-debugging-port, a Chromium switch no fuse controls) instead of Playwright's _electron driver, which needs --inspect. Main-process checks (isPackaged, app name) were replaced by app.ping, the fuse wire read and runtime probes.
