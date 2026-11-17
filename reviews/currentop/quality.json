@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "task": "currentop",
+  "reviewed_revision": "0fecf7d28849e6b9f8670b06a2e52c4b81d9cc4b",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/currentop/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/currentop/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/currentop/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "destroyed flag: a kill answering after the tab closed no longer reads or schedules; view specs"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "only currentOp commands hidden; $currentOp aggregations of other clients listed and killable; docs updated"},
+    {"id": "CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "shared isUnauthorizedBrowseError in browse/browse.ts used by currentop.ts and docs/query/query.ts"},
+    {"id": "TW-1", "source": "test-writer", "severity": "Low", "disposition": "accepted", "note": "formatDuration shows 59.96 s as '60.0 s' instead of '1 min 00 s'; cosmetic rounding, not a requirement"}
+  ],
+  "validation": [
+    {"command": "npx vitest run --config test/integration/vitest.config.ts test/integration/currentop.int.spec.ts", "result": "pass"},
+    {"command": "npm run test:e2e -- test/e2e/currentop.e2e.ts", "result": "pass"},
+    {"command": "cd packages/backend && npx vitest run src/admin/currentop src/docs/query src/browse", "result": "pass"},
+    {"command": "cd packages/renderer && npx ng test --include='src/app/admin/currentop/**/*.spec.ts'", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}
