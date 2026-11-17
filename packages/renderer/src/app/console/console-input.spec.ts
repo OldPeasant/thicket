@@ -4,6 +4,7 @@ import {
   applyCompletion,
   completionLabel,
   ConsoleHistory,
+  HISTORY_LIMIT,
   isInputComplete,
   onFirstLine,
   onLastLine,
@@ -52,6 +53,47 @@ describe('ConsoleHistory', () => {
     h.add('b');
     h.add('c');
     expect(h.entries).toEqual(['b', 'c']);
+  });
+
+  it('has nothing to step through while empty', () => {
+    const h = new ConsoleHistory();
+    expect(h.previous('typed')).toBeNull();
+    expect(h.next()).toBeNull();
+  });
+
+  it('running an input stops stepping and forgets the draft', () => {
+    const h = new ConsoleHistory();
+    h.add('a');
+    h.add('b');
+    expect(h.previous('draft')).toBe('b');
+    expect(h.previous('b')).toBe('a');
+    h.add('a');
+    // Stepping starts again at the newest entry; the old draft is gone.
+    expect(h.entries).toEqual(['a', 'b', 'a']);
+    expect(h.next()).toBeNull();
+    expect(h.previous('')).toBe('a');
+    expect(h.next()).toBe('');
+  });
+
+  it('keeps HISTORY_LIMIT entries by default', () => {
+    const h = new ConsoleHistory();
+    for (let i = 0; i < HISTORY_LIMIT + 3; i++) h.add(`x = ${i}`);
+    expect(h.entries).toHaveLength(HISTORY_LIMIT);
+    expect(h.entries[0]).toBe('x = 3');
+  });
+});
+
+describe('isInputComplete edge cases', () => {
+  it.each([
+    ['`a\\`(`', true],
+    ['x = `line1\nline2`', true],
+    ["x = 'a'\n{", false],
+    ["x = 'open\nf(", false],
+    ['x = 1 /* { */', true],
+    ['f(\n  // )\n', false],
+    ['[1, 2]]', true],
+  ])('%j -> %s', (code, expected) => {
+    expect(isInputComplete(code)).toBe(expected);
   });
 });
 

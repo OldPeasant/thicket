@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
 import type { WorkspaceTab } from '../layout/workspace.service';
 import { ProfileSafetyService } from '../safety/profile-safety.service';
-import { ShellConsole, shellTabId, showOutput } from './shell-console';
+import { ShellConsole, shellTabId, showOutput, TRANSCRIPT_LIMIT } from './shell-console';
 
 const TAB: WorkspaceTab = {
   id: shellTabId('p1'),
@@ -217,6 +217,10 @@ describe('ShellConsole', () => {
       await type('x = {\n  y: 1\n}', 10);
       expect((await key('ArrowUp')).defaultPrevented).toBe(false);
       expect(input().value).toBe('x = {\n  y: 1\n}');
+      // ArrowDown above the last line moves the caret as well.
+      await type('x = {\n  y: 1\n}', 2);
+      expect((await key('ArrowDown')).defaultPrevented).toBe(false);
+      expect(input().value).toBe('x = {\n  y: 1\n}');
     });
 
     it('does not record the same input twice in a row', async () => {
@@ -332,6 +336,353 @@ describe('ShellConsole', () => {
     fixture.destroy();
     await settle();
     expect(fake.requestsFor('shell.close')[0]?.params).toEqual({ sessionId: 's1' });
+  });
+
+  describe('stop, clear and the transcript', () => {
+    it('Ctrl+C stops a running input; with a selection it leaves the copy alone', async () => {
+      await create();
+      await type('while (true) {}');
+      await key('Enter');
+      // A selection inside the input: Ctrl+C copies, the run goes on.
+      const area = input();
+      area.value = 'abc';
+      area.setSelectionRange(0, 2);
+      const copy = await key('c', { ctrlKey: true });
+      expect(copy.defaultPrevented).toBe(false);
+      expect(fake.cancels).toEqual([]);
+      expect(q('shell-running')).not.toBeNull();
+      // Without a selection Ctrl+C interrupts.
+      area.setSelectionRange(1, 1);
+      const stop = await key('c', { ctrlKey: true });
+      expect(stop.defaultPrevented).toBe(true);
+      expect(fake.cancels).toContain('st1');
+      expect(q('shell-stopped')).not.toBeNull();
+      expect(q('shell-running')).toBeNull();
+    });
+
+    it('Ctrl+C does nothing while no input runs', async () => {
+      await create();
+      await type('x');
+      const event = await key('c', { ctrlKey: true });
+      expect(event.defaultPrevented).toBe(false);
+      expect(fake.cancels).toEqual([]);
+    });
+
+    it('ignores output of a stopped run and runs the next input', async () => {
+      await create();
+      await type('sleep(100000)');
+      await key('Enter');
+      get('shell-stop').click();
+      await settle();
+      fake.data('shell.eval', 'st1', { kind: 'print', text: 'late print' });
+      fake.end('st1');
+      await settle();
+      expect(q('shell-print')).toBeNull();
+      expect(all('shell-run')[0]?.getAttribute('data-state')).toBe('stopped');
+      await type('1');
+      await key('Enter');
+      expect(evals().map((e) => e.code)).toEqual(['sleep(100000)', '1']);
+      fake.data('shell.eval', 'st2', { kind: 'result', text: '1' });
+      fake.end('st2');
+      await settle();
+      expect(get('shell-result').textContent).toBe('1');
+    });
+
+    it('does not start a second run while one is running', async () => {
+      await create();
+      await type('a = 1');
+      await key('Enter');
+      await type('b = 2');
+      await key('Enter', { ctrlKey: true });
+      expect(evals()).toHaveLength(1);
+      expect(q('shell-run-btn')).toBeNull();
+      expect(input().value).toBe('b = 2');
+    });
+
+    it('Clear empties the transcript but keeps the session and a running input', async () => {
+      await create();
+      await type('a = 1');
+      await key('Enter');
+      fake.end('st1');
+      await settle();
+      await type('b = 2');
+      await key('Enter');
+      expect(all('shell-run')).toHaveLength(2);
+      get('shell-clear').click();
+      await settle();
+      expect(all('shell-run')).toHaveLength(1);
+      expect(all('shell-run')[0]?.textContent).toContain('b = 2');
+      fake.end('st2');
+      await settle();
+      get('shell-clear').click();
+      await settle();
+      expect(all('shell-run')).toHaveLength(0);
+      expect(fake.requestsFor('shell.close')).toHaveLength(0);
+      expect(fake.requestsFor('shell.open')).toHaveLength(1);
+      expect(get('shell-prompt').textContent?.trim()).toBe('shop>');
+    });
+
+    it('keeps only the newest TRANSCRIPT_LIMIT runs', async () => {
+      await create();
+      const total = TRANSCRIPT_LIMIT + 2;
+      for (let i = 1; i <= total; i++) {
+        view.code.set(`x = ${i}`);
+        view.run();
+        // Let the stream request reach the fake, then end it.
+        for (let j = 0; j < 3; j++) await new Promise((resolve) => setTimeout(resolve, 0));
+        fake.end(`st${streamNo}`);
+      }
+      await settle();
+      expect(streamNo).toBe(total);
+      expect(view.runs()).toHaveLength(TRANSCRIPT_LIMIT);
+      expect(view.runs()[0]?.code).toBe('x = 3');
+      expect(view.runs().at(-1)?.code).toBe(`x = ${total}`);
+      expect(all('shell-run')).toHaveLength(TRANSCRIPT_LIMIT);
+    });
+
+    it('runs from the Run button, which is disabled for a blank input', async () => {
+      await create();
+      expect(get<HTMLButtonElement>('shell-run-btn').disabled).toBe(true);
+      await type('   ');
+      expect(get<HTMLButtonElement>('shell-run-btn').disabled).toBe(true);
+      await type('db.orders.countDocuments()');
+      get<HTMLButtonElement>('shell-run-btn').click();
+      await settle();
+      expect(evals()).toEqual([{ sessionId: 's1', code: 'db.orders.countDocuments()' }]);
+    });
+
+    it('shows a stream error in the run and keeps the session for other errors', async () => {
+      await create();
+      await type('db.orders.drop()');
+      await key('Enter');
+      fake.failStream('st1', { code: 'SERVER_ERROR', message: 'not authorized on shop' });
+      await settle();
+      expect(get('shell-error').textContent).toContain('not authorized on shop');
+      expect(q('shell-reopen')).toBeNull();
+      expect(input().disabled).toBe(false);
+    });
+
+    it('notes "Type it for more" under a cursor batch in the viewer', async () => {
+      await create();
+      await type('db.orders.find()');
+      await key('Enter');
+      fake.data('shell.eval', 'st1', {
+        kind: 'result',
+        type: 'Cursor',
+        value: '[{"_id":{"$numberInt":"1"}}]',
+        text: '[ { _id: 1 } ]\nType "it" for more',
+      });
+      fake.end('st1');
+      await settle();
+      expect(get('shell-result-viewer').textContent).toContain('for more');
+    });
+  });
+
+  describe('completion races and keys', () => {
+    function deferredComplete(): (completions: string[]) => void {
+      let release!: (completions: string[]) => void;
+      fake.handle(
+        'shell.complete',
+        () =>
+          new Promise((resolve) => {
+            release = (completions) => resolve({ completions });
+          }),
+      );
+      return (completions) => release(completions);
+    }
+
+    it('drops a completion answer that arrives after the input changed', async () => {
+      const release = deferredComplete();
+      await create();
+      await type('db.ord');
+      await key('Tab');
+      await type('db.orders.find()');
+      release(['db.orders', 'db.ordersArchive']);
+      await settle();
+      expect(q('shell-completions')).toBeNull();
+      expect(input().value).toBe('db.orders.find()');
+    });
+
+    it('drops a single completion that arrives after the input ran', async () => {
+      const release = deferredComplete();
+      await create();
+      await type('db.ord');
+      await key('Tab');
+      await key('Enter', { ctrlKey: true });
+      release(['db.orders']);
+      await settle();
+      expect(input().value).toBe('');
+      expect(evals()).toHaveLength(1);
+    });
+
+    it('shows why completion failed', async () => {
+      fake.fail('shell.complete', { code: 'INTERNAL', message: 'completer crashed' });
+      await create();
+      await type('db.');
+      await key('Tab');
+      expect(get('shell-completion-note').textContent).toContain('completer crashed');
+    });
+
+    it('Ctrl+Space asks for completions too; ArrowUp wraps and Tab applies', async () => {
+      fake.respond('shell.complete', {
+        completions: ['db.orders', 'db.ordersArchive', 'db.other'],
+      });
+      await create();
+      await type('db.o');
+      const space = await key(' ', { ctrlKey: true });
+      expect(space.defaultPrevented).toBe(true);
+      expect(fake.requestsFor('shell.complete')).toHaveLength(1);
+      await key('ArrowUp');
+      expect(all('shell-completion')[2]?.getAttribute('aria-selected')).toBe('true');
+      expect(input().getAttribute('aria-activedescendant')).toMatch(/-completion-2$/);
+      await key('Tab');
+      expect(input().value).toBe('db.other');
+      expect(q('shell-completions')).toBeNull();
+    });
+
+    it('a second Tab replaces the pending request; the cancelled one shows no error', async () => {
+      const releases: ((completions: string[]) => void)[] = [];
+      fake.handle(
+        'shell.complete',
+        () =>
+          new Promise((resolve) => {
+            releases.push((completions) => resolve({ completions }));
+          }),
+      );
+      await create();
+      await type('db.ord');
+      await key('Tab');
+      await key('Tab');
+      expect(releases).toHaveLength(2);
+      expect(fake.cancels.length).toBeGreaterThan(0);
+      releases[1]?.(['db.orders']);
+      await settle();
+      releases[0]?.(['db.ordersArchive', 'db.ordersOld']);
+      await settle();
+      expect(input().value).toBe('db.orders');
+      expect(q('shell-completions')).toBeNull();
+      expect(q('shell-completion-note')).toBeNull();
+    });
+
+    it('other keys pass through to the input while the popup is open', async () => {
+      fake.respond('shell.complete', { completions: ['db.orders', 'db.ordersArchive'] });
+      await create();
+      await type('db.ord');
+      await key('Tab');
+      const other = await key('e');
+      expect(other.defaultPrevented).toBe(false);
+      expect(q('shell-completions')).not.toBeNull();
+    });
+
+    it('closes the popup when the input loses focus', async () => {
+      fake.respond('shell.complete', { completions: ['db.orders', 'db.ordersArchive'] });
+      await create();
+      await type('db.ord');
+      await key('Tab');
+      expect(q('shell-completions')).not.toBeNull();
+      input().dispatchEvent(new FocusEvent('blur'));
+      await settle();
+      expect(q('shell-completions')).toBeNull();
+    });
+  });
+
+  describe('session lifecycle', () => {
+    it('closes a session whose open answer arrives after the tab went away', async () => {
+      let release!: () => void;
+      fake.handle(
+        'shell.open',
+        () =>
+          new Promise((resolve) => {
+            release = () => resolve({ sessionId: 'late', db: 'shop' });
+          }),
+      );
+      await create();
+      fixture.destroy();
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(fake.requestsFor('shell.close').map((r) => r.params)).toEqual([{ sessionId: 'late' }]);
+      expect(view.session().state).not.toBe('open');
+    });
+
+    it('closes the older session when a newer open overtakes it', async () => {
+      const releases: (() => void)[] = [];
+      let n = 0;
+      fake.handle('shell.open', () => {
+        const id = `s${++n}`;
+        return new Promise((resolve) => {
+          releases.push(() => resolve({ sessionId: id, db: id === 's1' ? 'old' : 'new' }));
+        });
+      });
+      await create();
+      void view.open();
+      await settle();
+      expect(releases).toHaveLength(2);
+      releases[1]?.();
+      await settle();
+      releases[0]?.();
+      await settle();
+      expect(view.session()).toEqual({ state: 'open', sessionId: 's2' });
+      expect(get('shell-prompt').textContent?.trim()).toBe('new>');
+      expect(fake.requestsFor('shell.close').map((r) => r.params)).toEqual([{ sessionId: 's1' }]);
+    });
+
+    it('ignores the failure of an older open once a newer one succeeded', async () => {
+      let n = 0;
+      let failFirst!: () => void;
+      fake.handle('shell.open', () => {
+        if (++n === 1) {
+          return new Promise((_resolve, reject) => {
+            failFirst = () => reject(new Error('connection reset'));
+          });
+        }
+        return { sessionId: 's2', db: 'shop' };
+      });
+      await create();
+      await view.open();
+      await settle();
+      failFirst();
+      await settle();
+      expect(view.session()).toEqual({ state: 'open', sessionId: 's2' });
+      expect(q('shell-failed')).toBeNull();
+    });
+
+    it('reopening closes the current session first', async () => {
+      await create();
+      fake.respond('shell.open', { sessionId: 's2', db: 'shop' });
+      await view.open();
+      await settle();
+      expect(fake.requestsFor('shell.close').map((r) => r.params)).toEqual([{ sessionId: 's1' }]);
+      expect(view.session()).toEqual({ state: 'open', sessionId: 's2' });
+    });
+
+    it('cancels a running input and closes the session when the tab goes away', async () => {
+      await create();
+      await type('sleep(100000)');
+      await key('Enter');
+      fixture.destroy();
+      await settle();
+      expect(fake.cancels).toContain('st1');
+      expect(fake.requestsFor('shell.close')[0]?.params).toEqual({ sessionId: 's1' });
+    });
+
+    it('does not open a session after the tab went away', async () => {
+      await create();
+      fixture.destroy();
+      await view.open();
+      expect(fake.requestsFor('shell.open')).toHaveLength(1);
+    });
+
+    it('opens without a database when the tab names none', async () => {
+      await create({ ...TAB, data: { profileId: 'p1' } });
+      expect(fake.requestsFor('shell.open')[0]?.params).toEqual({ profileId: 'p1' });
+    });
+
+    it('takes the production accent from the tab as well', async () => {
+      await create({ ...TAB, production: true });
+      expect(el().classList.contains('production')).toBe(true);
+      expect(q('shell-production')).not.toBeNull();
+    });
   });
 });
 

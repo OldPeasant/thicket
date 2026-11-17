@@ -1108,6 +1108,57 @@ describe('SidebarTreeService', () => {
       });
     });
 
+    describe('shell tabs', () => {
+      it('opens one shell tab per connection, starting in the given database', () => {
+        tree.openShell('p1', 'shop');
+        expect(ws.activeId()).toBe('shell:p1');
+        expect(ws.active()).toEqual({
+          id: 'shell:p1',
+          kind: 'shell',
+          title: 'Shell',
+          detail: 'Profile p1',
+          production: false,
+          data: { profileId: 'p1', db: 'shop' },
+        });
+      });
+
+      it('opens without a database from the connection', () => {
+        tree.openShell('p2');
+        expect(ws.active()?.data).toEqual({ profileId: 'p2' });
+      });
+
+      it('selects an open shell tab instead of opening another or changing its database', () => {
+        tree.openShell('p1', 'shop');
+        tree.openCollection('p1', 'shop', { name: 'orders', type: 'collection' });
+        expect(ws.activeId()).not.toBe('shell:p1');
+        tree.openShell('p1', 'other');
+        expect(ws.activeId()).toBe('shell:p1');
+        expect(ws.tabs().filter((t) => t.kind === 'shell')).toHaveLength(1);
+        expect(ws.active()?.data).toEqual({ profileId: 'p1', db: 'shop' });
+        tree.openShell('p2');
+        expect(
+          ws
+            .tabs()
+            .filter((t) => t.kind === 'shell')
+            .map((t) => t.id),
+        ).toEqual(['shell:p1', 'shell:p2']);
+      });
+
+      it('marks the shell tab of a production profile', () => {
+        tree.openShell('prod');
+        expect(ws.active()).toMatchObject({ production: true, detail: 'Profile prod' });
+      });
+
+      it('falls back to the profile id for an unknown profile', () => {
+        tree.openShell('ghost');
+        expect(ws.active()).toMatchObject({
+          id: 'shell:ghost',
+          detail: 'ghost',
+          production: false,
+        });
+      });
+    });
+
     it('create and rename on a non-production profile are sent without a dialog', async () => {
       await tree.createCollection('p1', 'shop', 'fresh');
       await tree.createDatabase('p1', 'newdb', 'first');

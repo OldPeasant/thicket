@@ -572,6 +572,53 @@ describe('SidebarTree', () => {
     });
   });
 
+  describe('open shell', () => {
+    it('is offered on a connection only while it is connected', async () => {
+      await start();
+      await menu(node('conn', 'Profile p1'));
+      const item = must('menu-open-shell') as HTMLButtonElement;
+      expect(item.textContent?.trim()).toBe('Open shell');
+      expect(item.disabled).toBe(true);
+      await click(item);
+      expect(TestBed.inject(WorkspaceService).tabs()).toHaveLength(0);
+    });
+
+    it('opens the connection shell from the connection menu', async () => {
+      await start();
+      await click(node('conn', 'Profile p1'));
+      await menu(node('conn', 'Profile p1'));
+      await click(must('menu-open-shell'));
+      const ws = TestBed.inject(WorkspaceService);
+      expect(ws.active()).toMatchObject({
+        id: 'shell:p1',
+        kind: 'shell',
+        detail: 'Profile p1',
+        data: { profileId: 'p1' },
+      });
+      expect(byTestId('tree-menu')).toBeNull();
+    });
+
+    it('starts the shell in the database from the database menu', async () => {
+      await start();
+      await click(node('conn', 'Profile p1'));
+      await menu(node('db', 'shop'));
+      await click(must('menu-open-shell'));
+      expect(TestBed.inject(WorkspaceService).active()).toMatchObject({
+        id: 'shell:p1',
+        data: { profileId: 'p1', db: 'shop' },
+      });
+    });
+
+    it('stays available on read-only profiles (it is not a write action)', async () => {
+      await start();
+      await click(node('conn', 'Reader'));
+      await menu(node('conn', 'Reader'));
+      expect((must('menu-open-shell') as HTMLButtonElement).disabled).toBe(false);
+      await menu(node('db', 'shop'));
+      expect((must('menu-open-shell') as HTMLButtonElement).disabled).toBe(false);
+    });
+  });
+
   describe('read-only profiles', () => {
     it('disables every write action and shows the badge', async () => {
       await start();
