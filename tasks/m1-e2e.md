@@ -16,3 +16,4 @@ One Playwright suite that walks SPEC demo steps 2–7 against the int-harness fi
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-17 03:44+0100 by dell26/agent-3): Atlas SRV is replaced by a mongodb:// URI to a TLS single-member replica set (tls=true, tlsCAFile=test CA, replicaSet=rs0, directConnection=true): SRV needs DNS and the member's own host name is not reachable from the host. Added startMongoSpec (e2e harness) and TLS support in initiateReplicaSet; the TLS RS is not added to FIXTURE_NAMES so integration global setup is unchanged.
