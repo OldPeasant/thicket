@@ -621,6 +621,24 @@ Contract layout (`packages/contract/src/`):
   `rolesInfo: 1` with `showPrivileges` and `showBuiltinRoles`. Integration:
   `test/integration/users-roles.int.spec.ts`.
 
+## Current operations (`packages/renderer/src/app/admin/currentop`, backend `src/admin/currentop`)
+- Tab kind `currentop`, id `currentOpTabId(profileId)`, data `CurrentOpTabData` (`profileId`);
+  opened by "Current operations" (`menu-current-ops`) in the sidebar's connection menu
+  (`SidebarTreeService.openCurrentOps`).
+- Backend `admin.currentOp`: the `currentOp` command on `admin` on the primary (the
+  connection's default server, so `killOp` reaches the server that listed the opid); `ns` is a
+  prefix on name boundaries (`^<ns>(\.|$)`), `minSecsRunning` → `secs_running: { $gte }`,
+  `opType` → `op`, `all` → `$all`. `Unauthorized` (no `inprog` privilege) retries with
+  `$ownOps`. Its own `currentOp` is left out; longest running first. `admin.killOp` (behind the
+  write guard) parses the canonical EJSON `opId` (integer or `"shard:opid"`, else
+  `INVALID_PARAMS`) and sends `killOp`. Int tests `test/integration/currentop.int.spec.ts`.
+- Renderer: filters (namespace, minimum seconds, type, idle/system) reload at once; the head
+  shows the matching `db.currentOp(…)` call; auto-refresh every 2/5/10 s (default 5) or never,
+  the next read scheduled after the previous answer. Running time as text and a log-scaled bar
+  (amber from 10 s, red from 60 s). Kill (active operations only, `appWriteControl`) goes
+  through `WriteGuard.run` with `alwaysConfirm`, then reads again. `currentop.model.ts` reduces
+  the EJSON entries. e2e: `test/e2e/currentop.e2e.ts`.
+
 ## Aggregation builder (`packages/renderer/src/app/aggregation`)
 - `AggregationView` is the `aggregation` tab view (id `aggregationTabId(profileId, db, coll)`,
   `data` like a collection tab), opened with "Aggregate…" (`open-aggregation`) on the
