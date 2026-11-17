@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "task": "gridfs",
+  "reviewed_revision": "2043ec33b56e421da3674db1310e811e3519db7b",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/gridfs/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/gridfs/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/gridfs/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "TW-1", "source": "test-writer", "severity": "Medium", "disposition": "fixed", "note": "gridfs.delete added to DESTRUCTIVE (round 1)."},
+    {"id": "TW-2", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "TITLES for gridfs.upload/gridfs.delete (round 1)."},
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P1", "disposition": "fixed", "note": "Renderer suite green after the TW-1/TW-2 fix."},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "Upload awaits each GridFS write and its end before acting on a cancel; cleanup cannot race in-flight inserts."},
+    {"id": "CR-3", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "Int tests cancel after progress and at every progress step."},
+    {"id": "CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "Download closes its write stream before rm."},
+    {"id": "CR-5", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "Cancel message makes no guarantee; list reloads after an upload cancel."},
+    {"id": "O-1", "source": "test-writer", "severity": "Low", "disposition": "accepted", "note": "Defensive closeStream branch not reachable via pipeline; kept as a safety net (mirrors io/export.ts)."},
+    {"id": "O-2", "source": "test-writer", "severity": "Low", "disposition": "accepted", "note": "Narrow race (source deleted between handler stat and upload stat) gives a generic error message; nothing is written."},
+    {"id": "O-3", "source": "test-writer", "severity": "Low", "disposition": "accepted", "note": "Reload after an upload cancel may briefly show a file being removed; the next refresh corrects it."}
+  ],
+  "validation": [
+    {"command": "npm run test:int -- gridfs", "result": "pass"},
+    {"command": "npm run test:e2e -- gridfs", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}

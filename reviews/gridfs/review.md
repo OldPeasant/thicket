@@ -2,31 +2,40 @@
 
 Date: 2026-11-17
 
-Task: gridfs - M6 (Could): GridFS
+Task: gridfs - M6 (Could): GridFS (review round 2)
 
-Scope: `git diff c10fccd4..HEAD` (committed changes only; working tree clean)
+Scope: `git diff 27adc3ab..HEAD` (`27adc3ab` = `git merge-base HEAD origin/main`). Committed changes only. The working tree was clean before and after the review. The parent named HEAD 6709a258. That commit was later rebased to 2043ec33, and the two differ only in `tasks/gridfs.md` (`git diff 6709a258 HEAD --stat`). The round-1 fix commit 64ac4558 is now c732fb1f, again differing only in `tasks/gridfs.md`.
 
 Requirements:
 - tasks/gridfs.md (goal, 2 acceptance criteria, 3 recorded assumptions)
-- SPEC.md, docs/ARCHITECTURE.md (renderer never sends file paths, every write checked in the backend, canonical EJSON, theme tokens only; "GridFS" section added by this task)
-- AGENTS.md, parent instructions (focus on transfer cancel/cleanup, streamOnConnection, progress, write guard ordering, error mapping, renderer transfer state)
-- Existing conventions, especially `packages/backend/src/io/export.ts` (cleanup of a cancelled file write)
+- SPEC.md, docs/ARCHITECTURE.md ("GridFS" section; renderer never sends file paths; writes guarded in the backend; canonical EJSON; theme tokens only)
+- AGENTS.md, parent instructions for round 2
+- Round 1: reviews/gridfs/review.md (CR-1..CR-5, now replaced by this report), reviews/gridfs/fixes.md, reviews/gridfs/tests.md (round 2 notes O-1..O-3)
+- Driver source `node_modules/mongodb/lib/gridfs/upload.js` (mongodb 7.9.0), used to check the CR-2 fix
 
 Git range:
 - Branch: main
-- HEAD: 3b5094ce0202682f2a19b3d728f88cad4dcf3a62
-- Base/start: c10fccd45875c380422f1ada78c7e16442ff14c4
-- Commits reviewed: 5 (8876ccb6, 3dfa194e, 95911f20, 08632b7d, 3b5094ce)
+- HEAD: 2043ec33b56e421da3674db1310e811e3519db7b (reviewed revision)
+- Base/start: 27adc3abd4885ca9a8f0496a7abc21d3a21853d1
+- Commits reviewed: 9 (4b14b72b, 5f1855ec, 389f7066, d8e6d24d, 5e6a8e19, 0bfa8383, c732fb1f, b0e1ad46, 2043ec33)
 
-Summary: 0 P0, 1 P1, 2 P2, 2 P3
+Summary: 0 P0, 0 P1, 0 P2, 0 P3
 
-Already reported by the test-writer (reviews/gridfs/tests.md) and confirmed here, not counted
-again: TW-1 (`gridfs.delete` is missing from `DESTRUCTIVE` in
-`packages/renderer/src/app/safety/write-guard.service.ts:35`) and TW-2 (no `TITLES` entries for
-`gridfs.upload`/`gridfs.delete`, write-guard.service.ts:44). I ran
-`npx ng test --include src/app/gridfs/gridfs-view.spec.ts` and got 3 failed / 43 passed: the three
-tests that fail on purpose because of TW-1/TW-2. Backend and contract units
-(`npx vitest run packages/backend/src/gridfs packages/contract`) gave 932 passed.
+## Verification of round 1 findings
+
+- CR-1 (project check red; TW-1/TW-2): resolved. `write-guard.service.ts` now lists `gridfs.delete` in `DESTRUCTIVE` and has `TITLES` entries `Upload file` and `Delete file`. `npx ng test --include src/app/gridfs/gridfs-view.spec.ts` gave 47 passed.
+- CR-2 (cleanup raced in-flight driver inserts): resolved. `uploadFile` (`packages/backend/src/gridfs/gridfs.ts:298-338`) no longer passes the GridFS stream through an abortable `pipeline`. It awaits each `write` callback and the `end` callback, and checks the signal only between these steps. I checked the driver source. `doWrite` calls back only after its chunk inserts resolve: the `outstandingRequests` counter covers this, and a 64 KiB read is smaller than a 255 KiB chunk, so a write starts at most one insert. `_final` → `writeRemnant` → `checkDone` calls back only after the files-document `insertOne` resolves. So when `removeFile` runs, no insert of this upload is still in flight. A read-side abort (`createReadStream(..., { signal })`) also lands only between awaited writes. `cancelOnClose` awaits `uploadFile`, so `conn.close` waits for the cleanup too. Cleanup deletes only the id generated for this upload.
+- CR-3 (cancel tests never cancelled mid-transfer): resolved. `test/integration/gridfs.int.spec.ts:441-489` cancels after the first progress event, and also at every progress step including the end. It asserts an empty bucket right away and again after a settle. Validator-based tests (lines 491-536) and `gridfs-faults.int.spec.ts` cover server and local-file failures in the middle of a transfer.
+- CR-4 (late open recreates the cancelled download file): resolved. `downloadFile` awaits `closeStream(output)` before `rm` (`gridfs.ts:252-256, 263-272`), which follows the `io/export.ts` convention. `gridfs-faults.int.spec.ts:212` holds back the open past the cancel and asserts that no file is left.
+- CR-5 (cancel message promised nothing was kept): resolved. `cancelTransfer` (`packages/renderer/src/app/gridfs/gridfs-view.ts:262-267`) says "Cancelled the upload/download of X." and reloads the list after an upload cancel. The spec covers the reload, the no-reload case for downloads, and keeping the chosen bucket.
+
+## Acceptance criteria
+
+- AC1 (integration test: 20 MB upload, download identical by hash): `gridfs.int.spec.ts:180` uploads 20 MB of random bytes through the RPC server with the write guard, checks stepwise progress and the `fileId`, downloads the file, and compares SHA-256. I ran `npm run test:int -- gridfs` (MongoDB 8 Testcontainers fixture): 2 files, 18 passed.
+- AC2 (e2e: upload and delete from the UI): `test/e2e/gridfs.e2e.ts` opens the tab from the sidebar database menu, uploads through the stubbed native dialog, checks the row and the stored `length`, downloads and compares the hash, then deletes through the confirm dialog and asserts 0 files and 0 chunks. I ran `npm run test:e2e -- gridfs` (built Electron app, Playwright `_electron`): 1 passed.
+- `python tasks.py verify gridfs` still shows both criteria unticked. No criterion is claimed without evidence. The parent still has to record the evidence.
+
+Other runs: `npx vitest run packages/backend/src/gridfs` gave 41 passed. I did not run the full `.taskcheck`; the parent runs it.
 
 ## P0 Critical
 
@@ -34,47 +43,23 @@ None.
 
 ## P1 High
 
-- [ ] **CR-1 | The project check fails at HEAD (3 renderer tests red)**
-    - File: `packages/renderer/src/app/safety/write-guard.service.ts:35`
-    - Category: Tests
-    - Problem: At HEAD, three tests in `gridfs-view.spec.ts` fail (destructive delete and dialog titles; TW-1/TW-2). `.taskcheck` runs `npm run check`, which includes the renderer suite, so it fails.
-    - Why it matters: `done` cannot pass. The underlying behavior is also a real safety gap: Enter confirms a file delete because the OK button gets focus, and the confirm dialogs are titled `gridfs.delete`/`gridfs.upload`.
-    - Suggested fix: Add `gridfs.delete` to `DESTRUCTIVE`, and add `TITLES` entries such as `'gridfs.upload': 'Upload file'` and `'gridfs.delete': 'Delete file'`. Then re-run the renderer suite.
+None.
 
 ## P2 Medium
 
-- [ ] **CR-2 | A cancelled upload cleans up before the driver's in-flight inserts finish, so chunks or a chunkless files document can be left behind**
-    - File: `packages/backend/src/gridfs/gridfs.ts:276-281`
-    - Category: Correctness
-    - Problem: `pipeline(..., { signal })` rejects as soon as the signal aborts. It destroys the `GridFSBucketWriteStream` and does not wait for that stream's pending writes. In driver 7.9 (`node_modules/mongodb/lib/gridfs/upload.js`, `doWrite`/`writeRemnant`/`checkDone`), a chunk `insertOne` and, during `_final`, the files-document `insertOne` are already started and keep running after the destroy. `removeFile` (line 280) then sends `deleteOne`/`deleteMany` right away, possibly on another pooled connection. If one of those inserts is applied after the delete, a stray chunk remains. If the cancel arrives during `_final`, a files document remains whose chunks were deleted: a corrupt file that the list shows as a normal file, while the user was told the upload was cancelled. `conn.close` has the same race, because `cancelOnClose` only waits for `uploadFile` to return.
-    - Why it matters: This contradicts the task assumption and the ARCHITECTURE.md statement that "a partial upload's chunks and files document are deleted". The failure is silent data corruption, and it is most likely when a small file is cancelled near its end.
-    - Suggested fix: Before `removeFile`, wait until the upload stream has settled. Options: wait for its `close`/`finish`, or do not give the GridFS stream to the abortable pipeline (stop the read side and call `uploadStream.abort()` once it is idle). Alternatively, run the cleanup again after a settle. Compare `closeStream` in `io/export.ts`.
-
-- [ ] **CR-3 | The upload-cancel integration test never cancels mid-transfer**
-    - File: `test/integration/gridfs.int.spec.ts:408-423`
-    - Category: Tests
-    - Problem: The test calls `backend.cancel(streamId)` immediately after `gridfs.upload` returns. `uploadFile` awaits `stat` and then calls `signal.throwIfAborted()`, so the cancel most likely lands before any chunk is written, and the test passes trivially. There is no test that cancels after progress has been reported, or during the final files-document write, which is where CR-2 occurs. The download-cancel test (line 319) has the same weakness.
-    - Why it matters: The cleanup guarantee the feature advertises is unverified on the path where it matters.
-    - Suggested fix: Wait for the first progress event (or use a small `progressBytes`) before cancelling. After `finished`, wait briefly and then assert that `files` and `chunks` are both 0.
+None.
 
 ## P3 Low
 
-- [ ] **CR-4 | A cancelled download can leave the (empty) target file when the cancel arrives before the file is open**
-    - File: `packages/backend/src/gridfs/gridfs.ts:243-247`
-    - Category: Correctness
-    - Problem: `createWriteStream(target)` opens the file asynchronously. If the signal aborts before that open completes, `pipeline` rejects at once and `rm(target)` runs. The open can then still finish and create `target`. The project already handles exactly this case in `io/export.ts` `closeStream` ("An open still running finishes (and creates the file) first, so a removal after this cannot be undone by a late open"), but `downloadFile` does not.
-    - Why it matters: A file the user cancelled is left behind, which contradicts the documented "a partial download file is removed". The project has a convention for this case, and this code does not follow it.
-    - Suggested fix: Keep a reference to the write stream and wait for its `close` (destroy it if needed) before calling `rm`, as `closeStream` does.
+None.
 
-- [ ] **CR-5 | Cancel always says "nothing was kept", even if the upload already committed**
-    - File: `packages/renderer/src/app/gridfs/gridfs-view.ts:259-265`
-    - Category: Correctness
-    - Problem: `cancelTransfer` unsubscribes and shows "Cancelled the upload of X; nothing was kept." without reloading. If the backend had already finished the upload (the files document was written and `end` was in flight), the backend ignores the cancel and the file exists. The message is then wrong, and the list stays stale until the user clicks Refresh. CR-2 can also keep data that the message says was removed.
-    - Why it matters: A cancelled write may already have been committed. The UI states as fact something it cannot know.
-    - Suggested fix: After cancelling an upload, reload the list, and word the message without the guarantee (for example "Cancelled the upload of X."). Or wait for the stream's terminal event before choosing the message.
+## Notes (not findings)
+
+- Test-writer O-3 confirmed, not counted. The reload after an upload cancel is sent without waiting for the backend's terminal event. If the cancel arrives while the files document is being written, the reloaded list can briefly show the file that the cleanup is about to remove. The window is a few milliseconds, the next refresh corrects it, and deleting that row answers "was already gone". This needs no fix for this task.
+- Test-writer O-2 confirmed, not counted. `stat(source)` (`gridfs.ts:308`) is outside the `try`. If the file vanishes between the handler's `stat` and the stream start, the user sees a generic error message instead of "Could not read …". Nothing is written to the database in this case.
+- Test-writer O-1 is accurate. The branch in `closeStream` for a stream that is not yet closed is defensive, because `pipeline` already waits for the close.
+- Other checks found no issues. The renderer sends no paths, and the upload/download paths come only from the backend's dialogs. Both writes are guarded in the backend (`write: 'always'`, `guardWrites`) before any dialog opens. Delete always asks (`alwaysConfirm`), and Cancel has the focus. Queries use `$eq` and an escaped regex, and the bucket name refuses `$`/NUL. Ids travel as canonical EJSON and are read without BSON promotion. Stale list responses are dropped through `AbortController`s. Repeated clicks on Upload are blocked by `running`/`transfer`. The template has no `innerHTML`, and the CSS has no hard-coded colours.
 
 ## Review conclusion
 
-Material issues found; fix before completing the task.
-
-Notes: The acceptance-criterion tests exist. `gridfs.int.spec.ts:153` does a 20 MB round trip checked by SHA-256, and `test/e2e/gridfs.e2e.ts` uploads, downloads and deletes through the UI and its confirm dialog. As instructed, I did not run them or inspect the `tasks.py verify` evidence. Other checks found no issues. The write guard covers `gridfs.upload`/`gridfs.delete` (`write: 'always'`) before any dialog opens. The renderer sends no paths. Ids travel as canonical EJSON and are read without BSON promotion. Every database query uses `$eq` and escapes the regex. Out-of-order list results are ignored through per-list `AbortController`s. Destroying the tab cancels a running transfer. The CSS contains no hard-coded colours.
+No material issues found.
