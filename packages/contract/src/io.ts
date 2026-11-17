@@ -105,7 +105,7 @@ export const ioMethods = defineMethods({
         sample: z.array(ejsonDocument('document')),
         /**
          * CSV only: header columns. `sample` then holds the first rows imported with the default
-         * mapping (every column, `auto` type).
+         * mapping (every named column, `auto` type; see `io.import`'s `csvMapping`).
          */
         csvColumns: z.array(z.string()).optional(),
         /** CSV only: the cells of the first rows (after the header), as written in the file. */
@@ -130,13 +130,16 @@ export const ioMethods = defineMethods({
       ordered: z.boolean().optional(),
       stopOnError: z.boolean().optional(),
       /**
-       * CSV only: column (header name) → { dotted field path, BSON type }. Columns left out are
-       * not imported. Without it every column is imported under its own name as `auto`.
+       * CSV only: column (header name, and its 0-based `index` in the header, which a repeated
+       * header name needs) → { dotted field path, BSON type }. Columns left out are not imported.
+       * Without it every named column is imported under its own name as `auto`, except columns
+       * whose name is not a valid path or repeats or overlaps an earlier column's name.
        */
       csvMapping: z
         .array(
           z.strictObject({
             column: z.string(),
+            index: count.optional(),
             path: z.string().min(1),
             bsonType: z.enum(CSV_TYPES),
           }),

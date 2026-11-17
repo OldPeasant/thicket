@@ -1,5 +1,5 @@
 import type { CsvType } from '@thicket/contract';
-import { BSON, Decimal128, Double, Int32, Long, ObjectId, type Document } from 'mongodb';
+import { BSON, Decimal128, Double, Int32, Long, ObjectId, Timestamp, type Document } from 'mongodb';
 
 import { RpcError } from '../../server/rpc';
 
@@ -68,7 +68,10 @@ export function cellText(value: unknown, relaxed: boolean): string {
   if (typeof value === 'number') return String(value);
   if (typeof value === 'bigint') return value.toString();
   if (value instanceof Int32 || value instanceof Double) return String(value.valueOf());
-  if (value instanceof Long || value instanceof Decimal128) return value.toString();
+  // A Timestamp is a Long in the driver, but no number: it falls through to Extended JSON.
+  if ((value instanceof Long && !(value instanceof Timestamp)) || value instanceof Decimal128) {
+    return value.toString();
+  }
   if (value instanceof ObjectId) return value.toHexString();
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
   return BSON.EJSON.stringify(value, { relaxed });
@@ -106,11 +109,46 @@ function double(text: string): Double {
   return new Double(Number(text));
 }
 
+/**
+ * ISO 8601 calendar date, optionally with a time (`T`, minutes required, seconds and a fraction
+ * optional) and an offset (`Z`, `±hh:mm` or `±hhmm`).
+ */
+const ISO_DATE =
+  /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d+))?)?(?:Z|([+-])(\d{2}):?(\d{2}))?)?$/;
+
+/**
+ * A date cell: milliseconds since 1970 (digits only, what exports may write) or ISO 8601 (see
+ * {@link ISO_DATE}). A date-time without an offset is UTC, so the result never depends on the
+ * time zone of the machine. Anything else (`03/01/2026`, `2026-03-01 10:00`, `2024-02-30`) is
+ * no date.
+ */
 function date(text: string): Date {
-  // Digits only: milliseconds since 1970 (what spreadsheets rarely write, but exports may).
-  const d = /^-?\d+$/.test(text) ? new Date(Number(text)) : new Date(text);
-  if (Number.isNaN(d.getTime())) throw new CellError('is not a date');
-  return d;
+  if (/^-?\d+$/.test(text)) {
+    const d = new Date(Number(text));
+    if (Number.isNaN(d.getTime())) throw new CellError('is not a date');
+    return d;
+  }
+  const m = ISO_DATE.exec(text);
+  if (!m) throw new CellError('is not a date');
+  const n = (i: number) => Number(m[i] ?? '0');
+  const [year, month, day, hours, minutes, seconds] = [n(1), n(2), n(3), n(4), n(5), n(6)];
+  const millis = Number((m[7] ?? '').padEnd(3, '0').slice(0, 3));
+  const utc = new Date(0);
+  utc.setUTCFullYear(year, month - 1, day);
+  utc.setUTCHours(hours, minutes, seconds, millis);
+  // Out-of-range parts (month 13, February 30, hour 24, second 60) roll over: refuse them.
+  const valid =
+    utc.getUTCFullYear() === year &&
+    utc.getUTCMonth() === month - 1 &&
+    utc.getUTCDate() === day &&
+    utc.getUTCHours() === hours &&
+    utc.getUTCMinutes() === minutes &&
+    utc.getUTCSeconds() === seconds &&
+    n(9) <= 23 &&
+    n(10) <= 59;
+  if (!valid) throw new CellError('is not a date');
+  const offsetMinutes = (m[8] === '-' ? -1 : 1) * (n(9) * 60 + n(10));
+  return new Date(utc.getTime() - offsetMinutes * 60_000);
 }
 
 /**
@@ -177,27 +215,79 @@ export interface CsvColumnMapping {
   type: CsvType;
 }
 
+/** One entry of `io.import`'s `csvMapping`. */
+export interface CsvMappingInput {
+  column: string;
+  /** 0-based position of the column in the header (needed for a repeated header name). */
+  index?: number | undefined;
+  path: string;
+  bsonType: CsvType;
+}
+
+/** Whether two paths are the same or one is the prefix path of the other. */
+function overlaps(a: string, b: string): boolean {
+  return a === b || a.startsWith(`${b}.`) || b.startsWith(`${a}.`);
+}
+
 /**
- * Validates a mapping against the header: every column named must exist (a repeated header name
- * means its first column), paths have no empty segment, and no path is used twice or is the
- * prefix of another (one would overwrite the other). Without `mapping`, every column with a name
- * is imported under that name as `auto`.
+ * The default mapping: every column under its own name as `auto`, except columns that cannot be
+ * a field this way, which are left out (the import panel lets the user map them): a blank name,
+ * a name with an empty path segment (`a.`, `.a`), and a name that repeats or overlaps the path
+ * of an earlier column (`a,a` or `a,a.b`: the first one is taken). Never throws.
+ */
+export function defaultMapping(header: readonly string[]): CsvColumnMapping[] {
+  const taken: string[] = [];
+  const columns: CsvColumnMapping[] = [];
+  header.forEach((column, index) => {
+    if (column.trim() === '') return;
+    const path = column.split('.');
+    if (path.some((s) => s === '')) return;
+    if (taken.some((t) => overlaps(t, column))) return;
+    taken.push(column);
+    columns.push({ index, column, path, type: 'auto' });
+  });
+  return columns;
+}
+
+/** The header position of a mapping entry's column; `RpcError` INVALID_PARAMS when unclear. */
+function columnIndex(header: readonly string[], m: CsvMappingInput): number {
+  if (m.index !== undefined) {
+    if (header[m.index] !== m.column) {
+      throw new RpcError(
+        'INVALID_PARAMS',
+        `The file has no column ${JSON.stringify(m.column)} at index ${String(m.index)}`,
+      );
+    }
+    return m.index;
+  }
+  const index = header.indexOf(m.column);
+  if (index < 0) {
+    throw new RpcError('INVALID_PARAMS', `The file has no column ${JSON.stringify(m.column)}`);
+  }
+  if (header.lastIndexOf(m.column) !== index) {
+    // By its name alone, the wrong one of the columns could be imported.
+    throw new RpcError(
+      'INVALID_PARAMS',
+      `The file has more than one column ${JSON.stringify(m.column)}: choose one by its index`,
+    );
+  }
+  return index;
+}
+
+/**
+ * Validates a mapping against the header: every column named must exist (at its `index` when
+ * given, which a repeated header name needs), paths have no empty segment, and no path is used
+ * twice or is the prefix of another (one would overwrite the other). Without `mapping`, the
+ * lenient {@link defaultMapping}.
  */
 export function resolveMapping(
   header: readonly string[],
-  mapping: readonly { column: string; path: string; bsonType: CsvType }[] | undefined,
+  mapping: readonly CsvMappingInput[] | undefined,
 ): CsvColumnMapping[] {
-  const entries =
-    mapping ??
-    header
-      .filter((column) => column.trim() !== '')
-      .map((column) => ({ column, path: column, bsonType: 'auto' as const }));
+  if (mapping === undefined) return defaultMapping(header);
   const seen = new Set<string>();
-  const resolved = entries.map((m) => {
-    const index = header.indexOf(m.column);
-    if (index < 0) {
-      throw new RpcError('INVALID_PARAMS', `The file has no column ${JSON.stringify(m.column)}`);
-    }
+  const resolved = mapping.map((m) => {
+    const index = columnIndex(header, m);
     const path = m.path.split('.');
     if (path.some((s) => s === '')) {
       throw new RpcError('INVALID_PARAMS', `Field path ${JSON.stringify(m.path)} is not valid`);

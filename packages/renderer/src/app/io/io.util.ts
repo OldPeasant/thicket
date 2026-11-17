@@ -44,16 +44,24 @@ export interface CsvColumnRow {
   example: string;
 }
 
-/** The default mapping: every named column under its own name, `auto`. */
+/**
+ * The default mapping: every named column under its own name, `auto` (like the backend's
+ * default). Columns whose name is no valid path (`a.`), or repeats or overlaps the name of an
+ * earlier included column (`a,a` or `a,a.b`), start unchecked: the user maps them.
+ */
 export function defaultCsvRows(
   columns: readonly string[],
   rows: readonly string[][],
 ): CsvColumnRow[] {
-  const seen = new Set<string>();
+  const taken: string[] = [];
+  const overlaps = (a: string, b: string) =>
+    a === b || a.startsWith(`${b}.`) || b.startsWith(`${a}.`);
   return columns.map((column, i) => {
-    // A repeated header name maps to its first column only (the backend maps by name).
-    const usable = column.trim() !== '' && !seen.has(column);
-    seen.add(column);
+    const usable =
+      column.trim() !== '' &&
+      !column.split('.').some((s) => s === '') &&
+      !taken.some((t) => overlaps(t, column));
+    if (usable) taken.push(column);
     return { column, include: usable, path: column, type: 'auto', example: rows[0]?.[i] ?? '' };
   });
 }
@@ -84,13 +92,17 @@ export function csvMappingProblem(rows: readonly CsvColumnRow[]): string | null 
   return null;
 }
 
-/** `io.import`'s `csvMapping` for the included columns. */
+/**
+ * `io.import`'s `csvMapping` for the included columns. `rows` are in header order (one per
+ * column), so each entry names its column by index too: a repeated header name is imported from
+ * the column the user chose.
+ */
 export function csvMapping(
   rows: readonly CsvColumnRow[],
 ): NonNullable<ParamsOf<'io.import'>['csvMapping']> {
-  return rows
-    .filter((r) => r.include)
-    .map((r) => ({ column: r.column, path: r.path.trim(), bsonType: r.type }));
+  return rows.flatMap((r, index) =>
+    r.include ? [{ column: r.column, index, path: r.path.trim(), bsonType: r.type }] : [],
+  );
 }
 
 /** An object of canonical EJSON that is a type wrapper (`{"$oid": …}`), not a document. */

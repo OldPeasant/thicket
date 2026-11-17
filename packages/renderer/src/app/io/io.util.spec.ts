@@ -137,7 +137,13 @@ describe('defaultCsvRows', () => {
     ]);
   });
 
-  it('leaves out unnamed and repeated columns (the backend maps a name to its first column)', () => {
+  it('leaves out overlapping names and names that are no valid path, like the backend', () => {
+    const rows = defaultCsvRows(['a', 'a.b', 'x.', '.y', 'c.d', 'c', 'cd'], []);
+    expect(rows.map((r) => r.include)).toEqual([true, false, false, false, true, false, true]);
+    expect(csvMappingProblem(rows)).toBeNull();
+  });
+
+  it('leaves out unnamed and repeated columns (the first of a repeated name is taken)', () => {
     const rows = defaultCsvRows(['name', '', ' ', 'name', 'qty'], [['a', 'b', 'c', 'd', 'e']]);
     expect(rows.map((r) => r.include)).toEqual([true, false, false, false, true]);
     expect(rows.map((r) => r.example)).toEqual(['a', 'b', 'c', 'd', 'e']);
@@ -207,8 +213,20 @@ describe('csvMapping', () => {
         row('qty', { path: 'stock.qty', type: 'int' }),
       ]),
     ).toEqual([
-      { column: 'sku', path: '_id', bsonType: 'string' },
-      { column: 'qty', path: 'stock.qty', bsonType: 'int' },
+      { column: 'sku', index: 0, path: '_id', bsonType: 'string' },
+      { column: 'qty', index: 2, path: 'stock.qty', bsonType: 'int' },
+    ]);
+  });
+
+  it('names a repeated header column by its index, so the chosen one is imported', () => {
+    const rows = defaultCsvRows(['name', 'qty', 'name'], [['a', '1', 'b']]);
+    const chosen = rows.map((r, i) =>
+      i === 0 ? { ...r, include: false } : i === 2 ? { ...r, include: true, path: 'alias' } : r,
+    );
+    expect(csvMappingProblem(chosen)).toBeNull();
+    expect(csvMapping(chosen)).toEqual([
+      { column: 'qty', index: 1, path: 'qty', bsonType: 'auto' },
+      { column: 'name', index: 2, path: 'alias', bsonType: 'auto' },
     ]);
   });
 });

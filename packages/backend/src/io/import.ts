@@ -2,7 +2,7 @@ import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { CsvType, ErrorSummary, IoProgress } from '@thicket/contract';
+import type { ErrorSummary, IoProgress } from '@thicket/contract';
 import { BSON, type Document } from 'mongodb';
 
 import { canonical, toNumber } from '../browse/browse';
@@ -17,7 +17,12 @@ import {
   parseDumpedDocument,
   readMetadata,
 } from './bson/bson';
-import { recordToDocument, resolveMapping, type CsvColumnMapping } from './csv/convert';
+import {
+  recordToDocument,
+  resolveMapping,
+  type CsvColumnMapping,
+  type CsvMappingInput,
+} from './csv/convert';
 import { CsvScanner } from './csv/csv';
 import { JsonScanner, LineScanner, ScanError, type Scanner, type ScannedValue } from './scanner';
 
@@ -29,7 +34,8 @@ import { JsonScanner, LineScanner, ScanError, type Scanner, type ScannedValue } 
  * - JSON / JSON Lines: parsed as EJSON (canonical or relaxed: type wrappers such as
  *   `{"$oid": …}` are honoured, plain numbers become Int32 / Int64 / Double).
  * - CSV: the first record is the header; each column is imported as a field path with a BSON
- *   type (`csvMapping`, default: every named column under its name as `auto`).
+ *   type (`csvMapping`; default: every named column under its name as `auto`, except columns
+ *   that repeat or overlap an earlier name, see `defaultMapping`).
  * - BSON: a `mongodump` `.bson` file, each document exactly as dumped; its `.metadata.json`
  *   (when present) creates a new collection with the dump's options and, after the documents,
  *   the dump's indexes. Errors name the document's number instead of a line.
@@ -39,11 +45,7 @@ export type TextImportFormat = 'json' | 'jsonl';
 export type ImportFormat = TextImportFormat | 'csv' | 'bson';
 
 /** One CSV column to import (`io.import`'s `csvMapping`). */
-export interface CsvMappingEntry {
-  column: string;
-  path: string;
-  bsonType: CsvType;
-}
+export type CsvMappingEntry = CsvMappingInput;
 
 /** Most documents per `insert` command. */
 export const IMPORT_BATCH_DOCS = 1000;
@@ -284,7 +286,7 @@ export interface ImportOptions {
   ordered?: boolean;
   /** Stop the import at the first failed document (default true); else skip it and go on. */
   stopOnError?: boolean;
-  /** CSV only: the columns to import (default: every named column under its name, `auto`). */
+  /** CSV only: the columns to import (default: `defaultMapping` of the header). */
   csvMapping?: readonly CsvMappingEntry[];
   /** Called after every batch with the running totals (and once at the end). */
   progress?: (progress: IoProgress) => void;

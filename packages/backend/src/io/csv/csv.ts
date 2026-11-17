@@ -69,14 +69,18 @@ export class CsvScanner {
     for (const c of text) {
       const crlf = this.afterCr && c === '\n';
       this.afterCr = false;
-      if (crlf) continue;
       if (this.state === 'quoted') {
-        // Line breaks inside quotes are cell text (counted for the line numbers).
+        // Line breaks inside quotes are cell text, kept as written (counted for the line
+        // numbers: `\r\n` once, a lone `\r` or `\n` once each).
         if (c === '"') this.state = 'quoteSeen';
         else this.append(c);
-        if (c === '\n') this.line++;
+        if (c === '\r') {
+          this.afterCr = true;
+          this.line++;
+        } else if (c === '\n' && !crlf) this.line++;
         continue;
       }
+      if (crlf) continue;
       const newline = c === '\n' || c === '\r';
       if (newline) this.afterCr = c === '\r';
       switch (this.state) {
@@ -87,7 +91,7 @@ export class CsvScanner {
           } else {
             if (this.cells.length === 0) this.recordLine = this.line;
             if (c === '"') this.state = 'quoted';
-            else if (c === ',') this.endCell();
+            else if (c === ',') this.separator();
             else {
               this.state = 'unquoted';
               this.append(c);
@@ -96,14 +100,14 @@ export class CsvScanner {
           break;
         case 'unquoted':
           if (newline) this.endRecord(out);
-          else if (c === ',') this.endCell();
+          else if (c === ',') this.separator();
           else this.append(c);
           break;
         case 'quoteSeen':
           if (c === '"') {
             this.state = 'quoted';
             this.append('"');
-          } else if (c === ',') this.endCell();
+          } else if (c === ',') this.separator();
           else if (newline) this.endRecord(out);
           else throw new ScanError('text after a closing quote', this.line);
           break;
@@ -112,15 +116,26 @@ export class CsvScanner {
     }
   }
 
-  private append(c: string): void {
-    this.size += c.length;
+  /** Counts `n` characters of the record against the limit. */
+  private grow(n: number): void {
+    this.size += n;
     if (this.size > this.maxRecordChars) {
       throw new ScanError(
         `a record is longer than ${String(this.maxRecordChars)} characters (is the file CSV?)`,
         this.recordLine,
       );
     }
+  }
+
+  private append(c: string): void {
+    this.grow(c.length);
     this.cell += c;
+  }
+
+  /** A comma ends a cell; it counts as a character, so a line of separators is limited too. */
+  private separator(): void {
+    this.grow(1);
+    this.endCell();
   }
 
   private endCell(): void {

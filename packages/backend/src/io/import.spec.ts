@@ -979,6 +979,38 @@ describe('CSV import', () => {
       expect(server.names()).toEqual(['insert']);
     });
 
+    it('without a mapping leaves out a repeated or overlapping column (like the preview)', async () => {
+      // A Thicket export of documents with mixed shapes: `a` and `a.b` are both columns.
+      const file = await fileWith('mixed.csv', 'a,a.b,a,n\n1,,9,x\n,2,,y\n');
+      const server = dumpServer();
+      const { result } = await importAs(server.client, file, 'csv');
+      expect(result).toEqual({ processed: 2, failed: 0, errors: [], inserted: 2 });
+      expect(server.inserted()).toEqual(['{"a":{"$numberInt":"1"},"n":"x"}', '{"n":"y"}']);
+    });
+
+    it('imports the chosen one of two columns with the same name by its index', async () => {
+      const file = await fileWith('repeated.csv', 'name,qty,name\nfirst,3,second\n');
+      const server = dumpServer();
+      const { result } = await importAs(server.client, file, 'csv', {
+        csvMapping: [{ column: 'name', index: 2, path: 'name', bsonType: 'string' }],
+      });
+      expect(result).toEqual({ processed: 1, failed: 0, errors: [], inserted: 1 });
+      expect(server.inserted()).toEqual(['{"name":"second"}']);
+    });
+
+    it('refuses a repeated column named without its index before inserting anything', async () => {
+      const file = await fileWith('repeated.csv', 'name,qty,name\nfirst,3,second\n');
+      const server = dumpServer();
+      const { result } = await importAs(server.client, file, 'csv', {
+        csvMapping: [{ column: 'name', path: 'name', bsonType: 'string' }],
+      });
+      expect(result).toMatchObject({
+        code: 'INVALID_PARAMS',
+        message: 'The file has more than one column "name": choose one by its index',
+      });
+      expect(server.names()).toEqual([]);
+    });
+
     it('refuses a mapping naming a column the file lacks before inserting anything', async () => {
       const file = await fileWith('m.csv', 'a,b\n1,2\n');
       const server = dumpServer();

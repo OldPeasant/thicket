@@ -214,8 +214,9 @@ describe('CsvScanner', () => {
     });
 
     it('accepts a record of exactly maxRecordChars characters and refuses a longer one', () => {
-      expect(cells(scan('abc,de\n', 5))).toEqual([['abc', 'de']]);
-      const error = thrown(() => scan('ok\nabc,def\n', 5));
+      // The separator counts: "abc,d" is 5 characters.
+      expect(cells(scan('abc,d\n', 5))).toEqual([['abc', 'd']]);
+      const error = thrown(() => scan('ok\nabc,de\n', 5));
       expect(error).toBeInstanceOf(ScanError);
       expect((error as ScanError).line).toBe(2);
       expect((error as Error).message).toMatch(/a record is longer than 5 characters/);
@@ -231,6 +232,24 @@ describe('CsvScanner', () => {
       expect(() => scanner.feed('"never closed, and the rest of the file\n')).toThrow(
         /Line 2: a record is longer than 10 characters/,
       );
+    });
+
+    it('a line of separators only hits the record limit (empty cells are no free ride)', () => {
+      const scanner = new CsvScanner(10);
+      expect(() => scanner.feed(','.repeat(1000))).toThrow(
+        /Line 1: a record is longer than 10 characters/,
+      );
+    });
+
+    it('a line of empty quoted cells hits the record limit too', () => {
+      const scanner = new CsvScanner(10);
+      expect(() => scanner.feed('"",'.repeat(1000))).toThrow(
+        /Line 1: a record is longer than 10 characters/,
+      );
+    });
+
+    it('a record of separators at the limit is still read', () => {
+      expect(cells(scan(',,,,\n', 4))).toEqual([['', '', '', '', '']]);
     });
   });
 });

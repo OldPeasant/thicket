@@ -18,6 +18,7 @@ import {
   cellText,
   collectPaths,
   convertCell,
+  defaultMapping,
   isPlainDocument,
   recordToDocument,
   resolveMapping,
@@ -357,6 +358,44 @@ describe('convertCell', () => {
         expect(() => convertCell(text, 'date'), text).toThrow(new CellError('is not a date'));
       }
     });
+
+    it('reads an ISO 8601 date-time without an offset as UTC, whatever the host time zone', () => {
+      expect(convertCell('2026-03-01T10:00', 'date')).toEqual(
+        new Date(Date.UTC(2026, 2, 1, 10, 0)),
+      );
+      expect(convertCell('2026-03-01T10:00:30.5', 'date')).toEqual(
+        new Date(Date.UTC(2026, 2, 1, 10, 0, 30, 500)),
+      );
+      expect(convertCell('2026-03-01T10:00:30.123456', 'date')).toEqual(
+        new Date(Date.UTC(2026, 2, 1, 10, 0, 30, 123)),
+      );
+    });
+
+    it('reads the offset forms Z, +hh:mm, -hh:mm and +hhmm', () => {
+      const at = new Date(Date.UTC(2026, 2, 1, 10, 0));
+      expect(convertCell('2026-03-01T10:00:00Z', 'date')).toEqual(at);
+      expect(convertCell('2026-03-01T11:30:00+01:30', 'date')).toEqual(at);
+      expect(convertCell('2026-03-01T05:00:00-05:00', 'date')).toEqual(at);
+      expect(convertCell('2026-03-01T11:00+0100', 'date')).toEqual(at);
+    });
+
+    it.each([
+      '03/01/2026',
+      '2026-03-01 10:00',
+      'March 1, 2026',
+      'Sun, 01 Mar 2026 10:00:00 GMT',
+      '2026-3-1',
+      '2026-02-30',
+      '2026-03-01T24:00',
+      '2026-03-01T10:60',
+      '2026-03-01T10:00:60',
+      '2026-03-01T10:00+24:00',
+      '2026-03-01T10',
+      '2026-03-01Z',
+      '1.5',
+    ])('refuses %j, which is neither ISO 8601 nor epoch millis', (text) => {
+      expect(() => convertCell(text, 'date')).toThrow(new CellError('is not a date'));
+    });
   });
 
   describe('objectId', () => {
@@ -407,7 +446,7 @@ function CSV_TYPES_BUT_STRING(): CsvType[] {
 }
 
 describe('resolveMapping', () => {
-  const header = ['name', 'qty', '', 'city', 'name'];
+  const header = ['name', 'qty', '', 'city', 'note'];
 
   it('without a mapping imports every named column under its name as auto', () => {
     expect(resolveMapping(['name', 'qty', '', '  ', 'city'], undefined)).toEqual([
@@ -415,6 +454,47 @@ describe('resolveMapping', () => {
       { index: 1, column: 'qty', path: ['qty'], type: 'auto' },
       { index: 4, column: 'city', path: ['city'], type: 'auto' },
     ]);
+  });
+
+  it('without a mapping leaves out repeated, overlapping and invalid names (never throws)', () => {
+    expect(
+      resolveMapping(['a', 'a', 'a.b', 'x.', '.y', 'c.d', 'c', 'cd', 'n'], undefined).map((c) => [
+        c.index,
+        c.column,
+      ]),
+    ).toEqual([
+      [0, 'a'],
+      [5, 'c.d'],
+      [7, 'cd'],
+      [8, 'n'],
+    ]);
+    expect(defaultMapping(['a', 'a', 'a.b'])).toEqual([
+      { index: 0, column: 'a', path: ['a'], type: 'auto' },
+    ]);
+  });
+
+  it('a repeated header name is chosen by its index, and refused by its name alone', () => {
+    const repeated = ['name', 'qty', 'name'];
+    expect(
+      resolveMapping(repeated, [{ column: 'name', index: 2, path: 'alias', bsonType: 'string' }]),
+    ).toEqual([{ index: 2, column: 'name', path: ['alias'], type: 'string' }]);
+    expect(
+      rpcError(() => resolveMapping(repeated, [{ column: 'name', path: 'n', bsonType: 'auto' }]))
+        .message,
+    ).toBe('The file has more than one column "name": choose one by its index');
+  });
+
+  it('refuses an index that does not hold the named column', () => {
+    expect(
+      rpcError(() =>
+        resolveMapping(header, [{ column: 'name', index: 1, path: 'n', bsonType: 'auto' }]),
+      ).message,
+    ).toBe('The file has no column "name" at index 1');
+    expect(
+      rpcError(() =>
+        resolveMapping(header, [{ column: 'name', index: 9, path: 'n', bsonType: 'auto' }]),
+      ).message,
+    ).toBe('The file has no column "name" at index 9');
   });
 
   it('maps named columns to dotted paths and types, in the mapping order', () => {
@@ -429,7 +509,7 @@ describe('resolveMapping', () => {
     ]);
   });
 
-  it('a repeated header name means its first column; an empty name can be mapped', () => {
+  it('an empty name can be mapped', () => {
     expect(
       resolveMapping(header, [
         { column: 'name', path: 'title', bsonType: 'auto' },

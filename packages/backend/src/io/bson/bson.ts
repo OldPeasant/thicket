@@ -208,7 +208,14 @@ export async function readMetadata(file: string): Promise<Document | undefined> 
   }
   try {
     const parsed = BSON.EJSON.parse(text, { relaxed: false }) as unknown;
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new Error();
+    // A plain object only: canonical EJSON makes `5` an Int32 and `{"$date": …}` a Date.
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      Object.getPrototypeOf(parsed) !== Object.prototype
+    ) {
+      throw new Error();
+    }
     return parsed as Document;
   } catch {
     throw new RpcError(
