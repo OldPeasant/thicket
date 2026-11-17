@@ -4,7 +4,7 @@ Date: 2026-11-17
 
 Task: profiles-import-export - M2: Import from Compass and URIs, export without secrets
 
-Scope: current task; findings CR-1..CR-5 from `reviews/profiles-import-export/review.md` and TW-1 from `reviews/profiles-import-export/tests.md`
+Scope: current task; findings CR-1..CR-6 from `reviews/profiles-import-export/review.md` and TW-1 from `reviews/profiles-import-export/tests.md`
 
 ## Fixed findings
 
@@ -112,6 +112,35 @@ Fix:
 Validation:
 - `cd apps/desktop && npx vitest run src/profiles src/main` — Pass
 
+### CR-6 — Import notices say "enter it when connecting" for secrets that are never asked
+
+Files changed:
+- `apps/desktop/src/profiles/import/compass.ts`
+- `apps/desktop/src/profiles/import/handlers.ts`
+- `apps/desktop/src/profiles/import/import.spec.ts`
+- `packages/renderer/src/app/connections/import/import-export-page.html`
+
+Problem:
+The import notices told the user to enter dropped secrets "when connecting", but only the database `password` is prompted (`secretMode: 'ask'`). This affected the weak-keychain notice, the save-failure notice and the Thicket stripped-options notice. Proxy, client key and SSH secrets are entered only in the connection editor (`ExtraSecretKind` in `connection-form.model.ts`). The AWS session token can't be entered anywhere in the app.
+
+Fix:
+`SECRET_LABELS` moved from `handlers.ts` to `compass.ts` and is exported. A new exported `secretAdvice(kinds)` builds the advice for each kind of secret:
+- `password`: "the password is asked when connecting";
+- `sshPassword`, `sshKeyPassphrase`, `tlsKeyPassphrase`, `proxyPassword`: "enter the ... in the connection editor";
+- any other kind: "the ... can't be entered in Thicket".
+
+The weak-keychain notice, the save-failure notice and the Thicket stripped-options notice now all use it. The Compass encrypted-credentials notice and the import page's hint now say that a password is asked when connecting and that other secrets (SSH, client key, proxy) are entered in the connection editor.
+
+Tests:
+- The exact-text assertion for the SSH save failure was updated to the new wording.
+- New assertions check that an SSH-only notice and the Thicket notice no longer say "when connecting".
+- The password save-failure notice is now checked by exact text.
+- A new unit test covers `secretAdvice` (password only, mixed kinds with duplicates, editor-only kinds, AWS session token) and the wording of the encrypted Compass notice.
+
+Validation:
+- `cd apps/desktop && npx vitest run src/profiles src/main` — Pass (6 files, 198 tests)
+- `npm run check` — Pass
+
 ## Not fixed
 
 None.
@@ -119,11 +148,11 @@ None.
 ## Validation summary
 
 Focused tests:
-- `cd apps/desktop && npx vitest run src/profiles src/main` — Pass (6 files, 191 tests)
+- `cd apps/desktop && npx vitest run src/profiles src/main` — Pass (6 files, 191 tests; after CR-6: 198 tests)
 - `npx vitest run packages/contract` — Pass (4 files, 733 tests)
 
 Full test suite:
-- `npm run check` — Pass (lint + prettier + typecheck; root vitest 65 files / 3600 tests; renderer `ng test` 81 files / 2436 tests). The first run failed only on prettier formatting of `import.spec.ts`. I fixed that with `npx prettier --write` and the rerun passed.
+- `npm run check` — Pass (lint + prettier + typecheck; root vitest 65 files / 3600 tests; renderer `ng test` 81 files / 2436 tests). The first run failed only on prettier formatting of `import.spec.ts`. I fixed that with `npx prettier --write` and the rerun passed. After CR-6: Pass again (lint + prettier + typecheck; root vitest 65 files / 3607 tests; renderer 81 files / 2436 tests).
 
 Lint/type-check/build:
 - Included in `npm run check` — Pass

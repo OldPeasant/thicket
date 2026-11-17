@@ -13,8 +13,10 @@ import type { NativeDialogs } from '../../dialogs';
 import { ProfilesReadOnlyError } from '../store';
 import {
   ImportFileError,
+  SECRET_LABELS,
   parseImportFile,
   parseUriList,
+  secretAdvice,
   type ImportNotice,
   type ParsedImportFile,
 } from './compass';
@@ -57,17 +59,6 @@ function sameKey(p: { name: string; connectionString: string }): string {
   return JSON.stringify([p.name, p.connectionString]);
 }
 
-const SECRET_LABELS: Record<SecretKind, string> = {
-  password: 'password',
-  sshPassword: 'SSH password',
-  sshKeyPassphrase: 'SSH key passphrase',
-  tlsKeyPassphrase: 'client key passphrase',
-  proxyPassword: 'proxy password',
-  awsSecretAccessKey: 'AWS secret access key',
-  awsSessionToken: 'AWS session token',
-  oidcTokens: 'OIDC tokens',
-};
-
 /**
  * Saves the parsed entries as new profiles, in file order. Secrets go to `secrets.bin` only when
  * the keychain is `secure`; otherwise (or when storing one fails) they are dropped, the profile
@@ -104,7 +95,7 @@ async function saveEntries(
         reason:
           `${entry.secrets.map((s) => SECRET_LABELS[s.kind]).join(', ')} not saved: ` +
           `the system keychain is not secure (${storage?.backend ?? 'unknown'}); ` +
-          'enter it when connecting',
+          secretAdvice(entry.secrets.map((s) => s.kind)),
       });
     }
     let saved = await deps.profiles.save(draft);
@@ -128,7 +119,7 @@ async function saveEntries(
         }
         notices.push({
           source: entry.source,
-          reason: `${failed.map((k) => SECRET_LABELS[k]).join(', ')} could not be saved; enter it when connecting`,
+          reason: `${failed.map((k) => SECRET_LABELS[k]).join(', ')} could not be saved; ${secretAdvice(failed)}`,
         });
       }
     }

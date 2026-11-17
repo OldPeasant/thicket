@@ -95,6 +95,43 @@ function colorOf(value: unknown): string | undefined {
   return Object.hasOwn(COMPASS_COLORS, color) ? COMPASS_COLORS[color] : undefined;
 }
 
+/** How secrets are named in notices. */
+export const SECRET_LABELS: Readonly<Record<SecretKind, string>> = {
+  password: 'password',
+  sshPassword: 'SSH password',
+  sshKeyPassphrase: 'SSH key passphrase',
+  tlsKeyPassphrase: 'client key passphrase',
+  proxyPassword: 'proxy password',
+  awsSecretAccessKey: 'AWS secret access key',
+  awsSessionToken: 'AWS session token',
+  oidcTokens: 'OIDC tokens',
+};
+
+/** Secrets besides the password that the connection editor can store. */
+const EDITOR_SECRETS = new Set<SecretKind>([
+  'sshPassword',
+  'sshKeyPassphrase',
+  'tlsKeyPassphrase',
+  'proxyPassword',
+]);
+
+/**
+ * Where the user enters secrets that were not imported: only the `password` is asked when
+ * connecting (`secretMode: 'ask'`); SSH, client key and proxy secrets go into the connection
+ * editor; the rest can't be entered in the app.
+ */
+export function secretAdvice(kinds: readonly SecretKind[]): string {
+  const unique = [...new Set(kinds)];
+  const labels = (list: SecretKind[]): string => list.map((k) => SECRET_LABELS[k]).join(', ');
+  const parts: string[] = [];
+  if (unique.includes('password')) parts.push('the password is asked when connecting');
+  const editor = unique.filter((k) => EDITOR_SECRETS.has(k));
+  if (editor.length > 0) parts.push(`enter the ${labels(editor)} in the connection editor`);
+  const other = unique.filter((k) => k !== 'password' && !EDITOR_SECRETS.has(k));
+  if (other.length > 0) parts.push(`the ${labels(other)} can't be entered in Thicket`);
+  return parts.join('; ');
+}
+
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -161,7 +198,8 @@ function compassEntry(
       source,
       reason:
         'its saved credentials are encrypted with a passphrase and were not imported; ' +
-        'enter them when connecting or in the connection editor',
+        'a password is asked when connecting, other secrets (SSH, client key, proxy) are ' +
+        'entered in the connection editor',
     });
   }
   return { source, draft, secrets };
@@ -230,7 +268,7 @@ function parseThicket(file: Record<string, unknown>): ParsedImportFile {
         source,
         reason:
           `${stripped.removed.map((kind) => URI_SECRET_OPTIONS[kind] ?? kind).join(', ')} ` +
-          'removed from the connection string and not imported; enter it when connecting',
+          `removed from the connection string and not imported; ${secretAdvice(stripped.removed)}`,
       });
     }
     // The import stores no secret for it, so a saved one has to be asked for.

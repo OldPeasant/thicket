@@ -22,6 +22,7 @@ import {
   parseImportFile,
   parseUriList,
   profileFromUri,
+  secretAdvice,
   stripUriSecrets,
   uriWithoutSecrets,
   type ImportExportFs,
@@ -376,6 +377,23 @@ describe('importExportHandlers', () => {
     expect(result.notices[0]?.reason).toMatch(/not saved/);
   });
 
+  it('says where each dropped secret is entered: only the password is asked (CR-6)', () => {
+    expect(secretAdvice(['password'])).toBe('the password is asked when connecting');
+    expect(secretAdvice(['password', 'sshKeyPassphrase', 'password'])).toBe(
+      'the password is asked when connecting; ' +
+        'enter the SSH key passphrase in the connection editor',
+    );
+    expect(secretAdvice(['proxyPassword', 'tlsKeyPassphrase', 'sshPassword'])).toBe(
+      'enter the proxy password, client key passphrase, SSH password in the connection editor',
+    );
+    expect(secretAdvice(['awsSessionToken'])).toBe(
+      "the AWS session token can't be entered in Thicket",
+    );
+    expect(parseImportFile(fixture('compass-encrypted.json')).notices[0]?.reason).toMatch(
+      /password is asked when connecting, other secrets .* connection editor/,
+    );
+  });
+
   it('falls back to asking when storing the password fails', async () => {
     const { profiles, secrets, call } = setup();
     secrets.failKinds.add('password');
@@ -385,7 +403,7 @@ describe('importExportHandlers', () => {
     expect(profiles.profiles[0]?.auth?.secretMode).toBe('ask');
     expect(result.notices).toContainEqual({
       source: 'Orders (staging)',
-      reason: expect.stringContaining('could not be saved') as string,
+      reason: 'password could not be saved; the password is asked when connecting',
     });
   });
 
@@ -884,6 +902,11 @@ describe('parseImportFile (Thicket export)', () => {
     expect(parsed.notices[0]?.reason).toMatch(
       /proxyPassword, tlsCertificateKeyFilePassword, AWS_SESSION_TOKEN removed/,
     );
+    expect(parsed.notices[0]?.reason).toContain(
+      'enter the proxy password, client key passphrase in the connection editor; ' +
+        "the AWS session token can't be entered in Thicket",
+    );
+    expect(parsed.notices[0]?.reason).not.toMatch(/when connecting/);
   });
 
   it('imports secretMode saved as ask: no secret is stored for it (CR-2)', () => {
@@ -1200,7 +1223,10 @@ describe('importExportHandlers (edge cases)', () => {
     };
     expect(failed.imported[0]?.auth?.secretMode).toBe('ask');
     expect(failed.notices).toEqual([
-      { source: 'Tunnel', reason: 'SSH password could not be saved; enter it when connecting' },
+      {
+        source: 'Tunnel',
+        reason: 'SSH password could not be saved; enter the SSH password in the connection editor',
+      },
     ]);
 
     const weak = setup({ level: 'unavailable', file: tunnel });
@@ -1209,6 +1235,9 @@ describe('importExportHandlers (edge cases)', () => {
     };
     expect(weak.secrets.stored).toEqual([]);
     expect(dropped.notices[0]?.reason).toMatch(/^SSH password not saved: .*not secure/);
+    // Only the database password is asked when connecting (CR-6).
+    expect(dropped.notices[0]?.reason).toMatch(/enter the SSH password in the connection editor$/);
+    expect(dropped.notices[0]?.reason).not.toMatch(/when connecting/);
   });
 
   it('a failing password secret turns saved into ask in the stored profile and the result', async () => {
