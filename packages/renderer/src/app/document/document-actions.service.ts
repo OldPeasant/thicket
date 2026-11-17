@@ -73,6 +73,13 @@ export interface SaveConflict {
  */
 export type ResolveBlocker = 'server-unknown' | 'projection' | 'partial';
 
+/**
+ * Why a document deleted on the server can't be inserted again: `'projection'` while a projection
+ * is active, `'partial'` when it was loaded only partly otherwise (edited under a projection since
+ * cleared, or a large document whose long arrays were cut).
+ */
+export type ReinsertBlocker = 'projection' | 'partial';
+
 let nextDraftId = 0;
 
 /**
@@ -237,6 +244,21 @@ export class DocumentActions {
     return projection !== undefined && isTopLevelProjection(projection) ? null : 'projection';
   }
 
+  /**
+   * Why "Insert your version again" can't resolve the conflict under `key` (`null`: it can, or
+   * the document was not deleted on the server). A partial document (see `isPartial`) or a cut
+   * one is never inserted again: that would lose the data that was not loaded. The one rule for
+   * the conflict view and `overwrite`.
+   */
+  reinsertBlocker(key: string): ReinsertBlocker | null {
+    const conflict = this.conflictMap().get(key);
+    if (conflict === undefined || conflict.current !== null) return null;
+    if (conflict.cut === undefined && this.requireHost().projection() !== undefined) {
+      return 'projection';
+    }
+    return conflict.cut !== undefined || this.isPartial(key) ? 'partial' : null;
+  }
+
   /** Refuses (with a message) when `resolveBlocker` says Overwrite and Merge can't run. */
   private refuseResolve(key: string): boolean {
     const blocker = this.resolveBlocker(key);
@@ -265,13 +287,11 @@ export class DocumentActions {
     const host = this.requireHost();
     const partial = this.isPartial(key);
     if (conflict.current === null) {
-      if (partial || conflict.cut !== undefined) {
+      const blocker = this.reinsertBlocker(key);
+      if (blocker !== null) {
         this.messageState.set({
           kind: 'error',
-          text:
-            conflict.cut === undefined && host.projection() !== undefined
-              ? PROJECTION_REINSERT_REFUSED
-              : PARTIAL_REINSERT_REFUSED,
+          text: blocker === 'projection' ? PROJECTION_REINSERT_REFUSED : PARTIAL_REINSERT_REFUSED,
         });
         return false;
       }

@@ -231,7 +231,7 @@ describe('ConflictView with a partly loaded (cut-array) document', () => {
     expect(el().querySelectorAll('[data-testid="conflict-note"]')).toHaveLength(1);
     expect(text('conflict-note')).toContain('loaded only partly');
     expect(text('conflict-note')).toContain('long arrays are read page by page');
-    expect(text('conflict-note')).toContain('would lose the items that were not loaded');
+    expect(text('conflict-note')).toContain('would lose the data that was not loaded');
     expect(text('conflict-note')).not.toContain("query's projection");
     // Insert again could only be refused, so it is not offered; Keep it deleted is.
     expect(q('conflict-overwrite')).toBeNull();
@@ -270,9 +270,58 @@ describe('ConflictView with a partly loaded (cut-array) document', () => {
     projection = '{"name":{"$numberInt":"1"}}';
     const loaded = doc({ name: 'small order' });
     await conflictWith(loaded, doc({ name: 'renamed order' }), null);
+
+    // The view follows the service's rule (conflict-reinsert-rule): no insert-again, one note why.
+    expect(actions.reinsertBlocker(KEY)).toBe('projection');
+    expect(el().querySelectorAll('[data-testid="conflict-note"]')).toHaveLength(1);
+    expect(text('conflict-note')).toContain('Inserting your version again is not available');
+    expect(text('conflict-note')).toContain('with a projection');
+    expect(text('conflict-note')).not.toContain('Overwrite and Merge manually');
+    expect(q('conflict-overwrite')).toBeNull();
+    expect(q('conflict-merge')).toBeNull();
+    expect(text('conflict-keep-server')).toBe('Keep it deleted');
+
     expect(await actions.overwrite(KEY)).toBe(false);
     expect(actions.message()?.text).toContain('with a projection active');
     expect(fake.requestsFor('docs.insert')).toHaveLength(0);
+  });
+
+  it('a deleted document loaded with a projection that was cleared since offers no insert-again', async () => {
+    cut = undefined;
+    projection = '{"name":{"$numberInt":"1"}}';
+    const loaded = doc({ name: 'small order' });
+    await conflictWith(loaded, doc({ name: 'renamed order' }), null);
+    // The projection is cleared: the edited document stays partial (an edit re-renders the view).
+    projection = undefined;
+    edits.edit(loaded, doc({ name: 'renamed again' }), true);
+    await settle();
+
+    expect(actions.reinsertBlocker(KEY)).toBe('partial');
+    expect(el().querySelectorAll('[data-testid="conflict-note"]')).toHaveLength(1);
+    expect(text('conflict-note')).toContain('Inserting your version again is not available');
+    expect(text('conflict-note')).toContain('Keep it deleted');
+    expect(q('conflict-overwrite')).toBeNull();
+    expect(text('conflict-keep-server')).toBe('Keep it deleted');
+    expect(await actions.overwrite(KEY)).toBe(false);
+    expect(actions.message()?.text).toContain('loaded only partly');
+    expect(fake.requestsFor('docs.insert')).toHaveLength(0);
+  });
+
+  it('a deleted whole document without a projection still offers insert-again', async () => {
+    cut = undefined;
+    const loaded = doc({ name: 'small order' });
+    fake.fail('docs.update', {
+      code: 'CONFLICT',
+      message: 'changed (fictitious)',
+      detail: { current: null },
+    });
+    edits.edit(loaded, doc({ name: 'renamed order' }), false);
+    expect(await actions.save(KEY)).toBe(false);
+    await settle();
+
+    expect(actions.reinsertBlocker(KEY)).toBeNull();
+    expect(q('conflict-note')).toBeNull();
+    expect(text('conflict-overwrite')).toBe('Insert your version again');
   });
 
   it('a deleted partial document without an active projection gets the partial-load wording', async () => {

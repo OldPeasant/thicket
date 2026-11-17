@@ -30,8 +30,9 @@ interface ConflictItem {
   /** The server version: changed, deleted, or changed but not readable. */
   readonly state: 'changed' | 'deleted' | 'unknown';
   /**
-   * Why Overwrite and Merge manually are not offered: the projection the document was loaded with
-   * (`'projection'`), or it is a large document whose long arrays were cut (`'partial'`).
+   * Why Overwrite and Merge manually (for a deleted document: "Insert your version again") are
+   * not offered: the projection the document was loaded with (`'projection'`), or it was loaded
+   * only partly otherwise (`'partial'`); see `resolveBlocker` and `reinsertBlocker`.
    */
   readonly blocked: 'projection' | 'partial' | null;
   /** Arrays of a large document that were loaded only partly: only their loaded items are compared. */
@@ -94,17 +95,17 @@ function lines(doc: BsonDocument | null): string[] {
           <p class="note" data-testid="conflict-note">
             Keep the server version to load it again, then edit again.
           </p>
+        } @else if (item.state === 'deleted' && item.blocked !== null) {
+          <p class="note" data-testid="conflict-note">
+            Inserting your version again is not available: the document was loaded only partly (with
+            a projection, or a large document whose long arrays are read page by page), so inserting
+            it again would lose the data that was not loaded. Keep it deleted.
+          </p>
         } @else if (item.blocked === 'projection') {
           <p class="note" data-testid="conflict-note">
             Overwrite and Merge manually are not available: the document was loaded with a
             projection that hides parts of fields or is no longer active, so they could change data
             you did not load. To use them, clear the projection, run the query again and edit again.
-          </p>
-        } @else if (item.blocked === 'partial' && item.state === 'deleted') {
-          <p class="note" data-testid="conflict-note">
-            Inserting your version again is not available: the document was loaded only partly (with
-            a projection, or a large document whose long arrays are read page by page), so inserting
-            it again would lose the items that were not loaded. Keep it deleted.
           </p>
         } @else if (item.blocked === 'partial') {
           <p class="note" data-testid="conflict-note">
@@ -519,11 +520,10 @@ export class ConflictView {
           : conflict.current === null
             ? 'deleted'
             : 'changed',
-      // A cut document deleted on the server can't be inserted again (resolveWith refuses it):
-      // resolveBlocker never blocks a deleted document, so the view does.
+      // A document deleted on the server: whether it can be inserted again is the service's rule.
       blocked:
-        conflict.current === null && conflict.cut !== undefined
-          ? 'partial'
+        conflict.current === null
+          ? this.actions.reinsertBlocker(conflict.key)
           : blockedBy(this.actions.resolveBlocker(conflict.key)),
       cut,
       partial,
