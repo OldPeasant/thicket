@@ -5,7 +5,7 @@ owner: felix/agent-1
 deps: [docs-query-backend]
 touches: [packages/backend/src/io,apps/desktop/src/dialogs]
 prio: 2
-lease_until: 2026-11-17T00:53:16Z
+lease_until: 2026-11-17T00:58:17Z
 ---
 ## Goal
 Export a query result as JSON array or JSON Lines (EJSON relaxed or canonical) streamed to a file chosen in a native dialog; import JSON/JSONL with preview, ordered/unordered, stop/continue on error, progress events.
