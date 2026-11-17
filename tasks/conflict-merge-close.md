@@ -1,10 +1,11 @@
 ---
 title: Close the conflict merge editor when its conflict disappears or changes state (CR-7 of conflict-ui)
-status: todo
-owner:
+status: in_progress
+owner: felix/agent-2
 deps: [conflict-ui]
 touches: [packages/renderer/src/app/document/conflict]
 prio: 2
+lease_until: 2026-11-17T03:03:16Z
 ---
 ## Goal
 The conflict view's merge editor (`conflict-view.ts`) stays open after its conflict is gone or no longer
