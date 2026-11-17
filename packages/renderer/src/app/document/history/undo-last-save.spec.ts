@@ -906,13 +906,16 @@ describe('Undo last save', () => {
     expect(stringifyEJson(server.stored as BsonDocument)).toBe(saved);
   });
 
-  // Repeated top-level keys (kept by the EJSON parser): the whole-document check can't be built,
-  // so the undo falls back to the diff's own replace and its changed-field check.
+  // Repeated top-level keys (kept by the EJSON parser): the diff is a replace of every field and
+  // the whole-document check can't be built, so the undo is refused and nothing is written.
   describe('a document with repeated top-level keys', () => {
     const REPEATED =
       '{"_id":{"$numberInt":"1"},"status":"open","tag":"a","tag":"b","total":{"$numberInt":"10"}}';
     const SAVED =
       '{"_id":{"$numberInt":"1"},"status":"open","tag":"a","tag":"b","total":{"$numberInt":"15"}}';
+    const REFUSED =
+      'Not undone: this document has repeated field names, so the old version can not be ' +
+      'written back safely.';
 
     async function saveRepeated(): Promise<void> {
       server.stored = doc(REPEATED);
@@ -921,42 +924,43 @@ describe('Undo last save', () => {
       expect(stringifyEJson(server.stored as BsonDocument)).toBe(SAVED);
     }
 
-    it('save, undo last save: the server document equals the original again', async () => {
+    it('save, undo last save: refused, nothing written, the server keeps the saved version', async () => {
       await saveRepeated();
 
-      expect(await actions.undoSave(ID)).toBe(true);
+      expect(await actions.undoSave(ID)).toBe(false);
 
-      expect(stringifyEJson(server.stored as BsonDocument)).toBe(REPEATED);
-      expect(replaces()).toHaveLength(2);
-      expect(replaces()[1]?.['expected']).toBe('{"total":{"$eq":{"$numberInt":"15"}}}');
+      expect(actions.message()).toEqual({ kind: 'error', text: REFUSED });
+      expect(stringifyEJson(server.stored as BsonDocument)).toBe(SAVED);
+      expect(replaces()).toHaveLength(1);
+      expect(updates()).toHaveLength(0);
+      // Like the partial refusal: the undo entry is kept (nothing was written).
+      expect(actions.canUndoSave(ID)).toBe(true);
     });
 
-    it('reports a conflict when the field the save changed was changed on the server since', async () => {
+    it('refuses and writes nothing when the field the save changed was changed on the server since', async () => {
       await saveRepeated();
       server.set('total', { type: 'int', value: 20 });
       const changedOnServer = stringifyEJson(server.stored as BsonDocument);
 
       expect(await actions.undoSave(ID)).toBe(false);
 
+      expect(actions.message()).toEqual({ kind: 'error', text: REFUSED });
       expect(stringifyEJson(server.stored as BsonDocument)).toBe(changedOnServer);
-      expect(actions.message()?.text).toMatch(
-        /^Not undone: the document was changed on the server/,
-      );
+      expect(replaces()).toHaveLength(1);
     });
 
-    // AC2: any change on the server since the save conflicts. The undo is a replace of every
-    // field, but this fallback checks only the field the save changed.
-    it('reports a conflict instead of replacing over a server change to a field the save did not touch', async () => {
+    // AC2: a change on the server since the save is never overwritten. The undo would replace
+    // every field under a check of only the field the save changed, so it is refused instead.
+    it('does not replace over a server change to a field the save did not touch', async () => {
       await saveRepeated();
       server.set('status', { type: 'string', value: 'shipped' });
       const changedOnServer = stringifyEJson(server.stored as BsonDocument);
 
-      await actions.undoSave(ID);
+      expect(await actions.undoSave(ID)).toBe(false);
 
+      expect(actions.message()).toEqual({ kind: 'error', text: REFUSED });
       expect(stringifyEJson(server.stored as BsonDocument)).toBe(changedOnServer);
-      expect(actions.message()?.text).toMatch(
-        /^Not undone: the document was changed on the server/,
-      );
+      expect(replaces()).toHaveLength(1);
     });
   });
 });

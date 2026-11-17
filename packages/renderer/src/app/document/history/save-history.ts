@@ -6,7 +6,7 @@ export interface SavedVersion {
   readonly key: string;
   /** The document before the save (as loaded; only the shown fields when it was partial). */
   readonly before: BsonDocument;
-  /** The document as the save wrote it. */
+  /** The document as the server stored it after the save (see `DocumentActions.recordSave`). */
   readonly after: BsonDocument;
   /** It was loaded with a projection or cut (see `DocumentActions.isPartial`). */
   readonly partial: boolean;

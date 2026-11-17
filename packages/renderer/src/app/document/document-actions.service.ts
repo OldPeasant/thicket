@@ -164,7 +164,8 @@ export class DocumentActions {
    * "Undo last save": writes the version from before the document's last save back, as the
    * minimal diff from the saved version with the saved version's values as the conflict check (as
    * Save does; when only a replace restores the field order, the check covers the whole saved
-   * version, see `keepingOrder`). When the document changed on the server since, nothing is
+   * version, see `keepingOrder`; refused when that check can't be built, for repeated field
+   * names). When the document changed on the server since, nothing is
    * overwritten: the message says so and the undo is no longer offered. Refused while the document has unsaved
    * edits (Save or Revert them first). Resolves with true when the old version was written.
    */
@@ -444,6 +445,10 @@ export class DocumentActions {
     };
     const diff =
       options.keepOrder && !partial ? keepingOrder(pending.diff, original, current) : pending.diff;
+    if (diff === null) {
+      this.messageState.set({ kind: 'error', text: UNDO_REPEATED_KEYS_REFUSED });
+      return false;
+    }
     if (
       partial &&
       (overwritesHiddenData(diff, original) ||
@@ -708,17 +713,18 @@ interface SendOptions {
  * version the save left on the server, see `recordSave`) would not give `current` with its field
  * order; otherwise `diff` as it is. A replace writes every field, so its conflict check covers the
  * whole of `original` (every top-level field and the field count): any change on the server
- * since then conflicts. When that check can't be built (`wholeDocumentCheck`), the update stays
- * the minimal one (the order may differ).
+ * since then conflicts. When that check can't be built (`wholeDocumentCheck`), an update stays
+ * the minimal one (the order may differ), and `null` for a replace: it would write every field
+ * under a check of only the changed ones, so it must not be sent.
  */
 function keepingOrder(
   diff: Exclude<DocumentDiff, { readonly kind: 'none' }>,
   original: BsonDocument,
   current: BsonDocument,
-): Exclude<DocumentDiff, { readonly kind: 'none' }> {
+): Exclude<DocumentDiff, { readonly kind: 'none' }> | null {
   if (diff.kind === 'update' && bsonEquals(applyUpdate(original, diff.ops), current)) return diff;
   const expected = wholeDocumentCheck(original);
-  if (expected === null) return diff;
+  if (expected === null) return diff.kind === 'update' ? diff : null;
   const id = diff.filter.fields.find((f) => f.key === '_id');
   const filter: BsonDocument = {
     type: 'object',
@@ -795,6 +801,11 @@ const UNDO_WITH_EDITS_REFUSED =
 const UNDO_CONFLICT =
   'Not undone: the document was changed on the server since the save. Nothing was overwritten; ' +
   'run the query again to see the current version.';
+
+/** Undo's refusal when only a replace restores the document but it can't be checked whole. */
+const UNDO_REPEATED_KEYS_REFUSED =
+  'Not undone: this document has repeated field names, so the old version can not be written ' +
+  'back safely.';
 
 /** Undo's refusal under a projection or for a partly loaded document (no edit to redo). */
 const UNDO_PARTIAL_REFUSED =
