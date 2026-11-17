@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "task": "ldap-auth",
+  "reviewed_revision": "91b6f0907ffb4b118dce258fae8bc612c7ded67f",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/ldap-auth/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/ldap-auth/review.md"},
+    "fixer": {"status": "not_required", "reason": "fixer not required: code-reviewer found no findings (two rounds, final on 91b6f09) and the test-writer found no production bugs"}
+  },
+  "fixes_required": false,
+  "findings": [],
+  "validation": [
+    {"command": "npm run test:int -- ldap", "result": "pass"},
+    {"command": "npx vitest run --root packages/backend src/auth/ldap src/connections", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}
