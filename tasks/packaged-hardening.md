@@ -1,11 +1,11 @@
 ---
 title: Harden the packaged app: Electron fuses (RunAsNode, NODE_OPTIONS, asar-only), ignore THICKET_DEV_SERVER/THICKET_RENDERER_DIR when packaged
-status: in_progress
+status: done
 owner: dell26/agent-3
 deps: [packaging]
 touches: [apps/desktop/electron-builder.yml,apps/desktop/src/main]
 prio: 3
-lease_until: 2026-11-17T05:37:39Z
+lease_until: 
 ---
 ## Goal
 From the packaging review (reviews/packaging/review.md, CR-3): the packaged app keeps Electron's
@@ -26,3 +26,4 @@ See SPEC.md and docs/ARCHITECTURE.md (Electron shell, Packaging).
 - ASSUMPTION (2026-11-17 06:07+0100 by dell26/agent-3): NODE_OPTIONS hardening is verified by reading the fuse wire only: Electron already drops --require etc. from NODE_OPTIONS in packaged apps even with the fuse on (shown by an unfused control), so no runtime probe can observe it.
 - ASSUMPTION (2026-11-17 06:07+0100 by dell26/agent-3): Only the fuses named in the task were set; cookieEncryption and grantFileProtocolExtraPrivileges were left at defaults (out of scope).
 - ASSUMPTION (2026-11-17 06:17+0100 by dell26/agent-3): Packaged builds still accept --remote-debugging-port (no fuse controls it; the smoke test uses it). Accepted residual risk: launching the binary with arguments already implies local code execution as the user; blocking the switch in packaged builds would be a follow-up task.
+- done by dell26/agent-3: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 59s on be7edc84c; criteria verified 3/3
