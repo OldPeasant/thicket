@@ -17,6 +17,7 @@ Replace Canopy's 'show more' with a pager for arrays/objects above N entries (se
   - verified (2026-11-17 03:21+0100 by dell26/agent-3): cd packages/renderer && npx ng test --include src/app/explorer/doc-paging.spec.ts (HEAD 35aa821) -> 16 passed: 2000-item array pager, next/last/prev/first, jump to typed page, edit on page 7 kept when paging away and back
 - [x] e2e: 50 000-item array document opens in < 2 s and pages via getSlice (network log shows slices)
   - verified (2026-11-17 03:21+0100 by dell26/agent-3): npm run build -w packages/renderer && npm run build -w apps/desktop && npx playwright test test/e2e/doc-paging.e2e.ts (built Electron app, mongo8 container fixture, headless) -> 1 passed: 50 000-item doc opened in 190 ms (<2 s), find sent only page 1, system.profile log shows $slice reads for pages 2, 400, 500
+  - verified (2026-11-17 03:21+0100 by dell26/agent-3): npm run build -w packages/renderer && npm run build -w apps/desktop && npx playwright test test/e2e/doc-paging.e2e.ts (built Electron app, mongo8 container fixture, headless) -> 1 passed: 50 000-item doc opened in 190 ms (<2 s), find sent only page 1, system.profile log shows slice reads for pages 2, 400, 500
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
