@@ -5,7 +5,7 @@ owner: felix/agent-2
 deps: []
 touches: [test/e2e/layout.e2e.ts,packages/renderer/src/app/connections/import]
 prio: 2
-lease_until: 2026-11-17T06:00:38Z
+lease_until: 2026-11-17T06:05:41Z
 ---
 ## Goal
 The welcome-page e2e test clicks Import and expects `page-heading` = 'Import from Compass', but the
