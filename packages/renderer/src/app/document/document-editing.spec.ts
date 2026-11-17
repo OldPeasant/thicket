@@ -302,6 +302,90 @@ describe('Editing documents in a collection tab', () => {
     expect(q('doc-conflict', docItem(0))).toBeNull();
   });
 
+  describe('conflict view', () => {
+    /** Edits total of order 1 to 15 and saves into a conflict with server total 99. */
+    const conflict = async (current: string | null = orderText(1, 99, 1)) => {
+      fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current } });
+      await typeInto(0, 'total', '15');
+      await click('edit-save');
+      fake.respond('docs.update', { modified: true });
+    };
+    const rows = () => [...el().querySelectorAll<HTMLElement>('[data-testid="conflict-row"]')];
+
+    it('shows both versions side by side with the differing line highlighted', async () => {
+      expect(q('conflict-view')).toBeNull();
+      await conflict();
+      expect(text('conflict-title')).toBe('Changed on the server since you loaded it');
+      expect(text('conflict-count')).toBe('1 differing line');
+      const changed = rows().filter((r) => r.dataset['kind'] !== 'same');
+      expect(changed).toHaveLength(1);
+      expect(text('conflict-local', changed[0])).toContain('total: 15');
+      expect(text('conflict-server', changed[0])).toContain('total: 99');
+      expect(get('conflict-local', changed[0]).classList).toContain('diff');
+      expect(get('conflict-server', changed[0]).classList).toContain('diff');
+      const sameRow = rows().find((r) => r.textContent?.includes('qty: 1'));
+      expect(sameRow?.dataset['kind']).toBe('same');
+    });
+
+    it('Overwrite writes the local version, checked against the new server version', async () => {
+      await conflict();
+      await click('conflict-overwrite');
+      expect(updates().at(-1)).toMatchObject({
+        update: '{"$set":{"total":{"$numberInt":"15"}}}',
+        expected: '{"total":{"$eq":{"$numberInt":"99"}}}',
+      });
+      expect(q('conflict-view')).toBeNull();
+      expect(q('edit-count')).toBeNull();
+    });
+
+    it('Keep server version discards the local edits', async () => {
+      fake.respond('docs.get', { doc: orderText(1, 99, 1), sliced: [] });
+      await conflict();
+      await click('conflict-keep-server');
+      expect(updates()).toHaveLength(1);
+      expect(q('conflict-view')).toBeNull();
+      expect(q('edit-count')).toBeNull();
+      expect(input(0, 'total').value).toBe('99');
+    });
+
+    it('Merge manually saves the edited merged document', async () => {
+      await conflict();
+      await click('conflict-merge');
+      const area = get<HTMLTextAreaElement>('conflict-merge-text');
+      expect(area.value).toContain('total: 15');
+      area.value = '{ _id: 1, total: 15, qty: 5 }';
+      area.dispatchEvent(new Event('input'));
+      await click('conflict-merge-save');
+      expect(updates().at(-1)).toMatchObject({
+        update: '{"$set":{"total":{"$numberInt":"15"},"qty":{"$numberInt":"5"}}}',
+        expected: '{"total":{"$eq":{"$numberInt":"99"}},"qty":{"$eq":{"$numberInt":"1"}}}',
+      });
+      expect(q('conflict-view')).toBeNull();
+    });
+
+    it('Merge manually shows a syntax error and sends nothing', async () => {
+      await conflict();
+      await click('conflict-merge');
+      const area = get<HTMLTextAreaElement>('conflict-merge-text');
+      area.value = '{ _id: 1, total: ';
+      area.dispatchEvent(new Event('input'));
+      await click('conflict-merge-save');
+      expect(q('conflict-merge-error')).not.toBeNull();
+      expect(updates()).toHaveLength(1);
+      await click('conflict-merge-cancel');
+      expect(q('conflict-merge-text')).toBeNull();
+      expect(q('conflict-view')).not.toBeNull();
+    });
+
+    it('offers to insert again or keep it deleted when the server deleted the document', async () => {
+      await conflict(null);
+      expect(text('conflict-title')).toBe('Deleted on the server since you loaded it');
+      expect(q('conflict-merge')).toBeNull();
+      expect(text('conflict-overwrite')).toBe('Insert your version again');
+      expect(text('conflict-keep-server')).toBe('Keep it deleted');
+    });
+  });
+
   it('reports other save errors and keeps the edits', async () => {
     fake.fail('docs.update', { code: 'SERVER_ERROR', message: 'Document failed validation' });
     await typeInto(0, 'total', '15');
