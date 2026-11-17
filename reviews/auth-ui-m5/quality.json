@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "task": "auth-ui-m5",
+  "reviewed_revision": "989b004364384dbeb0ceecd8b39e87c3db79bcfb",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/auth-ui-m5/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/auth-ui-m5/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/auth-ui-m5/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "stored AWS session token could not be removed; remove button, clearSecret on save, key-ID change clears it"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "OIDC device-code countdown said '1 seconds'"},
+    {"id": "CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "'ask' hint said 'password' for the AWS secret access key"},
+    {"id": "CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "no 'removed on save' hint when a changed AWS key ID will remove the saved session token; behavior is correct, only hint text; recorded as assumption for human review"},
+    {"id": "CR-5", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "'removed on save' hint can outlive an already removed token after edits during a save; no extra call, only text; recorded as assumption"}
+  ],
+  "validation": [
+    {"command": "cd packages/renderer && npx ng test --include src/app/connections", "result": "pass"},
+    {"command": "npm run test:e2e -- ldap.e2e.ts", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}
