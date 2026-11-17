@@ -21,3 +21,4 @@ Release run 44136477833 (tag v0.1.0-rc.2, 2026-11-17) failed in the "Smoke test 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 18:57+0100 by dell26/agent-1): Local runs stand in for the release run: without xvfb-run here, the smoke suite ran with Chromium's headless Ozone (as the config allows), APPIMAGE_EXTRACT_AND_RUN=1, THICKET_SMOKE_MONGO=1, under CPU load to mimic a slow runner. ENOTEMPTY itself didn't reproduce locally; the same race showed up as the app recreating the deleted userData folder (20/20 tests leaked it before, 0/20 after).
+- ASSUMPTION (2026-11-17 19:17+0100 by dell26/agent-1): CI check run 44144880655 on wip/smoke-userdata-cleanup: macOS fails in packages/backend/src/ssh/socks.spec.ts:345, unrelated to this task (only test/e2e changed); covered by task ci-windows-macos
