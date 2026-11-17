@@ -5,7 +5,7 @@ owner: dell26/agent-2
 deps: [conn-manager,app-layout]
 touches: [packages/backend/src/admin/stats,packages/renderer/src/app/admin/stats]
 prio: 4
-lease_until: 2026-11-17T07:17:24Z
+lease_until: 2026-11-17T07:22:26Z
 ---
 ## Goal
 serverStatus, dbStats and replica set status with a few charts (ops/s, connections, memory) refreshing live.
