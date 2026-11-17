@@ -22,3 +22,4 @@ SSH server host key then fail with "Cannot parse privateKey: Malformed OpenSSH p
 
 ## Notes
 Test-only change; production SSH code is not affected.
+- ASSUMPTION (2026-11-17 06:18+0100 by felix/agent-1): Also switched test/integration/fixtures/ssh.ts and test/e2e/demo/ssh-x509.ts (not in touches) to the helper, since they use the same flaky ed25519 generator; helper lives in packages/backend/src/ssh/testing.ts (test-only, like server/testing.ts)
