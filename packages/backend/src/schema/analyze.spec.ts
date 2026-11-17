@@ -271,6 +271,50 @@ describe('analyzeSample', () => {
     ]);
   });
 
+  it('keeps binary and code values just below the cut thresholds in full', async () => {
+    const bytes = (n: number) => new Uint8Array(n).fill(3);
+    const docs: Document[] = [
+      // Binary is cut only above the limit, so limit - 1 bytes is always a full value.
+      {
+        bin: new Binary(bytes(EXAMPLE_LENGTH_LIMIT - 1)),
+        code: new Code('c'.repeat(EXAMPLE_LENGTH_LIMIT - 2)),
+      },
+      // Code at limit - 1 may be a cut (surrogate pair) value: left out.
+      { bin: new Binary(bytes(1)), code: new Code('d'.repeat(EXAMPLE_LENGTH_LIMIT - 1)) },
+    ];
+    const r = await analyzeSample(docs);
+    const bins = examplesOf(fieldOf(r.fields, 'bin'), 'binData') as BSON.Binary[];
+    expect(bins.map((b) => b.length()).sort((a, b) => a - b)).toEqual([
+      1,
+      EXAMPLE_LENGTH_LIMIT - 1,
+    ]);
+    const codes = examplesOf(fieldOf(r.fields, 'code'), 'javascript') as BSON.Code[];
+    expect(codes.map((c) => c.code)).toEqual(['c'.repeat(EXAMPLE_LENGTH_LIMIT - 2)]);
+  });
+
+  it('keeps long code with scope as an example (the analyzer never cuts it)', async () => {
+    const long = 'x'.repeat(5000);
+    const r = await analyzeSample([{ fn: new Code(long, { k: 'v' }) }]);
+    const fn = fieldOf(r.fields, 'fn');
+    expect(typeOf(fn, 'javascriptWithScope').count).toBe(1);
+    const [example] = examplesOf(fn, 'javascriptWithScope') as BSON.Code[];
+    expect(example?.code).toBe(long);
+    expect(example?.scope).toEqual({ k: 'v' });
+  });
+
+  it('values left out as cut take no example slot: the full values still fill the 5', async () => {
+    const longs = Array.from({ length: 7 }, (_, i) => ({
+      s: String(i).repeat(EXAMPLE_LENGTH_LIMIT + 1),
+    }));
+    const shorts = ['a', 'b', 'c', 'd', 'e', 'f'].map((s) => ({ s }));
+    const r = await analyzeSample([...longs, ...shorts]);
+    const s = fieldOf(r.fields, 's');
+    expect(typeOf(s, 'string').count).toBe(13);
+    const examples = examplesOf(s, 'string') as string[];
+    expect(examples).toHaveLength(MAX_SCHEMA_EXAMPLES);
+    for (const example of examples) expect(example).toHaveLength(1);
+  });
+
   it('nested fields: dotted paths, shares relative to the parent documents', async () => {
     const docs: Document[] = [
       { a: { b: new Int32(1) } },
@@ -528,6 +572,18 @@ describe('analyzeCollection', () => {
         .types.map((t) => t.bsonType)
         .sort(),
     ).toEqual(['double', 'int', 'long']);
+  });
+
+  it('a long value read from the server is counted but not offered as a (cut) example', async () => {
+    const raw = [
+      BSON.serialize({ note: 'n'.repeat(EXAMPLE_LENGTH_LIMIT * 3) }),
+      BSON.serialize({ note: 'short note' }),
+    ];
+    const client = fakeClient(() => cursorReply(0, raw as unknown as Document[]));
+    const r = await analyzeCollection(client, params());
+    const note = fieldOf(r.fields, 'note');
+    expect(typeOf(note, 'string').count).toBe(2);
+    expect(examplesOf(note, 'string')).toEqual(['short note']);
   });
 
   it('an empty collection gives sampled 0 and no fields', async () => {

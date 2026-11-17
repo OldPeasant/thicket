@@ -4,21 +4,22 @@ Date: 2026-11-17
 
 Task: schema-analysis - M3: Schema analysis
 
-Scope: `git diff 1d5097e9..HEAD -- . ':!tasks'` (committed changes only): backend `packages/backend/src/schema/` and its wiring, contract `packages/contract/src/schema.ts`, renderer `packages/renderer/src/app/schema-analysis/` plus `collection-view.{ts,html}`, `test/integration/schema.int.spec.ts`, `test/e2e/schema-analysis.e2e.ts`, `package-lock.json` / `packages/backend/package.json`.
+Scope (round 2, current): the task's commits 82f57482, 9d140a4f, e206993f, 11724df3 and f0f755d0 on top of base 1d5097e9 (`git diff 1d5097e9..HEAD -- . ':!tasks' ':!reviews'`, narrowed to this task's files). The range also contains commits that other tasks merged into main (saved-pipelines, query-history, shell-open-close-race and others). Those were left out, except where they meet this task's code in `collection-view.{ts,html}`. The focus is on the fix commit f0f755d0, the `docs/ARCHITECTURE.md` "Schema analysis" section and the new unit specs. Only committed code was reviewed. Uncommitted test-file changes from the concurrent test-writer were ignored.
 
 Requirements:
 - tasks/schema-analysis.md acceptance criteria and recorded assumptions #1-#4
 - SPEC.md M3 (schema analysis Must; "click a field type to build a filter" Could)
 - docs/ARCHITECTURE.md (stack table, API conventions, Schema analysis section)
 - AGENTS.md (evidence, no secrets)
+- reviews/schema-analysis/fixes.md (fixer's claims, verified against the code)
 
 Git range:
 - Branch: main
-- HEAD: 061dba5a64e9463ab0a2dae1f320c39f284d0093
+- HEAD: f0f755d0a449ab58078f939062abfaa3949cb857
 - Base/start: 1d5097e9b7d64df151d86dd329c77c0217096422
-- Commits reviewed: 3 code commits (343b22c6, 41c76712, 061dba5a) plus a heartbeat commit touching only `tasks/`. The commits were rebased over the heartbeat during review; `git range-diff` shows them identical to the original dedd1b8b/0445fb2f/1ed51146. An uncommitted change to `docs/ARCHITECTURE.md` (new "Schema analysis" section) was in the working tree; it is outside the committed scope and was only read for context.
+- Commits reviewed: 5 task commits (82f57482, 9d140a4f, e206993f, 11724df3, f0f755d0)
 
-Summary: 0 P0, 0 P1, 2 P2, 3 P3
+Summary: 0 P0, 0 P1, 0 P2, 1 P3 (round 2; see "Round 1 findings, status" for the earlier ones)
 
 ## P0 Critical
 
@@ -30,63 +31,61 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | Truncated examples become equality filters that match nothing**
-    - File: `packages/backend/src/schema/analyze.ts:171` (with `packages/renderer/src/app/schema-analysis/schema-panel.ts:143`, `:205`)
-    - Category: Correctness
-    - Problem: `storedValuesLengthLimit: EXAMPLE_STRING_LIMIT` (200) makes `mongodb-schema` silently crop stored String values (`cropString`), Binary buffers and Code bodies (`getCappedValue` in `node_modules/mongodb-schema/lib/schema-analyzer.js:115-132`). These cropped values go into `examples` as if they were real values. The panel then offers them as "use as filter" chips, and `pickValue` emits `{ key: croppedValue }`. The tooltip (`ex.full`) shows the cropped text with no sign that it was cut.
-    - Why it matters: SPEC M3 "use as filter for a value". For any string longer than 200 characters, or any Binary longer than 200 bytes, the chip builds a filter that matches no documents, and nothing tells the user why.
-    - Suggested fix: Mark cropped examples in the backend, or drop them there. For example, compare against the original length, or skip values at or above the limit. The renderer should then show such examples without making them clickable, or build a `$regex` prefix filter for strings. Add a test for a long string.
-
-- [ ] **CR-2 | No unit tests for the new pure logic and the panel**
-    - File: `packages/renderer/src/app/schema-analysis/schema-analysis.model.ts:59-136`, `packages/renderer/src/app/schema-analysis/schema-panel.ts:216-235`, `packages/backend/src/schema/analyze.ts:60-160`, `packages/renderer/src/app/collection/collection-view.ts:452-477`
-    - Category: Tests
-    - Problem: The diff adds no `*.spec.ts`. Neighbouring features follow the convention of model and panel specs (`explain.model.spec.ts`, `explain-panel.spec.ts`). The following are covered only indirectly, by one happy-path integration test and one e2e test, or not at all:
-      - `withFilterField`: replacing the same key in place, an unparseable filter being replaced, an empty filter;
-      - `filterKeyOf` (`a.[].b` -> `a.b`);
-      - `percent` rounding;
-      - `schemaRows` with malformed `examples`;
-      - `typeAlias` / `mergeTypes` (DBRef+Document merge, Long/Int64, dedupe, 5-example cap);
-      - the depth-first ordering of `flattenSchema` for documents inside arrays (`a.[].b`);
-      - the panel's cancel/out-of-order handling: a newer request aborts the older one; CANCELLED is ignored; the error state appears on failure; closing aborts;
-      - `analyzeSchema` clearing a stale panel on a parse error.
-    - Why it matters: Assumption #3 (merge semantics) and the cancellation contract are exactly the kind of behavior that regresses quietly. The e2e test does not cover the replace-same-key or unparseable-filter paths, or `a.[].b` paths.
-    - Suggested fix: Add `schema-analysis.model.spec.ts`, `schema-panel.spec.ts` (with `provideFakeThicket`) and a backend `analyze.spec.ts` that runs `analyzeSample` on in-memory BSON documents. The test-writer covers this.
+None.
 
 ## P3 Low
 
-- [ ] **CR-3 | The query bar's collation is ignored by the analysis**
-    - File: `packages/renderer/src/app/collection/collection-view.ts:463`
-    - Category: Correctness
-    - Problem: `analyzeSchema` passes only `filter`. `docs.find` and Explain apply the bar's `collation`, but `schema.analyze` has no `collation` param. With a case-insensitive collation set, the sample can be drawn from a different set of documents than the ones the bar shows, while the button's title says it analyzes "the documents the filter matches".
-    - Why it matters: This is a small edge case, but it gives a misleading result when it happens.
-    - Suggested fix: Add an optional `collation` to the contract and pass it to the `aggregate` command. Otherwise, record the limitation as an assumption.
-
-- [ ] **CR-4 | Dependency `mongodb-schema` is deprecated upstream and brings CLI-only optional deps**
-    - File: `packages/backend/package.json:25`, `package-lock.json` (`node_modules/mongodb-schema`)
+- [ ] **CR-6 | Task assumptions no longer match the code (example limit, library, collation)**
+    - File: `tasks/schema-analysis.md:21` (assumption #4), compared with `packages/backend/src/schema/analyze.ts:33` and `:116`
     - Category: Quality
-    - Problem: The lock entry for `mongodb-schema@12.7.0` carries `"deprecated": "This package is not maintained anymore. Please use @mongodb-js/mongodb-schema instead"`. It also installs optional CLI dependencies (`yargs`, `cli-table`, `js-yaml`, `numeral`, `progress`, `stats-lite`) that the backend never uses and that may end up in the packaged app. ARCHITECTURE's stack table does name `mongodb-schema`, so the choice follows the docs.
-    - Why it matters: The package gets no future fixes (for example, for new driver/BSON majors; its peer range today is `mongodb ^6.6.1 || ^7.0.0`), and the app bundle grows.
-    - Suggested fix: Consider `@mongodb-js/mongodb-schema` (the same API), or record an assumption and a follow-up. Either way, update the stack table if the dependency changes.
+    - Problem: Assumption #4 still says "strings cut at 200 chars". The code now uses `EXAMPLE_LENGTH_LIMIT` = 1000 and drops any string, code or binary example that may have been cut. The task Goal names `mongodb-schema`, but the dependency is now `@mongodb-js/mongodb-schema` (the stack table in ARCHITECTURE has been updated). CR-3 (the bar's collation is ignored) was accepted as out of scope, but no assumption records that limitation.
+    - Why it matters: Humans review decisions through `tasks.py assumptions`. As things stand, they would review an outdated behavior and would not see the library change or the collation limitation.
+    - Suggested fix: The parent worker should record new assumptions with `python tasks.py assume schema-analysis "..."`: examples that may have been cut at 1000 are dropped, not shortened; the dependency is `@mongodb-js/mongodb-schema` because the old package is deprecated; collation is not passed to `schema.analyze`. This review does not change task state.
 
-- [ ] **CR-5 | `aria-pressed` on the Schema button does not match its behavior**
-    - File: `packages/renderer/src/app/collection/collection-view.html:106`
-    - Category: Quality (accessibility)
-    - Problem: The button reports `aria-pressed="true"` while the panel is open, which tells screen readers it is a toggle. Activating it again re-runs the analysis instead of closing the panel. The other `aria-pressed` buttons in this view (Export/Import/Bulk, view modes) are real toggles or selections.
-    - Why it matters: Assistive-technology users are told that pressing it again will close the panel, and it won't.
-    - Suggested fix: Either drop `aria-pressed` (use `aria-expanded` with `aria-controls` on the panel instead), or make a second press close the panel and keep "Analyze again" inside the panel.
+## Round 2 verification of round-1 fixes
+
+- **CR-1 (cut examples), fixed.** I checked `isCut` (`analyze.ts:84-97`) against the installed analyzer (`node_modules/@mongodb-js/mongodb-schema/dist/schema-analyzer.js:131-155`):
+    - `cropString` returns `slice(0, limit)` or, when the cut would split a surrogate pair, `slice(0, limit - 1)`. A string shorter than `limit - 1` is never changed. Dropping strings of length `>= limit - 1` therefore removes every cut string. It also drops a few genuine ones, which is conservative and documented.
+    - Binary is cut only when `buffer.length > limit`, and the result is exactly `limit` long, so `>= limit` is exact. Code is cut when `code.length >= limit`, to `limit` or `limit - 1`, so `>= limit - 1` covers it.
+    - `CodeWScope` and all other types are passed through unchanged by `getCappedValue`.
+    - The `_bsontype` check is sound. The lock file has a single hoisted `bson@7.3.4` and no nested copy under the package.
+    - Type counts are unchanged; only the example lists lose values.
+    - The regression tests at `analyze.spec.ts:232-272` cover 5000 characters, exactly the limit, `limit - 1`, the surrogate-pair cut, Binary over and at the limit, and long Code. They also assert that each remaining example equals a source value.
+    - The ARCHITECTURE section describes this behavior correctly.
+- **CR-2 (unit tests), resolved by 11724df3.** The new specs cover everything round 1 asked for:
+    - `schema-analysis.model.spec.ts`: `withFilterField` (replace in place, unparseable filter, blank or `{}` filter, dotted keys, int typing), `filterKeyOf`, `percent`, and `schemaRows` with malformed examples.
+    - `schema-panel.spec.ts`: an older answer arriving late, an older failure after the newer answer, CANCELLED ignored, error then retry, null params or destroy cancelling the request.
+    - `analyze.spec.ts`: alias merging, the 5-example cap, `a.[].b`, unpromoted decoding, cancellation and killing the server operation, and the handler errors.
+    - `collection-view.spec.ts`: wiring, including a parse error clearing a stale panel.
+    - The tests assert behavior through the DOM and the fake RPC, not through private state.
+- **CR-3 (collation), not fixed.** Accepted by the parent as out of contract scope. That is reasonable for M3, but it is not recorded as an assumption (see CR-6).
+- **CR-4 (deprecated dependency), fixed.**
+    - `packages/backend/package.json` now depends on `@mongodb-js/mongodb-schema@^12.8.20`.
+    - The lock entry is at `package-lock.json:4481`. The old `mongodb-schema`/`mongodb-ns` entries are gone.
+    - No source file imports `mongodb-schema` any more.
+    - The API used (`parseSchema`, `Schema`, `SchemaType`, the options including `signal`) is unchanged.
+    - The optional CLI dependencies (`yargs`, `cli-table`, `js-yaml` and others) are still published upstream as optionalDependencies, as fixes.md says. This was not raised again.
+    - The `devOptional` -> `dev` flips for root `argparse`/`js-yaml`/`color-*` in the lock are the expected result of removing the old package.
+- **CR-5 (`aria-pressed`), fixed.** `collection-view.html:101-110` has no `aria-pressed`, and the spec asserts that the attribute is absent before and after opening the panel.
+
+## Round 1 findings, status
+
+- CR-1 (P2) Truncated examples become equality filters that match nothing: fixed (f0f755d0).
+- CR-2 (P2) No unit tests for the new pure logic and the panel: fixed (11724df3).
+- CR-3 (P3) The query bar's collation is ignored by the analysis: accepted as out of scope; record it as an assumption (CR-6).
+- CR-4 (P3) Deprecated `mongodb-schema` dependency: fixed (f0f755d0).
+- CR-5 (P3) `aria-pressed` on the Schema button: fixed (f0f755d0).
 
 ## Notes (not findings)
 
-- Acceptance criteria: the integration test, a 100-document fixture with string/int/double/long/decimal/null/missing at `value`, nested documents and mixed arrays, asserts the exact shares, missing ratio, filter-before-sample, sample size, empty collection and INVALID_PARAMS. The e2e test opens the analysis, clicks a value and a type, and asserts the query bar's filter text, focus and the filtered run. Both criteria are covered by the tests in the diff. No evidence is recorded yet (`tasks.py verify schema-analysis` shows both unchecked), and this review did not run the integration or e2e suites.
-- Checked and found sound:
-    - Cancellation: the backend runs `Operation` with `comment`/kill plus `abortable`, and passes the signal into `parseSchema`. The renderer aborts the previous request on new params, close or destroy, and ignores late or cancelled results; every path leaves the loading state.
-    - The cursor is closed in `finally`.
-    - No `eval` or `innerHTML`: values go through `parseEJson`/`printShellSyntax`, and the template uses text interpolation only. Style bindings go through Angular, so they are CSP-safe.
-    - Contract doc comments match the flattening (relative shares, `a.[]` = 1).
-    - Unpromoted decoding keeps int/long/double/decimal apart (asserted in the integration test).
-    - Accessibility: the bar has `role="img"` with an `aria-label`, chips are real buttons with titles and `:focus-visible` outlines, the status and alert roles are set, and the table uses `scope` headers.
-- The `docs/ARCHITECTURE.md` "Schema analysis" section is uncommitted at review time. The parent should commit it with the task.
+- The integration with query-history in `collection-view.ts`/`.html` merged cleanly:
+    - the Schema button sits beside Explain;
+    - `pickFilter` only edits the filter text and clears a stale filter error, without running a query, so it does not record history;
+    - retargeting the tab closes the panel.
+- `docs/ARCHITECTURE.md` "Schema analysis" is now committed (11724df3, updated in f0f755d0) and matches the code: the pipeline, unpromoted decoding, path and share rules, example rules, the renderer flow and the test locations.
+- Evidence: `tasks.py verify` has not recorded either acceptance criterion yet. The parent must run the integration test (`test/integration/schema.int.spec.ts` against the MongoDB container) and the e2e test (`test/e2e/schema-analysis.e2e.ts` via Playwright/Electron) on the final code and record them. Since round 1 the only renderer change is the removed `aria-pressed`, which the e2e test does not reference. This review did not run the test suites.
+- Raising the stored-value limit from 200 to 1000 increases memory per stored value. This is bounded by the sample size (default 1000 documents) and is negligible.
 
 ## Review conclusion
 
-Material issues found; fix before completing the task. There are no blocking (P0/P1) issues. CR-1 (cropped examples used as filters) and CR-2 (missing unit tests) should be fixed. CR-3 to CR-5 are optional.
+No material issues found. The P2 findings from round 1 (CR-1, CR-2) and the optional CR-4 and CR-5 have been fixed, and I checked the fixes against the code and the installed analyzer. The only open item is CR-6 (P3): outdated or missing task assumptions, which the parent worker records with `tasks.py assume`. The acceptance-criterion evidence (integration and e2e runs) still has to be recorded before `done`.
