@@ -849,6 +849,286 @@ describe('ShellConsole', () => {
       expect(q('shell-production')).not.toBeNull();
     });
   });
+
+  describe('script files', () => {
+    const SCRIPT = [
+      "const items = db.getSiblingDB('fixture_db').getCollection('items');",
+      'for (let i = 1; i <= 3; i++) {',
+      "  items.insertOne({ n: i, source: 'script' });",
+      "  print('inserted ' + i);",
+      '}',
+      '',
+    ].join('\n');
+
+    interface Source {
+      name: string;
+      size: number;
+      text(): Promise<string>;
+    }
+    const source = (name: string, text: string, size = text.length): Source => ({
+      name,
+      size,
+      text: () => Promise.resolve(text),
+    });
+    const scriptButton = () => get<HTMLButtonElement>('shell-run-script');
+    const fileInput = () => get<HTMLInputElement>('shell-script-file');
+    const squash = (text: string | null | undefined) => (text ?? '').replace(/\s+/g, ' ').trim();
+    const runScript = async (file: Source) => {
+      await view.runScript(file);
+      await settle();
+    };
+    /** Counts clicks on the hidden file input instead of opening a real chooser. */
+    const spyChooser = () => {
+      const calls = { count: 0 };
+      fileInput().click = () => {
+        calls.count++;
+      };
+      return calls;
+    };
+
+    it('runs the file text in the session with shell.eval', async () => {
+      await create();
+      await runScript(source('insert-three.mongodb', SCRIPT));
+      expect(evals()).toEqual([{ sessionId: 's1', code: SCRIPT }]);
+    });
+
+    it('shows the file name and its lines in the transcript instead of the code', async () => {
+      await create();
+      await runScript(source('insert-three.mongodb', SCRIPT));
+      const run = all('shell-run')[0] as HTMLElement;
+      expect(squash(get('shell-script-name').textContent)).toBe(
+        'script insert-three.mongodb · 5 lines',
+      );
+      expect(run.textContent).toContain('shop>');
+      expect(run.querySelector('pre.code')).toBeNull();
+      expect(run.textContent).not.toContain('insertOne');
+      expect(view.runs()[0]?.script).toEqual({ name: 'insert-three.mongodb', lines: 5 });
+      expect(view.runs()[0]?.code).toBe(SCRIPT);
+    });
+
+    it('says "1 line" for a one-line script', async () => {
+      await create();
+      await runScript(source('one.js', 'print(1)'));
+      expect(squash(get('shell-script-name').textContent)).toBe('script one.js · 1 line');
+    });
+
+    it('shows the progress while the script runs and its output as it streams in', async () => {
+      await create();
+      await runScript(source('insert-three.mongodb', SCRIPT));
+      expect(squash(get('shell-running').textContent)).toBe(
+        'Running insert-three.mongodb… 0 outputs so far',
+      );
+      fake.data('shell.eval', 'st1', { kind: 'print', text: 'inserted 1' });
+      await settle();
+      expect(squash(get('shell-running').textContent)).toBe(
+        'Running insert-three.mongodb… 1 output so far',
+      );
+      fake.data('shell.eval', 'st1', { kind: 'print', text: 'inserted 2' });
+      // A db change is no output of its own.
+      fake.data('shell.eval', 'st1', { kind: 'db', db: 'fixture_db' });
+      fake.data('shell.eval', 'st1', { kind: 'print', text: 'inserted 3' });
+      await settle();
+      expect(squash(get('shell-running').textContent)).toBe(
+        'Running insert-three.mongodb… 3 outputs so far',
+      );
+      expect(all('shell-print').map((p) => p.textContent)).toEqual([
+        'inserted 1',
+        'inserted 2',
+        'inserted 3',
+      ]);
+      expect(q('shell-stop')).not.toBeNull();
+      fake.end('st1');
+      await settle();
+      expect(q('shell-running')).toBeNull();
+      expect(all('shell-run')[0]?.getAttribute('data-state')).toBe('done');
+      expect(all('shell-print')).toHaveLength(3);
+      expect(get('shell-prompt').textContent?.trim()).toBe('fixture_db>');
+    });
+
+    it('announces the end of a script by its name', async () => {
+      await create();
+      await runScript(source('insert-three.mongodb', SCRIPT));
+      fake.data('shell.eval', 'st1', { kind: 'result', type: 'InsertOneResult', text: '{}' });
+      fake.end('st1');
+      await settle();
+      expect(get('shell-announce').textContent?.trim()).toBe(
+        'Script insert-three.mongodb finished',
+      );
+    });
+
+    it('announces the first error of a failed script', async () => {
+      await create();
+      await runScript(source('broken.js', 'db.items.insertOne('));
+      fake.data('shell.eval', 'st1', { kind: 'error', text: 'SyntaxError: Unexpected token' });
+      fake.end('st1');
+      await settle();
+      expect(get('shell-error').textContent).toBe('SyntaxError: Unexpected token');
+      expect(get('shell-announce').textContent?.trim()).toBe(
+        'Run failed: SyntaxError: Unexpected token',
+      );
+    });
+
+    it('stops a running script and announces it by name', async () => {
+      await create();
+      await runScript(source('loop.js', 'while (true) {}'));
+      get('shell-stop').click();
+      await settle();
+      expect(fake.cancels).toContain('st1');
+      expect(q('shell-stopped')).not.toBeNull();
+      expect(get('shell-announce').textContent?.trim()).toBe('Script loop.js stopped');
+    });
+
+    it('does not add the script to the input history and keeps the typed draft', async () => {
+      await create();
+      await type('draft');
+      await runScript(source('seed.js', 'x = 1'));
+      fake.end('st1');
+      await settle();
+      expect(view.history.entries).toEqual([]);
+      expect(input().value).toBe('draft');
+      await type('');
+      expect((await key('ArrowUp')).defaultPrevented).toBe(false);
+      expect(input().value).toBe('');
+    });
+
+    it('shows why a chosen file is not run, and sends nothing', async () => {
+      await create();
+      await runScript(source('notes.txt', 'hello'));
+      expect(get('shell-script-problem').getAttribute('role')).toBe('alert');
+      expect(get('shell-script-problem').textContent).toContain(
+        'notes.txt is not a script: choose a .js or .mongodb file',
+      );
+      expect(get('shell-transcript').contains(get('shell-script-problem'))).toBe(false);
+      expect(evals()).toEqual([]);
+      expect(all('shell-run')).toHaveLength(0);
+    });
+
+    it('refuses a too large, an empty or an unreadable file', async () => {
+      await create();
+      await runScript(source('big.js', 'x', 6 * 1024 * 1024));
+      expect(get('shell-script-problem').textContent).toContain('big.js is too large to run');
+      await runScript(source('empty.mongodb', '  \n'));
+      expect(get('shell-script-problem').textContent).toContain('empty.mongodb is empty');
+      await runScript({
+        name: 'gone.js',
+        size: 5,
+        text: () => Promise.reject(new Error('NotReadableError')),
+      });
+      expect(get('shell-script-problem').textContent).toContain('gone.js could not be read');
+      expect(evals()).toEqual([]);
+      expect(all('shell-run')).toHaveLength(0);
+    });
+
+    it('clears the problem with the next good file or the next typed run', async () => {
+      await create();
+      await runScript(source('notes.txt', 'hello'));
+      expect(q('shell-script-problem')).not.toBeNull();
+      await runScript(source('seed.js', 'x = 1'));
+      expect(q('shell-script-problem')).toBeNull();
+      fake.end('st1');
+      await settle();
+      await runScript(source('notes.txt', 'hello'));
+      expect(q('shell-script-problem')).not.toBeNull();
+      await type('1');
+      await key('Enter');
+      expect(q('shell-script-problem')).toBeNull();
+    });
+
+    it('Run script… opens the file chooser for .js and .mongodb files', async () => {
+      await create();
+      const chooser = spyChooser();
+      expect(fileInput().getAttribute('accept')).toBe('.js,.mongodb');
+      expect(fileInput().type).toBe('file');
+      expect(scriptButton().disabled).toBe(false);
+      scriptButton().click();
+      await settle();
+      expect(chooser.count).toBe(1);
+    });
+
+    it('runs the file chosen in the file input', async () => {
+      await create();
+      const chosen = source('insert-three.mongodb', SCRIPT);
+      Object.defineProperty(fileInput(), 'files', { value: [chosen], configurable: true });
+      fileInput().dispatchEvent(new Event('change'));
+      await settle();
+      expect(evals()).toEqual([{ sessionId: 's1', code: SCRIPT }]);
+      expect(fileInput().value).toBe('');
+    });
+
+    it('does nothing when the file chooser was cancelled', async () => {
+      await create();
+      Object.defineProperty(fileInput(), 'files', { value: [], configurable: true });
+      fileInput().dispatchEvent(new Event('change'));
+      await settle();
+      expect(evals()).toEqual([]);
+      expect(q('shell-script-problem')).toBeNull();
+    });
+
+    it('is disabled while something runs and sends no second run', async () => {
+      await create();
+      await type('sleep(100000)');
+      await key('Enter');
+      expect(scriptButton().disabled).toBe(true);
+      const chooser = spyChooser();
+      view.chooseScript();
+      expect(chooser.count).toBe(0);
+      await runScript(source('seed.js', 'x = 1'));
+      expect(evals().map((e) => e.code)).toEqual(['sleep(100000)']);
+      expect(all('shell-run')).toHaveLength(1);
+      fake.end('st1');
+      await settle();
+      expect(scriptButton().disabled).toBe(false);
+    });
+
+    it('a running script disables Run script… and the typed run', async () => {
+      await create();
+      await runScript(source('loop.js', 'while (true) {}'));
+      expect(scriptButton().disabled).toBe(true);
+      await type('1');
+      await key('Enter', { ctrlKey: true });
+      expect(evals().map((e) => e.code)).toEqual(['while (true) {}']);
+    });
+
+    it('is disabled when the session is not open and runs nothing', async () => {
+      fake.fail('shell.open', { code: 'NOT_CONNECTED', message: 'not connected' });
+      await create();
+      expect(scriptButton().disabled).toBe(true);
+      const chooser = spyChooser();
+      view.chooseScript();
+      expect(chooser.count).toBe(0);
+      await runScript(source('seed.js', 'x = 1'));
+      expect(evals()).toEqual([]);
+    });
+
+    it('sends nothing when the tab goes away while the file is read', async () => {
+      let release!: (text: string) => void;
+      await create();
+      const pending = view.runScript({
+        name: 'slow.js',
+        size: 5,
+        text: () =>
+          new Promise<string>((resolve) => {
+            release = resolve;
+          }),
+      });
+      fixture.destroy();
+      release('x = 1');
+      await pending;
+      expect(evals()).toEqual([]);
+    });
+
+    it('runs in the current database after `use`', async () => {
+      await create();
+      await type('use other');
+      await key('Enter');
+      fake.data('shell.eval', 'st1', { kind: 'db', db: 'other' });
+      fake.end('st1');
+      await settle();
+      await runScript(source('seed.js', 'x = 1'));
+      expect(view.runs()[1]?.prompt).toBe('other>');
+      expect(evals()[1]).toEqual({ sessionId: 's1', code: 'x = 1' });
+    });
+  });
 });
 
 describe('announce', () => {
@@ -891,6 +1171,21 @@ describe('announce', () => {
     expect(announce(run('done', [{ kind: 'result', text: '1' }]))).toBe('Run finished');
     expect(announce(run('done', [{ kind: 'print', text: 'hi' }]))).toBe('Run finished');
     expect(announce(run('done', []))).toBe('Run finished');
+  });
+
+  it('names the script of a script run', () => {
+    const script = { name: 'seed.mongodb', lines: 3 };
+    expect(announce({ ...run('done', [{ kind: 'print', text: 'ok' }]), script })).toBe(
+      'Script seed.mongodb finished',
+    );
+    expect(
+      announce({ ...run('done', [{ kind: 'result', type: 'Cursor', text: '[]' }]), script }),
+    ).toBe('Script seed.mongodb finished');
+    expect(announce({ ...run('stopped', []), script })).toBe('Script seed.mongodb stopped');
+    // An error is still read out first.
+    expect(announce({ ...run('done', [{ kind: 'error', text: 'boom' }]), script })).toBe(
+      'Run failed: boom',
+    );
   });
 });
 
