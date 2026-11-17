@@ -431,6 +431,24 @@ Contract layout (`packages/contract/src/`):
 - Views: table (explorer, `tables` layout), document list (one `app-json-form` per document), raw
   (shell syntax via `printShellSyntax`, or the canonical EJSON as received). e2e:
   `test/e2e/collection.e2e.ts` (10 000 documents).
+- Raw editor (`packages/renderer/src/app/raw-editor`, `RawEditor`, `app-raw-editor`): each
+  document of the document list has a **Raw** toggle that swaps its form for a CodeMirror 6
+  editor of the whole document (`@codemirror/*`, JavaScript highlighting for shell syntax, JSON for
+  EJSON; colors from the theme tokens). It is behind `@defer` in `collection-view.html`, so
+  CodeMirror is a lazy chunk (~450 kB) and stays out of the initial bundle. Text ⇄ model is
+  `raw-text.ts` (`printRaw`/`parseRaw`: core's shell-syntax parser and `parseEJsonDocument`,
+  never `eval`); errors carry offset/line/column (EJSON syntax errors from the JSON reader's
+  "position N", EJSON value errors have no place) and are marked in the text (`setDiagnostics`),
+  shown under it (`role="alert"`, `aria-describedby`) and the cursor jumps there. The format
+  toggle converts the current text, unapplied changes included; unreadable text stays in its
+  format. **Apply** (Ctrl+Enter) records the text with `DocumentEdits.edit()` (refused when the
+  `_id` changed or is missing); without unapplied changes the text follows the edit session
+  (undo, explorer edits, save), with them it stays and shows "Not applied" (Reset discards).
+  `no-eval.spec.ts` walks the editor's whole import graph (own code, core, `bson`, CodeMirror,
+  Lezer; ESM, `require`, dynamic imports) and fails on `eval`/`new Function`/string timers;
+  ESLint's `no-eval`/`no-implied-eval`/`no-new-func` cover renderer and core sources. Specs that
+  render it call `installJsdomLayoutStubs()` (`raw-editor/testing.ts`: jsdom has no `Range`
+  rectangles for CodeMirror's measuring).
 
 ## Write safety in the renderer (`packages/renderer/src/app/safety`)
 - Every write UI sends writes through `WriteGuard.run(method, params, options)` (or `approve()`,

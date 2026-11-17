@@ -296,13 +296,37 @@
                         [shown]="shown"
                         [profileId]="target().profileId"
                       />
+                      <button
+                        type="button"
+                        class="btn quiet raw-toggle"
+                        data-testid="doc-raw-toggle"
+                        title="Edit this document as text (shell syntax or EJSON)"
+                        [attr.aria-pressed]="isRaw(loaded)"
+                        [disabled]="key(loaded) === null"
+                        (click)="toggleRaw(loaded)"
+                      >
+                        Raw
+                      </button>
                     }
-                    <app-json-form
-                      [value]="tree"
-                      path=""
-                      [uid]="uid + '-' + $index"
-                      (valueChange)="docChanged($index, $event)"
-                    />
+                    @if (loaded && isRaw(loaded)) {
+                      <!-- CodeMirror is a lazy chunk: it loads when a raw editor first opens. -->
+                      @defer (on immediate) {
+                        <app-raw-editor
+                          [doc]="loaded"
+                          [partial]="partialDocs()"
+                          [readOnly]="readOnly()"
+                        />
+                      } @loading {
+                        <p class="message" data-testid="raw-loading">Loading the editor…</p>
+                      }
+                    } @else {
+                      <app-json-form
+                        [value]="tree"
+                        path=""
+                        [uid]="uid + '-' + $index"
+                        (valueChange)="docChanged($index, $event)"
+                      />
+                    }
                   }
                 </li>
               }

@@ -52,6 +52,19 @@ export default tseslint.config(
     },
   },
   {
+    // SPEC.md §6: the renderer and core (the shell-syntax parser, the raw editor) never run text
+    // as code; only the mongosh host in the backend does. The raw editor's whole import graph,
+    // packages included, is checked by packages/renderer/src/app/raw-editor/no-eval.spec.ts.
+    // Specs may run generated code on purpose (codegen's tests run the generated programs).
+    files: ['packages/renderer/src/**/*.ts', 'packages/core/src/**/*.ts'],
+    ignores: ['**/*.spec.ts'],
+    rules: {
+      'no-eval': 'error',
+      'no-implied-eval': 'error',
+      'no-new-func': 'error',
+    },
+  },
+  {
     // The contract types both sides of every call: `any` would silently switch that off.
     // (Already an error in tseslint `strict`; pinned here so a preset change can't drop it.)
     files: ['packages/contract/**/*.ts', 'packages/core/**/*.ts'],

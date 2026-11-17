@@ -41,6 +41,7 @@ import { RevealService } from '../explorer/services/reveal.service';
 import { SchemaService } from '../explorer/services/schema.service';
 import { TableOrientationService } from '../explorer/services/table-orientation.service';
 import type { WorkspaceTab } from '../layout/workspace.service';
+import { RawEditor } from '../raw-editor/raw-editor';
 import { ProfileSafetyService } from '../safety/profile-safety.service';
 import type { CollectionTabData } from '../sidebar/sidebar-tree.service';
 import { CollectionResults, PAGE_SIZES } from './collection-results.service';
@@ -80,7 +81,14 @@ const numberFormat = new Intl.NumberFormat();
 @Component({
   selector: 'app-collection-view',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [JsonExplorerComponent, JsonFormComponent, EditBar, DocumentHeader, DraftDocuments],
+  imports: [
+    JsonExplorerComponent,
+    JsonFormComponent,
+    EditBar,
+    DocumentHeader,
+    DraftDocuments,
+    RawEditor,
+  ],
   providers: [
     CollectionResults,
     DocumentEdits,
@@ -224,6 +232,31 @@ export class CollectionView {
 
   /** Prefix of element ids (tab ids may contain any character). */
   protected readonly uid = `coll-view-${++nextUid}`;
+  /** Documents of the document list shown in the raw editor instead of the form (by `_id` key). */
+  private readonly rawDocs = signal<ReadonlySet<string>>(new Set());
+  /** The page was read with a projection: its documents may be partial (see `docChanged`). */
+  protected readonly partialDocs = computed(() => this.results.query().projection !== undefined);
+  protected readonly readOnly = computed(() => this.safety.readOnly(this.target().profileId)());
+
+  protected key(doc: BsonDocument): string | null {
+    return documentKey(doc);
+  }
+
+  protected isRaw(doc: BsonDocument): boolean {
+    const key = documentKey(doc);
+    return key !== null && this.rawDocs().has(key);
+  }
+
+  /** Switches one document of the document list between the form and the raw editor. */
+  protected toggleRaw(doc: BsonDocument): void {
+    const key = documentKey(doc);
+    if (key === null) return;
+    this.rawDocs.update((keys) => {
+      const next = new Set(keys);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  }
 
   private readonly jumpInput = viewChild<ElementRef<HTMLInputElement>>('jumpInput');
   private readonly sizeSelect = viewChild<ElementRef<HTMLSelectElement>>('sizeSelect');
@@ -349,7 +382,7 @@ export class CollectionView {
     const edited = this.toDocument(tree);
     // With a projection the loaded document may be partial: Save then refuses edits that would
     // replace what the projection hides, also after the projection was cleared.
-    const partial = this.results.query().projection !== undefined;
+    const partial = this.partialDocs();
     if (original && edited !== null) this.edits.edit(original, edited, partial);
   }
 

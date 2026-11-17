@@ -363,3 +363,7 @@ svg {
     transition: none;
   }
 }
+
+.raw-toggle {
+  margin: 0.25rem 0;
+}
