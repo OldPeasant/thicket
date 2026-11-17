@@ -5,7 +5,7 @@ owner: dell26/agent-1
 deps: [browse-backend,doc-edit-save]
 touches: [packages/backend/src/browse/validator,packages/renderer/src/app/validator]
 prio: 3
-lease_until: 2026-11-17T04:05:00Z
+lease_until: 2026-11-17T04:10:06Z
 ---
 ## Goal
 View/edit `$jsonSchema` validator, validation level and action; mark documents in the editor that fail the validator (backend check with `$jsonSchema` query, not client-side Ajv).
