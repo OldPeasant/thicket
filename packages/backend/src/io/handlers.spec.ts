@@ -466,6 +466,47 @@ describe('ioHandlers and conn.close', () => {
     expect(existsSync(file)).toBe(false);
   });
 
+  it('a stream cancel of io.export while the connection stays open is not reported as closed', async () => {
+    const file = path.join(dir, 'cancelled.jsonl');
+    const { manager, order, answers, producers, call } = await closing('getMore', file);
+    answers.push(file);
+    await call('io.export', exportParams());
+    const cancel = new AbortController();
+    const out = { ...sink(), signal: cancel.signal };
+    const running = producers[0]?.(out);
+    running?.catch(() => undefined);
+    await vi.waitFor(() => expect(order).toEqual(['find', 'getMore']));
+    cancel.abort();
+    await expect(running).rejects.toMatchObject({
+      code: 'CANCELLED',
+      message: 'The operation was cancelled',
+    });
+    expect(order).toContain('killOp');
+    expect(order).not.toContain('client.close (file removed)');
+    expect(existsSync(file)).toBe(false);
+    expect(manager.client('p1')).toBeDefined();
+    await manager.close('p1');
+  });
+
+  it('an io.import failure while the connection is open passes on unchanged', async () => {
+    const file = path.join(dir, 'fails.jsonl');
+    await writeFile(file, '{"_id":1}\n');
+    const { manager, answers, producers, call } = await closing('none', file);
+    answers.push(file);
+    const preview = (await call('io.previewImport', { format: 'jsonl' })) as {
+      fileToken: string;
+    };
+    await call('io.import', { ...target, fileToken: preview.fileToken });
+    // The chosen file disappears before the import reads it.
+    await rm(file);
+    await expect(producers[0]?.(sink())).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+      message: `The file ${file} no longer exists`,
+    });
+    expect(manager.client('p1')).toBeDefined();
+    await manager.close('p1');
+  });
+
   it('io.import ends CANCELLED; its running insert is killed before the client closes', async () => {
     const file = path.join(dir, 'in.jsonl');
     await writeFile(file, '{"_id":1}\n{"_id":2}\n');

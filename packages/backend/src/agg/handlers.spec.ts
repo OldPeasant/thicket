@@ -223,6 +223,86 @@ describe('aggHandlers', () => {
     });
   });
 
+  it('conn.close kills a running agg.run (killOp, killCursors) before it closes the client', async () => {
+    const order: string[] = [];
+    let releaseAggregate: (reply: Document) => void = () => undefined;
+    const client: ClientLike = {
+      connect: () => Promise.resolve(),
+      close: () => {
+        order.push('client.close');
+        return Promise.resolve();
+      },
+      db: () => ({
+        command: async (command: Document) => {
+          order.push(Object.keys(command)[0] ?? '');
+          if ('aggregate' in command) {
+            return new Promise<Document>((resolve) => (releaseAggregate = resolve));
+          }
+          if ('currentOp' in command) return { inprog: [{ opid: 42 }], ok: 1 };
+          if ('killOp' in command) {
+            // The killed aggregate answers with the cursor it had opened.
+            releaseAggregate(cursorReply(77, [{ _id: 1 }]));
+            return { ok: 1 };
+          }
+          return defaultAnswer('admin', command);
+        },
+      }),
+    };
+    const manager = new ConnectionManager({
+      loadProfile: () => Promise.resolve(profile),
+      loadSecrets: () => Promise.resolve(null),
+      createClient: () => client,
+    });
+    await manager.open('p1', undefined);
+    order.length = 0;
+    const producers: StreamProducer[] = [];
+    const handler = aggHandlers(manager)['agg.run'] as Handler;
+    await handler({ ...base, pipeline } as never, {
+      signal: new AbortController().signal,
+      requestId: 'r1',
+      openStream: (producer) => {
+        producers.push(producer);
+        return 'stream-1';
+      },
+    });
+    const out = sink();
+    const running = producers[0]?.(out);
+    running?.catch(() => undefined);
+    await vi.waitFor(() => expect(order).toEqual(['aggregate']));
+    await manager.close('p1');
+    await expect(running).rejects.toMatchObject({
+      code: 'CANCELLED',
+      message: 'The connection was closed',
+    });
+    expect(order).toEqual(['aggregate', 'currentOp', 'killOp', 'killCursors', 'client.close']);
+    expect(out.batches).toEqual([]);
+  });
+
+  it('a stream cancel of agg.run while its connection stays open keeps "The operation was cancelled"', async () => {
+    let releaseAggregate: (reply: Document) => void = () => undefined;
+    const { call, producers, sent, manager } = await setup((db, command) => {
+      if ('aggregate' in command) {
+        return new Promise<Document>((resolve) => (releaseAggregate = resolve));
+      }
+      if ('currentOp' in command) return { inprog: [{ opid: 9 }], ok: 1 };
+      if ('killOp' in command) releaseAggregate(cursorReply(0, []));
+      return defaultAnswer(db, command);
+    });
+    await call('agg.run', { ...base, pipeline });
+    const cancel = new AbortController();
+    const running = producers[0]?.(sink(cancel.signal));
+    running?.catch(() => undefined);
+    await vi.waitFor(() => expect(firstKeys(sent)).toEqual(['aggregate']));
+    cancel.abort();
+    await expect(running).rejects.toMatchObject({
+      code: 'CANCELLED',
+      message: 'The operation was cancelled',
+    });
+    expect(firstKeys(sent)).toContain('killOp');
+    // The connection is still open.
+    expect(manager.statusOf('p1')).toMatchObject({ state: 'connected' });
+  });
+
   it('agg.run passes a failure on unchanged while its connection is open', async () => {
     const { call, producers } = await setup((db, command) => {
       if ('aggregate' in command) throw new Error('boom');

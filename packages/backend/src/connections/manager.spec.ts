@@ -10,6 +10,7 @@ import {
   ConnectionManager,
   isOpenClient,
   readServerInfo,
+  streamOnConnection,
   topologyOf,
   type ClientLike,
   type ConnectionManagerDeps,
@@ -2033,6 +2034,117 @@ describe('ConnectionManager.cancelOnClose (edge cases)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('streamOnConnection (task conn-close-agg-io-streams)', () => {
+  async function opened() {
+    const context = setup();
+    await context.manager.open('p1', undefined);
+    const client = context.created[0]?.client as FakeClient;
+    return { ...context, client };
+  }
+
+  it('answers the work result while the connection is open', async () => {
+    const { manager, client } = await opened();
+    await expect(
+      streamOnConnection(manager, 'p1', client, undefined, () => Promise.resolve(3)),
+    ).resolves.toBe(3);
+    await manager.close('p1');
+  });
+
+  it('passes a non-close failure on unchanged (same error) while the connection is open', async () => {
+    const { manager, client } = await opened();
+    const boom = new RpcError('SERVER_ERROR', 'fictitious server failure');
+    await expect(
+      streamOnConnection(manager, 'p1', client, undefined, () => Promise.reject(boom)),
+    ).rejects.toBe(boom);
+    const plain = new Error('fictitious driver failure');
+    await expect(
+      streamOnConnection(manager, 'p1', client, undefined, () => Promise.reject(plain)),
+    ).rejects.toBe(plain);
+    // The connection is untouched.
+    expect(manager.client('p1')).toBe(client);
+    expect(client.close).not.toHaveBeenCalled();
+    await manager.close('p1');
+  });
+
+  it("forwards the caller's abort to the work; the work's own cancel error is kept while open", async () => {
+    const { manager, client } = await opened();
+    const caller = new AbortController();
+    const ownCancel = new RpcError('CANCELLED', 'The operation was cancelled');
+    let seen: AbortSignal | undefined;
+    const running = streamOnConnection(manager, 'p1', client, caller.signal, (signal) => {
+      seen = signal;
+      return new Promise<never>((_, reject) =>
+        signal.addEventListener('abort', () => reject(ownCancel)),
+      );
+    });
+    expect(seen?.aborted).toBe(false);
+    caller.abort();
+    await expect(running).rejects.toBe(ownCancel);
+    expect(seen?.aborted).toBe(true);
+    expect(client.close).not.toHaveBeenCalled();
+    await manager.close('p1');
+  });
+
+  it('conn.close aborts the work, waits for its cleanup, then answers CANCELLED "The connection was closed"', async () => {
+    const { manager, client } = await opened();
+    const order: string[] = [];
+    client.close.mockImplementation(() => {
+      order.push('client closed');
+      return Promise.resolve();
+    });
+    const running = streamOnConnection(manager, 'p1', client, undefined, (signal) => {
+      return new Promise<never>((_, reject) => {
+        signal.addEventListener('abort', () => {
+          setTimeout(() => {
+            order.push('work cleaned up');
+            // Whatever the closed work fails with (here not even an RpcError).
+            reject(new Error('operation was interrupted'));
+          }, 10);
+        });
+      });
+    });
+    running.catch(() => undefined);
+    await manager.close('p1');
+    expect(order).toEqual(['work cleaned up', 'client closed']);
+    const error = await rejection(running);
+    expect(error).toMatchObject({ code: 'CANCELLED', message: 'The connection was closed' });
+  });
+
+  it('a failure after the connection was closed and reopened (new client) answers CANCELLED', async () => {
+    vi.useFakeTimers();
+    try {
+      const { manager, client } = await opened();
+      const late = deferred<never>();
+      // The work ignores the abort: close goes on after the grace time.
+      const running = streamOnConnection(manager, 'p1', client, undefined, () => late.promise);
+      running.catch(() => undefined);
+      const closing = manager.close('p1');
+      await vi.advanceTimersByTimeAsync(CLOSE_CANCEL_GRACE_MS);
+      await closing;
+      await manager.open('p1', undefined);
+      expect(manager.client('p1')).not.toBe(client);
+      late.reject(new Error('Topology is closed'));
+      const error = await rejection(running);
+      expect(error).toMatchObject({ code: 'CANCELLED', message: 'The connection was closed' });
+      await manager.close('p1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('refuses to start work for a closed connection or another client (work never runs)', async () => {
+    const { manager, client } = await opened();
+    const work = vi.fn(() => Promise.resolve(1));
+    const stranger = fakeClient();
+    const error = await rejection(streamOnConnection(manager, 'p1', stranger, undefined, work));
+    expect(error).toMatchObject({ code: 'CANCELLED', message: 'The connection was closed' });
+    await manager.close('p1');
+    const closed = await rejection(streamOnConnection(manager, 'p1', client, undefined, work));
+    expect(closed).toMatchObject({ code: 'CANCELLED', message: 'The connection was closed' });
+    expect(work).not.toHaveBeenCalled();
   });
 });
 
