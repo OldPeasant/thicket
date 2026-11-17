@@ -1,0 +1,272 @@
+import { provideZonelessChangeDetection } from '@angular/core';
+import { type ComponentFixture, TestBed } from '@angular/core/testing';
+import type { SlicedArray } from '@thicket/contract';
+import { type BsonDocument, parseEJsonDocument, stringifyEJson } from '@thicket/core/bson';
+import { beforeEach, describe, expect, it } from 'vitest';
+
+import { FakeThicketBridge, provideFakeThicket } from '../../api/testing';
+import { ProfileSafetyService } from '../../safety/profile-safety.service';
+import { DocumentActions } from '../document-actions.service';
+import { DocumentEdits } from '../edit-session';
+import { ConflictView } from './conflict-view';
+
+const KEY = '{"$numberInt":"1"}';
+const sku = (i: number) => `SKU-${String(i).padStart(6, '0')}`;
+const skus = (from: number, n: number) => Array.from({ length: n }, (_, i) => sku(from + i));
+
+// conflict-partial-docs: the conflict view on its own, with a fake host whose large document has
+// cut arrays (`slicedOf`), so paths the collection view never produces (dotted paths, a server
+// version without the array, local edits of the array) can be checked. All data is fictitious.
+describe('ConflictView with a partly loaded (cut-array) document', () => {
+  let fake: FakeThicketBridge;
+  let edits: DocumentEdits;
+  let actions: DocumentActions;
+  let fixture: ComponentFixture<ConflictView>;
+  let projection: string | undefined;
+  /** The document's cut arrays as the host reports them (`undefined`: loaded whole). */
+  let cut: readonly SlicedArray[] | undefined;
+
+  const el = () => fixture.nativeElement as HTMLElement;
+  const q = (id: string) => el().querySelector(`[data-testid="${id}"]`);
+  const text = (id: string) => q(id)?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+  const column = (id: 'conflict-local' | 'conflict-server') =>
+    [...el().querySelectorAll(`[data-testid="${id}"]`)].map((c) => c.textContent ?? '').join('\n');
+  const differing = () =>
+    [...el().querySelectorAll('[data-testid="conflict-row"]')].filter(
+      (r) => r.getAttribute('data-kind') !== 'same',
+    );
+  const doc = (value: Record<string, unknown>): BsonDocument =>
+    parseEJsonDocument(JSON.stringify({ _id: { $numberInt: '1' }, ...value }));
+
+  beforeEach(() => {
+    fake = new FakeThicketBridge();
+    projection = undefined;
+    cut = [{ path: 'items', total: 50_000, loaded: 100 }];
+    TestBed.configureTestingModule({
+      providers: [
+        provideZonelessChangeDetection(),
+        provideFakeThicket(fake),
+        DocumentEdits,
+        DocumentActions,
+      ],
+    });
+    TestBed.inject(ProfileSafetyService).set({
+      id: 'p1',
+      name: 'Local (fictitious)',
+      readOnly: false,
+      production: false,
+    });
+    edits = TestBed.inject(DocumentEdits);
+    actions = TestBed.inject(DocumentActions);
+    actions.setHost({
+      profileId: 'p1',
+      db: 'shop',
+      coll: 'orders',
+      projection: () => projection,
+      slicedOf: () => (cut === undefined ? undefined : { above: 100, arrays: cut }),
+      documentChanged: () => undefined,
+    });
+    fixture = TestBed.createComponent(ConflictView);
+    fixture.componentRef.setInput('profileId', 'p1');
+  });
+
+  /** Edits `loaded` (as the explorer marks a cut document: partial) to `edited`, saves into a conflict. */
+  async function conflictWith(
+    loaded: BsonDocument,
+    edited: BsonDocument,
+    server: BsonDocument | null,
+  ): Promise<void> {
+    fake.fail('docs.update', {
+      code: 'CONFLICT',
+      message: 'changed (fictitious)',
+      detail: { current: server === null ? null : stringifyEJson(server) },
+    });
+    edits.edit(loaded, edited, true);
+    expect(await actions.save(KEY)).toBe(false);
+    expect(actions.conflicts().has(KEY)).toBe(true);
+    await settle();
+  }
+
+  async function settle(): Promise<void> {
+    await fixture.whenStable();
+    fixture.detectChanges();
+  }
+
+  it('compares only the loaded items of a cut array at a dotted path', async () => {
+    cut = [{ path: 'order.lines', total: 300, loaded: 100 }];
+    const loaded = doc({ name: 'large order', order: { ref: 'R-1', lines: skus(0, 100) } });
+    const edited = doc({ name: 'renamed order', order: { ref: 'R-1', lines: skus(0, 100) } });
+    const server = doc({
+      name: 'renamed elsewhere',
+      order: { ref: 'R-1', lines: skus(0, 300) },
+    });
+    await conflictWith(loaded, edited, server);
+
+    const serverText = column('conflict-server');
+    expect(serverText).toContain(sku(99));
+    expect(serverText).not.toContain(sku(100));
+    expect(serverText).not.toContain(sku(299));
+    // Only the name differs: the never-loaded items 100-299 are no difference.
+    expect(differing()).toHaveLength(1);
+    expect(text('conflict-count')).toBe('1 differing line');
+    expect(text('conflict-cut-note')).toBe(
+      'order.lines: read page by page, so only the first 100 items are compared (the server has 300 items).',
+    );
+    // The sibling field of the cut array is kept as it is.
+    expect(serverText).toMatch(/ref: ['"]R-1['"]/);
+  });
+
+  it('notes a cut array the server version no longer has, and shows the loaded items as differences', async () => {
+    const loaded = doc({ name: 'large order', items: skus(0, 100) });
+    const edited = doc({ name: 'renamed order', items: skus(0, 100) });
+    const server = doc({ name: 'renamed elsewhere' });
+    await conflictWith(loaded, edited, server);
+
+    expect(text('conflict-cut-note')).toBe(
+      'items: read page by page, so only the first 100 items are compared.',
+    );
+    expect(text('conflict-cut-note')).not.toContain('the server has');
+    // The local items are a real difference (the server has no array any more).
+    expect(column('conflict-local')).toContain(sku(42));
+    expect(column('conflict-server')).not.toContain(sku(42));
+    expect(differing().length).toBeGreaterThan(100);
+  });
+
+  it('leaves a server value that is no array at the cut path as it is', async () => {
+    const loaded = doc({ name: 'large order', items: skus(0, 100) });
+    const edited = doc({ name: 'renamed order', items: skus(0, 100) });
+    const server = doc({ name: 'renamed elsewhere', items: 'replaced by a string (fictitious)' });
+    await conflictWith(loaded, edited, server);
+
+    expect(text('conflict-cut-note')).toBe(
+      'items: read page by page, so only the first 100 items are compared.',
+    );
+    expect(column('conflict-server')).toContain('replaced by a string (fictitious)');
+  });
+
+  it('names one note line per cut array, with singular wording and thousands separators', async () => {
+    cut = [
+      { path: 'items', total: 50_000, loaded: 100 },
+      { path: 'tags', total: 1_200, loaded: 1 },
+    ];
+    const loaded = doc({ name: 'large order', items: skus(0, 100), tags: ['t-0'] });
+    const edited = doc({ name: 'renamed order', items: skus(0, 100), tags: ['t-0'] });
+    const server = doc({
+      name: 'renamed elsewhere',
+      items: skus(0, 1_234),
+      tags: Array.from({ length: 1 }, (_, i) => `t-${i}`),
+    });
+    await conflictWith(loaded, edited, server);
+
+    const lines = [...el().querySelectorAll('[data-testid="conflict-cut-note"] li')].map((li) =>
+      li.textContent?.trim(),
+    );
+    expect(lines).toEqual([
+      'items: read page by page, so only the first 100 items are compared (the server has 1,234 items).',
+      'tags: read page by page, so only the first 1 item are compared (the server has 1 item).',
+    ]);
+    expect(differing()).toHaveLength(1);
+  });
+
+  it('with no edits left, still shows only the loaded part of the cut array, and only Keep server', async () => {
+    const loaded = doc({ name: 'large order', items: skus(0, 100) });
+    const edited = doc({ name: 'renamed order', items: skus(0, 100) });
+    const server = doc({ name: 'renamed elsewhere', items: skus(0, 300) });
+    await conflictWith(loaded, edited, server);
+    edits.undo();
+    await settle();
+
+    expect(edits.get(KEY)).toBeUndefined();
+    expect(text('conflict-count')).toBe('No unsaved edits left');
+    const serverText = column('conflict-server');
+    expect(serverText).toContain(sku(99));
+    expect(serverText).not.toContain(sku(100));
+    expect(text('conflict-cut-note')).toContain('(the server has 300 items)');
+    expect(q('conflict-keep-server')).not.toBeNull();
+    expect(q('conflict-overwrite')).toBeNull();
+    expect(q('conflict-merge')).toBeNull();
+  });
+
+  it('offers neither Overwrite nor Merge, with the partial-load note, under a top-level projection too', async () => {
+    projection = '{"name":{"$numberInt":"1"},"items":{"$numberInt":"1"}}';
+    const loaded = doc({ name: 'large order', items: skus(0, 100) });
+    const edited = doc({ name: 'renamed order', items: skus(0, 100) });
+    await conflictWith(loaded, edited, doc({ name: 'renamed elsewhere', items: skus(0, 300) }));
+
+    expect(text('conflict-note')).toContain('loaded only partly');
+    expect(text('conflict-note')).toContain('long arrays are read page by page');
+    expect(text('conflict-note')).not.toContain('was loaded with a projection');
+    expect(q('conflict-overwrite')).toBeNull();
+    expect(q('conflict-merge')).toBeNull();
+  });
+
+  it('a deleted server version: no cut note, and re-inserting names the partial load', async () => {
+    const loaded = doc({ name: 'large order', items: skus(0, 100) });
+    const edited = doc({ name: 'renamed order', items: skus(0, 100) });
+    await conflictWith(loaded, edited, null);
+
+    expect(text('conflict-title')).toContain('Deleted on the server');
+    expect(q('conflict-cut-note')).toBeNull();
+    // Overwrite (insert again) stays offered as for any deleted document, and is refused.
+    (q('conflict-overwrite') as HTMLButtonElement).click();
+    await settle();
+    expect(actions.message()?.text).toContain('Not inserted');
+    expect(actions.message()?.text).toContain('long arrays are read page by page');
+    expect(actions.message()?.text).not.toContain('with a projection active');
+    expect(fake.requestsFor('docs.insert')).toHaveLength(0);
+    expect(actions.conflicts().has(KEY)).toBe(true);
+  });
+
+  it('a deleted server version under a projection keeps the projection wording when not cut', async () => {
+    // Not a large document: no cut arrays, so the projection is what made it partial.
+    cut = undefined;
+    projection = '{"name":{"$numberInt":"1"}}';
+    const loaded = doc({ name: 'small order' });
+    await conflictWith(loaded, doc({ name: 'renamed order' }), null);
+    expect(await actions.overwrite(KEY)).toBe(false);
+    expect(actions.message()?.text).toContain('with a projection active');
+    expect(fake.requestsFor('docs.insert')).toHaveLength(0);
+  });
+
+  it('a deleted partial document without an active projection gets the partial-load wording', async () => {
+    // Edited under a projection that was cleared since (partial sticks), not cut.
+    cut = undefined;
+    const loaded = doc({ name: 'small order' });
+    await conflictWith(loaded, doc({ name: 'renamed order' }), null);
+    expect(await actions.overwrite(KEY)).toBe(false);
+    expect(actions.message()?.text).toContain('Not inserted');
+    expect(actions.message()?.text).toContain('loaded only partly');
+    expect(actions.message()?.text).not.toContain('with a projection active');
+    expect(fake.requestsFor('docs.insert')).toHaveLength(0);
+  });
+
+  describe('when the cut array was edited locally (raw editor) after the conflict', () => {
+    const loaded = doc({ name: 'large order', items: skus(0, 100) });
+    const server = doc({ name: 'renamed elsewhere', items: skus(0, 300) });
+
+    it('shorter: shows no never-loaded server items', async () => {
+      await conflictWith(loaded, doc({ name: 'renamed order', items: skus(0, 100) }), server);
+      edits.edit(loaded, doc({ name: 'renamed order', items: skus(0, 98) }), true);
+      await settle();
+
+      const serverText = column('conflict-server');
+      expect(serverText).not.toContain(sku(100));
+      expect(serverText).not.toContain(sku(299));
+      expect(text('conflict-cut-note')).toContain('(the server has 300 items)');
+    });
+
+    it('longer: never-loaded server items are neither shown nor counted as differences', async () => {
+      await conflictWith(loaded, doc({ name: 'renamed order', items: skus(0, 100) }), server);
+      // Two items appended locally: they are new, not a change of the server's items 100 and 101.
+      const appended = [...skus(0, 100), 'NEW-A (fictitious)', 'NEW-B (fictitious)'];
+      edits.edit(loaded, doc({ name: 'renamed order', items: appended }), true);
+      await settle();
+
+      const serverText = column('conflict-server');
+      expect(serverText).toContain(sku(99));
+      // Items 100 and 101 were never loaded (criterion 1).
+      expect(serverText).not.toContain(sku(100));
+      expect(serverText).not.toContain(sku(101));
+    });
+  });
+});
