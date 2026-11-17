@@ -4,7 +4,9 @@ Date: 2026-11-17
 
 Task: profiles-import-export - M2: Import from Compass and URIs, export without secrets
 
-Scope: `git diff 759d4d6..HEAD` (tasks/ changes excluded): commits cf3696e, 19e5210, b048e55
+Scope: `git diff 759d4d6..HEAD` (tasks/ changes excluded), re-review after fixes. Commits: cf3696e, 19e5210 and b048e55 (implementation), 715df6d (test-writer tests), 38344fc (fixes for CR-1..CR-5 and TW-1). The re-review focused on `715df6d..38344fc`.
+
+Reviewed revision: 38344fc39df87eac14ae6104047028ea58c1fa4f
 
 Requirements:
 - tasks/profiles-import-export.md (acceptance criteria and recorded assumptions)
@@ -12,24 +14,31 @@ Requirements:
 - docs/ARCHITECTURE.md (Profiles store, secrets storage, main window layout, connection editor)
 - AGENTS.md (project notes: no secrets in renderer, logs or committed fixtures)
 - Parent instructions (secret handling, file handling in main, contract/handler/renderer conventions)
+- reviews/profiles-import-export/fixes.md (claimed fixes, each checked against the code)
 
 Git range:
 - Branch: main
-- HEAD: b048e552a760c7ba813844b2a438830621fb9807
+- HEAD: 38344fc39df87eac14ae6104047028ea58c1fa4f
 - Base/start: 759d4d63be8ab2bdb90c5924083099dae40bec14
-- Commits reviewed: 3
+- Commits reviewed: 5
 
-Summary: 0 P0, 0 P1, 1 P2, 4 P3
+Summary: 0 P0, 0 P1, 0 P2, 1 P3 (open). CR-1..CR-5 from the first review are resolved.
 
-Evidence that was checked: all changed source files were read in full. `npx vitest run apps/desktop/src/profiles/import` passed (18 tests). `python tasks.py verify profiles-import-export` lists all three criteria as still unverified. Recording that evidence is up to the parent worker, so this report does not count it as a finding.
+Evidence I checked myself:
+- I read the full fix diff `715df6d..38344fc`.
+- 715df6d changes only spec files and review reports; it has no production code.
+- `npx vitest run apps/desktop/src/profiles apps/desktop/src/main`: 6 files, 191 tests passed.
+- `git grep PlannedPage|planned-page` in packages, apps and docs finds nothing.
+- I did not re-run `npm run check` or the e2e suite. The fixer reports that `npm run check` passed.
 
-What was confirmed:
-- Compass and URI imports take the userinfo password, `proxyPassword`, `tlsCertificateKeyFilePassword`, `AWS_SESSION_TOKEN` and the SSH password or passphrase out of the URI and store them as secrets.
-- Secrets are saved to `secrets.bin` only when the keychain is `secure`. In every other case they are dropped with a notice.
-- Export drops ids, turns `saved` into `ask` and removes secrets from the URI again.
-- File paths are chosen only through native dialogs in main. The renderer never sends a path.
-- Notices name URI entries by their masked URI.
-- The contract change (optional `notices`) is backward compatible.
+## Disposition of the first-review findings
+
+- [x] **CR-1 (P2, Security) | Thicket-format import stores secret URI options in connections.json: Resolved.** `parseThicket` (`apps/desktop/src/profiles/import/compass.ts:217-238`) now passes every entry's connection string through the new `stripUriSecrets` (`apps/desktop/src/profiles/import/uri.ts:116-130`). That function reuses `takeSecrets`, so the Compass and URI paths use the same rules. The removed values are dropped, never stored (`secrets: []`), and a notice names the removed options. A URI that can't be parsed is skipped, and the error message never contains the password. A URI without secrets is returned byte-identical, so re-import deduplication still works. Tests cover the parse level (all three options, grep of the output) and the handler level, including the stored profile.
+- [x] **CR-2 (P3) | `secretMode: 'saved'` kept without a stored secret: Resolved.** `compass.ts:237` turns `saved` into `ask`; `none` and `ask` are kept. Tested.
+- [x] **CR-3 (P3) | Import secret-save failures not logged: Resolved.** `MainHandlerDeps.log` (`apps/desktop/src/main/handlers.ts:28-29`) is forwarded to `importExportHandlers`. `index.ts:171` passes the main logger with a `profiles:` prefix. A test checks that the failure is logged and that the log contains no password.
+- [x] **CR-4 (P3) | Stale architecture note and unused `PlannedPage`: Resolved.** `planned-page.ts` is deleted and nothing references it any more. ARCHITECTURE.md now documents the import/export module, the export format, the `@thicket/core/uri` dependency, the route and `ImportExportPage`.
+- [x] **CR-5 (P3, Tests) | Untested handler paths: Resolved.** The test-writer's tests cover the size limit and the read-only store via `importUris`. The new handler test covers a Thicket file through `profiles.importCompass`: invalid entry skipped, secret stripped with a notice, `saved` becoming `ask`, no secret stored, and `UNSUPPORTED` for a read-only store.
+- [x] **TW-1 (from tests.md) | `colorOf` resolved inherited keys: Resolved.** `compass.ts:95` now looks keys up only through `Object.hasOwn`.
 
 ## P0 Critical
 
@@ -41,39 +50,17 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | Thicket-format import stores secret URI options in connections.json**
-    - File: `apps/desktop/src/profiles/import/compass.ts:183-205`
-    - Category: Security
-    - Problem: `parseThicket` checks each entry only with `profileDraft.safeParse` and passes the draft on unchanged with `secrets: []`. The contract's `hasPassword` checks only the userinfo. So a shared or hand-edited "Thicket Connections" file whose `connectionString` contains `proxyPassword=...`, `tlsCertificateKeyFilePassword=...` or `authMechanismProperties=AWS_SESSION_TOKEN:...` is saved as-is to `connections.json` through `profiles.save`, and the profile list sends it to the renderer. The Compass and URI paths strip exactly these options (`takeSecrets` in `uri.ts`), and `exportFile` strips them on the way out. The import side of the shared format is the only path without this protection.
-    - Why it matters: The task and the architecture require that no secret reaches `connections.json` or the renderer. Files in this format are explicitly meant to be shared within a team (recorded assumption), so this is untrusted input. Because the Compass path removes these options, a user would expect the Thicket path to do the same.
-    - Suggested fix: Clean each Thicket entry's `connectionString` the way the other paths do. Either pass it through `uriWithoutSecrets`, or reuse `takeSecrets` and return the values as `ImportedSecret`s so `saveEntries` stores them under the keychain rules. Add a notice when a secret is dropped. Add a unit test that imports a Thicket file with such options and checks that the saved profile has none of them.
+None.
 
 ## P3 Low
 
-- [ ] **CR-2 | Thicket import keeps `secretMode: 'saved'` without any stored secret**
-    - File: `apps/desktop/src/profiles/import/compass.ts:203-205`
+- [ ] **CR-6 | Import notices say "enter it when connecting" for secrets that are never asked for at connect time**
+    - File: `apps/desktop/src/profiles/import/compass.ts:233` (new Thicket notice), `apps/desktop/src/profiles/import/handlers.ts:101-106` and `handlers.ts:130-133` (keychain-not-secure and save-failed notices)
     - Category: Correctness
-    - Problem: A Thicket-format entry with `auth.secretMode: 'saved'` is imported unchanged, but the import never stores a secret for it. Files written by `exportFile` always use `ask`, so this only happens with hand-written files or files from another version. The resulting profile says its password is saved when none is. The sidebar shows a password prompt only for `ask`, so connecting fails authentication and the user is not asked for the password.
-    - Suggested fix: In `parseThicket`, change `saved` to `ask`, as `exportFile` does.
-
-- [ ] **CR-3 | Failures to save imported secrets are never logged in the app**
-    - File: `apps/desktop/src/main/handlers.ts:38-42` (with `apps/desktop/src/profiles/import/handlers.ts:81`)
-    - Category: Quality
-    - Problem: `importExportHandlers` accepts a `log`, which `saveEntries` uses when `secrets.set` fails. `mainHandlers` never passes one, so in production `log` falls back to a no-op. The other main stores do receive the `[main]` logger (`index.ts:94,106`).
-    - Suggested fix: Add `log` to `MainHandlerDeps` (or pass the main logger in) and forward it, for example with a `profiles import:` prefix.
-
-- [ ] **CR-4 | Stale architecture note and unused `PlannedPage`**
-    - File: `docs/ARCHITECTURE.md:387-388`, `packages/renderer/src/app/layout/planned-page.ts`
-    - Category: Quality
-    - Problem: ARCHITECTURE.md still says `NAV.importCompass` leads to "a `PlannedPage` placeholder that profiles-import-export replaces". That route now goes to `ImportExportPage`, and `PlannedPage` is no longer used anywhere: its last route and its spec were removed. The Profiles section also does not mention the new `src/profiles/import` module, its file format, or the new `@thicket/core` dependency of the desktop app.
-    - Suggested fix: Update the layout and Profiles sections of ARCHITECTURE.md. Delete `planned-page.ts` (and its export, if any), or note why it is kept.
-
-- [ ] **CR-5 | Untested handler paths: Thicket file through the handler, oversized file, read-only store**
-    - File: `apps/desktop/src/profiles/import/import.spec.ts:330-432`
-    - Category: Tests
-    - Problem: The handler tests cover only Compass files and URI lists. Three error-mapping branches are untested: the size limit (`MAX_IMPORT_FILE_BYTES` returns `INVALID_PARAMS`), `ProfilesReadOnlyError` returning `UNSUPPORTED`, and a Thicket-format file read through `profiles.importCompass`, including entries skipped because they fail validation. Thicket files are tested only as a direct `parseImportFile` round trip.
-    - Suggested fix: Add focused handler tests for these three cases. The CR-1 test can share the Thicket-file setup.
+    - Problem: The notices name proxy passwords, client key passphrases, AWS session tokens and SSH secrets, and tell the user to "enter it when connecting". The sidebar prompt only handles the main password with `secretMode: 'ask'`. A profile with a proxy user and no stored `proxyPassword` fails instead: `packages/backend/src/connections/options.ts:136-140` throws `AUTH_FAILED` "No password for proxy user ...: save it in the profile". These secrets can only be entered in the connection editor (`connection-editor.html:471`, `:690`).
+    - Why it matters: For these kinds of secret, the notice tells the user to do something the app does not support. The user then hits an authentication error instead of seeing a prompt.
+    - Suggested fix: When the removed or dropped secrets include anything other than the main password, word the notice differently, for example "enter it in the connection editor". Alternatively, use one neutral wording for all of them ("not imported; enter it in the connection editor or when asked").
 
 ## Review conclusion
 
-Material issues found; fix before completing the task. CR-1 must be fixed: one import path still lets secrets reach connections.json. The P3 items are small cleanups.
+No material issues found. All findings from the first review (CR-1..CR-5) and TW-1 are fixed at 38344fc, and I verified each fix in the code and with tests. The only open item, CR-6, is a low-priority wording issue in user notices. It does not block completing the task.

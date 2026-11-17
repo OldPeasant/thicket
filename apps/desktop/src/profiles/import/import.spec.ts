@@ -22,6 +22,7 @@ import {
   parseImportFile,
   parseUriList,
   profileFromUri,
+  stripUriSecrets,
   uriWithoutSecrets,
   type ImportExportFs,
 } from '.';
@@ -912,6 +913,86 @@ describe('parseImportFile (Thicket export)', () => {
     expect(() => parseImportFile(thicket([], 2))).toThrow(/Thicket export version 2/);
     expect(() => parseImportFile(thicket([], { $numberInt: '1' }))).toThrow(ImportFileError);
     expect(() => parseImportFile(thicket(undefined))).toThrow(/no profiles list/);
+  });
+
+  it('skips a profile whose URI passes the contract but cannot be parsed; the rest is imported', () => {
+    const base = { readOnly: false, production: false };
+    const parsed = parseImportFile(
+      thicket([
+        { ...base, name: 'Bad port', connectionString: 'mongodb://db.example.test:99999' },
+        { ...base, name: 'Good', connectionString: 'mongodb://db.example.test:27017' },
+      ]),
+    );
+    expect(parsed.entries.map((e) => e.source)).toEqual(['Good']);
+    expect(parsed.skipped).toEqual([
+      { source: 'Bad port', reason: expect.stringMatching(/port/i) as string },
+    ]);
+    expect(parsed.notices).toEqual([]);
+  });
+
+  it('strips a session token and secrets the profile does not use, naming them in the notice', () => {
+    const parsed = parseImportFile(
+      thicket([
+        {
+          name: 'Shared AWS',
+          readOnly: false,
+          production: false,
+          // No proxy user and no client key file: the values are dropped all the same.
+          connectionString:
+            'mongodb://db.example.test/?authMechanism=MONGODB-AWS' +
+            '&authMechanismProperties=aws_session_token:fake-shared-token' +
+            '&PROXYPASSWORD=fake-shared-proxy&tlsCertificateKeyFilePassword=fake-shared-tls',
+        },
+      ]),
+    );
+    const [entry] = parsed.entries;
+    expect(entry?.secrets).toEqual([]);
+    expect(JSON.stringify(parsed.entries)).not.toMatch(/fake-shared|password|session_token/i);
+    expect(parsed.notices).toHaveLength(1);
+    const reason = parsed.notices[0]?.reason ?? '';
+    for (const option of ['AWS_SESSION_TOKEN', 'proxyPassword', 'tlsCertificateKeyFilePassword'])
+      expect(reason).toContain(option);
+    expect(reason).not.toContain('fake-shared');
+  });
+});
+
+describe('stripUriSecrets', () => {
+  it('returns a URI without secrets unchanged, even when it is not in canonical form', () => {
+    const uri = 'mongodb://db.example.test/?appName=x&replicaSet=rs0&RETRYWRITES=false';
+    expect(stripUriSecrets(uri)).toEqual({ uri, removed: [] });
+  });
+
+  it('removes the password and reports it', () => {
+    const result = stripUriSecrets(
+      'mongodb://alice:fake-strip-pw@db.example.test/?authSource=admin',
+    );
+    expect(result).toEqual({
+      uri: 'mongodb://alice@db.example.test/?authSource=admin',
+      removed: ['password'],
+    });
+  });
+
+  it('removes every secret kind, in any case and repeated, reporting each kind once', () => {
+    const { uri, removed } = stripUriSecrets(
+      'mongodb://u:fake-a@db.example.test/?proxyHost=s.test&proxyPassword=fake-b&ProxyPassword=fake-c' +
+        '&TLSCERTIFICATEKEYFILEPASSWORD=fake-d&authMechanismProperties=FOO,AWS_SESSION_TOKEN:fake-e',
+    );
+    expect(uri).not.toMatch(/fake-|password|session_token/i);
+    expect(uri).toContain('proxyHost=s.test');
+    expect([...removed].sort()).toEqual(
+      ['awsSessionToken', 'password', 'proxyPassword', 'tlsKeyPassphrase'].sort(),
+    );
+  });
+
+  it('throws for an invalid URI without showing its password', () => {
+    let caught: unknown;
+    try {
+      stripUriSecrets('mongodb://u:fake-invalid-strip@db.example.test:99999');
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect(String(caught)).not.toContain('fake-invalid-strip');
   });
 });
 
