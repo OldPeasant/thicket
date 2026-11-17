@@ -17,3 +17,4 @@ Follow-ups from the agg-ui review (reviews/agg-ui/review.md CR-8, CR-9).
 ## Notes
 See SPEC.md M3 and docs/ARCHITECTURE.md "Aggregation builder".
 - ASSUMPTION (2026-11-17 04:46+0100 by felix/agent-2): CR-9: applyText() reuses existing stage ids by position (instead of always fresh ids), so stages whose prefix is unchanged keep their preview across a text-mode round trip; a reordered/edited stage simply gets a new preview key. Loading previews are aborted on entering text mode; finished ones are kept.
+- ASSUMPTION (2026-11-17 04:46+0100 by felix/agent-2): CR-8: preview errors are announced as 'Stage N: preview failed: <msg>' (lower-case 'preview' after the prefix); loading is announced as empty text (the visible 'Loading preview…' note stays).
