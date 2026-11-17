@@ -1,11 +1,11 @@
 ---
 title: M5: Connection editor for LDAP, OIDC and AWS
-status: in_progress
+status: done
 owner: felix/agent-1
 deps: [ldap-auth,oidc-auth,aws-auth,conn-ui-m2,profiles-import-export]
 touches: [packages/renderer/src/app/connections]
 prio: 3
-lease_until: 2026-11-17T04:40:36Z
+lease_until: 
 ---
 ## Goal
 Auth mechanism choices and their fields in the connection editor; OIDC 'sign in' state.
@@ -22,3 +22,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 04:41+0100 by felix/agent-1): LDAP, OIDC and AWS hide the authentication database field and drop authSource from the connection string (backend always uses $external), like X.509. Switching to/from AWS clears user name and password (an access key is no DB user)
 - ASSUMPTION (2026-11-17 04:41+0100 by felix/agent-1): OIDC sign-in state = non-modal panel docked bottom right (app-shell), fed by the oidc.prompt broadcast: browser flow says 'finish in the browser' with a Copy link button (the renderer has no method to open URLs; main already opened it), device flow shows the user code large with the verification page, expiry countdown, copy buttons; 'Hide' only hides it (no cancel method in the contract); a short 'Signed in' / 'did not finish' note after 'finished'. Editor exposes oidcFlow (auto/authCode/deviceCode) and oidcTrustedEndpoint
 - ASSUMPTION (2026-11-17 05:16+0100 by felix/agent-1): Review findings CR-4/CR-5 (P3 UI wording: changing the AWS key ID removes the saved session token on save without a 'removed on save' hint; the hint can outlive an already removed token after concurrent edits) deferred: behavior is correct, only hint text; candidate for ui-polish
+- done by felix/agent-1: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 122s on 2d6180f04; criteria verified 2/2
