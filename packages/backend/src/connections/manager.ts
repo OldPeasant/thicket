@@ -12,7 +12,10 @@ import {
   MongoClient,
   type Document,
   type MongoClientOptions,
+  type ReadPreference,
   type RunCommandOptions,
+  type RunCursorCommandOptions,
+  type WriteConcern,
 } from 'mongodb';
 
 import type { OidcAuthenticator, OidcTarget } from '../auth/oidc';
@@ -21,11 +24,38 @@ import { openSshTunnel, type SshEnvironment, type SshTunnel } from '../ssh/tunne
 import { redact, toConnectError } from './errors';
 import { clientConfig, type ClientConfig, type ConnectSecrets } from './options';
 
+/**
+ * The part of a driver cursor (`db.runCursorCommand()`) the backend uses: its `getMore`s and
+ * `killCursors` go to the server that answered the cursor command.
+ */
+export interface CursorLike {
+  readonly id: unknown;
+  hasNext(): Promise<boolean>;
+  readBufferedDocuments(): unknown[];
+  setComment(comment: unknown): unknown;
+  setBatchSize(batchSize: number): unknown;
+  close(): Promise<void>;
+}
+
+/** The part of a driver `Db` the backend uses (tests pass fakes). */
+export interface DbLike {
+  command(command: Document, options?: RunCommandOptions): Promise<Document>;
+  /** The profile's read preference (the client's default); fakes may leave it out (primary). */
+  readonly readPreference?: ReadPreference;
+  /** The profile's write concern (the client's default), if it has one. */
+  readonly writeConcern?: WriteConcern | undefined;
+  /**
+   * A cursor command as a driver cursor. Fakes may leave it out: cursors then run as plain
+   * `command`s (`getMore` included), which is only right without a read preference.
+   */
+  runCursorCommand?(command: Document, options?: RunCursorCommandOptions): CursorLike;
+}
+
 /** The part of `MongoClient` the manager uses (tests pass fakes). */
 export interface ClientLike {
   connect(): Promise<unknown>;
   close(force?: boolean): Promise<void>;
-  db(name: string): { command(command: Document, options?: RunCommandOptions): Promise<Document> };
+  db(name: string): DbLike;
 }
 
 export interface ConnectionManagerDeps {

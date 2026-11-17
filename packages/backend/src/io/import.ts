@@ -208,7 +208,7 @@ export async function importFile(
     batch = [];
     batchBytes = 0;
     while (rest.length > 0) {
-      const reply = await op.run({
+      const reply = await op.write({
         insert: options.coll,
         documents: rest.map((p) => p.doc),
         ordered,

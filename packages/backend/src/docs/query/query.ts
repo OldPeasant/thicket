@@ -12,10 +12,17 @@ import {
   type PageRequest,
   type SortSpec,
 } from '@thicket/core';
-import { BSON, type Document } from 'mongodb';
+import { BSON, type Document, type ReadPreferenceLike } from 'mongodb';
 
-import { RAW, canonical, decodeBatch, toBrowseError, toNumber } from '../../browse/browse';
-import { abortable, type ClientLike } from '../../connections/manager';
+import {
+  RAW,
+  ReadCursor,
+  canonical,
+  toBrowseError,
+  toNumber,
+  withWriteConcern,
+} from '../../browse/browse';
+import { abortable, type ClientLike, type DbLike } from '../../connections/manager';
 import { RpcError } from '../../server/rpc';
 
 /**
@@ -80,9 +87,15 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
-async function command(client: ClientLike, db: string, cmd: Document): Promise<Document> {
+async function command(
+  client: ClientLike,
+  db: string,
+  cmd: Document,
+  readPreference?: ReadPreferenceLike,
+): Promise<Document> {
   try {
-    return await client.db(db).command(cmd, RAW);
+    const options = readPreference === undefined ? RAW : { ...RAW, readPreference };
+    return await client.db(db).command(cmd, options);
   } catch (error) {
     throw toBrowseError(error);
   }
@@ -95,21 +108,33 @@ function isUnauthorized(error: unknown): boolean {
 
 /**
  * Kills the server operations carrying `comment`. Users without the `inprog` privilege see (and
- * may kill) their own operations with `$ownOps`. Best effort: failures are ignored. Resolves with
- * the number of operations found (0 when none, or `currentOp` failed).
+ * may kill) their own operations with `$ownOps`. `currentOp` and `killOp` run with the read
+ * preference the operation was sent with, so they reach the member running it (deterministic
+ * for `primary` and for a set with one eligible member). Best effort: failures are ignored.
+ * Resolves with the number of operations found (0 when none, or `currentOp` failed).
  */
-export async function killOperations(client: ClientLike, comment: string): Promise<number> {
+export async function killOperations(
+  client: ClientLike,
+  comment: string,
+  readPreference?: ReadPreferenceLike,
+): Promise<number> {
   let reply: Document;
   try {
     try {
-      reply = await command(client, 'admin', { currentOp: 1, 'command.comment': comment });
+      reply = await command(
+        client,
+        'admin',
+        { currentOp: 1, 'command.comment': comment },
+        readPreference,
+      );
     } catch (error) {
       if (!isUnauthorized(error)) throw error;
-      reply = await command(client, 'admin', {
-        currentOp: 1,
-        $ownOps: true,
-        'command.comment': comment,
-      });
+      reply = await command(
+        client,
+        'admin',
+        { currentOp: 1, $ownOps: true, 'command.comment': comment },
+        readPreference,
+      );
     }
   } catch {
     return 0;
@@ -117,52 +142,95 @@ export async function killOperations(client: ClientLike, comment: string): Promi
   const ops = Array.isArray(reply['inprog']) ? (reply['inprog'] as Document[]) : [];
   const ids = ops.map((op) => op['opid']).filter((opid) => opid !== undefined);
   await Promise.all(
-    ids.map((opid) => command(client, 'admin', { killOp: 1, op: opid }).catch(() => undefined)),
+    ids.map((opid) =>
+      command(client, 'admin', { killOp: 1, op: opid }, readPreference).catch(() => undefined),
+    ),
   );
   return ids.length;
 }
 
-interface CursorReply {
-  id: unknown;
-  docs: Document[];
-}
-
-function cursorOf(reply: Document, batch: 'firstBatch' | 'nextBatch'): CursorReply {
-  const cursor = reply['cursor'] as Document | undefined;
-  if (!cursor) throw new RpcError('INTERNAL', 'The server answered without a cursor');
-  return { id: cursor['id'], docs: decodeBatch(cursor[batch]) };
-}
-
 const isOpen = (id: unknown): boolean => id !== undefined && id !== null && toNumber(id) !== 0;
 
+/** Options of an {@link Operation}. */
+export interface OperationOptions {
+  /**
+   * Read from the primary instead of the profile's read preference: for reads that belong to a
+   * write (previews, conflict checks), which must see the writes they check.
+   */
+  primary?: boolean;
+}
+
 /**
- * One operation (a cursor command and its `getMore`s) that can be cancelled with `signal`.
- * All commands carry the same `comment`, so a cancel can find and kill whichever is running.
+ * One operation (cursor commands and their `getMore`s, or single commands) that can be
+ * cancelled with `signal`. All commands carry the same `comment`, so a cancel can find and kill
+ * whichever is running. Reads follow the profile's read preference (a cursor's `getMore`s and
+ * `killCursors` go to the server that opened it, see `ReadCursor`); {@link write} runs on the
+ * primary with the profile's write concern.
  */
 export class Operation {
   readonly comment = operationToken();
-  private cursorId: unknown;
+  private cursor: ReadCursor | undefined;
   private readonly cleanups: Promise<void>[] = [];
+  private readonly target: DbLike;
+  private readonly readPreference: ReadPreferenceLike | undefined;
 
   constructor(
     private readonly client: ClientLike,
     private readonly db: string,
     private readonly collection: string,
     private readonly signal: AbortSignal | undefined,
-  ) {}
+    options: OperationOptions = {},
+  ) {
+    this.target = client.db(db);
+    this.readPreference = options.primary === true ? 'primary' : this.target.readPreference;
+  }
 
   /**
-   * Runs a command. On abort it rejects with `CANCELLED` at once and, in the background, kills
-   * the server operation and the cursor it may still open (awaited by {@link close}).
+   * Runs a read command (cursors: {@link open}). On abort it rejects with `CANCELLED` at once
+   * and, in the background, kills the server operation and the cursor it may still open
+   * (awaited by {@link close}).
    */
   async run(cmd: Document): Promise<Document> {
+    return this.send(cmd, this.readPreference);
+  }
+
+  /** Runs a write command on the primary with the profile's write concern (like {@link run}). */
+  async write(cmd: Document): Promise<Document> {
+    return this.send(withWriteConcern(this.target, cmd), undefined);
+  }
+
+  private async send(
+    cmd: Document,
+    readPreference: ReadPreferenceLike | undefined,
+  ): Promise<Document> {
     if (this.signal?.aborted) throw cancelled();
-    const pending = command(this.client, this.db, { ...cmd, comment: this.comment });
+    const pending = command(
+      this.client,
+      this.db,
+      { ...cmd, comment: this.comment },
+      readPreference,
+    );
+    return this.guard(pending, readPreference, async (reply) => {
+      const id = (reply?.['cursor'] as Document | undefined)?.['id'];
+      if (isOpen(id)) await this.killCursorId(id, readPreference);
+    });
+  }
+
+  /**
+   * Waits for `pending` until the signal aborts. On abort: rejects with `CANCELLED` and cleans
+   * up in the background ({@link cleanUp}; `onSettled` runs once `pending` settles, with its
+   * reply or `undefined` when it failed).
+   */
+  private async guard<T>(
+    pending: Promise<T>,
+    readPreference: ReadPreferenceLike | undefined,
+    onSettled: (reply: T | undefined) => Promise<void>,
+  ): Promise<T> {
     try {
       return await abortable(pending, this.signal);
     } catch (error) {
       if (this.signal?.aborted) {
-        this.cleanups.push(this.cleanUp(pending));
+        this.cleanups.push(this.cleanUp(pending, readPreference, onSettled));
         throw cancelled();
       }
       throw error;
@@ -174,66 +242,86 @@ export class Operation {
    * The command may not be in `currentOp` yet (pool checkout, connection setup, network), so the
    * kill is retried every {@link KILL_RETRY_MS} until it found the operation or the command
    * settled, for at most {@link CANCEL_SETTLE_MS}. A cursor of a reply that comes later still is
-   * killed whenever that reply arrives; only the wait is bounded.
+   * killed whenever that reply arrives (and an open cursor whose `getMore` failed); only the wait
+   * is bounded.
    */
-  private async cleanUp(pending: Promise<Document>): Promise<void> {
+  private async cleanUp<T>(
+    pending: Promise<T>,
+    readPreference: ReadPreferenceLike | undefined,
+    onSettled: (reply: T | undefined) => Promise<void>,
+  ): Promise<void> {
     let settled = false;
     const late = pending.then(
       async (reply) => {
         settled = true;
-        const id = (reply['cursor'] as Document | undefined)?.['id'];
-        if (isOpen(id)) await this.killCursorId(id);
+        await onSettled(reply);
       },
-      () => {
+      async () => {
         settled = true;
+        await onSettled(undefined);
       },
     );
     const deadline = Date.now() + CANCEL_SETTLE_MS;
     while (!settled && Date.now() < deadline) {
-      if ((await killOperations(this.client, this.comment)) > 0) break;
+      if ((await killOperations(this.client, this.comment, readPreference)) > 0) break;
       await Promise.race([late, sleep(Math.min(KILL_RETRY_MS, deadline - Date.now()))]);
     }
     await Promise.race([late, sleep(Math.max(0, deadline - Date.now()))]);
   }
 
-  /** First batch of a cursor command; remembers the cursor id. */
+  /** Runs a cursor command and answers its first batch (a cursor left open is killed first). */
   async open(cmd: Document): Promise<Document[]> {
-    const cursor = cursorOf(await this.run(cmd), 'firstBatch');
-    this.cursorId = isOpen(cursor.id) ? cursor.id : undefined;
-    return cursor.docs;
+    if (this.signal?.aborted) throw cancelled();
+    await this.closeCursor();
+    const cursor = new ReadCursor(this.target, this.collection, this.comment, this.readPreference);
+    this.cursor = cursor;
+    return this.fetch(cursor, cursor.first(cmd));
   }
 
   /** True while the cursor has more batches. */
   get hasMore(): boolean {
-    return this.cursorId !== undefined;
+    return this.cursor?.hasMore ?? false;
   }
 
-  /** Next batch of the open cursor. */
+  /** Next batch of the open cursor (its `getMore` goes to the server that opened it). */
   async more(batchSize?: number): Promise<Document[]> {
-    if (this.cursorId === undefined) return [];
-    const cmd: Document = { getMore: this.cursorId, collection: this.collection };
-    if (batchSize !== undefined) cmd['batchSize'] = batchSize;
-    const cursor = cursorOf(await this.run(cmd), 'nextBatch');
-    this.cursorId = isOpen(cursor.id) ? cursor.id : undefined;
-    return cursor.docs;
+    const cursor = this.cursor;
+    if (cursor === undefined || !cursor.hasMore) return [];
+    if (this.signal?.aborted) throw cancelled();
+    return this.fetch(cursor, cursor.next(batchSize));
   }
 
-  private async killCursor(): Promise<void> {
-    const id = this.cursorId;
-    if (id === undefined) return;
-    this.cursorId = undefined;
-    await this.killCursorId(id);
+  private async fetch(cursor: ReadCursor, pending: Promise<Document[]>): Promise<Document[]> {
+    try {
+      return await this.guard(pending, this.readPreference, () => cursor.close());
+    } catch (error) {
+      // Cancelled: the background cleanup closes the cursor once its command settled.
+      if (this.signal?.aborted && this.cursor === cursor) this.cursor = undefined;
+      throw error;
+    }
   }
 
-  private async killCursorId(id: unknown): Promise<void> {
-    await command(this.client, this.db, { killCursors: this.collection, cursors: [id] }).catch(
-      () => undefined,
-    );
+  private async closeCursor(): Promise<void> {
+    const cursor = this.cursor;
+    this.cursor = undefined;
+    await cursor?.close();
+  }
+
+  private async killCursorId(
+    id: unknown,
+    readPreference: ReadPreferenceLike | undefined,
+  ): Promise<void> {
+    await command(
+      this.client,
+      this.db,
+      { killCursors: this.collection, cursors: [id] },
+      readPreference,
+    ).catch(() => undefined);
   }
 
   /** Kills a cursor left open and waits for any cancel cleanup. */
   async close(): Promise<void> {
-    await this.killCursor();
+    await this.closeCursor();
     await Promise.all(this.cleanups);
   }
 }
@@ -412,6 +500,7 @@ export async function countDocuments(
   client: ClientLike,
   p: ParsedParamsOf<'docs.count'>,
   signal?: AbortSignal,
+  options?: OperationOptions,
 ): Promise<ResultOf<'docs.count'>> {
   const pipeline: Document[] = [{ $match: parseDocument(p.filter, 'filter') }];
   if (p.limit !== undefined && p.limit > 0) pipeline.push({ $limit: p.limit });
@@ -420,7 +509,7 @@ export async function countDocuments(
   if (p.collation !== undefined) cmd['collation'] = parseDocument(p.collation, 'collation', true);
   if (p.hint !== undefined) cmd['hint'] = parseEjson(p.hint, 'hint', true);
   optional(cmd, 'maxTimeMS', p.maxTimeMS);
-  const op = new Operation(client, p.db, p.coll, signal);
+  const op = new Operation(client, p.db, p.coll, signal, options);
   try {
     const [group] = await op.open(cmd);
     return { count: group ? Math.max(0, Math.trunc(toNumber(group['n']) ?? 0)) : 0 };

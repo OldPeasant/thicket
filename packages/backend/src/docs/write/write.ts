@@ -4,7 +4,13 @@ import { BSON, type Document } from 'mongodb';
 import { canonical, toNumber } from '../../browse/browse';
 import type { ClientLike } from '../../connections/manager';
 import { RpcError } from '../../server/rpc';
-import { Operation, countDocuments, parseDocument, parseEjson } from '../query/query';
+import {
+  Operation,
+  countDocuments,
+  parseDocument,
+  parseEjson,
+  type OperationOptions,
+} from '../query/query';
 
 /**
  * Writing documents (`docs.insert/update/replace/delete`, `docs.previewMany`,
@@ -21,6 +27,13 @@ import { Operation, countDocuments, parseDocument, parseEjson } from '../query/q
  * of the document is read and the write fails with `CONFLICT` and `ConflictDetail`
  * (`{ current }`, `null` when the document is gone).
  */
+
+/**
+ * Reads that belong to a write (preview, expected-count check, conflict detail) go to the
+ * primary, whatever the profile's read preference: they must see the writes they check. The
+ * writes themselves carry the profile's write concern (`Operation.write`).
+ */
+const PRIMARY: OperationOptions = { primary: true };
 
 /** Sample size of `docs.previewMany` when the request names none. */
 export const DEFAULT_PREVIEW_SAMPLE = 20;
@@ -149,7 +162,7 @@ async function runWrite(
 ): Promise<Document> {
   const op = new Operation(client, db, coll, signal);
   try {
-    return await op.run(cmd);
+    return await op.write(cmd);
   } finally {
     await op.close();
   }
@@ -163,7 +176,7 @@ async function currentDocument(
   id: unknown,
   signal: AbortSignal | undefined,
 ): Promise<string | null> {
-  const op = new Operation(client, db, coll, signal);
+  const op = new Operation(client, db, coll, signal, PRIMARY);
   try {
     const [doc] = await op.open({
       find: coll,
@@ -319,11 +332,12 @@ export async function previewMany(
       ...(p.maxTimeMS !== undefined ? { maxTimeMS: p.maxTimeMS } : {}),
     },
     signal,
+    PRIMARY,
   );
   const cmd: Document = { find: p.coll, filter, limit, batchSize: limit, singleBatch: true };
   if (collation !== undefined) cmd['collation'] = collation;
   if (p.maxTimeMS !== undefined) cmd['maxTimeMS'] = p.maxTimeMS;
-  const op = new Operation(client, p.db, p.coll, signal);
+  const op = new Operation(client, p.db, p.coll, signal, PRIMARY);
   try {
     const docs = matched === 0 ? [] : await op.open(cmd);
     return { matched, sample: docs.map(canonical) };
@@ -357,6 +371,7 @@ async function checkExpectedCount(
       ...(p.collation !== undefined ? { collation: p.collation } : {}),
     },
     signal,
+    PRIMARY,
   );
   if (now > expectedCount) {
     throw new RpcError(

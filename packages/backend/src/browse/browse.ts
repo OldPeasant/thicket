@@ -1,9 +1,15 @@
 import type { CollectionInfo, DatabaseInfo, ResultOf } from '@thicket/contract';
 
-import { BSON, type Document, type RunCommandOptions } from 'mongodb';
+import {
+  BSON,
+  type Document,
+  type ReadPreferenceLike,
+  type RunCommandOptions,
+  type RunCursorCommandOptions,
+} from 'mongodb';
 
 import { redact, toConnectError } from '../connections/errors';
-import type { ClientLike } from '../connections/manager';
+import type { ClientLike, CursorLike, DbLike } from '../connections/manager';
 import { RpcError } from '../server/rpc';
 
 /**
@@ -126,6 +132,131 @@ export function canonical(doc: Document): string {
   return BSON.EJSON.stringify(doc, { relaxed: false });
 }
 
+/**
+ * Read preference and write concern (task raw-cmd-read-pref): the profile's read preference
+ * (+ tags) and write concern are the driver client's defaults, which a raw `db.command()` ignores
+ * (it always runs on the primary, without a write concern). So reads pass the database's read
+ * preference ({@link readOptions}), cursor commands run as driver cursors ({@link ReadCursor}),
+ * whose `getMore`/`killCursors` go to the server that opened them, and document writes carry the
+ * write concern in the command ({@link withWriteConcern}). Commands that change the schema
+ * (create, drop, rename, `collMod`, indexes) and users/roles stay on the primary as they were.
+ */
+
+/** Command options for a read: {@link RAW} plus the database's (the profile's) read preference. */
+export function readOptions(db: DbLike): RunCommandOptions {
+  return db.readPreference === undefined ? RAW : { ...RAW, readPreference: db.readPreference };
+}
+
+/**
+ * The write command with the database's (the profile's) write concern as its `writeConcern`
+ * field; unchanged when there is none or the command names one itself.
+ */
+export function withWriteConcern(db: DbLike, command: Document): Document {
+  const concern = db.writeConcern;
+  if (concern === undefined || 'writeConcern' in command) return command;
+  const field: Document = {};
+  if (concern.w !== undefined) field['w'] = concern.w;
+  if (concern.journal !== undefined) field['j'] = concern.journal;
+  if (concern.wtimeoutMS !== undefined) field['wtimeout'] = concern.wtimeoutMS;
+  return Object.keys(field).length === 0 ? command : { ...command, writeConcern: field };
+}
+
+const isOpenCursor = (id: unknown): boolean =>
+  id !== undefined && id !== null && toNumber(id) !== 0;
+
+/**
+ * The cursor of one read command (`find`, `aggregate`, `listCollections`, ...), batch by batch,
+ * read with the database's read preference. It runs as a driver cursor (`runCursorCommand`), so
+ * every `getMore` and the `killCursors` of {@link close} reach the server that answered the
+ * command, not whichever member the read preference selects next. Batches arrive as BSON bytes
+ * and are decoded without promotion (lossless EJSON). A `comment` is sent with the command and
+ * every `getMore`. Clients without `runCursorCommand` (test fakes) get plain commands.
+ */
+export class ReadCursor {
+  private cursor: CursorLike | undefined;
+  /** Cursor id of the plain-command path. */
+  private id: unknown;
+
+  constructor(
+    private readonly db: DbLike,
+    private readonly collection: string,
+    private readonly comment?: unknown,
+    /** Overrides the database's read preference (e.g. `primary` for reads around a write). */
+    private readonly readPreference: ReadPreferenceLike | undefined = db.readPreference,
+  ) {}
+
+  /** Runs the cursor command and answers its first batch. */
+  async first(command: Document): Promise<Document[]> {
+    const cmd = this.comment === undefined ? command : { ...command, comment: this.comment };
+    if (this.db.runCursorCommand) {
+      const options: RunCursorCommandOptions = { raw: true };
+      if (this.readPreference !== undefined) options.readPreference = this.readPreference;
+      const cursor = this.db.runCursorCommand(cmd, options);
+      if (this.comment !== undefined) cursor.setComment(this.comment);
+      this.cursor = cursor;
+      return this.fetch(cursor);
+    }
+    const reply = await this.command(cmd);
+    return this.batchOf(reply, 'firstBatch');
+  }
+
+  /** True while the server holds more batches. */
+  get hasMore(): boolean {
+    return isOpenCursor(this.cursor ? this.cursor.id : this.id);
+  }
+
+  /** The next batch (empty when there is none). */
+  async next(batchSize?: number): Promise<Document[]> {
+    if (!this.hasMore) return [];
+    if (this.cursor) {
+      if (batchSize !== undefined) this.cursor.setBatchSize(batchSize);
+      return this.fetch(this.cursor);
+    }
+    const cmd: Document = { getMore: this.id, collection: this.collection };
+    if (batchSize !== undefined) cmd['batchSize'] = batchSize;
+    if (this.comment !== undefined) cmd['comment'] = this.comment;
+    return this.batchOf(await this.command(cmd), 'nextBatch');
+  }
+
+  /** Kills the cursor on its server if it is still open (best effort, never rejects). */
+  async close(): Promise<void> {
+    if (this.cursor) {
+      await this.cursor.close().catch(() => undefined);
+      return;
+    }
+    const id = this.id;
+    this.id = undefined;
+    if (!isOpenCursor(id)) return;
+    await this.command({ killCursors: this.collection, cursors: [id] }).catch(() => undefined);
+  }
+
+  private async fetch(cursor: CursorLike): Promise<Document[]> {
+    try {
+      await cursor.hasNext();
+    } catch (error) {
+      throw toBrowseError(error);
+    }
+    return decodeBatch(cursor.readBufferedDocuments());
+  }
+
+  private async command(cmd: Document): Promise<Document> {
+    const options =
+      this.readPreference === undefined ? RAW : { ...RAW, readPreference: this.readPreference };
+    try {
+      return await this.db.command(cmd, options);
+    } catch (error) {
+      throw toBrowseError(error);
+    }
+  }
+
+  private batchOf(reply: Document, batch: 'firstBatch' | 'nextBatch'): Document[] {
+    const cursor = reply['cursor'] as Document | undefined;
+    if (!cursor) throw new RpcError('INTERNAL', 'The server answered without a cursor');
+    this.id = isOpenCursor(cursor['id']) ? cursor['id'] : undefined;
+    return decodeBatch(cursor[batch]);
+  }
+}
+
 async function run(client: ClientLike, db: string, command: Document): Promise<Document> {
   try {
     return await client.db(db).command(command, RAW);
@@ -134,10 +265,26 @@ async function run(client: ClientLike, db: string, command: Document): Promise<D
   }
 }
 
-/** Runs a command with `RAW` options; driver errors become `toBrowseError`s. */
+/** A read command with the profile's read preference; driver errors become `toBrowseError`s. */
+async function read(client: ClientLike, db: string, command: Document): Promise<Document> {
+  const target = client.db(db);
+  try {
+    return await target.command(command, readOptions(target));
+  } catch (error) {
+    throw toBrowseError(error);
+  }
+}
+
+/**
+ * Runs a command with `RAW` options on the primary (no read preference); driver errors become
+ * `toBrowseError`s. For commands that change something and for users/roles.
+ */
 export const runCommand = run;
 
-/** Runs a cursor command (`listCollections`, `aggregate`) and collects every batch. */
+/**
+ * Runs a read cursor command (`listCollections`, `aggregate`) with the profile's read preference
+ * and collects every batch (a {@link ReadCursor}: `getMore`s go to the same server).
+ */
 export async function runCursor(
   client: ClientLike,
   db: string,
@@ -145,22 +292,17 @@ export async function runCursor(
   collection: string,
   signal?: AbortSignal,
 ): Promise<Document[]> {
-  const first = await run(client, db, command);
-  const cursor = first['cursor'] as { id: unknown; firstBatch: Document[] } | undefined;
-  if (!cursor) throw new RpcError('INTERNAL', 'The server answered without a cursor');
-  const docs = decodeBatch(cursor.firstBatch);
-  let id = cursor.id;
-  while (toNumber(id) !== 0 && id !== undefined) {
-    if (signal?.aborted) {
-      await run(client, db, { killCursors: collection, cursors: [id] }).catch(() => undefined);
-      throw new RpcError('CANCELLED', 'The operation was cancelled');
+  const cursor = new ReadCursor(client.db(db), collection);
+  try {
+    const docs = await cursor.first(command);
+    while (cursor.hasMore) {
+      if (signal?.aborted) throw new RpcError('CANCELLED', 'The operation was cancelled');
+      docs.push(...(await cursor.next()));
     }
-    const next = await run(client, db, { getMore: id, collection });
-    const batch = next['cursor'] as { id: unknown; nextBatch: Document[] };
-    docs.push(...decodeBatch(batch.nextBatch));
-    id = batch.id;
+    return docs;
+  } finally {
+    await cursor.close();
   }
-  return docs;
 }
 
 /**
@@ -192,9 +334,11 @@ export async function listDatabases(
   let listed: DatabaseInfo[];
   let refused: unknown;
   try {
-    const answer = await client
-      .db('admin')
-      .command({ listDatabases: 1, nameOnly: !withSizes }, RAW);
+    const admin = client.db('admin');
+    const answer = await admin.command(
+      { listDatabases: 1, nameOnly: !withSizes },
+      readOptions(admin),
+    );
     listed = (answer['databases'] as Document[]).map((d) => {
       const info: DatabaseInfo = { name: String(d['name']) };
       if (withSizes) {
@@ -239,7 +383,7 @@ export async function dropDatabase(client: ClientLike, db: string): Promise<Resu
 }
 
 export async function databaseStats(client: ClientLike, db: string): Promise<ResultOf<'db.stats'>> {
-  const stats = await run(client, db, { dbStats: 1, scale: 1 });
+  const stats = await read(client, db, { dbStats: 1, scale: 1 });
   return {
     collections: Math.trunc(size(stats['collections'])),
     views: Math.trunc(size(stats['views'])),
