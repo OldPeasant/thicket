@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "task": "release-native-modules",
+  "reviewed_revision": "0f63ea94451b657937fb0eb4c48d0da9335cd7d9",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/release-native-modules/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/release-native-modules/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/release-native-modules/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "plugin stubbed every *.node; now only an allow-list of optional addons, any other addon fails the build"
+    },
+    {
+      "id": "CR-2",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "stub namespace path and message now include the package name"
+    }
+  ],
+  "validation": [
+    { "command": "cd apps/desktop && npx vitest run src/build", "result": "pass" },
+    { "command": "npm run check", "result": "pass" },
+    {
+      "command": "podman run docker.io/library/node:24 sh out/container-dist.sh (npm ci with compiled addons; npm run dist -w apps/desktop -- --linux AppImage) at bb4a42ff",
+      "result": "pass"
+    },
+    {
+      "command": "node apps/desktop/scripts/smoke-packaged.mjs <container-built AppImage>",
+      "result": "pass"
+    },
+    {
+      "command": "npx playwright test test/e2e/ssh.e2e.ts (container-built bundles)",
+      "result": "pass"
+    },
+    {
+      "command": "podman run docker.io/rhysd/actionlint:latest -no-color -verbose",
+      "result": "pass"
+    }
+  ]
+}
