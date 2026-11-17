@@ -1,10 +1,11 @@
 ---
 title: Test: fix failing e2e tests (layout Compass heading, sidebar drag, LDAP fixture start)
-status: todo
-owner:
+status: in_progress
+owner: felix/agent-2
 deps: [e2e-screenshot-repaint]
 touches: [test/e2e/layout.e2e.ts,test/e2e/ldap.e2e.ts,test/integration/fixtures/ldap.ts]
 prio: 2
+lease_until: 2026-11-17T06:06:11Z
 ---
 ## Goal
 `npm run test:e2e` on main (seen 2026-11-17 by e2e-screenshot-repaint, real display, 57 passed / 3 failed,
