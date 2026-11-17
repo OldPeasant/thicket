@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import type { ProfileDraft } from '@thicket/contract';
 import { parseConnectionString } from '@thicket/core';
-import type { MongoClientOptions, W } from 'mongodb';
+import type { MongoClientOptions, OIDCCallbackFunction, W } from 'mongodb';
 
 import { awsAuthOptions } from '../auth/aws';
 import { ldapAuthOptions } from '../auth/ldap';
@@ -21,7 +21,7 @@ export interface ClientConfig {
 /** `appName` when the profile sets none, so server logs show who connected. */
 export const DEFAULT_APP_NAME = 'Thicket';
 
-/** Mechanisms this build connects with; the others belong to later tasks (OIDC, Kerberos). */
+/** Mechanisms this build connects with; the others belong to later tasks (Kerberos). */
 const SUPPORTED_MECHANISMS = new Set([
   'NONE',
   'SCRAM-SHA-1',
@@ -29,6 +29,7 @@ const SUPPORTED_MECHANISMS = new Set([
   'MONGODB-X509',
   'MONGODB-AWS',
   'PLAIN',
+  'MONGODB-OIDC',
 ]);
 
 /**
@@ -36,12 +37,14 @@ const SUPPORTED_MECHANISMS = new Set([
  * `mongodb+srv://`, `replicaSet`, `directConnection` and other URI options come from there); the
  * profile's form fields and the secrets are passed as driver options, which take precedence over
  * the same options in the URI. Passwords never go into the URI, so it can be logged masked. A
- * profile with `ssh` needs its open tunnel's proxy options (`openSshTunnel`).
+ * profile with `ssh` needs its open tunnel's proxy options (`openSshTunnel`), a MONGODB-OIDC
+ * profile the sign-in callback (`OidcAuthenticator.callbackFor`).
  */
 export function clientConfig(
   profile: ProfileDraft,
   secrets: ConnectSecrets,
   tunnel?: TunnelProxy,
+  oidcCallback?: OIDCCallbackFunction,
 ): ClientConfig {
   if (profile.ssh && profile.proxy) {
     throw new RpcError(
@@ -65,6 +68,15 @@ export function clientConfig(
     Object.assign(options, awsAuthOptions(auth, secrets, uriUsername(profile.connectionString)));
   } else if (auth?.mechanism === 'PLAIN') {
     Object.assign(options, ldapAuthOptions(auth, secrets, uriUsername(profile.connectionString)));
+  } else if (auth?.mechanism === 'MONGODB-OIDC') {
+    if (!oidcCallback) {
+      throw new RpcError('UNSUPPORTED', 'OIDC sign-in is not available here');
+    }
+    options.authMechanism = 'MONGODB-OIDC';
+    // OIDC users live in `$external`; the user name (optional) is a principal hint for the server.
+    options.authSource = '$external';
+    if (auth.username !== undefined) options.auth = { username: auth.username };
+    options.authMechanismProperties = { OIDC_HUMAN_CALLBACK: oidcCallback };
   } else if (auth?.mechanism !== 'NONE' && auth?.mechanism !== 'MONGODB-X509') {
     const username = auth?.username ?? uriUsername(profile.connectionString);
     const needsPassword = auth !== undefined && auth.secretMode !== 'none';

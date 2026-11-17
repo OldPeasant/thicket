@@ -19,6 +19,10 @@ export const AUTH_MECHANISMS = [
   'GSSAPI',
 ] as const;
 
+export const OIDC_FLOWS = ['auto', 'authCode', 'deviceCode'] as const;
+
+export type OidcFlow = (typeof OIDC_FLOWS)[number];
+
 export const SECRET_KINDS = [
   'password',
   'sshPassword',
@@ -60,6 +64,12 @@ export const profileAuth = z.strictObject({
   authSource: optionalString,
   /** How the password (or other primary secret) is obtained. */
   secretMode: z.enum(['saved', 'ask', 'none']),
+  /**
+   * MONGODB-OIDC sign-in: `authCode` (system browser, loopback redirect), `deviceCode` (a code
+   * to enter on another device), `auto` (default: the browser, the device flow when no browser
+   * can be opened). Ignored by the other mechanisms.
+   */
+  oidcFlow: z.enum(OIDC_FLOWS).optional(),
 });
 
 /**

@@ -18,6 +18,7 @@ import {
   protocol,
   safeStorage,
   session,
+  shell,
   utilityProcess,
   type MessagePortMain,
 } from 'electron';
@@ -137,6 +138,11 @@ const host = new BackendHost<MessagePortMain>({
         secrets: secretsStore(),
         profiles: profilesStore(),
         dialogs: nativeDialogs,
+        oidc: {
+          openExternal: (url) => shell.openExternal(url),
+          hasProfile: (profileId) => profilesStore().has(profileId),
+          log: (message) => log(`oidc: ${message}`),
+        },
       }),
       onError: (error) => log(`privileged handler: ${String(error)}`),
     }),

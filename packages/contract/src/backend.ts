@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { count, emptyParams, profileId } from './common';
+import { count, emptyParams, emptyResult, profileId } from './common';
 import { defineMethods } from './define';
 import { profile } from './profiles';
 
@@ -97,6 +97,19 @@ export const privilegedMethods = defineMethods({
     }),
     /** `null` when the dialog was cancelled. */
     result: z.object({ path: z.string().min(1).nullable() }),
+  },
+  'oidc.openBrowser': {
+    summary: 'Main opens an OIDC sign-in page (http/https URL) in the system browser',
+    route: 'main',
+    params: z.strictObject({ url: z.url({ protocol: /^https?$/ }) }),
+    result: emptyResult,
+  },
+  'oidc.saveTokens': {
+    summary: "Main stores (or with null clears) a profile's OIDC token cache in secrets.bin",
+    route: 'main',
+    params: z.strictObject({ profileId, tokens: z.string().min(1).nullable() }),
+    /** `saved: false` when secret storage is unavailable (the backend keeps them in memory). */
+    result: z.object({ saved: z.boolean() }),
   },
 });
 

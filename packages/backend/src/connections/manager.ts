@@ -15,6 +15,7 @@ import {
   type RunCommandOptions,
 } from 'mongodb';
 
+import type { OidcAuthenticator } from '../auth/oidc';
 import { RpcError } from '../server/rpc';
 import { openSshTunnel, type SshEnvironment, type SshTunnel } from '../ssh/tunnel';
 import { redact, toConnectError } from './errors';
@@ -40,6 +41,8 @@ export interface ConnectionManagerDeps {
   now?(): number;
   /** SSH tunnels (`known_hosts`, host key questions); without it SSH profiles are `UNSUPPORTED`. */
   ssh?: SshEnvironment;
+  /** MONGODB-OIDC sign-in; without it OIDC profiles are `UNSUPPORTED`. */
+  oidc?: OidcAuthenticator;
   /** Defaults to `openSshTunnel` (tests pass fakes). */
   openTunnel?: typeof openSshTunnel;
   /**
@@ -116,7 +119,12 @@ export class ConnectionManager {
     const tunnel = await this.openTunnelFor(profile, secrets, label, signal);
     let config: ReturnType<typeof clientConfig>;
     try {
-      config = clientConfig(profile, secrets, tunnel?.proxy);
+      config = clientConfig(
+        profile,
+        secrets,
+        tunnel?.proxy,
+        this.oidcCallback(profile, storedFrom, secrets, signal),
+      );
     } catch (error) {
       await tunnel?.close();
       throw error;
@@ -161,6 +169,29 @@ export class ConnectionManager {
       // Closing the tunnel also ends a driver connect still in progress (its sockets fail).
       await tunnel?.close();
     }
+  }
+
+  /**
+   * The OIDC sign-in callback of a MONGODB-OIDC profile (undefined otherwise, or without an
+   * authenticator). Tokens are cached for `storedFrom` (a saved profile) only; `signal` ends a
+   * sign-in that waits for the user.
+   */
+  private oidcCallback(
+    profile: ProfileDraft,
+    storedFrom: string | undefined,
+    secrets: ConnectSecrets,
+    signal: AbortSignal | undefined,
+  ) {
+    const oidc = this.deps.oidc;
+    if (profile.auth?.mechanism !== 'MONGODB-OIDC' || !oidc) return undefined;
+    const stored = secrets['oidcTokens'];
+    return oidc.callbackFor({
+      profileName: profile.name,
+      ...(storedFrom !== undefined ? { profileId: storedFrom } : {}),
+      ...(profile.auth.oidcFlow !== undefined ? { flow: profile.auth.oidcFlow } : {}),
+      ...(stored !== undefined ? { stored } : {}),
+      ...(signal ? { signal } : {}),
+    });
   }
 
   /**
@@ -277,7 +308,12 @@ export class ConnectionManager {
       );
       if (tunnel) entry.tunnel = tunnel;
       if (this.entries.get(profileId) !== entry) throw closedWhileConnecting();
-      const { uri, options } = clientConfig(profile, secrets, tunnel?.proxy);
+      const { uri, options } = clientConfig(
+        profile,
+        secrets,
+        tunnel?.proxy,
+        this.oidcCallback(profile, profileId, secrets, entry.abort.signal),
+      );
       this.log(`open ${profileId}: connecting to ${uri}`, secrets);
       const client = this.createClient(uri, options);
       entry.client = client;

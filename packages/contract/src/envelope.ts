@@ -86,4 +86,9 @@ export const BROADCAST_STREAMS = {
    * `conn.trustHostKey`. Sent by the backend to every window.
    */
   sshHostKey: 'ssh.hostKey',
+  /**
+   * A MONGODB-OIDC connect waits for the user to sign in (browser or device code), or that
+   * sign-in is over; payload `OidcPrompt`. Sent by the backend to every window.
+   */
+  oidcPrompt: 'oidc.prompt',
 } as const;

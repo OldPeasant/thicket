@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { BROADCAST_STREAMS, methods, type Event, type Profile } from '@thicket/contract';
 
 import { aggHandlers } from '../agg';
+import { OidcAuthenticator } from '../auth/oidc';
 import { browseHandlers } from '../browse';
 import { ConnectionManager, connHandlers } from '../connections';
 import { docsQueryHandlers } from '../docs/query';
@@ -55,6 +56,21 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
     }
     return renderers.size;
   });
+  // MONGODB-OIDC: main opens the system browser and keeps the token cache in the keychain.
+  const oidc = new OidcAuthenticator({
+    openBrowser: async (url) => {
+      await link().call('oidc.openBrowser', { url });
+    },
+    saveTokens: async (profileId, tokens) => {
+      await link().call('oidc.saveTokens', { profileId, tokens });
+    },
+    prompt: (prompt) => {
+      for (const send of renderers) {
+        send({ stream: BROADCAST_STREAMS.oidcPrompt, kind: 'data', payload: prompt });
+      }
+    },
+    log: (message) => log(`connections: ${message}`),
+  });
   const loadProfile = async (profileId: string): Promise<Profile> =>
     ((await link().call('profiles.forConnect', { profileId })) as { profile: Profile }).profile;
   const connections = new ConnectionManager({
@@ -66,6 +82,7 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
         }
       ).secrets,
     log: (message) => log(`connections: ${message}`),
+    oidc,
     onStatus: (status) => {
       for (const send of renderers) {
         send({ stream: BROADCAST_STREAMS.connStatus, kind: 'data', payload: status });

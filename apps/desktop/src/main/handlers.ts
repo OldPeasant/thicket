@@ -2,6 +2,7 @@ import type { Handler } from '@thicket/backend';
 import type { ParsedParamsOf, ResultOf, Settings } from '@thicket/contract';
 
 import { dialogHandlers, type NativeDialogs } from '../dialogs';
+import { oidcHandlers, type OidcMainDeps } from '../oidc';
 import { profileForConnectHandler, profilesHandlers, type ProfilesStore } from '../profiles';
 import { secretsGetHandler, secretsHandlers, type SecretsStore } from '../secrets';
 
@@ -47,6 +48,8 @@ export function privilegedHandlers(deps: {
   profiles?: ProfilesStore;
   /** Serves `dialog.saveFile` / `dialog.openFile` when given. */
   dialogs?: NativeDialogs;
+  /** Serves `oidc.openBrowser` / `oidc.saveTokens` when given (secrets come from `secrets`). */
+  oidc?: Omit<OidcMainDeps, 'secrets'>;
 }): Record<string, Handler> {
   const handlers: Record<string, Handler> = {
     'main.ping': () => ({ process: 'main' }),
@@ -54,5 +57,6 @@ export function privilegedHandlers(deps: {
   };
   const profiles = deps.profiles;
   if (profiles) handlers['profiles.forConnect'] = profileForConnectHandler(profiles);
+  if (deps.oidc) Object.assign(handlers, oidcHandlers({ ...deps.oidc, secrets: deps.secrets }));
   return deps.dialogs ? { ...handlers, ...dialogHandlers(deps.dialogs) } : handlers;
 }
