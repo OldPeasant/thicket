@@ -1,11 +1,11 @@
 ---
 title: M4: mongosh host in the backend
-status: todo
-owner: 
+status: in_progress
+owner: dell26/agent-3
 deps: [mongosh-spike,conn-manager]
 touches: [packages/backend/src/shell]
 prio: 2
-lease_until: 
+lease_until: 2026-11-17T03:17:21Z
 extended: 
 releases: 1
 ---
