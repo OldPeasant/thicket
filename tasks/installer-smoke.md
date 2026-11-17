@@ -17,3 +17,4 @@ After building, each OS job starts the packaged app with Playwright: welcome scr
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 06:02+0100 by dell26/agent-2): Windows smoke test installs the NSIS .exe silently (/S /D=<temp>) rather than unzipping the portable zip; macOS tests only the arm64 dmg (macos-latest is Apple Silicon), not the x64 one under Rosetta; Linux tests only the AppImage, not deb/rpm.
+- ASSUMPTION (2026-11-17 06:02+0100 by dell26/agent-2): Linux CI sets kernel.apparmor_restrict_unprivileged_userns=0 so the AppImage runs with the Chromium sandbox (no --no-sandbox), and APPIMAGE_EXTRACT_AND_RUN=1 because the runners have no FUSE. The smoke test runs after the installers are uploaded as artifacts; a failure fails the build job and so blocks the draft release.
