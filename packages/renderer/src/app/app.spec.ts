@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { UsersRolesView } from './admin/users';
 import { App } from './app';
 import { appConfig } from './app.config';
+import { ShellConsole } from './console';
 import { IndexesView } from './indexes';
 import { TAB_VIEWS } from './layout/tab-views';
 
@@ -43,7 +44,7 @@ describe('App', () => {
     );
   });
 
-  it('registers exactly one view per tab kind, including indexes and users', () => {
+  it('registers exactly one view per tab kind, including indexes, users and shell', () => {
     TestBed.configureTestingModule({ providers: appConfig.providers });
     const views = TestBed.inject(TAB_VIEWS);
 
@@ -51,6 +52,7 @@ describe('App', () => {
     expect(new Set(kinds).size).toBe(kinds.length);
     expect(views.find((view) => view.kind === 'indexes')?.component).toBe(IndexesView);
     expect(views.find((view) => view.kind === 'users')?.component).toBe(UsersRolesView);
+    expect(views.find((view) => view.kind === 'shell')?.component).toBe(ShellConsole);
   });
 
   it('runs zoneless: zone.js is not loaded', () => {

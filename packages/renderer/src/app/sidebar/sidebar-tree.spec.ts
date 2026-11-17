@@ -511,6 +511,28 @@ describe('SidebarTree', () => {
       });
     });
 
+    it('offers both Open shell and Users and roles on a database; each opens its own tab', async () => {
+      await start();
+      await click(node('conn', 'Profile p1'));
+      await menu(node('db', 'shop'));
+      const ids = [...must('tree-menu').querySelectorAll<HTMLElement>('[role="menuitem"]')].map(
+        (item) => item.dataset['testid'],
+      );
+      expect(ids.filter((id) => id === 'menu-open-shell')).toHaveLength(1);
+      expect(ids.filter((id) => id === 'menu-users')).toHaveLength(1);
+      expect(ids.indexOf('menu-open-shell')).toBeLessThan(ids.indexOf('menu-users'));
+
+      await click(must('menu-open-shell'));
+      await menu(node('db', 'shop'));
+      await click(must('menu-users'));
+      const ws = TestBed.inject(WorkspaceService);
+      expect(ws.tabs().map((t) => [t.id, t.kind])).toEqual([
+        ['shell:p1', 'shell'],
+        ['users:p1:shop', 'users'],
+      ]);
+      expect(ws.active()?.id).toBe('users:p1:shop');
+    });
+
     it('disconnects from the context menu', async () => {
       await start();
       await click(node('conn', 'Profile p1'));
