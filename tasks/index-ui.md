@@ -17,3 +17,4 @@ Indexes tab per collection: list with stats, create dialog with all options, dro
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 04:09+0100 by dell26/agent-1): Indexes is its own workspace tab (kind indexes, opened with 'Indexes…' on the collection tab, like Aggregate…), not a sub-tab inside the collection view: matches the aggregation pattern and keeps collection-view changes small. The create dialog is an inline panel at the top of the tab.
+- ASSUMPTION (2026-11-17 04:09+0100 by dell26/agent-1): Client-side create validation mirrors server rules (sparse+partial, TTL on one asc/desc non-_id field, unique not on hashed/wildcard, at most one hashed/2d/wildcard field, collation needs locale, weights/language only with text, wildcardProjection only with the field $**); other refusals are left to the server, whose error is shown in the form.
