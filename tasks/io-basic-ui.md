@@ -13,7 +13,8 @@ Export current query results (JSON/JSONL, relaxed/canonical) and import a JSON/J
 ## Acceptance criteria
 - [x] e2e: export the fixture, import into a new collection, counts match
   - verified (2026-11-17 02:05+0100 by dell26/agent-1): npm run test:e2e -- test/e2e/io.e2e.ts (mongo8 fixture via Podman, headless Electron, native dialogs stubbed in main) -> 1 passed: 1,234 fixture docs exported as canonical JSON, imported through the panel into new collection orders_copy: count 1234 = 1234 and documents deep-equal; JSONL relaxed export of {group:1} imported into group1, counts match
-- [ ] Import into a read-only profile is not offered (test)
+- [x] Import into a read-only profile is not offered (test)
+  - verified (2026-11-17 02:15+0100 by dell26/agent-1): cd packages/renderer && npx ng test --include=src/app/collection/collection-view.spec.ts --include=src/app/io/import-panel.spec.ts -> 71 passed, incl. 'does not offer import on a read-only profile, and closes an open import panel' (no Import button, no io.previewImport/io.import sent) and ImportPanel read-only cases (refuses, closes, withdraws a pending confirm when the profile turns read-only)
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
