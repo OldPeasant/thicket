@@ -11,7 +11,8 @@ lease_until: 2026-11-17T04:06:41Z
 Console tab: multi-line input, history, autocompletion, document output in the explorer with plain-text toggle; warning banner on read-only profiles, production accent. Use the frontend-design skill for the visual direction; respect the Business and Tron tokens (no hard-coded colors).
 
 ## Acceptance criteria
-- [ ] e2e: demo step 11 (`db.orders.countDocuments()`)
+- [x] e2e: demo step 11 (`db.orders.countDocuments()`)
+  - verified (2026-11-17 04:49+0100 by dell26/agent-3): npm run test:e2e -- shell (built renderer + Electron, Playwright _electron, real mongosh worker against the mongo8 Podman fixture) at 40db3c6 -> 2 passed: demo step 11 opens Open shell from the connection menu, use shell_e2e, db.orders.countDocuments() shows 137; read-only profile shows the warning banner
 - [ ] Component tests: history navigation, completion popup, read-only banner
 
 ## Notes
