@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "task": "users-roles-view",
+  "reviewed_revision": "8c98ff1a662ae5cdcfa26e72f826bedf7f8e81a7",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/users-roles-view/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/users-roles-view/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/users-roles-view/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "target computed compares profileId/db by value, so reopening the tab keeps its state and sends no requests"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "usersInfo detail query sends showAuthenticationRestrictions; integration test with a restricted user"}
+  ],
+  "validation": [
+    {"command": "npm run test:int -- users-roles", "result": "pass"},
+    {"command": "cd packages/renderer && npx ng test --include='src/app/admin/**/*.spec.ts'", "result": "pass"},
+    {"command": "cd packages/backend && npx vitest run src/admin", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}
