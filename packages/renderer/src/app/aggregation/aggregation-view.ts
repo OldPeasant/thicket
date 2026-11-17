@@ -1,9 +1,11 @@
 import {
+  afterRenderEffect,
   ChangeDetectionStrategy,
   Component,
   computed,
   DestroyRef,
   effect,
+  ElementRef,
   inject,
   input,
   signal,
@@ -268,6 +270,15 @@ export class AggregationView {
   protected readonly renaming = signal<{ pipelineId: string; name: string } | null>(null);
   /** Id of the saved pipeline whose Delete waits for a second click. */
   protected readonly deleting = signal<string | null>(null);
+  /** A rename or delete of a saved pipeline is running: its submit and confirm are disabled. */
+  protected readonly savedBusy = signal(false);
+  /**
+   * The control of the saved panel to focus once rendered: `testId` inside the item of
+   * `pipelineId`, or anywhere in the panel when `pipelineId` is `null`. Falls back to the name
+   * input when the control is gone.
+   */
+  private readonly savedFocus = signal<{ pipelineId: string | null; testId: string } | null>(null);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
 
   constructor() {
     // A new builder starts with one $match stage.
@@ -286,10 +297,28 @@ export class AggregationView {
       untracked(() => {
         this.closeExplain();
         this.savedList.set(null);
+        this.savedListError.set(null);
+        this.savedMessage.set(null);
         this.renaming.set(null);
         this.deleting.set(null);
         if (this.savedOpen()) void this.loadSaved();
       });
+    });
+    // Rename and Delete… swap the clicked button for another control: focus follows it.
+    afterRenderEffect(() => {
+      const request = this.savedFocus();
+      if (request === null) return;
+      const root = this.host.nativeElement;
+      let scope: ParentNode | undefined = root;
+      if (request.pipelineId !== null) {
+        scope = [...root.querySelectorAll<HTMLElement>('[data-pipeline-id]')].find(
+          (item) => item.dataset['pipelineId'] === request.pipelineId,
+        );
+      }
+      const found =
+        scope?.querySelector<HTMLElement>(`[data-testid="${request.testId}"]`) ??
+        root.querySelector<HTMLElement>('[data-testid="agg-save-name"]');
+      found?.focus();
     });
     inject(DestroyRef).onDestroy(() => {
       clearTimeout(this.previewTimer);
@@ -788,22 +817,25 @@ export class AggregationView {
       return;
     }
     const target = this.target();
-    const replaces = (this.savedList() ?? []).some(
-      (p) => p.name.toLocaleLowerCase() === name.toLocaleLowerCase(),
-    );
+    const before = this.savedList();
     try {
       const { saved } = await this.api.request('pipelines.save', {
         ...target,
         name,
         stages: stages.stages,
       });
+      // The tab now shows another collection: its panel says nothing about this save.
+      if (!this.sameTarget(target)) return;
+      // "Saved" when the list was not read yet: it cannot tell.
+      const replaced = (before ?? []).some((p) => p.pipelineId === saved.pipelineId);
       this.savedName.set(saved.name);
       this.savedMessage.set({
         error: false,
-        text: `${replaces ? 'Replaced' : 'Saved'} "${saved.name}".`,
+        text: `${replaced ? 'Replaced' : 'Saved'} "${saved.name}".`,
       });
       await this.loadSaved();
     } catch (e) {
+      if (!this.sameTarget(target)) return;
       this.savedMessage.set({ error: true, text: describeError(e) });
     }
   }
@@ -839,38 +871,70 @@ export class AggregationView {
   protected startRename(saved: SavedPipeline): void {
     this.deleting.set(null);
     this.renaming.set({ pipelineId: saved.pipelineId, name: saved.name });
+    this.savedFocus.set({ pipelineId: saved.pipelineId, testId: 'agg-rename-name' });
+  }
+
+  protected cancelRename(saved: SavedPipeline): void {
+    this.renaming.set(null);
+    this.savedFocus.set({ pipelineId: saved.pipelineId, testId: 'agg-saved-rename' });
   }
 
   protected async renameSaved(event?: Event): Promise<void> {
     event?.preventDefault();
     const renaming = this.renaming();
-    if (renaming === null) return;
+    if (renaming === null || this.savedBusy()) return;
     const name = renaming.name.trim();
     if (name === '') {
       this.savedMessage.set({ error: true, text: 'Type a name for the pipeline.' });
       return;
     }
+    const target = this.target();
+    const { pipelineId } = renaming;
+    this.savedBusy.set(true);
     try {
-      const { saved } = await this.api.request('pipelines.rename', {
-        pipelineId: renaming.pipelineId,
-        name,
-      });
+      const { saved } = await this.api.request('pipelines.rename', { pipelineId, name });
+      if (!this.sameTarget(target)) return;
       this.renaming.set(null);
       this.savedMessage.set({ error: false, text: `Renamed to "${saved.name}".` });
       await this.loadSaved();
+      this.savedFocus.set({ pipelineId, testId: 'agg-saved-rename' });
     } catch (e) {
+      if (!this.sameTarget(target)) return;
       this.savedMessage.set({ error: true, text: describeError(e) });
+      this.savedFocus.set({ pipelineId, testId: 'agg-rename-name' });
+    } finally {
+      this.savedBusy.set(false);
     }
   }
 
+  protected askDelete(saved: SavedPipeline): void {
+    this.renaming.set(null);
+    this.deleting.set(saved.pipelineId);
+    this.savedFocus.set({ pipelineId: saved.pipelineId, testId: 'agg-saved-delete-confirm' });
+  }
+
+  protected cancelDelete(saved: SavedPipeline): void {
+    this.deleting.set(null);
+    this.savedFocus.set({ pipelineId: saved.pipelineId, testId: 'agg-saved-delete' });
+  }
+
   protected async deleteSaved(saved: SavedPipeline): Promise<void> {
+    if (this.savedBusy()) return;
+    const target = this.target();
+    this.savedBusy.set(true);
     try {
       await this.api.request('pipelines.delete', { pipelineId: saved.pipelineId });
+      if (!this.sameTarget(target)) return;
       this.deleting.set(null);
       this.savedMessage.set({ error: false, text: `Deleted "${saved.name}".` });
       await this.loadSaved();
+      this.savedFocus.set({ pipelineId: null, testId: 'agg-save-name' });
     } catch (e) {
+      if (!this.sameTarget(target)) return;
       this.savedMessage.set({ error: true, text: describeError(e) });
+      this.savedFocus.set({ pipelineId: saved.pipelineId, testId: 'agg-saved-delete-confirm' });
+    } finally {
+      this.savedBusy.set(false);
     }
   }
 

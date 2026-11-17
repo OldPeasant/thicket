@@ -345,7 +345,11 @@
           } @else {
             <ul class="saved-list" data-testid="agg-saved-list">
               @for (p of list; track p.pipelineId) {
-                <li class="saved-item" data-testid="agg-saved-item">
+                <li
+                  class="saved-item"
+                  data-testid="agg-saved-item"
+                  [attr.data-pipeline-id]="p.pipelineId"
+                >
                   @let r = renaming();
                   @if (r && r.pipelineId === p.pipelineId) {
                     <form class="view-form rename" (submit)="renameSaved($event)">
@@ -360,14 +364,19 @@
                           renaming.set({ pipelineId: p.pipelineId, name: inputValue($event) })
                         "
                       />
-                      <button type="submit" class="btn" data-testid="agg-rename-submit">
+                      <button
+                        type="submit"
+                        class="btn"
+                        data-testid="agg-rename-submit"
+                        [disabled]="savedBusy()"
+                      >
                         Rename
                       </button>
                       <button
                         type="button"
                         class="btn quiet"
                         data-testid="agg-rename-cancel"
-                        (click)="renaming.set(null)"
+                        (click)="cancelRename(p)"
                       >
                         Cancel
                       </button>
@@ -400,6 +409,7 @@
                           class="btn stop"
                           data-testid="agg-saved-delete-confirm"
                           [attr.aria-label]="'Really delete ' + p.name"
+                          [disabled]="savedBusy()"
                           (click)="deleteSaved(p)"
                         >
                           Delete
@@ -408,7 +418,7 @@
                           type="button"
                           class="btn quiet"
                           data-testid="agg-saved-delete-cancel"
-                          (click)="deleting.set(null)"
+                          (click)="cancelDelete(p)"
                         >
                           Keep
                         </button>
@@ -418,7 +428,7 @@
                           class="btn quiet"
                           data-testid="agg-saved-delete"
                           [attr.aria-label]="'Delete ' + p.name"
-                          (click)="renaming.set(null); deleting.set(p.pipelineId)"
+                          (click)="askDelete(p)"
                         >
                           Delete…
                         </button>

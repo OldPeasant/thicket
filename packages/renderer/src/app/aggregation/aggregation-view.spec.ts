@@ -2215,5 +2215,196 @@ describe('AggregationView', () => {
       expect(get('agg-saved-message').textContent).toContain('EIO');
       expect(savedNames()).toEqual(['Keep me']);
     });
+
+    const pointAt = async (coll: string) => {
+      fixture.componentRef.setInput('tab', {
+        ...TAB,
+        data: { profileId: 'p1', db: 'shop', coll, type: 'collection' },
+      });
+      await settle();
+    };
+
+    it('pointing the tab elsewhere clears the message and the list error of the previous collection', async () => {
+      await saveAs('Mine');
+      expect(get('agg-saved-message').textContent).toContain('Saved "Mine"');
+      await pointAt('invoices');
+      expect(q('agg-saved-message')).toBeNull();
+      expect(get('agg-saved-empty').textContent).toContain('shop.invoices');
+
+      fake.fail('pipelines.list', { code: 'INTERNAL', message: 'EIO: pipelines.json' });
+      await click(get('agg-saved'));
+      await click(get('agg-saved'));
+      expect(get('agg-saved-list-error').textContent).toContain('EIO');
+      let answer: (outcome: FakeOutcome<'pipelines.list'>) => void = () => undefined;
+      fake.handle('pipelines.list', () => new Promise((resolve) => (answer = resolve)));
+      await pointAt('customers');
+      expect(q('agg-saved-list-error')).toBeNull();
+      expect(get('agg-saved-panel').textContent).toContain('Loading saved pipelines');
+      answer({ pipelines: [] });
+      await settle();
+      expect(get('agg-saved-empty').textContent).toContain('shop.customers');
+    });
+
+    it('a save, rename or delete answered after the tab points elsewhere leaves the new panel alone', async () => {
+      await saveAs('Old');
+      const lists = () => fake.requestsFor('pipelines.list').length;
+
+      // Save: no message, no name from the answer, no reload of the new collection's list.
+      let release: () => void = () => undefined;
+      fake.handle(
+        'pipelines.save',
+        (params) =>
+          new Promise((resolve) => {
+            release = () =>
+              resolve({
+                saved: {
+                  pipelineId: 'pl-late',
+                  name: 'Named by main',
+                  profileId: params.profileId,
+                  db: params.db,
+                  coll: params.coll,
+                  stages: params.stages,
+                  updatedAt: '2026-11-17T04:00:00.000Z',
+                },
+              });
+          }),
+      );
+      await saveAs('Late');
+      await pointAt('invoices');
+      let before = lists();
+      release();
+      await settle();
+      expect(q('agg-saved-message')).toBeNull();
+      expect(get<HTMLInputElement>('agg-save-name').value).toBe('Late');
+      expect(lists()).toBe(before);
+
+      // Rename.
+      await pointAt('orders');
+      await click(inItem('Old', 'agg-saved-rename'));
+      await type('agg-rename-name', 'Renamed');
+      fake.handle(
+        'pipelines.rename',
+        (params) =>
+          new Promise((resolve) => {
+            release = () => {
+              const entry = saved.find((p) => p.pipelineId === params.pipelineId);
+              if (entry) entry.name = params.name;
+              resolve({ saved: entry as SavedPipeline });
+            };
+          }),
+      );
+      await click(get('agg-rename-submit'));
+      await pointAt('invoices');
+      before = lists();
+      release();
+      await settle();
+      expect(q('agg-saved-message')).toBeNull();
+      expect(lists()).toBe(before);
+
+      // Delete, failing late: its error is not shown for the new collection either.
+      await pointAt('orders');
+      fake.handle(
+        'pipelines.delete',
+        () =>
+          new Promise((resolve) => {
+            release = () => resolve({ error: { code: 'NOT_FOUND', message: 'No saved pipeline' } });
+          }),
+      );
+      await click(inItem('Renamed', 'agg-saved-delete'));
+      await click(inItem('Renamed', 'agg-saved-delete-confirm'));
+      await pointAt('invoices');
+      release();
+      await settle();
+      expect(q('agg-saved-message')).toBeNull();
+      expect(get('agg-saved-empty').textContent).toContain('shop.invoices');
+    });
+
+    it('saving says "Saved" for a new pipeline and "Replaced" only for one already listed', async () => {
+      await saveAs('One');
+      expect(get('agg-saved-message').textContent).toContain('Saved "One"');
+      await saveAs('Two');
+      expect(get('agg-saved-message').textContent).toContain('Saved "Two"');
+      await saveAs('ONE');
+      expect(get('agg-saved-message').textContent).toContain('Replaced "ONE"');
+    });
+
+    it('Rename and Delete… move the focus to the control that replaces them, and back', async () => {
+      await saveAs('First');
+      await saveAs('Second');
+      await click(inItem('First', 'agg-saved-rename'));
+      expect(document.activeElement).toBe(get('agg-rename-name'));
+      await click(get('agg-rename-cancel'));
+      expect(document.activeElement).toBe(inItem('First', 'agg-saved-rename'));
+
+      await click(inItem('First', 'agg-saved-rename'));
+      await type('agg-rename-name', 'Second');
+      await click(get('agg-rename-submit'));
+      expect(get('agg-saved-message').textContent).toContain('already exists');
+      expect(document.activeElement).toBe(get('agg-rename-name'));
+      await type('agg-rename-name', 'Primary');
+      await click(get('agg-rename-submit'));
+      expect(document.activeElement).toBe(inItem('Primary', 'agg-saved-rename'));
+
+      await click(inItem('Second', 'agg-saved-delete'));
+      expect(document.activeElement).toBe(inItem('Second', 'agg-saved-delete-confirm'));
+      await click(inItem('Second', 'agg-saved-delete-cancel'));
+      expect(document.activeElement).toBe(inItem('Second', 'agg-saved-delete'));
+      await click(inItem('Second', 'agg-saved-delete'));
+      await click(inItem('Second', 'agg-saved-delete-confirm'));
+      expect(savedNames()).toEqual(['Primary']);
+      expect(document.activeElement).toBe(get('agg-save-name'));
+    });
+
+    it('Delete and Rename are disabled while their request runs, so a second click sends nothing', async () => {
+      await saveAs('Twice');
+      let release: () => void = () => undefined;
+      fake.handle(
+        'pipelines.rename',
+        (params) =>
+          new Promise((resolve) => {
+            release = () => {
+              const entry = saved.find((p) => p.pipelineId === params.pipelineId);
+              if (entry) entry.name = params.name;
+              resolve({ saved: entry as SavedPipeline });
+            };
+          }),
+      );
+      await click(inItem('Twice', 'agg-saved-rename'));
+      await type('agg-rename-name', 'Once');
+      const submit = get<HTMLButtonElement>('agg-rename-submit');
+      await click(submit);
+      expect(submit.disabled).toBe(true);
+      await click(submit);
+      // Enter in the name field submits the form: also ignored.
+      get('agg-rename-name')
+        .closest('form')
+        ?.dispatchEvent(new Event('submit', { cancelable: true }));
+      await settle();
+      expect(fake.requestsFor('pipelines.rename')).toHaveLength(1);
+      release();
+      await settle();
+      expect(get('agg-saved-message').textContent).toContain('Renamed to "Once"');
+
+      fake.handle(
+        'pipelines.delete',
+        (params) =>
+          new Promise((resolve) => {
+            release = () => {
+              saved = saved.filter((p) => p.pipelineId !== params.pipelineId);
+              resolve({});
+            };
+          }),
+      );
+      await click(inItem('Once', 'agg-saved-delete'));
+      const confirm = inItem('Once', 'agg-saved-delete-confirm') as HTMLButtonElement;
+      await click(confirm);
+      expect(confirm.disabled).toBe(true);
+      await click(confirm);
+      expect(fake.requestsFor('pipelines.delete')).toHaveLength(1);
+      release();
+      await settle();
+      expect(get('agg-saved-message').textContent).toContain('Deleted "Once"');
+      expect(savedNames()).toEqual([]);
+    });
   });
 });
