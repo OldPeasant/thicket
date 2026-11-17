@@ -4,21 +4,30 @@ Date: 2026-11-17
 
 Task: update-notice - Release (Should): Update available notice
 
-Scope: task commits 94b93322 (main-side checker, handler, release link opening) and a692c990 (renderer service, notice, shell wiring, docs); `git diff 71edb348..HEAD` limited to the task's code. Other commits in that range only touch `tasks/` (heartbeats, assumptions). The task commits are the rebased versions of 9077f6f7 and 122e57dd; `git diff 122e57dd a692c990 -- apps packages docs` is empty, so the code is the same.
+Scope: round 2. Final code of the task, `git diff 71edb348..7a0b9b28` excluding `tasks/` and `reviews/`. Reviewed revision: 7a0b9b286b67694b38032a6e0cd7643854130d78.
+
+Task code commits:
+- 94b93322: main-side checker, handler, release link opening;
+- a692c990: renderer service, notice, shell wiring, docs;
+- e8545506: fixes for CR-1 and CR-2 from round 1;
+- 7a0b9b28: round-2 tests from the test-writer (test files only).
+
+Commit a4afc8ba adds only tests and reports from round 1. The round-1 findings were checked against `git diff a4afc8ba..e8545506`, and the round-2 tests against `git diff e8545506..7a0b9b28`.
 
 Requirements:
 - tasks/update-notice.md acceptance criteria and recorded assumptions
-- SPEC.md section 3 Release ("Update available" notice, no silent auto-update), section 4 (`app.*` checkForUpdate), section 5 (only GitHub releases API, can be switched off), section 6 (window.open blocked)
-- docs/ARCHITECTURE.md (desktop main / security guards, update notice entry)
+- SPEC.md Release "Update available" notice, section 5 (only the GitHub releases API is contacted, and the check can be switched off), section 6 (`window.open` blocked)
+- docs/ARCHITECTURE.md (desktop main security guards, update notice entry)
 - docs/QUALITY.md, AGENTS.md
+- reviews/update-notice/fixes.md
 
 Git range:
 - Branch: main
-- HEAD: a692c9903b7e7fb83705e9a9ef1019278d1e8543
+- HEAD: 7a0b9b286b67694b38032a6e0cd7643854130d78
 - Base/start: 71edb3483a5901c8059bb754ca7696bbdd2d4391
-- Commits reviewed: 2 (code); 6 other commits in range touch only tasks/
+- Commits reviewed: 4 code/test commits (94b93322, a692c990, e8545506, 7a0b9b28) plus the test/report commit a4afc8ba; other commits in the range touch only `tasks/`
 
-Summary: 0 P0, 0 P1, 0 P2, 2 P3
+Summary: 0 P0, 0 P1, 0 P2, 0 P3
 
 ## P0 Critical
 
@@ -34,39 +43,45 @@ None.
 
 ## P3 Low
 
-- [ ] **CR-1 | `denyWindowOpen` is no longer used in production, but its doc, test and ARCHITECTURE still present it as the window-open guard**
-    - File: `apps/desktop/src/main/security.ts:72`
-    - Category: Quality
-    - Problem: `apps/desktop/src/main/index.ts:75` now installs an inline lambda calling `openReleaseLink` (`apps/desktop/src/update/handlers.ts:17`) instead of `denyWindowOpen`. `denyWindowOpen` ("no new windows, ever") is now used only by `security.spec.ts:72` and `:131-136` ("denies window.open regardless of the requested URL"). `docs/ARCHITECTURE.md:101` still says the `window.open` guard is a pure function in `src/main/security.ts`.
-    - Why it matters: a reader or a future security review sees a passing "always deny" test and thinks that is the guard in use. The real policy (open Thicket release pages externally, deny the window) lives in another module.
-    - Suggested fix: remove `denyWindowOpen` and its tests, or move the release-link policy into `security.ts` so there is still one window-open guard. Then update the ARCHITECTURE line 101 wording.
+None.
 
-- [ ] **CR-2 | The release-link allowlist also accepts asset download URLs, not only release pages**
-    - File: `apps/desktop/src/update/checker.ts:83`
-    - Category: Security
-    - Problem: `isReleaseUrl` accepts any https URL under `https://github.com/OldPeasant/thicket/releases/`. That includes `.../releases/download/<tag>/<asset>`. The window-open handler serves every web contents, so any `window.open` of such a URL from the renderer makes the user's browser download a release binary. The notice only needs tag pages (`html_url` is always `.../releases/tag/<tag>`).
-    - Why it matters: the risk is low, because these are official assets and the user still has to run the file. Still, the allowlist is wider than the feature needs, and SPEC section 6 treats `window.open` as blocked.
-    - Suggested fix: limit the prefix to `https://github.com/OldPeasant/thicket/releases/tag/`, and add a `releases/download/...` case to the rejected URLs in `checker.spec.ts` ("release links").
+## Verification of round-1 findings
+
+- **CR-1 (resolved):** `denyWindowOpen` was replaced by `windowOpenHandler(url, openExternal, log)` in `apps/desktop/src/main/security.ts:79`.
+  - Its doc comment states the release-link exception.
+  - `apps/desktop/src/main/index.ts:76` installs it for every web contents.
+  - `openReleaseLink` was removed from `apps/desktop/src/update/handlers.ts`.
+  - `git grep "denyWindowOpen\|openReleaseLink"` on the reviewed revision finds nothing in `apps`, `packages` or `docs`.
+  - `security.spec.ts` tests these cases: non-release URLs are denied and nothing opens; a tag page opens externally while the window is still denied; a browser failure is logged or swallowed.
+  - The `security.ts` guard note in `docs/ARCHITECTURE.md` (around lines 101-103) and the "Update notice" bullet both describe the exception.
+  - `security.ts` now imports `isReleaseUrl` from `../update/checker`. That module imports only a type from `@thicket/contract`, so `security.ts` stays Electron-free and unit-testable, and the import creates no cycle.
+- **CR-2 (resolved):** `RELEASE_PAGE_PREFIX` is now `https://github.com/OldPeasant/thicket/releases/tag/` (`apps/desktop/src/update/checker.ts:13`).
+  - `isReleaseUrl` compares the WHATWG-normalised `href`, so `.../releases/tag/../download/...` normalises to a download URL and is rejected. A test covers this case, and `releases/latest` and `releases/download/...` are tested as rejected too.
+  - The recorded fixtures and the renderer spec use only tag-page `html_url`s, so the narrower prefix doesn't change the update-detection results.
+
+## Round-2 tests (7a0b9b28)
+
+- `security.spec.ts`: "opens nothing for non-tag release URLs, http or a path escaping /releases/tag/". It passes these URLs through `windowOpenHandler`:
+  - `releases/latest`;
+  - a `tag/../download` URL;
+  - an `http:` URL;
+  - a URL with userinfo;
+  - a non-URL string.
+
+  It asserts the window is denied and `openExternal` is never called. This tests behaviour through the real guard, not just through `isReleaseUrl`.
+- `checker.spec.ts`: "skips a release whose html_url is not a tag page and reports the newest one that is". The newest two releases have a download URL and a `releases/latest` URL as `html_url`. The test confirms `check()` falls back to v0.3.0 with its tag-page URL.
+  - The helpers `page()` and `entry()` exist in the enclosing `describe` (checker.spec.ts:180-187).
+  - The expected result matches `latestStable`: an entry with a link that fails `isReleaseUrl` is skipped.
+- Both tests are deterministic. They use injected `fetch` and `openExternal` fakes, make no network calls, and change no production code. They partly overlap the `isReleaseUrl` list in `checker.spec.ts`, but they check different layers (the guard and the release selection), so this is not a finding.
 
 ## Notes (verified, no finding)
 
-- Acceptance criterion 1: `apps/desktop/src/update/checker.spec.ts` tests recorded GitHub responses in `fixtures/` for these cases:
-  - newer release;
-  - same version;
-  - running version newer than every release;
-  - pre-releases ignored, whether flagged or marked only by the tag;
-  - drafts ignored;
-  - network error, HTTP 403 (rate limit), malformed body, body read failure and timeout all handled silently.
-- Acceptance criterion 2: "Setting off: no request" is tested in three places:
-  - in `UpdateChecker`;
-  - through the `app.checkForUpdate` handler (`fetch` not called);
-  - in the renderer (`update-notice.spec.ts`: no request at start or after 3 days).
-- I could not run the test suites in this session (command execution was denied), so I have not confirmed that these tests pass. The parent must record its own run with `tasks.py verify`. Neither criterion is verified yet.
-- Version comparison follows semver precedence: numeric core, a release ranks above its pre-releases, numeric identifiers rank below alphanumeric ones, and a longer identifier list ranks higher. Unparseable current versions never report an update. The parser rejects unsafe integers.
-- Setting off: main reads `checkForUpdates` before every check, and the renderer reads it again before every scheduled check. An answer that arrives after the user switches the setting off is discarded (tested). Unpackaged builds are gated by `app.isPackaged` / `THICKET_UPDATE_CHECK=1` (recorded assumption).
-- Timers: the 15 s abort timer is cleared in `finally`. The 24 h interval is created only on an off-to-on change, cleared when the setting goes off, and cleared through `DestroyRef`. The settings broadcast subscription is also unsubscribed through `DestroyRef`.
-- External link safety: only https URLs with no userinfo under the Thicket releases prefix are opened, and only after WHATWG URL normalisation. The test list rejects `..`-style tricks, look-alike hosts, `http:`, `javascript:` and other repos. The window is always denied. Angular binds the link `href` and sanitises it, and the URL comes from the same allowlist.
-- No secrets, no credentials and no extra data are sent: an unauthenticated GET with fixed headers. This matches SPEC section 5.
+- The renderer and update modules in the task are unchanged since round 1, apart from the files listed above. The round-1 checks still apply:
+  - Acceptance criterion 1 is covered by recorded fixtures in `checker.spec.ts`: newer, same, pre-release ignored, and network error silent.
+  - Acceptance criterion 2 ("setting off, no request") is tested in the checker, in the handler and in the renderer service.
+  - Timers and subscriptions are cleaned up, and answers that arrive late are discarded.
+  - Version comparison follows semver precedence.
+- I could not run the test suites in this session: command execution beyond git inspection was denied. `fixes.md` reports `npx vitest run src/update src/main` with 117 passed and `npm run check` passing. That run predates the two round-2 tests. The parent must record its own run of the final revision with `tasks.py verify`.
 
 ## Review conclusion
 

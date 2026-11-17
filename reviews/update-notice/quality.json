@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "task": "update-notice",
+  "reviewed_revision": "7a0b9b286b67694b38032a6e0cd7643854130d78",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/update-notice/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/update-notice/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/update-notice/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "window-open guard is windowOpenHandler in security.ts again; denyWindowOpen/openReleaseLink removed, docs updated"
+    },
+    {
+      "id": "CR-2",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "isReleaseUrl accepts only .../releases/tag/ pages; asset download URLs rejected"
+    },
+    {
+      "id": "TW-note-1",
+      "source": "test-writer",
+      "severity": "Low",
+      "disposition": "accepted",
+      "note": "a late check answer after setting off->on may overwrite a newer one; both come from main's shared cached checker, so they match in practice"
+    }
+  ],
+  "validation": [
+    { "command": "cd apps/desktop && npx vitest run src/update src/main", "result": "pass" },
+    {
+      "command": "cd packages/renderer && npx ng test --include src/app/update --include src/app/layout/app-shell.spec.ts",
+      "result": "pass"
+    },
+    { "command": "npm run check", "result": "pass" }
+  ]
+}
