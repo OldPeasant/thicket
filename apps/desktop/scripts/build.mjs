@@ -15,7 +15,9 @@ const common = {
   format: 'cjs',
   target: 'node24',
   sourcemap: 'linked',
-  external: ['electron'],
+  // cpu-features: ssh2's optional native helper (main gets the backend package too). ssh2 requires
+  // it in try/catch and falls back to pure JS, so it stays out of the bundles and isn't shipped.
+  external: ['electron', 'cpu-features'],
   logLevel: 'info',
 };
 

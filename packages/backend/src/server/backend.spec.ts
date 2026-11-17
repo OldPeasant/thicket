@@ -1,5 +1,18 @@
-import { privilegedMethods, type Profile, type Response } from '@thicket/contract';
-import { describe, expect, it, vi } from 'vitest';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import {
+  BROADCAST_STREAMS,
+  privilegedMethods,
+  sshHostKeyPrompt,
+  type Event,
+  type Profile,
+  type Response,
+} from '@thicket/contract';
+import { Server as SshServer, utils as sshUtils } from 'ssh2';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { startBackend, type ParentPortLike } from './backend';
 import { sleep } from './handlers';
@@ -519,6 +532,184 @@ describe('startBackend: connections', () => {
       'connections: open p1: AUTH_FAILED No password for user alice: enter it or save it in the profile',
     );
     expect(lines.join('\n')).not.toContain(FICTITIOUS_PASSWORD);
+  });
+});
+
+describe('startBackend: SSH host key prompts (task ssh-tunnel)', () => {
+  const SSH_PASSWORD = 'fictitious-ssh-wiring-Pw';
+  const cleanups: (() => Promise<void>)[] = [];
+  afterEach(async () => {
+    for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  });
+
+  /** An in-process SSH server on 127.0.0.1 (accepts the password, never forwards). */
+  async function sshServer(): Promise<number> {
+    const server = new SshServer(
+      { hostKeys: [sshUtils.generateKeyPairSync('ed25519').private] },
+      (conn) => {
+        conn.on('error', () => undefined);
+        conn.on('authentication', (ctx) =>
+          ctx.method === 'password' && ctx.password === SSH_PASSWORD ? ctx.accept() : ctx.reject(),
+        );
+        cleanups.push(() => Promise.resolve(void conn.end()));
+      },
+    );
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    cleanups.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
+    return (server.address() as AddressInfo).port;
+  }
+
+  async function userData(): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'thicket-userdata-'));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+    return dir;
+  }
+
+  function sshProfile(port: number): Profile {
+    return {
+      id: 'tunnel',
+      name: 'Tunnel',
+      connectionString: 'mongodb://db.example.test:27017',
+      ssh: { host: '127.0.0.1', port, username: 'ops', method: 'password' },
+      serverSelectionTimeoutMS: 1_000,
+      readOnly: false,
+      production: false,
+    };
+  }
+
+  /** A backend with userData and a fake main that serves the SSH profile and its password. */
+  function sshBackend(profile: Profile, dir: string) {
+    let deliver: ((e: { data: unknown; ports: MainPortLike[] }) => void) | undefined;
+    const parentPort: ParentPortLike = {
+      on: (_event, listener) => {
+        deliver = listener;
+      },
+    };
+    const handlers = startBackend({ parentPort, pid: 7, userData: dir, log: vi.fn() });
+    const [mainEnd, backendEnd] = portPair();
+    serve(mainEnd, {
+      table: privilegedMethods,
+      route: 'main',
+      handlers: {
+        'profiles.forConnect': () => ({ profile }),
+        'secrets.get': () => ({ secrets: { sshPassword: SSH_PASSWORD } }),
+      },
+    });
+    deliver?.({ data: { type: 'privileged' }, ports: [mainPort(backendEnd)] });
+    const connectRenderer = (window: number) => {
+      const [renderer, backendSide] = portPair();
+      const wrapped = mainPort(backendSide);
+      deliver?.({ data: { type: 'renderer', window }, ports: [wrapped] });
+      const messages: unknown[] = [];
+      renderer.onMessage((m) => messages.push(m));
+      const prompts = () =>
+        messages.filter((m) => (m as Event).stream === BROADCAST_STREAMS.sshHostKey) as Event[];
+      const answer = async (id: string) => {
+        await vi.waitFor(() =>
+          expect(messages.find((m) => (m as Response).id === id)).toBeDefined(),
+        );
+        return messages.find((m) => (m as Response).id === id) as Response;
+      };
+      const disconnect = () => {
+        for (const listener of wrapped.closeListeners) listener();
+      };
+      return { renderer, prompts, answer, disconnect };
+    };
+    return { handlers, connectRenderer };
+  }
+
+  it('serves conn.trustHostKey; an unknown prompt id answers NOT_FOUND', async () => {
+    const b = sshBackend(sshProfile(1), await userData());
+    expect(Object.keys(b.handlers)).toContain('conn.trustHostKey');
+    const r = b.connectRenderer(1);
+    r.renderer.send({
+      id: 't',
+      method: 'conn.trustHostKey',
+      params: { promptId: 'no-such-prompt', trust: true },
+    });
+    expect(await r.answer('t')).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } });
+  });
+
+  it('broadcasts ssh.hostKey to every renderer; one "no" refuses the connect, nothing saved', async () => {
+    const port = await sshServer();
+    const dir = await userData();
+    const b = sshBackend(sshProfile(port), dir);
+    const one = b.connectRenderer(1);
+    const two = b.connectRenderer(2);
+    const gone = b.connectRenderer(3);
+    gone.disconnect();
+
+    one.renderer.send({ id: 'o', method: 'conn.open', params: { profileId: 'tunnel' } });
+    await vi.waitFor(() => expect(two.prompts()).toHaveLength(1), { timeout: 5_000 });
+    await vi.waitFor(() => expect(one.prompts()).toHaveLength(1));
+    const event = two.prompts()[0];
+    expect(event).toMatchObject({ stream: 'ssh.hostKey', kind: 'data' });
+    expect(event?.payload).toEqual(one.prompts()[0]?.payload);
+    expect(sshHostKeyPrompt.parse(event?.payload)).toMatchObject({
+      host: '127.0.0.1',
+      port,
+      keyType: 'ssh-ed25519',
+      fingerprint: expect.stringMatching(/^SHA256:/) as unknown,
+      timeoutMS: 300_000,
+    });
+    // A disconnected renderer is not asked.
+    expect(gone.prompts()).toEqual([]);
+
+    const promptId = (event?.payload as { promptId: string }).promptId;
+    two.renderer.send({
+      id: 'no',
+      method: 'conn.trustHostKey',
+      params: { promptId, trust: false },
+    });
+    expect(await two.answer('no')).toEqual({ id: 'no', ok: true, result: {} });
+    const opened = await one.answer('o');
+    expect(opened).toMatchObject({
+      ok: false,
+      error: { code: 'SSH_ERROR', message: expect.stringMatching(/was not trusted/) as unknown },
+    });
+    await expect(readFile(join(dir, 'known_hosts'))).rejects.toMatchObject({ code: 'ENOENT' });
+
+    // The other renderer's late answer: the question is over.
+    one.renderer.send({
+      id: 'late',
+      method: 'conn.trustHostKey',
+      params: { promptId, trust: true },
+    });
+    expect(await one.answer('late')).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } });
+  });
+
+  it('without a connected renderer the host key is not trusted at once', async () => {
+    const port = await sshServer();
+    const dir = await userData();
+    const b = sshBackend(sshProfile(port), dir);
+    const open = b.handlers['conn.open'] as (
+      params: { profileId: string },
+      context: { signal: AbortSignal; requestId: string },
+    ) => Promise<unknown>;
+    await expect(
+      open({ profileId: 'tunnel' }, { signal: new AbortController().signal, requestId: 'r' }),
+    ).rejects.toMatchObject({ code: 'SSH_ERROR', detail: { reason: 'hostKeyRejected' } });
+    await expect(readFile(join(dir, 'known_hosts'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('conn.trustHostKey with trust: true saves the key in userData/known_hosts', async () => {
+    const port = await sshServer();
+    const dir = await userData();
+    const b = sshBackend(sshProfile(port), dir);
+    const r = b.connectRenderer(1);
+    r.renderer.send({ id: 'o', method: 'conn.open', params: { profileId: 'tunnel' } });
+    await vi.waitFor(() => expect(r.prompts()).toHaveLength(1), { timeout: 5_000 });
+    const promptId = (r.prompts()[0]?.payload as { promptId: string }).promptId;
+    r.renderer.send({ id: 'yes', method: 'conn.trustHostKey', params: { promptId, trust: true } });
+    expect(await r.answer('yes')).toMatchObject({ ok: true });
+    await vi.waitFor(async () =>
+      expect(await readFile(join(dir, 'known_hosts'), 'utf8')).toMatch(
+        new RegExp(`^\\[127\\.0\\.0\\.1\\]:${String(port)} ssh-ed25519 \\S+\\n$`),
+      ),
+    );
+    // The driver then cannot reach the fictitious database (no forwarding): the open fails later.
+    r.renderer.send({ id: 'c', method: 'conn.close', params: { profileId: 'tunnel' } });
+    expect(await r.answer('c')).toMatchObject({ ok: true });
   });
 });
 

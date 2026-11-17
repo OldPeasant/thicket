@@ -177,7 +177,8 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   and passes the form fields and secrets as driver options (`auth`, `authMechanism`
   SCRAM-SHA-1/256, `authSource`, `tls`, `tlsCAFile`, `tlsCertificateKeyFile` + passphrase,
   allow-invalid flags, read preference, `appName` (default `Thicket`), timeouts), so passwords
-  never enter the URI; SSH and the other mechanisms answer `UNSUPPORTED` until their tasks.
+  never enter the URI; the other mechanisms (LDAP, OIDC, AWS, Kerberos) answer `UNSUPPORTED`
+  until their tasks.
   MONGODB-X509 (task x509-proxy) needs TLS with a client certificate (`AUTH_FAILED` otherwise),
   always uses `authSource: '$external'`, and sends a user name only when the profile has one
   (else the server takes the certificate subject). The client certificate is a PEM bundle
@@ -197,6 +198,33 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   counts as `AUTH_FAILED` only for connect errors, e.g. an X.509 subject without a user); messages start with a readable prefix and are masked (`maskText` + the
   connect's secret values), as is every log line. Later handlers get a connected client with
   `manager.client(profileId)` (`NOT_CONNECTED` otherwise).
+- SSH tunnels (`packages/backend/src/ssh/`, task ssh-tunnel, `ssh2`): for a profile with `ssh`
+  the manager first runs `openSshTunnel()` (password = `sshPassword` secret, private key file +
+  optional `sshKeyPassphrase` secret, or the agent at `SSH_AUTH_SOCK` / `pageant`), then gives the
+  driver the tunnel as its SOCKS5 proxy: a local SOCKS5 server on `127.0.0.1` (random port,
+  random user/password per tunnel, `socks.ts`) turns every driver socket into one SSH
+  `forwardOut` channel to the host the driver asked for. So each replica set member gets its
+  own forwarded channel under the name the set reports (resolved by the SSH server), and
+  `mongodb+srv://` is resolved by the driver (locally) before any socket goes through the
+  tunnel. `ssh` + `proxy` in one profile is `INVALID_PARAMS`. The tunnel is closed with the
+  connection (`conn.close`, failed connect, end of `conn.test`): channels, local port, SSH
+  session. An SSH session lost while the connection is open (keepalive, server restart) closes
+  the tunnel; the connection becomes `error` (`SSH_ERROR`), the backend broadcasts `conn.status`,
+  and the next `conn.open` builds a new tunnel. Host keys: `KnownHosts` keeps `userData/known_hosts` (OpenSSH format, `[host]:port`,
+  reads hashed entries); main passes `THICKET_USER_DATA` to the backend process. A known key
+  connects; a host listed with other keys only is refused (`SSH_ERROR`, detail `reason:
+  'hostKeyChanged'`, the message names the file to edit); an unknown key pauses the handshake
+  timeout and asks: the backend broadcasts `ssh.hostKey` (`SshHostKeyPrompt`: `promptId`, host,
+  port, key type, `SHA256:` fingerprint) to every window and waits up to 5 min for
+  `conn.trustHostKey({ promptId, trust })` (then appends the key); "no", the time out or no
+  window fail with `SSH_ERROR` (`reason: 'hostKeyRejected'`); a cancelled connect (`conn.close`,
+  request cancel) ends the question and fails with `CANCELLED`, and a server that closes the
+  connection meanwhile ends it too (`SSH_ERROR`). Other failures are
+  `SSH_ERROR` with readable messages (authentication, missing/wrong passphrase, unreachable,
+  timeout = `connectTimeoutMS`, default 20 s). The bundles keep ssh2's optional native
+  `cpu-features` external (ssh2 falls back to JS). Integration fixture
+  `test/integration/fixtures/ssh.ts`: `linuxserver/openssh-server` (forwarding switched on) in
+  front of a two-member set whose names only sshd resolves.
 - Streams (`serve()` in `packages/backend/src/server/rpc.ts`): a streaming handler calls
   `context.openStream(producer)` and returns `{ streamId }`. The producer starts after the
   response was sent, gets a `StreamSink` (`send(payload)`, validated against the method's

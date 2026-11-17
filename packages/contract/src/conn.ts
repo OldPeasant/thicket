@@ -42,6 +42,26 @@ export type ServerInfo = z.infer<typeof serverInfo>;
 
 const password = z.string().optional();
 
+/**
+ * Payload of the `ssh.hostKey` broadcast (`BROADCAST_STREAMS.sshHostKey`): a connect through an
+ * SSH tunnel met a host key that is not in Thicket's `known_hosts`. The connect waits until a
+ * renderer answers with `conn.trustHostKey` (or `timeoutMS` passed: "no"). A host key that differs
+ * from the trusted one is never asked about: the connect fails with `SSH_ERROR`.
+ */
+export const sshHostKeyPrompt = z.object({
+  promptId: z.string().min(1),
+  host: z.string().min(1),
+  port: z.number().int().min(1).max(65535),
+  /** `ssh-ed25519`, `ecdsa-sha2-nistp256`, `ssh-rsa`, ... */
+  keyType: z.string().min(1),
+  /** OpenSSH style: `SHA256:` + unpadded base64 of the key's SHA-256. */
+  fingerprint: z.string().min(1),
+  /** How long the backend waits for the answer. */
+  timeoutMS: z.number().int().positive(),
+});
+
+export type SshHostKeyPrompt = z.infer<typeof sshHostKeyPrompt>;
+
 export const connMethods = defineMethods({
   'conn.test': {
     summary: 'Try to connect with a saved profile or an unsaved draft, then disconnect',
@@ -74,6 +94,13 @@ export const connMethods = defineMethods({
     route: 'backend',
     params: z.strictObject({ profileId: profileId.optional() }),
     result: z.object({ connections: z.array(connStatus) }),
+  },
+  'conn.trustHostKey': {
+    summary: 'Answer an ssh.hostKey prompt: trust the host key (saved in known_hosts) or not',
+    route: 'backend',
+    /** `NOT_FOUND` when the prompt is no longer open (answered, timed out, connect cancelled). */
+    params: z.strictObject({ promptId: z.string().min(1), trust: z.boolean() }),
+    result: emptyResult,
   },
   'conn.serverInfo': {
     summary: 'Server version, topology and build info of an open connection',

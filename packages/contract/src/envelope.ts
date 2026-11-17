@@ -81,4 +81,9 @@ export const BROADCAST_STREAMS = {
    * running in it failed with `INTERNAL`, its streams ended, its connections are closed.
    */
   backendRestarted: 'backend.restarted',
+  /**
+   * An SSH tunnel's host key is unknown: ask the user; payload `SshHostKeyPrompt`, answer with
+   * `conn.trustHostKey`. Sent by the backend to every window.
+   */
+  sshHostKey: 'ssh.hostKey',
 } as const;

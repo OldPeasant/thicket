@@ -172,18 +172,50 @@ describe('clientConfig', () => {
     },
   );
 
-  it('answers UNSUPPORTED for SSH tunnels, before looking at auth', () => {
-    const error = errorOf(() =>
-      clientConfig(
+  describe('SSH tunnels', () => {
+    const ssh = {
+      host: 'bastion.example.test',
+      port: 22,
+      username: 'ops',
+      method: 'agent' as const,
+    };
+    const tunnel = {
+      proxyHost: '127.0.0.1',
+      proxyPort: 40123,
+      proxyUsername: 'tunnel-user',
+      proxyPassword: 'tunnel-pass',
+    };
+
+    it('needs the open tunnel of an SSH profile', () => {
+      const error = errorOf(() => clientConfig(draft({ ssh }), {}));
+      expect(error?.code).toBe('INTERNAL');
+      expect(error?.message).toMatch(/SSH tunnel/);
+    });
+
+    it("routes the driver through the tunnel's local SOCKS port, keeping the URI", () => {
+      const { uri, options } = clientConfig(
         draft({
-          ssh: { host: 'bastion.example.test', port: 22, username: 'ops', method: 'agent' },
-          auth: { mechanism: 'SCRAM-SHA-256', username: 'alice', secretMode: 'saved' },
+          connectionString: 'mongodb+srv://cluster0.example.test/?replicaSet=rs0',
+          ssh,
         }),
         {},
-      ),
-    );
-    expect(error?.code).toBe('UNSUPPORTED');
-    expect(error?.message).toMatch(/SSH/);
+        tunnel,
+      );
+      expect(uri).toBe('mongodb+srv://cluster0.example.test/?replicaSet=rs0');
+      expect(options).toMatchObject(tunnel);
+    });
+
+    it('refuses SSH together with a SOCKS5 proxy', () => {
+      const error = errorOf(() =>
+        clientConfig(draft({ ssh, proxy: { host: 'proxy.example.test', port: 1080 } }), {}, tunnel),
+      );
+      expect(error?.code).toBe('INVALID_PARAMS');
+    });
+
+    it('ignores tunnel options for a profile without SSH', () => {
+      const { options } = clientConfig(draft({}), {}, tunnel);
+      expect(options.proxyHost).toBeUndefined();
+    });
   });
 
   it('passes TLS CA file, client certificate with passphrase and allow-invalid flags', () => {
