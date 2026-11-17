@@ -2,7 +2,7 @@
 title: Conflict view for partly loaded (cut-array) documents
 status: todo
 owner:
-deps: [doc-paging]
+deps: [doc-paging,conflict-merge-close]
 touches: [packages/renderer/src/app/document/conflict,packages/renderer/src/app/document/document-actions.service.ts]
 prio: 2
 ---
