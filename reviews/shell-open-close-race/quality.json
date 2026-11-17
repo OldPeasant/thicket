@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "task": "shell-open-close-race",
+  "reviewed_revision": "5ee7bdd65d69496ddcec624a9900520bc0fa2357",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/shell-open-close-race/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/shell-open-close-race/review.md"},
+    "fixer": {"status": "not_required", "reason": "test-writer found no production bugs; the only review finding (CR-1, P3) is accepted and recorded with tasks.py assume (its fix belongs in server/backend.ts, outside this task's touches)"}
+  },
+  "fixes_required": false,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "accepted", "note": "reconnect overlapping a still-running conn.close can lose the new connection's shells; narrow (renderer waits for conn.close); recorded with tasks.py assume"},
+    {"id": "TW-1", "source": "test-writer", "severity": "Low", "disposition": "accepted", "note": "closeAll at shutdown does not cancel pending opens; outside the criteria, the process exit ends the workers; recorded with tasks.py assume"}
+  ],
+  "validation": [
+    {"command": "cd packages/backend && npx vitest run src/shell/host.spec.ts src/server/backend.spec.ts", "result": "pass (2 files, 117 tests)"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}
