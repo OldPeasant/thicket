@@ -13,7 +13,8 @@ In the table view, select rows and set/unset one field for all; saved as one bat
 ## Acceptance criteria
 - [x] e2e: select 3 rows, set a field, save → 3 docs updated
   - verified (2026-11-17 07:17+0100 by dell26/agent-1): npm run test:e2e -- test/e2e/multi-edit.e2e.ts (Playwright/Electron, built app, MongoDB container fixture) -> 'select 3 rows, set a field, save: 3 documents updated' passed (3/3 passed)
-- [ ] One conflicting document is reported, the others saved (int/e2e test)
+- [x] One conflicting document is reported, the others saved (int/e2e test)
+  - verified (2026-11-17 07:17+0100 by dell26/agent-1): npm run test:e2e -- test/e2e/multi-edit.e2e.ts against MongoDB container -> 'one document changed on the server: it is reported, the others are saved' and 'one document deleted on the server: ...' passed; plus multi-edit.service/selection unit specs (125 focused tests pass)
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
