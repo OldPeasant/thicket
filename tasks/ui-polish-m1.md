@@ -1,10 +1,11 @@
 ---
 title: Round the Test connection latency; status bar shows the active tab's connection
-status: todo
-owner:
+status: in_progress
+owner: felix/agent-2
 deps: []
 touches: [packages/renderer/src/app/connections/connection-editor.html,packages/renderer/src/app/layout]
 prio: 2
+lease_until: 2026-11-17T05:37:26Z
 ---
 ## Goal
 Two UI bugs seen in the M1 demo screenshots (reviews/m1-e2e/, task m1-e2e).
