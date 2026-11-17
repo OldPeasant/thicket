@@ -1,7 +1,6 @@
 import type { Page } from '@playwright/test';
 import { access, readFile } from 'node:fs/promises';
 
-import { headlessArgs } from './harness/app';
 import { capturePageWithRepaint, expect, screenshot, test } from './harness';
 
 // The harness `screenshot()` helper on headless Linux: after each view switch the capture shows
@@ -141,7 +140,10 @@ test.describe('screenshot() on headless Linux', () => {
   test.skip(process.platform !== 'linux', 'the headless Ozone backend is Linux-only');
 
   test('the app is started headless with a real screen size', async ({ electronApp }) => {
-    expect(headlessArgs()).toContain('--ozone-platform=headless');
+    // The switches the app process really received, not what the harness would pass now.
+    const args = electronApp.process().spawnargs;
+    expect(args).toContain('--ozone-platform=headless');
+    expect(args).toContain('--ozone-override-screen-size=1920,1080');
     const size = await electronApp.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()[0]?.getContentSize(),
     );
@@ -189,13 +191,14 @@ test.describe('screenshot() on headless Linux', () => {
     expect(shown.rgb).toEqual([255, 128, 0]);
   });
 
-  test('when Playwright times out, screenshot() falls back to a repaint capture of the element', async ({
+  test('an element that is not visible fails with the TimeoutError, not a fallback capture', async ({
     electronApp,
     window,
   }, testInfo) => {
     await expect(window.getByTestId('welcome-new')).toBeVisible();
     // A laid-out but invisible element: Playwright's element screenshot waits for it to become
-    // visible and times out (TimeoutError), so the helper uses the main-process capture of its box.
+    // visible and times out. The repaint fallback only covers "no new frame", so the helper must
+    // rethrow instead of saving an empty or whole-window image.
     await window.evaluate(() => {
       const doc = (globalThis as unknown as Dom).document;
       const box = doc.createElement('div');
@@ -206,17 +209,30 @@ test.describe('screenshot() on headless Linux', () => {
     });
     const hidden = window.locator('#e2e-hidden-box');
     await expect(hidden).toBeHidden();
-    const box = await hidden.boundingBox();
-    expect(box?.width).toBe(240);
-    // A folder that does not exist yet: the helper creates it.
-    const path = testInfo.outputPath('fallback', 'nested', 'hidden-box.png');
-    const png = await screenshot(electronApp, hidden, path);
-    expect(png.length).toBeGreaterThan(0);
-    expect((await readFile(path)).equals(png), 'the file holds the returned PNG').toBe(true);
-    const shown = await pixel(window, png, 0, 0);
-    // Only the element's rectangle, not the whole window (CSS px; the headless scale factor is 1).
-    expect(Math.abs(shown.width - 240)).toBeLessThanOrEqual(1);
-    expect(Math.abs(shown.height - 60)).toBeLessThanOrEqual(1);
+    const path = testInfo.outputPath('fallback', 'hidden-box.png');
+    const started = Date.now();
+    await expect(screenshot(electronApp, hidden, path)).rejects.toMatchObject({
+      name: 'TimeoutError',
+    });
+    // Playwright's 5 s timeout, then straight out: no repaint rounds were waited for.
+    expect(Date.now() - started).toBeLessThan(7_000);
+    await expect(access(path)).rejects.toThrow();
+  });
+
+  test('a locator that matches nothing fails fast with the TimeoutError', async ({
+    electronApp,
+    window,
+  }, testInfo) => {
+    await expect(window.getByTestId('welcome-new')).toBeVisible();
+    const missing = window.locator('#e2e-no-such-element');
+    const path = testInfo.outputPath('missing.png');
+    const started = Date.now();
+    await expect(screenshot(electronApp, missing, path)).rejects.toMatchObject({
+      name: 'TimeoutError',
+    });
+    // Playwright's 5 s timeout plus at most the short box lookup, not the test timeout.
+    expect(Date.now() - started).toBeLessThan(8_000);
+    await expect(access(path)).rejects.toThrow();
   });
 
   test('a page screenshot creates the output folder and writes the returned PNG', async ({

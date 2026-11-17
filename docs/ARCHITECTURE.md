@@ -829,7 +829,8 @@ Windows: run `.taskcheck` and npm scripts from Git for Windows' bash (TFP runs t
   before the click. The helper makes sure the window has a real size, asks for a repaint, takes
   Playwright's screenshot (5 s timeout) and, if that times out, falls back to
   `capturePageWithRepaint()` (main process: `invalidate()`, wait 400 ms, `capturePage()`, three
-  times, keep the last). `test/e2e/screenshot.e2e.ts` checks it with DISPLAY/WAYLAND_DISPLAY unset:
+  times, keep the last). An element that is hidden or matches nothing still fails with the
+  `TimeoutError` (no fallback). `test/e2e/screenshot.e2e.ts` checks it with DISPLAY/WAYLAND_DISPLAY unset:
   after each view switch the PNG shows a marker colour drawn after the switch.
 - Import `test`/`expect` from `test/e2e/harness`. Fixtures: `userDataDir` (a fresh temp folder per
   test, passed as `THICKET_USER_DATA`, deleted afterwards), `appEnv` (option), `electronApp`, `window`

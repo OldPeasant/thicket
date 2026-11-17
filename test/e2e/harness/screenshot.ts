@@ -8,6 +8,8 @@ const PLAYWRIGHT_TIMEOUT = 5_000;
 /** Repaint-and-capture rounds of the fallback; the last capture is kept. */
 const REPAINT_ROUNDS = 3;
 const REPAINT_WAIT = 400;
+/** How long the fallback waits for an element's box (a locator matching nothing fails fast). */
+const BOX_TIMEOUT = 2_000;
 
 /** A rectangle in CSS pixels of the page's viewport. */
 interface Rect {
@@ -43,13 +45,19 @@ export async function screenshot(
     win.webContents.invalidate();
   });
   await mkdir(dirname(path), { recursive: true });
+  let rect: Rect | undefined;
   try {
     return await target.screenshot({ path, timeout: PLAYWRIGHT_TIMEOUT });
   } catch (error) {
     if (!(error instanceof Error) || error.name !== 'TimeoutError') throw error;
+    // The fallback only covers "no new frame": an element that is missing, hidden or has no box
+    // keeps failing the test instead of saving the whole window or an empty image.
+    if (isLocator(target)) {
+      rect = (await visibleBox(target)) ?? undefined;
+      if (!rect) throw error;
+    }
   }
-  const rect = isLocator(target) ? await target.boundingBox() : null;
-  const png = await capturePageWithRepaint(app, page, rect ?? undefined);
+  const png = await capturePageWithRepaint(app, page, rect);
   await writeFile(path, png);
   return png;
 }
@@ -91,6 +99,16 @@ export async function capturePageWithRepaint(
 
 async function browserWindowOf(app: ElectronApplication, page: Page) {
   return (await app.browserWindow(page)) as JSHandle<BrowserWindow>;
+}
+
+/** The box of `locator` if it is visible and laid out, else null (fails fast: short timeout). */
+async function visibleBox(locator: Locator): Promise<Rect | null> {
+  try {
+    if (!(await locator.isVisible())) return null;
+    return await locator.boundingBox({ timeout: BOX_TIMEOUT });
+  } catch {
+    return null;
+  }
 }
 
 function isLocator(target: Page | Locator): target is Locator {

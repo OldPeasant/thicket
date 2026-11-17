@@ -43,6 +43,9 @@ const NODE_MARKER = 'THICKET_SMOKE_NODE_RAN';
 const noDisplay = !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY;
 const headless =
   process.platform === 'linux' && (noDisplay || process.env.THICKET_TEST_HEADLESS === '1');
+// Headless Ozone's default screen is 1x1, which clamps the window to 1x1 (blank or hanging
+// screenshots): give it a real screen size.
+const HEADLESS_ARGS = ['--ozone-platform=headless', '--ozone-override-screen-size=1920,1080'];
 const userData = mkdtempSync(join(tmpdir(), 'thicket-smoke-'));
 const output = [];
 
@@ -91,7 +94,7 @@ async function runAsNodeRan(path) {
   const probeData = mkdtempSync(join(tmpdir(), 'thicket-smoke-node-'));
   const probe = spawn(
     path,
-    ['-e', `console.log('${NODE_MARKER}')`, ...(headless ? ['--ozone-platform=headless'] : [])],
+    ['-e', `console.log('${NODE_MARKER}')`, ...(headless ? HEADLESS_ARGS : [])],
     {
       env: {
         ...process.env,
@@ -144,11 +147,7 @@ try {
   // even with the fuse on, so a runtime probe would show nothing either way.
   child = spawn(
     resolve(executable),
-    [
-      '--remote-debugging-port=0',
-      '--inspect=0',
-      ...(headless ? ['--ozone-platform=headless'] : []),
-    ],
+    ['--remote-debugging-port=0', '--inspect=0', ...(headless ? HEADLESS_ARGS : [])],
     {
       env: {
         ...process.env,

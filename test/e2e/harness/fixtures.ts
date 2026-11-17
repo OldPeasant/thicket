@@ -11,6 +11,7 @@ import { join } from 'node:path';
 
 import { launchApp, realUserDataDir, snapshotDir } from './app';
 import { containerRuntimeUnavailable, startMongo, type E2EMongo, type FixtureName } from './mongo';
+import { screenshot } from './screenshot';
 
 export interface E2EFixtures {
   /** Fresh temporary folder used as the app's `userData`; deleted after the test. */
@@ -45,7 +46,7 @@ export async function screenshotWindows(app: ElectronApplication, testInfo: Test
   for (const [index, page] of windows.entries()) {
     const path = testInfo.outputPath(`failure-window-${index}.png`);
     try {
-      await page.screenshot({ path, timeout: 5_000 });
+      await screenshot(app, page, path);
       await testInfo.attach(`window ${index}`, { path, contentType: 'image/png' });
     } catch (error) {
       console.warn(`screenshot of window ${index} failed: ${String(error)}`);
