@@ -61,9 +61,19 @@ function shell(text: string | undefined, fallback: string): string {
   }
 }
 
+/**
+ * A collection in mongosh syntax: `db.orders` when the name is a JavaScript identifier, else
+ * `db.getCollection("my-orders")` (quoted like `safety/operation.ts`).
+ */
+export function collRef(coll: string): string {
+  return /^[A-Za-z_$][\w$]*$/.test(coll)
+    ? `db.${coll}`
+    : `db.getCollection(${JSON.stringify(coll)})`;
+}
+
 /** The exported query as the mongosh call it runs: `db.orders.find({ a: 1 }).sort({ b: -1 })`. */
 export function describeExport(coll: string, query: ParsedQuery): string {
-  let call = `db.${coll}.find(${shell(query.filter, '{}')}`;
+  let call = `${collRef(coll)}.find(${shell(query.filter, '{}')}`;
   call += query.projection !== undefined ? `, ${shell(query.projection, '{}')})` : ')';
   if (query.sort !== undefined) call += `.sort(${shell(query.sort, '{}')})`;
   if (query.collation !== undefined) call += `.collation(${shell(query.collation, '{}')})`;

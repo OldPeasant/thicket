@@ -3,7 +3,7 @@
     <header class="head">
       <h2 class="title" [id]="uid + '-title'">Import documents</h2>
       <code class="command" data-testid="import-command"
-        >db.<span class="coll">{{ collName().trim() || '…' }}</span
+        ><span class="coll">{{ collText() }}</span
         >.insertMany(<span class="file">{{ preview()?.fileName ?? 'file' }}</span
         >, {{ '{' }} ordered: {{ ordered() }} {{ '}' }})</code
       >

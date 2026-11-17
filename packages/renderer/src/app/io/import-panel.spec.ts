@@ -326,6 +326,42 @@ describe('ImportPanel', () => {
       expect(imported).toEqual([{ coll: 'orders_new', inserted: 4 }]);
     });
 
+    it('a finished import needs a new file choice before importing again', async () => {
+      await choose();
+      click('import-start');
+      await settle();
+      fake.data('io.import', 'i1', { processed: 4, failed: 0, errors: [] });
+      fake.end('i1');
+      await settle();
+      expect(phase()).toBe('done');
+      // The result stays visible, but the used file is gone: one more click cannot repeat it.
+      expect(q('import-count')?.textContent).toBe('4');
+      expect(get('import-status').textContent).toContain('shop.orders');
+      expect(q('import-start')).toBeNull();
+      expect(q('import-file')).toBeNull();
+      expect(get('import-choose').textContent?.trim()).toBe('Choose file…');
+      await fixture.componentInstance.start();
+      expect(imports()).toHaveLength(1);
+      // Choosing the file again allows a deliberate second import.
+      await choose();
+      expect(phase()).toBe('previewed');
+      click('import-start');
+      await settle();
+      expect(imports()).toHaveLength(2);
+    });
+
+    it('shows a target name that is not an identifier with getCollection', async () => {
+      await choose();
+      type('import-coll', 'my-orders');
+      await settle();
+      expect(q('import-command')?.textContent).toContain(
+        'db.getCollection("my-orders").insertMany(',
+      );
+      type('import-coll', '');
+      await settle();
+      expect(q('import-command')?.textContent).toContain('db.….insertMany(');
+    });
+
     it('a failed sidebar reload does not turn a finished import into an error', async () => {
       fake.fail('coll.list', { code: 'NOT_CONNECTED', message: 'gone' });
       await choose();
@@ -346,7 +382,8 @@ describe('ImportPanel', () => {
       expect(phase()).toBe('error');
       expect(q('import-error')?.textContent).toContain('not primary (fictitious)');
       expect(collLists()).toHaveLength(1);
-      expect(imported).toHaveLength(0);
+      // Documents inserted before the failure stay: the tab shows them.
+      expect(imported).toEqual([{ coll: 'orders', inserted: 0 }]);
       // The file stays chosen: Import can be tried again.
       expect(get<HTMLButtonElement>('import-start').disabled).toBe(false);
     });
@@ -372,7 +409,8 @@ describe('ImportPanel', () => {
       expect(phase()).toBe('cancelled');
       expect(get('import-status').textContent).toContain('50');
       expect(collLists()).toHaveLength(1);
-      expect(imported).toHaveLength(0);
+      // The 50 inserted documents stay: the tab shows them.
+      expect(imported).toEqual([{ coll: 'orders', inserted: 50 }]);
     });
 
     it('destroying the panel stops a running import', async () => {
@@ -461,6 +499,31 @@ describe('ImportPanel', () => {
       await settle();
       confirm.answer(true);
       await settle();
+      expect(imports()).toHaveLength(0);
+    });
+
+    it('closing the panel while the confirm dialog is open withdraws it and sends nothing', async () => {
+      safety.set({ id: 'p1', name: 'Prod (fictitious)', readOnly: false, production: true });
+      await choose();
+      click('import-start');
+      await settle();
+      expect(confirm.current()).not.toBeNull();
+      click('import-close');
+      await settle();
+      expect(confirm.current()).toBeNull();
+      expect(closed).toBe(1);
+      expect(imports()).toHaveLength(0);
+      expect(q('import-error')).toBeNull();
+    });
+
+    it('destroying the panel while the confirm dialog is open withdraws it', async () => {
+      safety.set({ id: 'p1', name: 'Prod (fictitious)', readOnly: false, production: true });
+      await choose();
+      click('import-start');
+      await settle();
+      fixture.destroy();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(confirm.current()).toBeNull();
       expect(imports()).toHaveLength(0);
     });
   });

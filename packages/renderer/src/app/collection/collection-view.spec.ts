@@ -809,4 +809,28 @@ describe('CollectionView', () => {
     await importInto('orders_copy');
     expect(finds()).toHaveLength(1);
   });
+
+  it('a cancelled import into the tab collection also runs the query again', async () => {
+    fake.respond('io.previewImport', {
+      fileToken: 'tok-1',
+      fileName: 'orders-sample.json',
+      sizeBytes: 64,
+      sample: docs(1, 2),
+    });
+    fake.handle('io.import', () => ({ streamId: 'imp1' }));
+    fake.respond('coll.list', { collections: [] });
+    click('io-import');
+    await settle();
+    click('import-choose');
+    await settle();
+    click('import-start');
+    await settle();
+    fake.data('io.import', 'imp1', { processed: 1, failed: 0, errors: [] });
+    await settle();
+    click('import-cancel');
+    await settle();
+    expect(q('import-status')?.getAttribute('data-phase')).toBe('cancelled');
+    expect(finds()).toHaveLength(2);
+    expect(lastFind()).toMatchObject({ coll: 'orders' });
+  });
 });

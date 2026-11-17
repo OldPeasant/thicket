@@ -192,6 +192,33 @@ describe('ExportPanel', () => {
     expect(closed).toBe(1);
   });
 
+  it('quotes a collection name that is not a JavaScript identifier', async () => {
+    fixture.componentRef.setInput('target', { ...TARGET, coll: 'my-orders' });
+    await settle();
+    expect(q('export-command')?.textContent).toBe(
+      'db.getCollection("my-orders").find({ status: "open" }).sort({ total: -1 }).limit(100)',
+    );
+  });
+
+  it('describes the exported query while running and done, not one applied later', async () => {
+    const sent = 'db.orders.find({ status: "open" }).sort({ total: -1 }).limit(100)';
+    const later: ParsedQuery = { filter: '{}', sortSpec: [], emptyFilter: true };
+    click('export-start');
+    await settle();
+    fixture.componentRef.setInput('query', later);
+    await settle();
+    expect(q('export-command')?.textContent).toBe(sent);
+    fake.end('x1');
+    await settle();
+    expect(status().getAttribute('data-phase')).toBe('done');
+    expect(q('export-command')?.textContent).toBe(sent);
+    // A new export sends (and then describes) the query applied now.
+    click('export-start');
+    await settle();
+    expect(exports()[1]?.params).toMatchObject({ source: { kind: 'find', filter: '{}' } });
+    expect(q('export-command')?.textContent).toBe('db.orders.find({})');
+  });
+
   it('Close while idle emits closed and cancels nothing', async () => {
     click('export-close');
     await settle();

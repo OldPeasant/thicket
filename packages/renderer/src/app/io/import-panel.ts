@@ -22,6 +22,7 @@ import {
   NO_PROGRESS,
   TEXT_FORMATS,
   type TextFormat,
+  collRef,
   formatBytes,
   formatNumber,
   printSample,
@@ -58,7 +59,10 @@ let nextUid = 0;
 export class ImportPanel {
   readonly target = input.required<IoTarget>();
   readonly closed = output();
-  /** Documents were imported into `coll` (of the target's database). */
+  /**
+   * An import into `coll` (of the target's database) ended: done, failed or cancelled. Documents
+   * inserted before a failure or Cancel stay, so `inserted` may be above 0 in every case.
+   */
   readonly imported = output<{ coll: string; inserted: number }>();
 
   private readonly api = inject(ApiService);
@@ -86,6 +90,11 @@ export class ImportPanel {
     return phase === 'choosing' || phase === 'importing';
   });
   protected readonly nameProblem = computed(() => collNameProblem(this.collName().trim()));
+  /** The target collection in the header's shell call (`db.…` while the name is empty). */
+  protected readonly collText = computed(() => {
+    const name = this.collName().trim();
+    return name === '' ? 'db.…' : collRef(name);
+  });
   protected readonly sample = computed(() =>
     (this.preview()?.sample ?? []).slice(0, PREVIEW_SHOWN).map(printSample),
   );
@@ -101,11 +110,16 @@ export class ImportPanel {
 
   private subscription: Subscription | null = null;
   private previewAbort: AbortController | null = null;
+  /** Withdraws a pending `WriteGuard` confirmation (Cancel, close, destroy, read-only). */
+  private approveAbort: AbortController | null = null;
+  private destroyed = false;
 
   constructor() {
     inject(DestroyRef).onDestroy(() => {
+      this.destroyed = true;
       this.subscription?.unsubscribe();
       this.previewAbort?.abort();
+      this.approveAbort?.abort();
     });
     // The target collection starts as the tab's collection.
     effect(() => {
@@ -177,12 +191,14 @@ export class ImportPanel {
   /** Imports the chosen file (after the confirm dialog where the profile needs one). */
   async start(): Promise<void> {
     const preview = this.preview();
-    if (preview === null || this.busy() || this.readOnly()) return;
+    if (preview === null || this.busy() || this.readOnly() || this.approveAbort) return;
     this.nameTouched.set(false);
     if (this.nameProblem() !== null) return;
     const { profileId, db } = this.target();
     const coll = this.collName().trim();
     this.error.set(null);
+    const abort = new AbortController();
+    this.approveAbort = abort;
     let params;
     try {
       params = await this.guard.approve(
@@ -195,14 +211,22 @@ export class ImportPanel {
           ordered: this.ordered(),
           stopOnError: this.stopOnError(),
         },
-        { detail: `From ${preview.fileName} (${this.sizeText()}).`, confirmLabel: 'Import' },
+        {
+          detail: `From ${preview.fileName} (${this.sizeText()}).`,
+          confirmLabel: 'Import',
+          signal: abort.signal,
+        },
       );
     } catch (error) {
-      if (ApiError.from(error).code === 'CANCELLED') return;
+      if (ApiError.from(error).code === 'CANCELLED' || abort.signal.aborted) return;
       this.error.set(describeError(error));
       this.phase.set('error');
       return;
+    } finally {
+      if (this.approveAbort === abort) this.approveAbort = null;
     }
+    // Closed, destroyed or turned read-only while the confirm dialog was open: send nothing.
+    if (abort.signal.aborted || this.destroyed || this.readOnly()) return;
     this.phase.set('importing');
     this.progress.set(NO_PROGRESS);
     this.subscription = this.api.stream('io.import', params).subscribe({
@@ -211,26 +235,30 @@ export class ImportPanel {
         this.subscription = null;
         this.error.set(describeError(error));
         this.phase.set('error');
-        void this.refreshSidebar(profileId, db);
+        this.ended(profileId, db, coll);
       },
       complete: () => {
         this.subscription = null;
         this.phase.set('done');
-        const { processed, failed } = this.progress();
-        this.imported.emit({ coll, inserted: Math.max(0, processed - failed) });
-        void this.refreshSidebar(profileId, db);
+        // The file token was used: importing it again needs a new choice (no accidental repeat).
+        this.preview.set(null);
+        this.ended(profileId, db, coll);
       },
     });
   }
 
   /** Stops a running import; documents inserted so far stay. */
   cancel(): void {
+    if (this.approveAbort) {
+      this.approveAbort.abort();
+      this.approveAbort = null;
+    }
     if (this.subscription) {
       this.subscription.unsubscribe();
       this.subscription = null;
       this.phase.set('cancelled');
       const { profileId, db } = this.target();
-      void this.refreshSidebar(profileId, db);
+      this.ended(profileId, db, this.collName().trim());
     }
     if (this.previewAbort) {
       this.previewAbort.abort();
@@ -242,6 +270,13 @@ export class ImportPanel {
   close(): void {
     this.cancel();
     this.closed.emit();
+  }
+
+  /** An import stopped (any way): the tab and the sidebar show what was inserted. */
+  private ended(profileId: string, db: string, coll: string): void {
+    const { processed, failed } = this.progress();
+    this.imported.emit({ coll, inserted: Math.max(0, processed - failed) });
+    void this.refreshSidebar(profileId, db);
   }
 
   /** A new collection appears in the sidebar; counts are read again. */

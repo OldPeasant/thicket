@@ -61,7 +61,16 @@ export class ExportPanel {
   protected readonly progress = signal<IoProgress>(NO_PROGRESS);
   protected readonly error = signal<string | null>(null);
 
-  protected readonly command = computed(() => describeExport(this.target().coll, this.query()));
+  /** The command sent by the last Choose file and export (what a running or finished one wrote). */
+  private readonly sentCommand = signal<string | null>(null);
+  /** The live query before an export; the sent one while it runs and after it ended. */
+  protected readonly command = computed(() => {
+    const phase = this.phase();
+    const sent = this.sentCommand();
+    return sent !== null && phase !== 'idle' && phase !== 'error'
+      ? sent
+      : describeExport(this.target().coll, this.query());
+  });
   protected readonly processedText = computed(() => formatNumber(this.progress().processed));
   protected readonly running = computed(() => this.phase() === 'running');
 
@@ -83,6 +92,7 @@ export class ExportPanel {
   protected start(): void {
     if (this.running()) return;
     const params = exportParams(this.target(), this.query(), this.format(), this.mode());
+    this.sentCommand.set(describeExport(this.target().coll, this.query()));
     this.phase.set('running');
     this.path.set(null);
     this.progress.set(NO_PROGRESS);

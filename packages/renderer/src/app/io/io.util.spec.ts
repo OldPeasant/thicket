@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { ParsedQuery } from '../collection/query.util';
 import {
   NO_PROGRESS,
+  collRef,
   describeExport,
   exportParams,
   formatBytes,
@@ -81,6 +82,10 @@ describe('describeExport', () => {
     );
   });
 
+  it('quotes a collection name that is not an identifier', () => {
+    expect(describeExport('my-orders', EMPTY)).toBe('db.getCollection("my-orders").find({})');
+  });
+
   it('omits a zero limit', () => {
     expect(describeExport('orders', { ...EMPTY, limit: 0 })).toBe('db.orders.find({})');
   });
@@ -89,6 +94,21 @@ describe('describeExport', () => {
     expect(describeExport('orders', { ...EMPTY, filter: '{not json' })).toBe(
       'db.orders.find({not json)',
     );
+  });
+});
+
+describe('collRef', () => {
+  it('uses db.<name> for JavaScript identifiers', () => {
+    expect(collRef('orders')).toBe('db.orders');
+    expect(collRef('_tmp$1')).toBe('db._tmp$1');
+  });
+
+  it('uses db.getCollection("…") for any other name, quoted as a JS string', () => {
+    expect(collRef('my-orders')).toBe('db.getCollection("my-orders")');
+    expect(collRef('2024 sales')).toBe('db.getCollection("2024 sales")');
+    expect(collRef('a.b')).toBe('db.getCollection("a.b")');
+    expect(collRef('say "hi"\\')).toBe('db.getCollection("say \\"hi\\"\\\\")');
+    expect(collRef('ä')).toBe('db.getCollection("ä")');
   });
 });
 
