@@ -13,7 +13,8 @@ Watch a collection or database (replica set only) with a live event list; open t
 ## Acceptance criteria
 - [x] Integration test: insert/update/delete events received in order
   - verified (2026-11-17 08:19+0100 by felix/agent-1): npx vitest run --config test/integration/vitest.config.ts test/integration/change-streams.int.spec.ts (Podman, mongo8rs replica-set fixture) -> 10 passed, incl. 'receives insert, update and delete events of a collection in order' (order, documentKeys, clusterTime order) and cursor-pinning/cleanup tests
-- [ ] Standalone server shows a clear 'needs replica set' message (test)
+- [x] Standalone server shows a clear 'needs replica set' message (test)
+  - verified (2026-11-17 08:19+0100 by felix/agent-1): same integration run against mongo8 standalone fixture -> 'refuses with a clear needs replica set message' passed (UNSUPPORTED, detail needsReplicaSet); cd packages/renderer && npx ng test --include='src/app/watch/**/*.spec.ts' -> 29 passed incl. WatchView 'shows a clear needs replica set message for a standalone server'
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
