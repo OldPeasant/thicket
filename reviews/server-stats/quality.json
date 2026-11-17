@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "task": "server-stats",
-  "reviewed_revision": "2a34290dee7fff4f03fd29dc837f1647b39034b6",
+  "reviewed_revision": "e48cc2d641a802702124b300f6ad4b39bc7b7af5",
   "helpers": {
     "test-writer": {"status": "completed", "report": "reviews/server-stats/tests.md"},
     "code-reviewer": {"status": "completed", "report": "reviews/server-stats/review.md"},

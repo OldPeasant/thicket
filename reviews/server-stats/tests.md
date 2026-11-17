@@ -210,3 +210,73 @@ Tests and task-scoped coverage are sufficient; no production defects found. The 
 needed no changes to existing tests; 2 tests were added to guard CR-1 (recorded fixtures carry no
 `$`-named fields, as the backend answers). Focused tests (56), `npm run check` (= `.taskcheck`) and
 task-scoped coverage on the final code all pass.
+
+## Addendum: revision e48cc2d641a802702124b300f6ad4b39bc7b7af5 (rebased onto main with gridfs)
+
+Date: 2026-11-17
+
+Scope: the task was rebased onto main after the gridfs task landed. New merge-base
+c7d60256ab0272087d68559517da5e1364df0165, measured HEAD e48cc2d641a802702124b300f6ad4b39bc7b7af5
+(branch main), clean working tree before this addendum (the `recorded fixtures` tests above are
+committed in 9fcb88e1; `server-stats.model.spec.ts` sha256 is still
+c62247742a316a41b7fd8347381dc0636a62472876ec32a926f388492c6466de, the snapshot tested above).
+Task commits now: 233102e3, 71f2595e, 7f6e1753, ffd600f2, 663406fd, 9fcb88e1, e48cc2d6.
+
+What changed in the task code: `git range-diff 27adc3ab..b23468b3 c7d60256..e48cc2d6 -- packages test`
+shows commits 1, 3, 4, 5 identical (`=`) and commit 2 (71f2595e) differing only in context lines
+from gridfs and in the conflict resolution of `TabKind` in
+`packages/renderer/src/app/layout/workspace.service.ts`, which now keeps both `'gridfs'` and
+`'serverstats'`. `app.config.ts` registers both `provideTabView('gridfs', GridfsView)` and
+`provideTabView('serverstats', ServerStatsView)`. No task production logic changed, so no test
+changes were needed and no test file was edited for this addendum.
+
+Commands and results (2026-11-17, packages and repo root as noted):
+
+| Command | Result |
+|---|---|
+| `cd packages/renderer && npx ng test --include='src/app/admin/stats/**/*.spec.ts'` (08:18:17 +0100) | Pass: 3 files, 56 tests |
+| `npm run check` from the repo root (= `.taskcheck`; eslint, Prettier, type checks incl. `ngc` strictTemplates, root vitest, renderer `ng test`) | Pass: root vitest 95 files, 4972 tests; renderer 116 files, 3874 tests (includes the gridfs specs) |
+| Renderer coverage, same command as in "Coverage" above (08:19:33 +0100) | Pass, exit 0: 116 files, 3874 tests |
+| Backend coverage, same command as in "Coverage" above | Pass, exit 0 |
+
+Integration and e2e tests were not re-run: the rebase changed no task backend code or e2e path
+(range-diff above). Integration evidence from the earlier run still applies to identical code.
+
+Coverage on e48cc2d6 (whole-file coverage of task-changed production files, covered/total):
+
+| Changed file | Statements | Branches | Functions | Lines |
+|---|---:|---:|---:|---:|
+| `packages/backend/src/admin/stats/stats.ts` | 29/29 | 22/22 | 6/6 | 23/23 |
+| `packages/backend/src/admin/stats/handlers.ts` | 3/3 | N/A (0/0) | 3/3 | 3/3 |
+| `packages/backend/src/admin/stats/index.ts` | N/A (0/0) | N/A | N/A | N/A |
+| `packages/backend/src/index.ts` | 1/1 | N/A | N/A | 1/1 |
+| `packages/backend/src/server/backend.ts` | 58/63 | 16/18 | 19/24 | 55/58 |
+| `packages/contract/src/admin.ts` | 1/1 (unchanged file, not re-run) | N/A | N/A | 1/1 |
+| `packages/renderer/src/app/admin/stats/server-stats-view.ts` | 176/177 | 73/83 | 44/44 | 145/145 |
+| `packages/renderer/src/app/admin/stats/server-stats.model.ts` | 143/144 | 158/162 | 28/28 | 116/117 |
+| `packages/renderer/src/app/admin/stats/stats-chart.ts` | 132/132 | 43/44 | 19/19 | 94/94 |
+| `packages/renderer/src/app/admin/stats/index.ts` | N/A (0/0) | N/A | N/A | N/A |
+| `packages/renderer/src/app/app.config.ts` | 1/1 | N/A | N/A | 1/1 |
+| `packages/renderer/src/app/layout/workspace.service.ts` | 55/55 | 37/38 | 16/16 | 38/38 |
+| `packages/renderer/src/app/sidebar/sidebar-tree.service.ts` | 247/247 | 111/111 | 71/71 | 200/200 |
+| `packages/renderer/src/app/sidebar/sidebar-tree.ts` | 404/413 | 238/272 | 96/96 | 346/347 |
+
+Aggregate (summed counters, same exclusions as above): statements 1250/1266 (98.7%), branches
+698/750 (93.1%), functions 302/307 (98.4%), lines 1023/1028 (99.5%). Renderer subset 1158/1169,
+660/710, 274/274, 940/942; backend subset 91/96, 38/40, 28/33, 82/85; contract 1/1.
+The task-owned stats files have exactly the numbers of the previous run. The differences are in
+shared pre-existing files that now also contain gridfs code from main (`backend.ts` +1 uncovered
+statement/function/line, `sidebar-tree.service.ts` and `sidebar-tree.ts` a few more covered
+counters); they are outside this task's responsibility. Uncovered-location table above still applies
+to the stats files (same line numbers).
+
+Reports: `packages/renderer/coverage/renderer/coverage-summary.json` sha256
+9ddc36810feb297ab6ff340e6290a03b91a994897ca418e115f301a559801c25,
+`packages/renderer/coverage/renderer/lcov.info` sha256
+410bf92678f6ac46c5a6d4b74c78cff6df9ae26ecfc7dd70159d2bca57c39cd5,
+`packages/backend/coverage/coverage-summary.json` sha256
+7c714cacd4495e8f89b7fe58bfb593a1bd28c52a51dac87e0df8716bc15b0348 (all regenerated by these runs;
+no source or test file changed between the runs).
+
+Bugs found: none. Result for e48cc2d6: tests and task-scoped coverage are sufficient; all validation
+passed.
