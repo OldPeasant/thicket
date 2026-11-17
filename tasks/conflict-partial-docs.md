@@ -1,10 +1,11 @@
 ---
 title: Conflict view for partly loaded (cut-array) documents
-status: todo
-owner:
+status: in_progress
+owner: felix/agent-2
 deps: [doc-paging,conflict-merge-close]
 touches: [packages/renderer/src/app/document/conflict,packages/renderer/src/app/document/document-actions.service.ts]
 prio: 2
+lease_until: 2026-11-17T04:34:51Z
 ---
 ## Goal
 Follow-up of doc-paging (reviews/doc-paging/tests.md TW-1, TW-2): when a save conflict hits a large
@@ -18,3 +19,4 @@ array with the whole server document and blames a projection for the missing Ove
 
 ## Notes
 See SPEC.md, docs/ARCHITECTURE.md "Paging inside documents", conflict-ui task.
+- ASSUMPTION (2026-11-17 05:08+0100 by felix/agent-2): resolveBlocker returns the new 'partial' only for documents with cut arrays (stored on the SaveConflict at conflict time), even under a top-level projection; documents edited under a since-cleared projection keep the existing, more specific projection wording. Re-insert uses the partial wording when cut or when no projection is active.

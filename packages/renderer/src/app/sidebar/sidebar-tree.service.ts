@@ -8,6 +8,7 @@ import {
   type ResultOf,
 } from '@thicket/contract';
 
+import { usersTabId, type UsersTabData } from '../admin/users/users-roles-view';
 import { ApiError, describeError } from '../api/api-error';
 import { ApiService } from '../api/api.service';
 import { type ShellTabData, shellTabId } from '../console/shell-console';
@@ -403,6 +404,20 @@ export class SidebarTreeService {
     });
   }
 
+  /** Opens (or selects) the read-only users and roles tab of a database. */
+  openUsers(profileId: string, db: string): void {
+    const profile = this.profile(profileId);
+    const data: UsersTabData = { profileId, db };
+    this.workspace.open({
+      id: usersTabId(profileId, db),
+      kind: 'users',
+      title: `${db} users`,
+      detail: `${profile?.name ?? profileId} / ${db}`,
+      production: profile?.production === true,
+      data: { ...data },
+    });
+  }
+
   /** Opens (or selects) the connection's mongosh console, starting in `db` when it is new. */
   openShell(profileId: string, db?: string): void {
     const profile = this.profile(profileId);
@@ -465,7 +480,10 @@ export class SidebarTreeService {
     for (const tab of this.workspace.tabs()) {
       const data = tab.data as Partial<CollectionTabData> | undefined;
       if (
-        (tab.kind === 'collection' || tab.kind === 'aggregation' || tab.kind === 'indexes') &&
+        (tab.kind === 'collection' ||
+          tab.kind === 'aggregation' ||
+          tab.kind === 'indexes' ||
+          tab.kind === 'validator') &&
         data?.profileId === profileId &&
         data.db === db &&
         (coll === undefined || data.coll === coll)

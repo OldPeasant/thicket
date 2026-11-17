@@ -496,6 +496,43 @@ describe('SidebarTree', () => {
       expect(byTestId('sidebar-notice')?.textContent).toContain('not authorized to drop');
     });
 
+    it('opens the users and roles tab of a database from its context menu', async () => {
+      await start();
+      await click(node('conn', 'Profile p1'));
+      await menu(node('db', 'shop'));
+      const item = must('menu-users') as HTMLButtonElement;
+      expect(item.textContent).toContain('Users and roles');
+      await click(item);
+      expect(byTestId('tree-menu')).toBeNull();
+      expect(TestBed.inject(WorkspaceService).active()).toMatchObject({
+        id: 'users:p1:shop',
+        kind: 'users',
+        data: { profileId: 'p1', db: 'shop' },
+      });
+    });
+
+    it('offers both Open shell and Users and roles on a database; each opens its own tab', async () => {
+      await start();
+      await click(node('conn', 'Profile p1'));
+      await menu(node('db', 'shop'));
+      const ids = [...must('tree-menu').querySelectorAll<HTMLElement>('[role="menuitem"]')].map(
+        (item) => item.dataset['testid'],
+      );
+      expect(ids.filter((id) => id === 'menu-open-shell')).toHaveLength(1);
+      expect(ids.filter((id) => id === 'menu-users')).toHaveLength(1);
+      expect(ids.indexOf('menu-open-shell')).toBeLessThan(ids.indexOf('menu-users'));
+
+      await click(must('menu-open-shell'));
+      await menu(node('db', 'shop'));
+      await click(must('menu-users'));
+      const ws = TestBed.inject(WorkspaceService);
+      expect(ws.tabs().map((t) => [t.id, t.kind])).toEqual([
+        ['shell:p1', 'shell'],
+        ['users:p1:shop', 'users'],
+      ]);
+      expect(ws.active()?.id).toBe('users:p1:shop');
+    });
+
     it('disconnects from the context menu', async () => {
       await start();
       await click(node('conn', 'Profile p1'));
@@ -637,6 +674,8 @@ describe('SidebarTree', () => {
       expect((must('menu-drop-db') as HTMLButtonElement).disabled).toBe(true);
       expect((must('menu-refresh') as HTMLButtonElement).disabled).toBe(false);
       expect((must('menu-stats') as HTMLButtonElement).disabled).toBe(false);
+      // Viewing users and roles is a read: allowed on a read-only profile.
+      expect((must('menu-users') as HTMLButtonElement).disabled).toBe(false);
 
       await click(node('db', 'shop'));
       await menu(node('coll', 'orders'));

@@ -5,6 +5,7 @@ import {
   collTarget,
   dbName,
   dbTarget,
+  ejsonArray,
   ejsonDocument,
   emptyResult,
   writeFields,
@@ -94,4 +95,24 @@ export const collMethods = defineMethods({
     params: z.strictObject({ ...collWrite, ...validatorFields }),
     result: emptyResult,
   },
+  'coll.validator.check': {
+    summary: 'Which of the given documents fail the validator (a `$nor` query on the server)',
+    route: 'backend',
+    params: z.strictObject({
+      ...collTarget,
+      /** `_id` values of the documents to check (at most `MAX_VALIDATOR_CHECK_IDS`). */
+      ids: ejsonArray('_id values'),
+      /** A validator to check against instead of the collection's own (e.g. an unsaved draft). */
+      validator: ejsonDocument('validator').optional(),
+    }),
+    result: z.object({
+      /** The `_id`s among `ids` whose documents fail the validator. */
+      invalid: ejsonArray('_id values'),
+      /** `false` when the collection has no validator (and none was given): nothing can fail. */
+      hasValidator: z.boolean(),
+    }),
+  },
 });
+
+/** Most `_id`s one `coll.validator.check` takes (the largest result page). */
+export const MAX_VALIDATOR_CHECK_IDS = 1000;

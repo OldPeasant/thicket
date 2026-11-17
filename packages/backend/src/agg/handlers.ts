@@ -1,6 +1,6 @@
 import type { ParsedParamsOf, ResultOf } from '@thicket/contract';
 
-import { abortable, isOpenClient, type ConnectionManager } from '../connections/manager';
+import { abortable, streamOnConnection, type ConnectionManager } from '../connections/manager';
 import { RpcError, type Handler, type HandlerContext } from '../server/rpc';
 import { buildAggregate, createView, explain, previewStage, streamAggregate } from './agg';
 
@@ -8,7 +8,7 @@ import { buildAggregate, createView, explain, previewStage, streamAggregate } fr
  * Handlers of `agg.run` (streamed), `agg.previewStage`, `agg.explain` and `agg.createView` on the
  * profile's open connection (`NOT_CONNECTED` otherwise). `startBackend` wraps the write methods
  * (`agg.createView`, and `agg.run` with `$out`/`$merge`) with `guardWrites()`; these handlers do
- * not check the profile flags themselves. Cancelling works like `docs.find`.
+ * not check the profile flags themselves. Cancelling works like `docs.find`, also by `conn.close`.
  */
 export function aggHandlers(manager: ConnectionManager): Record<string, Handler> {
   return {
@@ -17,17 +17,12 @@ export function aggHandlers(manager: ConnectionManager): Record<string, Handler>
       if (!c.openStream) throw new RpcError('INTERNAL', 'agg.run needs a streaming server');
       // Invalid params fail the request itself, before a stream exists.
       const built = buildAggregate(p);
-      const streamId = c.openStream(async (sink) => {
-        try {
-          return await streamAggregate(client, p, (batch) => sink.send(batch), sink.signal, built);
-        } catch (error) {
-          // `conn.close` cancels the profile's streams: whatever the closed client failed with.
-          if (!isOpenClient(manager, p.profileId, client)) {
-            throw new RpcError('CANCELLED', 'The connection was closed');
-          }
-          throw error;
-        }
-      });
+      // `conn.close` aborts the aggregation and waits for its cleanup (killOp/killCursors) first.
+      const streamId = c.openStream((sink) =>
+        streamOnConnection(manager, p.profileId, client, sink.signal, (signal) =>
+          streamAggregate(client, p, (batch) => sink.send(batch), signal, built),
+        ),
+      );
       return { streamId };
     },
     'agg.previewStage': async (p: ParsedParamsOf<'agg.previewStage'>, c: HandlerContext) =>

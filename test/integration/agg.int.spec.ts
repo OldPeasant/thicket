@@ -8,7 +8,9 @@ import {
   RpcClient,
   RpcError,
   aggHandlers,
+  connHandlers,
   guardWrites,
+  type ClientLike,
   serve,
 } from '@thicket/backend';
 import {
@@ -54,15 +56,24 @@ const parse = (text: string) => BSON.EJSON.parse(text, { relaxed: false }) as Do
 const ejson = (value: unknown) => BSON.EJSON.stringify(value, { relaxed: false });
 
 function backendFor() {
+  // The killOp commands this backend's own clients send (a cancel's cleanup).
+  const killOps: Document[] = [];
   const manager = new ConnectionManager({
     loadProfile: (id) => Promise.resolve(profileOf(id)),
     loadSecrets: () => Promise.resolve(null),
+    createClient: (uri, options) => {
+      const client = new MongoClient(uri, { ...options, monitorCommands: true });
+      client.on('commandStarted', (event) => {
+        if (event.commandName === 'killOp') killOps.push(event.command);
+      });
+      return client as ClientLike;
+    },
   });
   const [serverPort, clientPort] = portPair();
   const stop = serve(serverPort, {
     table: methods,
     route: 'backend',
-    handlers: guardWrites(aggHandlers(manager), profileOf),
+    handlers: { ...guardWrites(aggHandlers(manager), profileOf), ...connHandlers(manager) },
   });
   const client = new RpcClient(clientPort);
   const events = new Map<string, Event[]>();
@@ -103,7 +114,7 @@ function backendFor() {
     stop();
     await manager.closeAll();
   };
-  return { manager, call, aggregate, close };
+  return { manager, killOps, call, finished, aggregate, close };
 }
 
 let backend: ReturnType<typeof backendFor>;
@@ -170,6 +181,64 @@ describe('agg.run', () => {
       backend.call('agg.run', { ...target(), pipeline: '[{"$match":{},"$sort":{}}]' }),
     );
     expect(error.code).toBe('INVALID_PARAMS');
+  });
+});
+
+describe('agg.run and conn.close', () => {
+  const SLOW = 'slow_close';
+
+  async function serverOps(): Promise<Document[]> {
+    return direct
+      .db('admin')
+      .aggregate([
+        { $currentOp: { allUsers: true, idleCursors: true } },
+        { $match: { ns: `${DB}.${SLOW}` } },
+      ])
+      .toArray();
+  }
+
+  async function waitFor<T>(probe: () => Promise<T>, done: (value: T) => boolean): Promise<T> {
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      const value = await probe();
+      if (done(value) || Date.now() > deadline) return value;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+
+  it('conn.close during a slow agg.run ends its stream with CANCELLED and kills the server operation', async () => {
+    await direct
+      .db(DB)
+      .collection<Document>(SLOW)
+      .insertMany(Array.from({ length: 40 }, (_, i): Document => ({ _id: i })));
+    const { streamId } = await backend.call('agg.run', {
+      ...target(),
+      coll: SLOW,
+      // Every document takes 50 ms: the aggregation runs for seconds on the server.
+      pipeline: ejson([
+        {
+          $match: {
+            $expr: {
+              $function: { body: 'function() { sleep(50); return true; }', args: [], lang: 'js' },
+            },
+          },
+        },
+      ]),
+    });
+    expect(await waitFor(serverOps, (ops) => ops.length > 0)).not.toEqual([]);
+    const kills = backend.killOps.length;
+    try {
+      await backend.call('conn.close', { profileId: 'plain' });
+      const outcome = await backend.finished(streamId);
+      expect(outcome.error).toEqual({ code: 'CANCELLED', message: 'The connection was closed' });
+      // conn.close cancelled the stream before closing the client: its operation is gone...
+      expect(await serverOps()).toEqual([]);
+      // ...killed by the stream's cleanup (a killOp from this backend's own client), not left to
+      // the server noticing the closed sockets.
+      expect(backend.killOps.length).toBeGreaterThan(kills);
+    } finally {
+      await backend.manager.open('plain', undefined);
+    }
   });
 });
 

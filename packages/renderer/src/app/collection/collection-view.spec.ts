@@ -9,6 +9,7 @@ import findIxscan from '../explain/fixtures/find-ixscan-8.2.json';
 import { WorkspaceService, type WorkspaceTab } from '../layout/workspace.service';
 import { ConfirmService } from '../safety/confirm.service';
 import { ProfileSafetyService } from '../safety/profile-safety.service';
+import { ValidatorChanges } from '../validator/validator-marks.service';
 import { CollectionView } from './collection-view';
 
 const TAB: WorkspaceTab = {
@@ -1537,6 +1538,208 @@ describe('CollectionView', () => {
       fixture.componentRef.setInput('tab', { ...TAB, data: { ...TAB.data } });
       await settle();
       expect(q('explain-panel')).not.toBeNull();
+    });
+  });
+
+  describe('validator marks', () => {
+    const int = (n: number) => `{"$numberInt":"${n}"}`;
+    const ids = (from: number, n: number) =>
+      `[${Array.from({ length: n }, (_, i) => int(from + i)).join(',')}]`;
+    const checks = () =>
+      fake.requestsFor('coll.validator.check').map((r) => r.params as Record<string, unknown>);
+    const shownDocs = () => [...el().querySelectorAll<HTMLElement>('[data-testid="result-doc"]')];
+    const markedPositions = () =>
+      shownDocs().flatMap((doc, i) => (doc.dataset['invalid'] === 'true' ? [i + 1] : []));
+    /** Answers checks with these failing `_id`s (Int32), as the server would: only shown ones. */
+    const failing = (...numbers: number[]) =>
+      fake.handle('coll.validator.check', (p) => ({
+        invalid: `[${numbers
+          .filter((n) => p.ids.includes(int(n)))
+          .map(int)
+          .join(',')}]`,
+        hasValidator: true,
+      }));
+    const recheck = async () => {
+      TestBed.inject(ValidatorChanges).changed({ profileId: 'p1', db: 'shop', coll: 'orders' });
+      await settle();
+    };
+
+    it("checks the shown page's _ids against the collection's validator when opened", () => {
+      expect(checks()).toEqual([{ profileId: 'p1', db: 'shop', coll: 'orders', ids: ids(1, 50) }]);
+      expect(checks()[0]).not.toHaveProperty('validator');
+    });
+
+    it('marks the failing documents in the list view, and only those', async () => {
+      failing(2, 5);
+      await recheck();
+      click('view-list');
+      await settle();
+      expect(markedPositions()).toEqual([2, 5]);
+      const marked = shownDocs()[1];
+      expect(marked?.classList).toContain('invalid');
+      const tag = marked?.querySelector('[data-testid="doc-invalid"]');
+      expect(tag?.textContent?.trim()).toBe('Fails validator');
+      expect(tag?.getAttribute('title')).toContain('Unsaved edits are not checked');
+      expect(shownDocs()[0]?.querySelector('[data-testid="doc-invalid"]')).toBeNull();
+      expect(shownDocs()[0]?.hasAttribute('data-invalid')).toBe(false);
+      expect(get('validator-summary').textContent?.replace(/\s+/g, ' ').trim()).toBe(
+        '2 documents on this page fail the validator.',
+      );
+      // The list view already shows the marks: no link to it.
+      expect(get('validator-summary').querySelector('button')).toBeNull();
+    });
+
+    it('says "1 document … fails" for one failing document', async () => {
+      failing(7);
+      await recheck();
+      expect(get('validator-summary').textContent).toContain(
+        '1 document on this page fails the validator.',
+      );
+    });
+
+    it('the table view shows the summary with a link to the marked list', async () => {
+      failing(3);
+      await recheck();
+      expect(q('doc-invalid')).toBeNull();
+      const link = get('validator-summary').querySelector('button');
+      expect(link?.textContent?.trim()).toBe('Show them marked');
+      link?.click();
+      await settle();
+      expect(markedPositions()).toEqual([3]);
+    });
+
+    it('shows no summary and no marks when nothing fails or there is no validator', async () => {
+      failing();
+      await recheck();
+      click('view-list');
+      await settle();
+      expect(q('validator-summary')).toBeNull();
+      expect(markedPositions()).toEqual([]);
+
+      fake.respond('coll.validator.check', { invalid: '[]', hasValidator: false });
+      await recheck();
+      expect(q('validator-summary')).toBeNull();
+    });
+
+    it('checks the next page and marks its documents only', async () => {
+      failing(2, 52);
+      await recheck();
+      answer = () => docs(51, 50);
+      click('pager-next');
+      await settle();
+      expect(checks().at(-1)?.['ids']).toBe(ids(51, 50));
+      click('view-list');
+      await settle();
+      expect(markedPositions()).toEqual([2]);
+    });
+
+    it('checks again when the validator of this collection changes', async () => {
+      const before = checks().length;
+      failing(4);
+      await recheck();
+      expect(checks()).toHaveLength(before + 1);
+      expect(checks().at(-1)?.['ids']).toBe(ids(1, 50));
+      expect(get('validator-summary').textContent).toContain('1 document');
+    });
+
+    it("keeps this tab's marks when the validator of another collection changes", async () => {
+      failing(4);
+      await recheck();
+      const before = checks().length;
+      TestBed.inject(ValidatorChanges).changed({ profileId: 'p1', db: 'shop', coll: 'items' });
+      await settle();
+      // Another collection's change sends no check from this tab.
+      expect(checks()).toHaveLength(before);
+      expect(new Set(checks().map((c) => c['coll']))).toEqual(new Set(['orders']));
+      expect(get('validator-summary').textContent).toContain('1 document');
+    });
+
+    it('shows no marks when the check fails', async () => {
+      failing(2);
+      await recheck();
+      expect(q('validator-summary')).not.toBeNull();
+      fake.fail('coll.validator.check', { code: 'SERVER_ERROR', message: 'not authorized' });
+      await recheck();
+      click('view-list');
+      await settle();
+      expect(q('validator-summary')).toBeNull();
+      expect(markedPositions()).toEqual([]);
+      // The documents are still shown.
+      expect(shownDocs()).toHaveLength(50);
+    });
+
+    it('says why when the check fails, and drops the notice after a successful check', async () => {
+      failing();
+      await recheck();
+      expect(q('validator-check-error')).toBeNull();
+      fake.fail('coll.validator.check', { code: 'SERVER_ERROR', message: 'not authorized' });
+      await recheck();
+      const notice = get('validator-check-error');
+      const said = notice.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+      expect(said.startsWith('Could not check the documents against the validator: ')).toBe(true);
+      expect(said).toContain('not authorized');
+      expect(notice.getAttribute('role')).toBe('status');
+      expect(notice.classList).not.toContain('error');
+
+      failing(2);
+      await recheck();
+      expect(q('validator-check-error')).toBeNull();
+      expect(q('validator-summary')).not.toBeNull();
+    });
+
+    it('does not mark a document whose answer came for an older page', async () => {
+      let release!: () => void;
+      fake.handle(
+        'coll.validator.check',
+        () =>
+          new Promise((resolve) => {
+            release = () => resolve({ invalid: `[${int(2)}]`, hasValidator: true });
+          }),
+      );
+      await recheck();
+      const slow = release;
+      failing(53);
+      answer = () => docs(51, 50);
+      click('pager-next');
+      await settle();
+      slow();
+      await settle();
+      click('view-list');
+      await settle();
+      expect(markedPositions()).toEqual([3]);
+    });
+
+    it('closing the tab cancels a running check', async () => {
+      let checkId = '';
+      fake.handle('coll.validator.check', (_p, request) => {
+        checkId = request.id;
+        return new Promise(() => undefined);
+      });
+      await recheck();
+      expect(fake.cancels).not.toContain(checkId);
+      fixture.destroy();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(fake.cancels).toContain(checkId);
+    });
+
+    it('Validator… opens the validator tab of this collection, once', async () => {
+      const workspace = TestBed.inject(WorkspaceService);
+      fixture.componentRef.setInput('tab', { ...TAB, detail: 'Live / shop', production: true });
+      await settle();
+      click('open-validator');
+      await settle();
+      expect(workspace.active()).toEqual({
+        id: 'validator:p1:shop.orders',
+        kind: 'validator',
+        title: 'orders validator',
+        detail: 'Live / shop',
+        production: true,
+        data: { profileId: 'p1', db: 'shop', coll: 'orders', type: 'collection' },
+      });
+      expect(workspace.active()?.data).not.toBe(TAB.data);
+      click('open-validator');
+      await settle();
+      expect(workspace.tabs().filter((t) => t.kind === 'validator')).toHaveLength(1);
     });
   });
 });

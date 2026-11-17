@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "task": "conn-close-agg-io-streams",
+  "reviewed_revision": "629875828174acd6b4e57a6c056bda6af6d822f3",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/conn-close-agg-io-streams/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/conn-close-agg-io-streams/review.md"},
+    "fixer": {"status": "not_required", "reason": "no P0-P2 findings; the only finding (CR-1, P3) is outside the task's touches and accepted"}
+  },
+  "fixes_required": false,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "docs.find keeps its own copy of the streamOnConnection logic; file outside this task's touches, switch it to the helper when docs/query/handlers.ts changes next"}
+  ],
+  "validation": [
+    {"command": "npx vitest run --config test/integration/vitest.config.ts test/integration/agg.int.spec.ts", "result": "pass"},
+    {"command": "npx vitest run packages/backend/src/io/handlers.spec.ts packages/backend/src/agg/handlers.spec.ts packages/backend/src/connections/manager.spec.ts", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}

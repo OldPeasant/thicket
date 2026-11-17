@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "task": "validator",
+  "reviewed_revision": "fe8806d17f18079b4ed14fc8be5306b5bd5d8c82",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/validator/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/validator/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/validator/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "failing validator check now shows an error notice in the collection tab"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "unit tests added for backend validator/handlers and renderer model, marks service, view"},
+    {"id": "CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "save() guards on saving, dirty and read-only like the Save button"},
+    {"id": "CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "editor, selects and template button locked while saving"},
+    {"id": "CR-5", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "per-collection change signal; other tabs are not re-checked"},
+    {"id": "CR-6", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "stale check error stays only until the next non-empty page; cosmetic, reviewer marked optional"},
+    {"id": "CR-7", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "hasValidator signal unused in production; harmless, reviewer marked optional cleanup"}
+  ],
+  "validation": [
+    {"command": "cd packages/renderer && npx ng test --include='src/app/validator/**/*.spec.ts'", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}

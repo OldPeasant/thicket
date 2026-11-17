@@ -230,6 +230,14 @@
       <button
         type="button"
         class="btn quiet"
+        data-testid="open-validator"
+        (click)="openValidator()"
+      >
+        Validator…
+      </button>
+      <button
+        type="button"
+        class="btn quiet"
         data-testid="io-export"
         [attr.aria-pressed]="ioPanel() === 'export'"
         [disabled]="ioLocked()"
@@ -336,6 +344,19 @@
     } @else if (results.notice(); as notice) {
       <p class="message" data-testid="results-notice" role="status">{{ notice }}</p>
     }
+    @if (validator.error(); as e) {
+      <p class="message" data-testid="validator-check-error" role="status">
+        Could not check the documents against the validator: {{ e }}
+      </p>
+    }
+    @if (invalidText(); as invalid) {
+      <p class="message invalid" data-testid="validator-summary" role="status">
+        {{ invalid }}.
+        @if (view() === 'table') {
+          <button type="button" class="link" (click)="view.set('list')">Show them marked</button>
+        }
+      </p>
+    }
     @if (results.loading() && results.page() === null) {
       <p class="message" data-testid="results-loading">Loading documents…</p>
     }
@@ -375,7 +396,21 @@
             </div>
             <ol class="doc-list" [attr.start]="positionUnknown() ? null : page.firstRow + 1">
               @for (tree of explorerDocs(); track $index) {
-                <li class="doc" data-testid="result-doc">
+                @let failing = isInvalidAt($index);
+                <li
+                  class="doc"
+                  data-testid="result-doc"
+                  [class.invalid]="failing"
+                  [attr.data-invalid]="failing ? true : null"
+                >
+                  @if (failing) {
+                    <span
+                      class="invalid-mark"
+                      data-testid="doc-invalid"
+                      title="As stored on the server, this document fails the collection's validator. Unsaved edits are not checked."
+                      >Fails validator</span
+                    >
+                  }
                   @if (tree === null) {
                     <p class="message error">This document could not be read.</p>
                   } @else {

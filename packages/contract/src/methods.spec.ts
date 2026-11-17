@@ -182,6 +182,10 @@ const RESULTS: { [M in MethodName]: { valid: ResultOf<M>; invalid: unknown } } =
     },
   },
   'coll.validator.set': { valid: {}, invalid: null },
+  'coll.validator.check': {
+    valid: { invalid: '[]', hasValidator: true },
+    invalid: { invalid: '[]' },
+  },
 
   'docs.find': { valid: { streamId: 's1' }, invalid: { streamId: '' } },
   'docs.count': { valid: { count: 0 }, invalid: { count: -1 } },

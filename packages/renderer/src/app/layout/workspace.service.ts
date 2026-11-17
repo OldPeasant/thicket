@@ -1,7 +1,8 @@
 import { Injectable, computed, signal } from '@angular/core';
 
 /** What a workspace tab shows. Later tasks register a view per kind (`provideTabView`). */
-export type TabKind = 'collection' | 'aggregation' | 'indexes' | 'shell' | 'admin';
+export type TabKind =
+  'collection' | 'aggregation' | 'indexes' | 'validator' | 'shell' | 'admin' | 'users';
 
 /** One tab of the workspace. `id` is stable: opening a tab with a known id selects it instead. */
 export interface WorkspaceTab {

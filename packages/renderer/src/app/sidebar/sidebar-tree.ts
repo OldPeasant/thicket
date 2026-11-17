@@ -448,6 +448,11 @@ export class SidebarTree {
           run: () => this.tree.openShell(profileId, db),
         },
         {
+          id: 'users',
+          label: 'Users and roles',
+          run: () => this.tree.openUsers(profileId, db),
+        },
+        {
           id: 'create-coll',
           label: 'Create collection…',
           write: true,

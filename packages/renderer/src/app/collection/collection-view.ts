@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  DestroyRef,
   effect,
   ElementRef,
   inject,
@@ -57,6 +58,8 @@ import { TableOrientationService } from '../explorer/services/table-orientation.
 import { WorkspaceService, type WorkspaceTab } from '../layout/workspace.service';
 import { aggregationTabId } from '../aggregation/aggregation-view';
 import { indexesTabId } from '../indexes/indexes-view';
+import { ValidatorChanges, ValidatorMarks } from '../validator/validator-marks.service';
+import { validatorTabId } from '../validator/validator-view';
 import { RawEditor } from '../raw-editor/raw-editor';
 import { ProfileSafetyService } from '../safety/profile-safety.service';
 import type { CollectionTabData } from '../sidebar/sidebar-tree.service';
@@ -129,6 +132,7 @@ const numberFormat = new Intl.NumberFormat();
     ArraySliceService,
     SchemaService,
     TableOrientationService,
+    ValidatorMarks,
   ],
   templateUrl: './collection-view.html',
   styleUrl: './collection-view.css',
@@ -146,6 +150,17 @@ export class CollectionView {
   protected readonly display = inject(BsonDisplayService);
   private readonly api = inject(ApiService);
   private readonly slices = inject(ArraySliceService);
+  /** Which shown documents fail the collection's validator (checked by the server). */
+  protected readonly validator = inject(ValidatorMarks);
+  private readonly validatorChanges = inject(ValidatorChanges);
+  /** "2 documents on this page fail the validator", or `null` when none do. */
+  protected readonly invalidText = computed(() => {
+    const n = this.validator.invalid().size;
+    if (n === 0) return null;
+    return n === 1
+      ? '1 document on this page fails the validator'
+      : `${numberFormat.format(n)} documents on this page fail the validator`;
+  });
   protected readonly pageSizes = PAGE_SIZES;
   protected readonly labels = FIELD_LABELS;
 
@@ -365,6 +380,22 @@ export class CollectionView {
       this.results.pageLoads();
       untracked(() => pages.clear());
     });
+    // The shown documents are checked against the validator whenever the page changes (a saved
+    // document changes it too) or the validator was changed in its tab.
+    effect(() => {
+      const target = this.target();
+      this.validatorChanges.version(target);
+      const keys = this.docs().map((doc) => (doc === null ? null : documentKey(doc)));
+      untracked(() => void this.validator.check(target, keys));
+    });
+    inject(DestroyRef).onDestroy(() => this.validator.stop());
+  }
+
+  /** The document fails the collection's validator (as stored, without its unsaved edits). */
+  protected isInvalidAt(index: number): boolean {
+    const doc = this.docs()[index];
+    const key = doc ? documentKey(doc) : null;
+    return key !== null && this.validator.invalid().has(key);
   }
 
   protected edit(field: QueryField, event: Event): void {
@@ -562,6 +593,20 @@ export class CollectionView {
       id: indexesTabId(profileId, db, coll),
       kind: 'indexes',
       title: `${coll} indexes`,
+      detail: tab.detail,
+      production: tab.production,
+      data: { ...tab.data },
+    });
+  }
+
+  /** Opens the validator of this collection in its own tab. */
+  protected openValidator(): void {
+    const tab = this.tab();
+    const { profileId, db, coll } = this.target();
+    this.workspace.open({
+      id: validatorTabId(profileId, db, coll),
+      kind: 'validator',
+      title: `${coll} validator`,
       detail: tab.detail,
       production: tab.production,
       data: { ...tab.data },
