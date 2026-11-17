@@ -1,0 +1,84 @@
+{
+  "schema": 1,
+  "task": "multi-doc-edit",
+  "reviewed_revision": "94a6a096b17ab8f8bff8d0b10a22a7d17b7483ed",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/multi-doc-edit/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/multi-doc-edit/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/multi-doc-edit/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P1",
+      "disposition": "fixed",
+      "note": "batch report disappeared when a conflicting document was deleted on the server (same defect as TW-1)"
+    },
+    {
+      "id": "TW-1",
+      "source": "test-writer",
+      "severity": "Medium",
+      "disposition": "fixed",
+      "note": "report kept in MultiEdit.result; selection moves with removed rows"
+    },
+    {
+      "id": "CR-2",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "partialRefusal for unloaded fields under a projection and for cut arrays"
+    },
+    {
+      "id": "CR-3",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "select-all uses only the shown rows"
+    },
+    {
+      "id": "CR-4",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "invalid",
+      "note": "unit specs for approveAll, MultiEdit, the view and RowSelectionService existed at review time; round-2 review confirms"
+    },
+    {
+      "id": "CR-5",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "status live region always in the DOM"
+    },
+    {
+      "id": "CR-6",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "ARCHITECTURE.md describes multi-edit and approveAll"
+    },
+    {
+      "id": "TW-R2-1",
+      "source": "test-writer",
+      "severity": "Low",
+      "disposition": "accepted",
+      "note": "sub-field projection: setting the whole parent field reports a false conflict; safe (nothing overwritten), recorded as an assumption"
+    },
+    {
+      "id": "TW-R2-2",
+      "source": "test-writer",
+      "severity": "Low",
+      "disposition": "accepted",
+      "note": "unset through a non-document value on one row refuses the whole batch; deliberate, a refused batch sends nothing"
+    }
+  ],
+  "validation": [
+    {
+      "command": "cd packages/renderer && npx ng test --include='src/app/collection/multi-edit/**/*.spec.ts' --include='src/app/safety/write-guard.service.spec.ts' --include='src/app/explorer/services/row-selection.service.spec.ts'",
+      "result": "pass"
+    },
+    { "command": "npm run test:e2e -- test/e2e/multi-edit.e2e.ts --output=/tmp/me-out2", "result": "pass" },
+    { "command": "npm run check", "result": "pass" }
+  ]
+}
