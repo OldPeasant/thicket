@@ -762,6 +762,93 @@ describe('Editing documents in a collection tab', () => {
       expect(q('conflict-view')).toBeNull();
     });
 
+    // Round 4 (TW-3 fix): under a top-level projection addr is loaded whole, so a sub-field the
+    // server added to it is a server change the user is shown; Overwrite/Merge write the local
+    // version and unset it.
+    describe('under a top-level projection, with a sub-field the server added to a loaded field', () => {
+      const withAddr = (total: number, addr: string) =>
+        `{"_id":{"$numberInt":"1"},"total":{"$numberInt":"${total}"},"addr":${addr}}`;
+      const serverAddr = '{"city":"Bonn","street":"Hauptstr. 1"}';
+
+      beforeEach(async () => {
+        let streams = 400;
+        fake.handle('docs.find', () => {
+          const id = `s${++streams}`;
+          setTimeout(() => {
+            fake.data('docs.find', id, { docs: [withAddr(10, '{"city":"Bonn"}')] });
+            fake.end(id, { delivered: 1 });
+          });
+          return { streamId: id };
+        });
+        fake.respond('docs.get', { doc: withAddr(15, '{"city":"Bonn"}'), sliced: [] });
+        const projection = get<HTMLInputElement>('query-projection');
+        projection.value = '{ total: 1, addr: 1 }';
+        projection.dispatchEvent(new Event('input'));
+        await click('query-run');
+        fake.fail('docs.update', {
+          code: 'CONFLICT',
+          message: 'x',
+          detail: { current: withAddr(99, serverAddr) },
+        });
+        await typeInto(0, 'total', '15');
+        await click('edit-save');
+        fake.respond('docs.update', { modified: true });
+      });
+
+      it('shows the added sub-field on the server side and offers Overwrite and Merge', () => {
+        expect(text('conflict-title')).toBe('Changed on the server since you loaded it');
+        const server = rows()
+          .map((r) => text('conflict-server', r))
+          .join('\n');
+        expect(server).toMatch(/street: ['"]Hauptstr\. 1['"]/);
+        expect(text('conflict-note')).toMatch(
+          /^Only the fields loaded with the query's projection/,
+        );
+        expect(text('conflict-note')).not.toMatch(/not available/);
+        expect(q('conflict-overwrite')).not.toBeNull();
+        expect(q('conflict-merge')).not.toBeNull();
+      });
+
+      it('Overwrite writes the local version and unsets the sub-field', async () => {
+        await click('conflict-overwrite');
+        expect(updates()).toHaveLength(2);
+        const update = updates()[1];
+        expect(update?.['update']).toBe(
+          '{"$set":{"total":{"$numberInt":"15"}},"$unset":{"addr.street":""}}',
+        );
+        expect(String(update?.['expected'])).toContain('"total":{"$eq":{"$numberInt":"99"}}');
+        expect(fake.requestsFor('docs.replace')).toHaveLength(0);
+        expect(q('conflict-view')).toBeNull();
+        expect(q('edit-count')).toBeNull();
+        expect(text('edit-message')).not.toMatch(/projection|Not saved/);
+      });
+
+      it('Merge manually saves the merged text and unsets what it leaves out', async () => {
+        await click('conflict-merge');
+        const area = get<HTMLTextAreaElement>('conflict-merge-text');
+        expect(area.value).not.toContain('street');
+        await click('conflict-merge-save');
+        expect(updates()).toHaveLength(2);
+        expect(updates()[1]?.['update']).toBe(
+          '{"$set":{"total":{"$numberInt":"15"}},"$unset":{"addr.street":""}}',
+        );
+        expect(q('conflict-view')).toBeNull();
+        expect(text('edit-message')).not.toMatch(/projection|Not saved/);
+      });
+
+      it('Merge manually keeps a server sub-field the user types into the merge', async () => {
+        await click('conflict-merge');
+        const area = get<HTMLTextAreaElement>('conflict-merge-text');
+        area.value = `{ _id: 1, total: 15, addr: { city: 'Bonn', street: 'Hauptstr. 1' } }`;
+        area.dispatchEvent(new Event('input'));
+        await settle();
+        await click('conflict-merge-save');
+        expect(updates()).toHaveLength(2);
+        expect(updates()[1]?.['update']).toBe('{"$set":{"total":{"$numberInt":"15"}}}');
+        expect(q('conflict-view')).toBeNull();
+      });
+    });
+
     it('with a projection shows the whole server version once every edit was undone', async () => {
       const projection = get<HTMLInputElement>('query-projection');
       projection.value = '{ total: 1, qty: 1 }';

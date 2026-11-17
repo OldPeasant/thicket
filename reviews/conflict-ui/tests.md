@@ -7,7 +7,8 @@ Task: conflict-ui - M1: Conflict resolution view
 Scope: base `2a62fc45bc886a9153dc8258561d921c397d2606` .. HEAD `cded8c146d2008bc904fffd938fab0a354f6977c` on `main`
 (task commits `98ddde500dbbddaff55bcb61048d36886cfc213d`, `cded8c146d2008bc904fffd938fab0a354f6977c`, supplied by the
 parent worker), plus the uncommitted test changes listed below. Production files at HEAD were verified unchanged
-(`git diff --quiet HEAD -- <production files>` -> exit 0).
+(`git diff --quiet HEAD -- packages/renderer/src/app/document/conflict packages/renderer/src/app/document/document-actions.service.ts packages/renderer/src/app/document/edit-session.ts packages/renderer/src/app/document/index.ts packages/renderer/src/app/collection/collection-view.ts packages/renderer/src/app/collection/collection-view.html`
+-> exit 0).
 
 Requirements:
 - `tasks/conflict-ui.md` acceptance criteria and its two recorded assumptions (Overwrite semantics, Merge manually
@@ -160,7 +161,8 @@ Changed-line coverage: not measured (the tooling has no changed-line mode; not r
 Evidence:
 - Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: `conflict-ui`, base
   `2a62fc45bc886a9153dc8258561d921c397d2606`, HEAD `cded8c146d2008bc904fffd938fab0a354f6977c`, task commits
-  `98ddde5`, `cded8c1` supplied by the parent; file list from `git diff --stat <base>..HEAD`.
+  `98ddde5`, `cded8c1` supplied by the parent; file list from
+  `git diff --stat 2a62fc45bc886a9153dc8258561d921c397d2606..cded8c146d2008bc904fffd938fab0a354f6977c`.
 - Source/test snapshot identifier (including uncommitted inputs): production files equal HEAD; uncommitted test files
   sha256: `edit-session.spec.ts` 3f3d0a6a4d40..., `document-actions.service.spec.ts` e7343dcb3ff7...,
   `document-editing.spec.ts` 70879570777a..., `conflict/line-diff.spec.ts` b2a20788441b... (hashed before and after
@@ -173,7 +175,8 @@ Evidence:
   (test code). No renamed or deleted files.
 - Provider/version, command, working directory, and test selection: Vitest 5.1.0 with v8 coverage via Angular
   `ng test`; working directory `packages/renderer`; command
-  `npx ng test --coverage --coverage-reporters=text --coverage-reporters=json-summary --coverage-reporters=json --filter='^(?!.*does not claim the document was deleted).*$' --include='src/app/document/**/*.spec.ts' --include='src/app/collection/**/*.spec.ts' --coverage-include=<each file above>`;
+  `npx ng test --coverage --coverage-reporters=text --coverage-reporters=json-summary --coverage-reporters=json --filter='^(?!.*does not claim the document was deleted).*$' --include='src/app/document/**/*.spec.ts' --include='src/app/collection/**/*.spec.ts' --coverage-include='src/app/document/conflict/conflict-view.ts' --coverage-include='src/app/document/conflict/line-diff.ts' --coverage-include='src/app/document/conflict/index.ts' --coverage-include='src/app/document/document-actions.service.ts' --coverage-include='src/app/document/edit-session.ts' --coverage-include='src/app/document/index.ts' --coverage-include='src/app/collection/collection-view.ts'`
+  (one `--coverage-include` per included file listed above);
   selection: 9 spec files, 279 tests run, 1 skipped by the filter (TW-1).
 - Run start/completion time and exit status: started 2026-11-17 02:11:27 +0100, duration 5.02s, exit 0.
 - Generated report paths and report hashes/run identifier: `packages/renderer/coverage/renderer/coverage-summary.json`
@@ -689,3 +692,199 @@ Tests added and all validation passed. TW-2 fix verified: both `edits.edit(` cal
 rebase and later edits, and legitimate plain Saves, Overwrites and Merges of partial documents still unset loaded
 fields. One Low observation (TW-3) needs a parent decision: under a top-level projection, Overwrite/Merge are offered
 but refused when the server added a sub-field to a field the user loaded in full.
+
+---
+
+# Round 4 (on the TW-3 fix)
+
+Date: 2026-11-17
+
+Task: conflict-ui - M1: Conflict resolution view (test-writer round 4, on the final code after the TW-3 fix)
+
+Scope: the task's commits `18731a9`, `58079e8`, `409217e`, `de37747`, `d43641b`, `a3fb370`, `3859765`, `5bb379c`
+(TW-3 fix) = `git log --no-merges 725f8f11ea280f6c3dfcbaedd253659eb2f50cf1..5bb379c7bea6a6c5d012c22117ea518d7767c68a
+-- packages/renderer` (the only merge in that range, `c04fbe9`, brings in `origin/main` and does not touch the
+renderer files below). Original task base `725f8f11ea280f6c3dfcbaedd253659eb2f50cf1`; measured HEAD
+`5bb379c7bea6a6c5d012c22117ea518d7767c68a` on `main` (current `git merge-base HEAD origin/main` is
+`b543ae63d3c885385323da59662cfd77fcc876b7`, after the task merged main). Plus uncommitted test changes in the two
+spec files below; no production file is modified in the working tree.
+
+Requirements:
+- `tasks/conflict-ui.md` acceptance criteria and its three recorded assumptions (assumption 1: Overwrite's result
+  equals the local version, fields only the server has are unset; assumption 2: under a projection only the top-level
+  fields the user loaded/edited are considered, hidden fields are neither shown nor unset; assumption 3: Overwrite and
+  Merge only under a projection of whole top-level fields)
+- TW-3 (round 3 above) and the round-3 section of `reviews/conflict-ui/fixes.md`; parent's round-4 brief (top-level
+  projection: Overwrite/Merge unset server-only sub-fields of loaded fields, also through the real collection view;
+  flagged `hidesSubFields` entries still refused)
+- `docs/ARCHITECTURE.md` "Coverage", `docs/QUALITY.md`, `AGENTS.md`
+
+## Test files changed (round 4)
+
+- `packages/renderer/src/app/document/document-editing.spec.ts`
+- `packages/renderer/src/app/document/document-actions.service.spec.ts`
+
+## Tests added or updated (round 4)
+
+Count: 10 test cases added (0 existing tests changed or removed).
+
+`document-editing.spec.ts`, "conflict view", new block "under a top-level projection, with a sub-field the server
+added to a loaded field" (real `CollectionView`, tree edit; the round-3 probe scenario: page loaded with
+`{ total: 1, addr: 1 }` returning `addr: {city: "Bonn"}`, total edited to 15, Save -> CONFLICT whose server version is
+`total: 99, addr: {city: "Bonn", street: "Hauptstr. 1"}`):
+- "shows the added sub-field on the server side and offers Overwrite and Merge" (server column shows `street`; the
+  note is the informational "Only the fields loaded with the query's projection are compared ...", not "not
+  available")
+- "Overwrite writes the local version and unsets the sub-field" (second `docs.update` is
+  `{"$set":{"total":15},"$unset":{"addr.street":""}}` with total 99 in `expected`; no `docs.replace`; conflict view
+  and edit bar closed; no "Not saved"/projection message)
+- "Merge manually saves the merged text and unsets what it leaves out" (prefilled text has no `street`; same update)
+- "Merge manually keeps a server sub-field the user types into the merge" (only `$set total`)
+
+`document-actions.service.spec.ts`, new block "TW-3: server-only sub-fields of loaded fields":
+- "Overwrite under a top-level exclusion projection unsets the sub-field, not the hidden field" (`{note: 0}`; the
+  server's hidden `note` is neither unset nor in `expected`)
+- "an Overwrite that unsets the sub-field and meets a newer server change conflicts again" (edits kept, conflict
+  updated to the newer server version, Overwrite still offered)
+- `it.each` x2 "a flagged entry is still refused with a top-level projection / no projection active now, and nothing
+  is sent" (Overwrite and Merge refused, `resolveBlocker` is `'projection'`, flag kept)
+- "a plain Save of a flagged entry still writes its loaded sub-field edit" (the narrowed check does not block a
+  legitimate Save)
+
+Existing tests covering the fix, re-run: the fixer's `it.each` "%s under a top-level projection unsets a sub-field the
+server added to a loaded field" (service, overwrite and merge), the TW-2 service/UI tests with flagged entries, and the
+round-3 undo/redo and raw-editor tests.
+
+## Requirement coverage (round 4)
+
+| Requirement | Tests | Command | Result |
+|---|---|---|---|
+| AC1: e2e reproduces demo step 7 (external change between load and save -> conflict view) | `test/e2e/conflict.e2e.ts` test 1 (unchanged) | `npm run test:e2e -- test/e2e/conflict.e2e.ts` (repo root, Electron app + MongoDB container) | Pass (2 passed, 4.2s) |
+| AC2: Overwrite writes the local version; Keep server discards local edits; Merge saves the merged doc | existing service/UI tests, e2e tests 1 and 2, round-4 UI Overwrite/Merge tests | focused renderer command below; e2e command above | Pass |
+| TW-3 fix: top-level projection, Overwrite unsets a server-only sub-field of a loaded field (service and real collection view) | fixer's service `it.each` (overwrite), round-4 UI "Overwrite writes the local version and unsets the sub-field", round-4 exclusion-projection test | focused renderer command below | Pass |
+| TW-3 fix: same for Merge manually | fixer's service `it.each` (merge), round-4 UI merge tests (2) | focused renderer command below | Pass |
+| TW-3 fix: a newer server change still conflicts again | round-4 "an Overwrite that unsets the sub-field and meets a newer server change conflicts again" | focused renderer command below | Pass |
+| Flagged (`hidesSubFields`) entries still refused | round-4 `it.each` x2, TW-2 service and UI tests, round-3 undo/redo and raw-editor tests | focused renderer command below | Pass |
+| Legitimate saves not blocked | round-4 "a plain Save of a flagged entry ...", round-3 safety-net block | focused renderer command below | Pass |
+
+## Focused test execution (round 4)
+
+Command:
+
+`cd packages/renderer && npx ng test --include='src/app/document/**/*.spec.ts' --include='src/app/collection/**/*.spec.ts' --include='src/app/raw-editor/**/*.spec.ts'`
+
+Result:
+
+Pass: 13 files, 693 tests (started 02:49:58). That run preceded `prettier --write` on `document-editing.spec.ts`
+(whitespace only); the coverage run below used the same selection on the formatted file: 13 files, 693 passed.
+
+## Full test execution (round 4)
+
+Command:
+
+`npm run check` (repo root)
+
+Result:
+
+Pass: eslint (`--max-warnings 0`), prettier `--check` ("All matched files use Prettier code style!"), typecheck, root
+vitest 55 files / 3264 tests, renderer `ng test` 72 files / 2154 tests. (The first attempt failed at
+`prettier --check` on the new `document-editing.spec.ts`; fixed with `npx prettier --write` on the two spec files,
+then re-run.)
+
+E2E: `npm run test:e2e -- test/e2e/conflict.e2e.ts` - Pass, 2 passed (4.2s): "external change between load and save
+shows the conflict view; Overwrite writes the local version" and "Keep server version discards the edits; Merge
+manually saves the merged document".
+
+## .taskcheck (round 4)
+
+Result:
+
+Pass (`.taskcheck` runs `npm run check`; same run as above, not invoked separately).
+
+## Bugs found (round 4)
+
+None; no failing test. TW-3 is resolved: under `{ total: 1, addr: 1 }` the conflict view offers Overwrite and Merge,
+and both write the local version (unsetting `addr.street`) through the real `CollectionView`.
+
+### Observations (no failing test; not defects against a stated requirement)
+
+- O-R4-1 (Low, maintainability): after the TW-3 fix the "unset of an unloaded path" check can no longer refuse
+  anything. In `resolveWith` (`document-actions.service.ts:277`) the `hidesSubFields ? entry.original` arm is
+  unreachable because `refuseResolve` returns `'projection'` for every flagged entry before `send` (flagged implies
+  partial); coverage shows 0 hits on that arm across 693 tests. In `save` (`:113-120`) `loaded` is `entry.original`,
+  and a diff from `entry.original` only unsets paths `entry.original` has, so `unsetsUnloaded` is false for every
+  diff `save` can produce. The check is inert defense in depth; behavior matches the assumptions. The parent may keep
+  it (documented as such) or remove it; no test depends on either choice.
+
+## Coverage (round 4)
+
+Status: verified.
+
+Metric: whole-file coverage of task-changed production files.
+Changed-line coverage: not measured (the tooling has no changed-line mode; not reconstructed by hand). The lines
+changed by `5bb379c` in `document-actions.service.ts` (`save`'s `send` call `:113-120`, `resolveWith`'s `send` call
+`:271-278`, `send`'s condition `:311-315`) have no uncovered statement; one branch arm on them is uncovered (`:277`,
+see O-R4-1).
+
+Evidence:
+- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: `conflict-ui`, base
+  `725f8f11ea280f6c3dfcbaedd253659eb2f50cf1`, HEAD `5bb379c7bea6a6c5d012c22117ea518d7767c68a`, task commits as in
+  "Scope" (supplied by the parent, cross-checked with `git log --no-merges 725f8f1..HEAD -- packages/renderer`); file
+  list from `git log --no-merges --name-only --format= 725f8f1..HEAD -- 'packages/renderer/src/**'` minus specs.
+- Source/test snapshot identifier (including uncommitted inputs): production files equal HEAD; uncommitted spec files
+  sha256 `document-editing.spec.ts` 955cf767073c... (formatted), `document-actions.service.spec.ts` a625bd280770...
+  (hashed after the coverage run; identical to the content `npm run check` and the e2e run used).
+- Exact included files (relative to `packages/renderer`): `src/app/collection/collection-view.ts`,
+  `src/app/document/conflict/conflict-view.ts`, `src/app/document/conflict/index.ts`,
+  `src/app/document/conflict/line-diff.ts`, `src/app/document/document-actions.service.ts`,
+  `src/app/document/edit-session.ts`, `src/app/document/index.ts`, `src/app/raw-editor/raw-editor.ts`. Excluded:
+  `src/app/collection/collection-view.html` (template, not instrumented separately; exercised by the UI tests), spec
+  files and `test/e2e/conflict.e2e.ts` (test code). No renamed or deleted files.
+- Provider/version, command, working directory, and test selection: Vitest 5.1.0 with `@vitest/coverage-v8` (v8) via
+  Angular `ng test`, Node v24.21.0; working directory `packages/renderer`; command
+  `npx ng test --coverage --coverage-reporters=text --coverage-reporters=json-summary --coverage-reporters=json --include='src/app/document/**/*.spec.ts' --include='src/app/collection/**/*.spec.ts' --include='src/app/raw-editor/**/*.spec.ts' --coverage-include='src/app/collection/collection-view.ts' --coverage-include='src/app/document/conflict/conflict-view.ts' --coverage-include='src/app/document/conflict/index.ts' --coverage-include='src/app/document/conflict/line-diff.ts' --coverage-include='src/app/document/document-actions.service.ts' --coverage-include='src/app/document/edit-session.ts' --coverage-include='src/app/document/index.ts' --coverage-include='src/app/raw-editor/raw-editor.ts'`;
+  selection: 13 spec files, 693 tests, none skipped or filtered.
+- Run start/completion time and exit status: started 2026-11-17 02:51:50 +0100, completed 02:52:07 +0100, all 693
+  tests passed, report written.
+- Generated report paths and report hashes/run identifier: `packages/renderer/coverage/renderer/coverage-summary.json`
+  (sha256 b495bb925cb1...), `packages/renderer/coverage/renderer/coverage-final.json` (sha256 e50755349ddd...), both
+  written 02:52:07 by this run (git-ignored).
+- Evidence outputs are fresh and inputs stayed unchanged: yes.
+- Final run after latest test additions and production fixes: yes (after all round-4 tests, on the TW-3 fix `5bb379c`).
+
+Values below use covered/total (percentage); zero-denominator metrics are N/A.
+
+| Changed file | Statements | Branches | Functions | Lines |
+|---|---:|---:|---:|---:|
+| `src/app/collection/collection-view.ts` | 200/207 (96.6%) | 109/128 (85.2%) | 59/60 (98.3%) | 168/168 (100%) |
+| `src/app/document/conflict/conflict-view.ts` | 171/174 (98.3%) | 96/99 (97.0%) | 24/24 (100%) | 126/127 (99.2%) |
+| `src/app/document/conflict/index.ts` | N/A (0/0) | N/A | N/A | N/A |
+| `src/app/document/conflict/line-diff.ts` | 62/62 (100%) | 28/28 (100%) | 5/5 (100%) | 51/51 (100%) |
+| `src/app/document/document-actions.service.ts` | 261/265 (98.5%) | 151/156 (96.8%) | 64/65 (98.5%) | 217/218 (99.5%) |
+| `src/app/document/edit-session.ts` | 101/101 (100%) | 44/45 (97.8%) | 33/33 (100%) | 74/74 (100%) |
+| `src/app/document/index.ts` | N/A (0/0) | N/A | N/A | N/A |
+| `src/app/raw-editor/raw-editor.ts` | 168/169 (99.4%) | 61/61 (100%) | 28/29 (96.6%) | 142/142 (100%) |
+| Aggregate (summed counters, all 8 files; `collection-view.html` excluded) | 963/978 (98.5%) | 489/517 (94.6%) | 213/216 (98.6%) | 778/780 (99.7%) |
+
+| File and uncovered lines/branch locations | Required behavior or risk | Action/test added or reason left uncovered |
+|---|---|---|
+| `document-actions.service.ts:277` (cond-expr, `hidesSubFields` arm in `resolveWith`) | flagged entry reaching `send` from Overwrite/Merge | Unreachable: `refuseResolve` refuses flagged entries first (the round-4 `it.each` proves the refusal). Observation O-R4-1. |
+| `document-actions.service.ts:100`, `:168`, `:304`, `:547`, `:571` | `clearMessage`, unreachable `saveMerged` arm, `send` without `_id`, `diff.kind === 'none'`, `hasPath` through a non-object | Same justification as rounds 2-3 (line numbers shifted by the TW-3 fix). |
+| `conflict-view.ts:446` and branches at `:382`, `:387`, `:408` | as in round 2 | Unchanged justification from round 2. |
+| `edit-session.ts:212`, `raw-editor.ts:133` | non-`Error` throw in `pendingSave`; `viewChild` initializer | Unchanged justification from round 3. |
+| `collection-view.ts` branches at 154-218, 267, 275, 349, 388-413, 428 | paging/query code and defensive arms | Not changed in this round; unchanged justification from round 3. |
+
+## Unable to test (round 4)
+
+- Nothing required was left unrun: component/service tests, `npm run check` and the e2e test against the Electron app
+  and a MongoDB container all ran. The e2e test uses no projection, so the TW-3 path is covered by component tests
+  through the real `CollectionView` only.
+- Changed-line coverage was not measured (no tool support).
+
+## Summary (round 4)
+
+Tests added and all validation passed. TW-3 fix verified: under a top-level-only projection, Overwrite and Merge
+manually unset server-only sub-fields of loaded fields (service and real collection view, inclusion and exclusion
+projections), a newer server change still conflicts again, and entries flagged `hidesSubFields` are still refused with
+any projection active now. No production defects found; one Low maintainability observation (O-R4-1: the
+unset-of-unloaded-path check is now unreachable) for the parent's discretion.

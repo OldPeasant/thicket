@@ -1147,6 +1147,77 @@ describe('DocumentActions', () => {
       expect(String(update?.['update'])).toContain('"$unset":{"addr.street":""}');
     });
 
+    // Round 4 (TW-3 fix): the unset of server-only sub-fields applies only to entries without
+    // hidesSubFields; flagged entries stay refused whatever projection is active now.
+    describe('TW-3: server-only sub-fields of loaded fields', () => {
+      const conflictOn = async (doc: BsonDocument, current: string, hides = false) => {
+        fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current } });
+        edits.edit(addrLoaded, doc, true, hides);
+        expect(await actions.save(keyOf(1))).toBe(false);
+        fake.respond('docs.update', { modified: true });
+        fake.requests.length = 0;
+      };
+
+      it('Overwrite under a top-level exclusion projection unsets the sub-field, not the hidden field', async () => {
+        projection = '{"note":{"$numberInt":"0"}}';
+        await conflictOn(
+          addrEdited,
+          '{"_id":{"$numberInt":"1"},"note":"hidden","addr":{"city":"Köln","street":"Hauptstr. 1"}}',
+        );
+        expect(actions.resolveBlocker(keyOf(1))).toBeNull();
+        expect(await actions.overwrite(keyOf(1))).toBe(true);
+        const [update] = params('docs.update');
+        expect(update?.['update']).toBe(
+          '{"$set":{"addr.city":"Berlin"},"$unset":{"addr.street":""}}',
+        );
+        expect(String(update?.['expected'])).not.toContain('note');
+      });
+
+      it('an Overwrite that unsets the sub-field and meets a newer server change conflicts again', async () => {
+        projection = '{"addr":{"$numberInt":"1"}}';
+        await conflictOn(addrEdited, addrServer);
+        const newer = '{"_id":{"$numberInt":"1"},"addr":{"city":"Ulm","street":"Hauptstr. 2"}}';
+        fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: newer } });
+        expect(await actions.overwrite(keyOf(1))).toBe(false);
+        const [update] = params('docs.update');
+        expect(String(update?.['update'])).toContain('"$unset":{"addr.street":""}');
+        expect(String(update?.['expected'])).toContain('Hauptstr. 1');
+        expect(edits.get(keyOf(1))?.current).toBe(addrEdited);
+        const street = actions
+          .conflicts()
+          .get(keyOf(1))
+          ?.current?.fields.find((f) => f.key === 'addr');
+        expect(JSON.stringify(street)).toContain('Hauptstr. 2');
+        expect(actions.resolveBlocker(keyOf(1))).toBeNull();
+      });
+
+      it.each([
+        ['a top-level projection', '{"addr":{"$numberInt":"1"}}'],
+        ['no projection', undefined],
+      ])(
+        'a flagged entry is still refused with %s active now, and nothing is sent',
+        async (_name, now) => {
+          projection = '{"addr.city":{"$numberInt":"1"}}';
+          await conflictOn(addrEdited, addrServer, true);
+          projection = now;
+          expect(actions.resolveBlocker(keyOf(1))).toBe('projection');
+          expect(await actions.overwrite(keyOf(1))).toBe(false);
+          expect(await actions.saveMerged(keyOf(1), addrEdited)).toBe(false);
+          expect(fake.requests).toHaveLength(0);
+          expect(actions.message()?.text).toMatch(/hides parts of fields/);
+          expect(edits.get(keyOf(1))?.hidesSubFields).toBe(true);
+        },
+      );
+
+      it('a plain Save of a flagged entry still writes its loaded sub-field edit', async () => {
+        projection = '{"addr.city":{"$numberInt":"1"}}';
+        edits.edit(addrLoaded, addrEdited, true, true);
+        expect(await actions.save(keyOf(1))).toBe(true);
+        const [update] = params('docs.update');
+        expect(update?.['update']).toBe('{"$set":{"addr.city":"Berlin"}}');
+      });
+    });
+
     // Round 3: the unset safety net must not block legitimate writes of partial documents.
     describe('the unset safety net lets legitimate writes through', () => {
       const full = parseEJsonDocument(
