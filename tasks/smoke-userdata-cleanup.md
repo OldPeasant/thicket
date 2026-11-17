@@ -1,0 +1,18 @@
+---
+title: Release: Linux smoke test fails removing the app's user-data folder
+status: todo
+owner:
+deps: []
+touches: [test/e2e/smoke]
+prio: 1
+---
+## Goal
+Release run 44136477833 (tag v0.1.0-rc.2, 2026-11-17) failed in the "Smoke test installer" step on linux-x64 and linux-arm64; win-x64 passed. Both AppImage smoke tests in `test/e2e/smoke/installer.smoke.ts` fail in teardown, not in the test body: `ENOTEMPTY: directory not empty, rmdir '/tmp/thicket-smoke-userdata-…/Cache'` from the `userDataDir` fixture's `rm(dir, { recursive: true, force: true })`. The app (likely Chromium child processes started through the AppImage runtime, which outlive the process Playwright closes) still writes into the folder while it is removed. Make teardown reliable: make sure the whole app process tree has exited before removing the folder (wait for exit, kill the process group if needed), and remove with retries (`maxRetries`/`retryDelay`) as a second line of defence. Check whether `test/e2e/harness` has the same pattern and fix it there too if so. Logs: `gh run view 44136477833 --log-failed`.
+
+## Acceptance criteria
+- [ ] Reproduce locally: run the smoke suite against a locally built AppImage (`npm run dist -w apps/desktop -- --linux AppImage`, then the smoke command the release workflow uses, headless) several times (e.g. 10 runs): record failures before and none after the fix
+- [ ] A release-like run on GitHub passes the Linux smoke step: the `bundle` job in check.yml or the smoke step on this task's `wip/` branch, if one runs it; otherwise skip with reason and a human checks the next tag
+- [ ] `npm run check` passes
+
+## Notes
+See SPEC.md and docs/ARCHITECTURE.md.
