@@ -4,7 +4,7 @@
  * loader electron-builder already uses for electron-builder.yml (app-builder-lib, a dependency of
  * the declared electron-builder devDependency, as in packaging.spec.ts), so no new dependency is
  * needed. The `run:` scripts of the build steps are extracted and run with bash the way GitHub
- * runs them (`bash --noprofile --norc -eo pipefail`) against fake files and a fake `npm`.
+ * runs them (`bash --noprofile --norc -eo pipefail`) against fake files and a fake `npm`/`npx`.
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -41,6 +41,7 @@ interface Step {
 
 interface Job {
   needs?: string | string[];
+  permissions?: Record<string, string>;
   'timeout-minutes'?: number | string;
   strategy?: { matrix?: { include?: Record<string, string | number>[] } };
   steps: Step[];
@@ -196,9 +197,10 @@ describe('release.yml: Windows signing steps', () => {
 
   it('builds the installer from the folder SignPath writes the signed app to', () => {
     const signedDir = step(build, 'Sign app (SignPath)').with?.['output-artifact-directory'];
-    const run = step(build, 'Build installer and zip from the signed app').run ?? '';
-    const prepackaged = /--prepackaged (\S+)/.exec(run)?.[1];
-    // npm -w apps/desktop runs electron-builder in apps/desktop.
+    const packaging = step(build, 'Build installer and zip from the signed app');
+    const prepackaged = /--prepackaged (\S+)/.exec(packaging.run ?? '')?.[1];
+    // electron-builder runs in the step's working directory, apps/desktop.
+    expect(packaging['working-directory']).toBe('apps/desktop');
     expect(posix.join('apps/desktop', prepackaged ?? '')).toBe(signedDir);
     // The signed installer is copied over the unsigned one from that same release/ folder.
     const signedInstallerDir = step(build, 'Sign installer (SignPath)').with?.[
@@ -219,6 +221,11 @@ describe('release.yml: Windows signing steps', () => {
     for (const entry of build.strategy?.matrix?.include ?? []) {
       if (entry.name !== 'win-x64') expect(entry.timeout, String(entry.name)).toBeUndefined();
     }
+  });
+
+  it('lets the build job token read the uploaded artifacts for SignPath, nothing more', () => {
+    // Job-level permissions replace the workflow-level ones, so contents: read is listed again.
+    expect(build.permissions).toEqual({ contents: 'read', actions: 'read' });
   });
 
   it('passes the SignPath token only to the signing check and the SignPath action', () => {
@@ -313,13 +320,16 @@ describe.skipIf(process.platform === 'win32')('release.yml run scripts (bash)', 
     scripts = mkdtempSync(join(tmpdir(), 'thicket-release-scripts-'));
     bin = join(scripts, 'bin');
     mkdirSync(bin);
-    // Fake npm: writes each argument as [arg] on its own line, so empty arguments show up.
-    const npm = join(bin, 'npm');
-    writeFileSync(
-      npm,
-      '#!/bin/sh\nfor a in "$@"; do printf \'[%s]\\n\' "$a"; done > "$NPM_ARGS"\n',
-    );
-    chmodSync(npm, 0o755);
+    // Fake npm and npx: write each argument as [arg] on its own line (empty arguments show up),
+    // the command name first.
+    for (const command of ['npm', 'npx']) {
+      const fake = join(bin, command);
+      writeFileSync(
+        fake,
+        `#!/bin/sh\n{ printf '%s\\n' ${command}; for a in "$@"; do printf '[%s]\\n' "$a"; done; } > "$NPM_ARGS"\n`,
+      );
+      chmodSync(fake, 0o755);
+    }
   });
   afterEach(() => {
     rmSync(work, { recursive: true, force: true });
@@ -337,17 +347,22 @@ describe.skipIf(process.platform === 'win32')('release.yml run scripts (bash)', 
     });
   }
 
+  /** The command line (command name, then [arg] per argument) a build step runs, in its working directory. */
   function npmArgs(name: string, env: Record<string, string>) {
     const argsFile = join(scripts, 'npm-args');
-    const result = runStep(build, name, { ...env, NPM_ARGS: argsFile });
+    const cwd = join(work, step(build, name)['working-directory'] ?? '.');
+    mkdirSync(cwd, { recursive: true });
+    const result = runStep(build, name, { ...env, NPM_ARGS: argsFile }, cwd);
     expect(result.status, result.stderr).toBe(0);
     return readFileSync(argsFile, 'utf8').trim().split('\n');
   }
 
-  const before = (args: string[]) =>
-    ['run', 'dist', '-w', 'apps/desktop', '--', ...args, '-c.extraMetadata.version=1.2.3'].map(
+  const before = (args: string[]) => [
+    'npm',
+    ...['run', 'dist', '-w', 'apps/desktop', '--', ...args, '-c.extraMetadata.version=1.2.3'].map(
       (a) => `[${a}]`,
-    );
+    ),
+  ];
 
   describe('Build installers', () => {
     it.each([
@@ -370,12 +385,34 @@ describe.skipIf(process.platform === 'win32')('release.yml run scripts (bash)', 
     });
   });
 
-  it('builds the installer and zip from the signed folder with the tag version', () => {
+  it('builds the installer and zip from the signed folder with the tag version, without rebuilding', () => {
     const args = npmArgs('Build installer and zip from the signed app', {
       TAG: 'v1.2.3',
       ARGS: '--win --x64',
     });
-    expect(args).toEqual(before(['--win', '--x64', '--prepackaged', 'release/win-signed']));
+    // electron-builder only (no renderer or bundle rebuild).
+    expect(args).toEqual([
+      'npx',
+      ...[
+        'electron-builder',
+        '--config',
+        'electron-builder.yml',
+        '--publish',
+        'never',
+        '--win',
+        '--x64',
+        '--prepackaged',
+        'release/win-signed',
+        '-c.extraMetadata.version=1.2.3',
+      ].map((a) => `[${a}]`),
+    ]);
+    // The same electron-builder options as the dist script (config, never publish).
+    const pkg = JSON.parse(readFileSync(join(desktopDir, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    expect(pkg.scripts.dist).toContain(
+      'electron-builder --config electron-builder.yml --publish never',
+    );
   });
 
   describe('Use signed installer', () => {

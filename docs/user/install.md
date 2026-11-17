@@ -8,8 +8,8 @@ checksums. In the file names below, `<version>` is the release version without t
 The macOS builds are **not code-signed yet** (no Apple Developer ID), so macOS warns the first
 time you open Thicket. Windows builds are signed from the first signed release on (publisher
 "SignPath Foundation", see [code signing](../CODE_SIGNING.md)); older Windows releases are
-unsigned, and Windows warns about them. The steps for each system below show how to open it anyway. Only do this for files downloaded from the official
-releases page whose checksum matches.
+unsigned, and Windows warns about them. The steps for each system below show how to open it
+anyway. Only do this for files downloaded from the official releases page whose checksum matches.
 
 - [Check the download](#check-the-download)
 - [Linux](#linux): [AppImage](#appimage-any-distribution), [Debian and Ubuntu](#debian-and-ubuntu-deb),

@@ -44,6 +44,11 @@ jobs:
             timeout: 150
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ matrix.timeout || 45 }}
+    # Job-level permissions replace the workflow-level block. actions: read lets the SignPath
+    # action read the uploaded artifact (and the run details) through the job token.
+    permissions:
+      contents: read
+      actions: read
     defaults:
       run:
         shell: bash
@@ -126,8 +131,10 @@ jobs:
 
       # --prepackaged: package the signed folder as is (no repacking, no fuse or resource edits),
       # so the zip and the app inside the installer hold the signed Thicket.exe. Same file names.
+      # electron-builder only (not `npm run dist`): the renderer and bundles are already in the app.
       - name: Build installer and zip from the signed app
         if: steps.signing.outputs.enabled == 'true'
+        working-directory: apps/desktop
         env:
           TAG: ${{ github.ref_name }}
           ARGS: ${{ matrix.args }}
@@ -135,7 +142,8 @@ jobs:
         run: |
           version="${TAG#v}"
           # shellcheck disable=SC2086 # ARGS holds several flags
-          npm run dist -w apps/desktop -- $ARGS --prepackaged release/win-signed "-c.extraMetadata.version=$version"
+          npx electron-builder --config electron-builder.yml --publish never $ARGS \
+            --prepackaged release/win-signed "-c.extraMetadata.version=$version"
 
       - name: Upload unsigned installer for signing
         id: unsigned-installer

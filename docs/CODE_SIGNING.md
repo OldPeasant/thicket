@@ -127,10 +127,15 @@ In the `build (win-x64)` job of [`release.yml`](../.github/workflows/release.yml
 3. The folder is uploaded as a workflow artifact and sent to SignPath (`win-app`); the signed
    folder comes back as `release/win-signed`.
 4. electron-builder builds the NSIS installer and the portable zip from the signed folder
-   (`--prepackaged`), without repacking the app, so both contain the signed `Thicket.exe`.
+   (`--prepackaged`), without repacking the app or rebuilding the bundles, so both contain the
+   signed `Thicket.exe`.
 5. The installer is uploaded and signed (`win-installer`) and replaces the unsigned one under the
    same name.
 6. The release job computes `SHA256SUMS.txt` from the uploaded, signed files.
+
+The `build` job grants its token `actions: read` (besides `contents: read`): the SignPath action
+reads the uploaded artifact and the run details through it. The workflow uses the action by its
+`v1` tag; a maintainer may pin it to a full commit SHA (with a `# v1.x` comment) instead.
 
 File names do not change: `thicket-<version>-win-x64.exe` and `thicket-<version>-win-x64.zip`,
 signed or not. Each signing request waits up to an hour for its approval, so the Windows job may
