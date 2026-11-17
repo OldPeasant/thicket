@@ -1131,6 +1131,113 @@ describe('DocumentActions', () => {
       expect(String(update?.['update'])).toContain('"$unset":{"addr.street":""}');
     });
 
+    // Round 3: the unset safety net must not block legitimate writes of partial documents.
+    describe('the unset safety net lets legitimate writes through', () => {
+      const full = parseEJsonDocument(
+        '{"_id":{"$numberInt":"1"},"total":{"$numberInt":"10"},"note":"n","addr":{"city":"Bonn","street":"Hauptstr. 1"}}',
+      );
+      const without = (doc: BsonDocument, ...keys: string[]): BsonDocument => ({
+        type: 'object',
+        fields: doc.fields.filter((f) => !keys.includes(f.key)),
+      });
+
+      it('a plain Save of a partial document unsets a loaded top-level field', async () => {
+        projection = '{"total":{"$numberInt":"1"},"note":{"$numberInt":"1"}}';
+        const loaded = without(full, 'addr');
+        edits.edit(loaded, without(loaded, 'note'), true);
+        expect(await actions.save(keyOf(1))).toBe(true);
+        expect(params('docs.update')[0]).toMatchObject({
+          update: '{"$unset":{"note":""}}',
+          expected: '{"note":{"$eq":"n"}}',
+        });
+      });
+
+      it('a plain Save under a dotted projection unsets a loaded sub-field', async () => {
+        projection = '{"addr.city":{"$numberInt":"1"}}';
+        edits.edit(
+          addrLoaded,
+          parseEJsonDocument('{"_id":{"$numberInt":"1"},"addr":{}}'),
+          true,
+          true,
+        );
+        expect(await actions.save(keyOf(1))).toBe(true);
+        expect(params('docs.update')[0]?.['update']).toBe('{"$unset":{"addr.city":""}}');
+      });
+
+      it('a second Save after the first one unsets a field of the saved baseline', async () => {
+        projection = '{"total":{"$numberInt":"1"},"note":{"$numberInt":"1"}}';
+        const loaded = without(full, 'addr');
+        const first = parseEJsonDocument(
+          '{"_id":{"$numberInt":"1"},"total":{"$numberInt":"15"},"note":"n"}',
+        );
+        edits.edit(loaded, first, true);
+        expect(await actions.save(keyOf(1))).toBe(true);
+        // The read-back answers with a different document; edit on from what the user has.
+        edits.edit(first, without(first, 'note'), true);
+        expect(await actions.save(keyOf(1))).toBe(true);
+        expect(params('docs.update')[1]?.['update']).toBe('{"$unset":{"note":""}}');
+      });
+
+      it('Overwrite unsets a loaded top-level field the user removed, under a top-level projection', async () => {
+        projection = '{"total":{"$numberInt":"1"},"note":{"$numberInt":"1"}}';
+        const loaded = without(full, 'addr');
+        fake.fail('docs.update', {
+          code: 'CONFLICT',
+          message: 'x',
+          detail: { current: stringifyEJson(full).replace('"n"', '"server"') },
+        });
+        edits.edit(loaded, without(loaded, 'note'), true);
+        expect(await actions.save(keyOf(1))).toBe(false);
+        fake.respond('docs.update', { modified: true });
+        fake.requests.length = 0;
+        expect(await actions.overwrite(keyOf(1))).toBe(true);
+        // addr is hidden by the projection: it is neither unset nor checked.
+        expect(params('docs.update')[0]).toMatchObject({
+          update: '{"$unset":{"note":""}}',
+          expected: '{"note":{"$eq":"server"}}',
+        });
+      });
+
+      it('Merge manually without a loaded field unsets it, under a top-level projection', async () => {
+        projection = '{"total":{"$numberInt":"1"},"note":{"$numberInt":"1"}}';
+        const loaded = without(full, 'addr');
+        fake.fail('docs.update', {
+          code: 'CONFLICT',
+          message: 'x',
+          detail: { current: stringifyEJson(full).replace('"n"', '"server"') },
+        });
+        edits.edit(
+          loaded,
+          parseEJsonDocument('{"_id":{"$numberInt":"1"},"total":{"$numberInt":"15"},"note":"n"}'),
+          true,
+        );
+        expect(await actions.save(keyOf(1))).toBe(false);
+        fake.respond('docs.update', { modified: true });
+        fake.requests.length = 0;
+        const merged = parseEJsonDocument('{"_id":{"$numberInt":"1"},"total":{"$numberInt":"15"}}');
+        expect(await actions.saveMerged(keyOf(1), merged)).toBe(true);
+        expect(params('docs.update')[0]?.['update']).toBe(
+          '{"$set":{"total":{"$numberInt":"15"}},"$unset":{"note":""}}',
+        );
+      });
+
+      it('Overwrite without a projection unsets a sub-field only the server has', async () => {
+        fake.fail('docs.update', {
+          code: 'CONFLICT',
+          message: 'x',
+          detail: { current: addrServer },
+        });
+        edits.edit(addrLoaded, addrEdited);
+        expect(await actions.save(keyOf(1))).toBe(false);
+        fake.respond('docs.update', { modified: true });
+        fake.requests.length = 0;
+        expect(await actions.overwrite(keyOf(1))).toBe(true);
+        expect(String(params('docs.update')[0]?.['update'])).toContain(
+          '"$unset":{"addr.street":""}',
+        );
+      });
+    });
+
     it('reads the server version as unknown when the reread returns text that is not EJSON', async () => {
       fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: 42 } });
       fake.respond('docs.get', { doc: '{not ejson', sliced: [] });

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
 import { CollectionView } from '../collection/collection-view';
+import { DocumentEdits } from '../document';
 import { EditModeService } from '../explorer/services/edit-mode.service';
 import type { WorkspaceTab } from '../layout/workspace.service';
 import { ProfileSafetyService } from '../safety/profile-safety.service';
@@ -147,6 +148,97 @@ describe('Raw editor in a collection tab', () => {
     await click('doc-raw-toggle', doc);
     const editor = must(fixture.debugElement.query(By.directive(RawEditor)), 'raw editor');
     expect((editor.componentInstance as RawEditor).partial()).toBe(true);
+  });
+
+  // conflict-ui TW-2 fix: the raw editor passes whether the projection may hide parts of fields.
+  describe('with a projection that may hide parts of fields', () => {
+    const runProjection = async (text: string) => {
+      const field = must(
+        el().querySelector<HTMLTextAreaElement | HTMLInputElement>(
+          '[data-testid="query-projection"]',
+        ),
+        'projection field',
+      );
+      field.value = text;
+      field.dispatchEvent(new Event('input'));
+      await click('query-run');
+    };
+    const rawEditor = () =>
+      must(fixture.debugElement.query(By.directive(RawEditor)), 'raw editor')
+        .componentInstance as RawEditor;
+    const edits = () => fixture.debugElement.injector.get(DocumentEdits);
+    const applyRaw = async (doc: HTMLElement, text: string) => {
+      const view = editorOf(doc);
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: text },
+        userEvent: 'input.type',
+      });
+      await settle();
+      await click('raw-apply', doc);
+    };
+    const withAddr = (total: number, addr: string) =>
+      `{"_id":{"$numberInt":"1"},"total":{"$numberInt":"${total}"},"addr":${addr}}`;
+
+    it.each([
+      ['a dotted path', '{ total: 1, "addr.city": 1 }', true],
+      ['$slice', '{ tags: { $slice: 1 } }', true],
+      ['whole top-level fields', '{ total: 1, addr: 1 }', false],
+    ])('%s: the applied edit records it (%s)', async (_name, projection, hides) => {
+      rows = [withAddr(10, '{"city":"Bonn"}')];
+      await start();
+      await runProjection(projection);
+      const doc = docItem(0);
+      await click('doc-raw-toggle', doc);
+      expect(rawEditor().partial()).toBe(true);
+      expect(rawEditor().hidesSubFields()).toBe(hides);
+      await applyRaw(doc, '{ _id: 1, total: 15, addr: { city: "Bonn" } }');
+      expect(edits().get('{"$numberInt":"1"}')).toMatchObject({
+        partial: true,
+        hidesSubFields: hides,
+      });
+    });
+
+    it('is false without a projection', async () => {
+      await start();
+      await click('doc-raw-toggle', docItem(0));
+      expect(rawEditor().hidesSubFields()).toBe(false);
+    });
+
+    it('hides Overwrite and Merge for a raw edit under a dotted projection, after a top-level one is run', async () => {
+      rows = [withAddr(10, '{"city":"Bonn"}')];
+      await start();
+      await runProjection('{ total: 1, "addr.city": 1 }');
+      const doc = docItem(0);
+      await click('doc-raw-toggle', doc);
+      await applyRaw(doc, '{ _id: 1, total: 15, addr: { city: "Bonn" } }');
+      await click('doc-raw-toggle', doc);
+      rows = [withAddr(10, '{"city":"Bonn","street":"Hauptstr. 1"}')];
+      await runProjection('{ total: 1, addr: 1 }');
+      expect(q('edit-count')?.textContent?.trim()).toBe('1 change');
+      fake.fail('docs.update', {
+        code: 'CONFLICT',
+        message: 'x',
+        detail: { current: withAddr(99, '{"city":"Bonn","street":"Hauptstr. 1"}') },
+      });
+      await click('doc-save', docItem(0));
+      expect(q('conflict-view')).not.toBeNull();
+      expect(q('conflict-overwrite')).toBeNull();
+      expect(q('conflict-merge')).toBeNull();
+      expect(q('conflict-keep-server')).not.toBeNull();
+      expect(fake.requestsFor('docs.update')).toHaveLength(1);
+    });
+
+    it('a plain Save of a raw edit removing a loaded sub-field unsets it', async () => {
+      rows = [withAddr(10, '{"city":"Bonn"}')];
+      await start();
+      await runProjection('{ total: 1, "addr.city": 1 }');
+      const doc = docItem(0);
+      await click('doc-raw-toggle', doc);
+      await applyRaw(doc, '{ _id: 1, total: 10, addr: {} }');
+      await click('doc-save', doc);
+      const update = fake.requestsFor('docs.update')[0]?.params as Record<string, unknown>;
+      expect(JSON.parse(update['update'] as string)).toEqual({ $unset: { 'addr.city': '' } });
+    });
   });
 
   it('opens the editor per document and closes it again', async () => {

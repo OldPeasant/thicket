@@ -311,6 +311,41 @@ describe('DocumentEdits', () => {
       edits.edit(loaded, order(1, 16), true);
       expect(edits.get(key)?.hidesSubFields).toBe(false);
     });
+
+    // Round 3: the flag must survive the entry being removed by undo and coming back by redo.
+    it('comes back with redo after every edit was undone', () => {
+      const loaded = order(1);
+      edits.edit(loaded, order(1, 15), true, true);
+      edits.undo();
+      expect(edits.get(key)).toBeUndefined();
+      edits.redo();
+      expect(edits.get(key)).toMatchObject({ partial: true, hidesSubFields: true });
+    });
+
+    it('implies partial also when the caller passes partial = false', () => {
+      edits.edit(order(1), order(1, 15), false, true);
+      expect(edits.get(key)).toMatchObject({ partial: true, hidesSubFields: true });
+    });
+
+    it('is set by a later edit under such a projection and kept by its undo', () => {
+      const loaded = order(1);
+      edits.edit(loaded, order(1, 15), true);
+      expect(edits.get(key)?.hidesSubFields).toBe(false);
+      edits.edit(loaded, order(1, 15, 4), true, true);
+      expect(edits.get(key)?.hidesSubFields).toBe(true);
+      // Undoing back to the first edit keeps the document flagged (the session cannot tell
+      // whether the first edit alone was loaded in full; erring on the safe side).
+      edits.undo();
+      expect(ejson(edits.get(key)?.current as BsonDocument)).toBe(ejson(order(1, 15)));
+      expect(edits.get(key)?.hidesSubFields).toBe(true);
+    });
+
+    it('is kept per document', () => {
+      edits.edit(order(1), order(1, 15), true, true);
+      edits.edit(order(2), order(2, 25), true);
+      expect(edits.get(key)?.hidesSubFields).toBe(true);
+      expect(edits.get('{"$numberInt":"2"}')?.hidesSubFields).toBe(false);
+    });
   });
 
   it('reports a document whose _id was edited as not savable', () => {

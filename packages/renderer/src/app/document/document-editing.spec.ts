@@ -701,6 +701,67 @@ describe('Editing documents in a collection tab', () => {
       expect(q('conflict-keep-server')).not.toBeNull();
     });
 
+    // Round 3: the flag from a tree edit under a dotted projection survives undo/redo and a later
+    // edit under a top-level projection.
+    it('keeps Overwrite and Merge hidden after undo, redo and a further edit under a top-level projection', async () => {
+      const withAddr = (total: number, addr: string) =>
+        `{"_id":{"$numberInt":"1"},"total":{"$numberInt":"${total}"},"addr":${addr}}`;
+      let page = withAddr(10, '{"city":"Bonn"}');
+      let streams = 300;
+      fake.handle('docs.find', () => {
+        const id = `s${++streams}`;
+        setTimeout(() => {
+          fake.data('docs.find', id, { docs: [page] });
+          fake.end(id, { delivered: 1 });
+        });
+        return { streamId: id };
+      });
+      const projection = get<HTMLInputElement>('query-projection');
+      projection.value = '{ total: 1, "addr.city": 1 }';
+      projection.dispatchEvent(new Event('input'));
+      await click('query-run');
+      await typeInto(0, 'total', '15');
+      page = withAddr(10, '{"city":"Bonn","street":"Hauptstr. 1"}');
+      projection.value = '{ total: 1, addr: 1 }';
+      projection.dispatchEvent(new Event('input'));
+      await click('query-run');
+      await typeInto(0, 'total', '16');
+      expect(text('edit-count')).toBe('1 change');
+      // Undo both edits (the document is no longer modified), then redo the first one.
+      await click('edit-undo');
+      await click('edit-undo');
+      expect(q('edit-count')).toBeNull();
+      await click('edit-redo');
+      expect(text('edit-count')).toBe('1 change');
+      fake.fail('docs.update', {
+        code: 'CONFLICT',
+        message: 'x',
+        detail: { current: withAddr(99, '{"city":"Bonn","street":"Hauptstr. 1"}') },
+      });
+      await click('edit-save');
+      fake.respond('docs.update', { modified: true });
+      expect(text('conflict-title')).toBe('Changed on the server since you loaded it');
+      expect(text('conflict-note')).toMatch(/^Overwrite and Merge manually are not available/);
+      expect(q('conflict-overwrite')).toBeNull();
+      expect(q('conflict-merge')).toBeNull();
+      expect(updates()).toHaveLength(1);
+    });
+
+    it('offers Overwrite for a document edited under a top-level projection, and writes it', async () => {
+      const projection = get<HTMLInputElement>('query-projection');
+      projection.value = '{ total: 1, qty: 1 }';
+      projection.dispatchEvent(new Event('input'));
+      await click('query-run');
+      await conflict();
+      expect(q('conflict-note')?.textContent ?? '').not.toMatch(/not available/);
+      await click('conflict-overwrite');
+      expect(updates().at(-1)).toMatchObject({
+        update: '{"$set":{"total":{"$numberInt":"15"}}}',
+        expected: '{"total":{"$eq":{"$numberInt":"99"}}}',
+      });
+      expect(q('conflict-view')).toBeNull();
+    });
+
     it('with a projection shows the whole server version once every edit was undone', async () => {
       const projection = get<HTMLInputElement>('query-projection');
       projection.value = '{ total: 1, qty: 1 }';
