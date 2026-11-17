@@ -1,10 +1,11 @@
 ---
 title: M1: Conflict resolution view
-status: todo
-owner:
+status: in_progress
+owner: dell26/agent-2
 deps: [doc-edit-save]
 touches: [packages/renderer/src/app/document/conflict]
 prio: 1
+lease_until: 2026-11-17T01:18:40Z
 ---
 ## Goal
 On CONFLICT show local vs server side by side with differences highlighted; actions overwrite (replace with conflict check on the new server version), keep server version, merge manually.
