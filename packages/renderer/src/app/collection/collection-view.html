@@ -246,6 +246,16 @@
         >
           Import…
         </button>
+        <button
+          type="button"
+          class="btn quiet"
+          data-testid="bulk-open"
+          title="Update or delete every document the filter matches, after a preview"
+          [attr.aria-pressed]="ioPanel() === 'bulk'"
+          (click)="toggleIo('bulk')"
+        >
+          Update/Delete many…
+        </button>
       }
     </span>
 
@@ -291,6 +301,16 @@
           [target]="target()"
           (closed)="ioPanel.set(null)"
           (imported)="imported($event.coll)"
+        />
+      }
+    }
+    @case ('bulk') {
+      @if (!readOnly()) {
+        <app-bulk-panel
+          [target]="target()"
+          [query]="results.query()"
+          (closed)="ioPanel.set(null)"
+          (changed)="bulkChanged()"
         />
       }
     }

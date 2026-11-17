@@ -1,0 +1,145 @@
+<section
+  class="panel"
+  [class.delete]="mode() === 'delete'"
+  [attr.aria-labelledby]="uid + '-title'"
+  data-testid="bulk-panel"
+  [attr.data-mode]="mode()"
+>
+  <header class="head">
+    <h2 class="title" [id]="uid + '-title'">
+      {{ mode() === 'update' ? 'Update matching documents' : 'Delete matching documents' }}
+    </h2>
+    <code class="command" data-testid="bulk-command" [title]="command()">{{ command() }}</code>
+    <button
+      type="button"
+      class="icon-btn close"
+      data-testid="bulk-close"
+      aria-label="Close bulk update and delete"
+      title="Close"
+      (click)="close()"
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+    </button>
+  </header>
+
+  <div class="options">
+    <div class="modes" role="group" aria-label="Operation">
+      <button
+        type="button"
+        data-testid="bulk-mode-update"
+        [attr.aria-pressed]="mode() === 'update'"
+        [disabled]="busy()"
+        (click)="setMode('update')"
+      >
+        updateMany
+      </button>
+      <button
+        type="button"
+        data-testid="bulk-mode-delete"
+        [attr.aria-pressed]="mode() === 'delete'"
+        [disabled]="busy()"
+        (click)="setMode('delete')"
+      >
+        deleteMany
+      </button>
+    </div>
+    <p class="note">Uses the applied filter and collation; sort and limit don't apply.</p>
+  </div>
+
+  @if (mode() === 'update') {
+    <label class="update" [for]="uid + '-update'">
+      <span class="label">Update (operators or a pipeline, shell syntax)</span>
+      <textarea
+        [id]="uid + '-update'"
+        data-testid="bulk-update"
+        rows="3"
+        spellcheck="false"
+        autocomplete="off"
+        placeholder='{ $set: { status: "archived" } }'
+        [value]="updateText()"
+        [disabled]="busy()"
+        [attr.aria-invalid]="updateError() ? true : null"
+        [attr.aria-describedby]="updateError() ? uid + '-update-error' : null"
+        (input)="editUpdate($event)"
+        (keydown.control.enter)="runPreview()"
+        (keydown.meta.enter)="runPreview()"
+      ></textarea>
+    </label>
+    @if (updateError(); as e) {
+      <p class="field-error" [id]="uid + '-update-error'" data-testid="bulk-update-error">
+        {{ e }}
+      </p>
+    }
+  }
+
+  <div class="match" data-testid="bulk-match" [class.stale]="stale()">
+    <p class="status" role="status" data-testid="bulk-status">
+      @if (phase() === 'previewing') {
+        Counting matching documents…
+      } @else if (current(); as p) {
+        <span class="matched" data-testid="bulk-matched">{{ matchedText() }}</span>
+        {{ p.matched === 1 ? 'document matches' : 'documents match' }}.
+        @if (p.matched === 0) {
+          Nothing to {{ p.mode }}.
+        } @else if (typedName()) {
+          Confirming asks you to type the collection name.
+        }
+      } @else if (stale()) {
+        The preview showed <span class="matched">{{ matchedText() }}</span> documents for
+        different settings. Preview again before running.
+      } @else if (outcome(); as o) {
+        <span data-testid="bulk-outcome">{{ outcomeText(o) }}</span>
+      } @else {
+        Preview counts the matching documents and shows a sample before anything changes.
+      }
+    </p>
+    <span class="actions">
+      @if (phase() === 'previewing') {
+        <button type="button" class="btn stop" data-testid="bulk-cancel" (click)="cancel()">
+          Cancel
+        </button>
+      }
+      <button
+        type="button"
+        class="btn"
+        data-testid="bulk-preview"
+        [disabled]="!canPreview()"
+        (click)="runPreview()"
+      >
+        Preview
+      </button>
+      <button
+        type="button"
+        class="btn run"
+        [class.danger]="mode() === 'delete'"
+        data-testid="bulk-execute"
+        [disabled]="!canExecute()"
+        (click)="execute()"
+      >
+        {{ executeLabel() }}
+      </button>
+    </span>
+  </div>
+  @if (busy()) {
+    <div class="track" aria-hidden="true"><div class="sweep"></div></div>
+  }
+
+  @if (current(); as p) {
+    @if (p.sample.length) {
+      <details class="sample" data-testid="bulk-sample" open>
+        <summary>
+          Sample: first {{ p.sample.length }} of {{ matchedText() }}
+        </summary>
+        <div class="docs">
+          @for (doc of p.sample; track $index) {
+            <pre class="doc" data-testid="bulk-sample-doc">{{ doc }}</pre>
+          }
+        </div>
+      </details>
+    }
+  }
+
+  @if (error(); as e) {
+    <p class="message error" role="alert" data-testid="bulk-error">{{ e }}</p>
+  }
+</section>

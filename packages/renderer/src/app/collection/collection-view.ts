@@ -34,6 +34,7 @@ import {
 import { fromExplorerValue, toExplorerValue } from '../explorer/bson-value.util';
 import { ExplainPanel, type ExplainParams } from '../explain';
 import { ExportPanel } from '../io/export-panel';
+import { BulkPanel } from './bulk/bulk-panel';
 import { ImportPanel } from '../io/import-panel';
 import { JsonExplorerComponent } from '../explorer/json-explorer.component';
 import { JsonFormComponent } from '../explorer/json-form/json-form.component';
@@ -107,6 +108,7 @@ const numberFormat = new Intl.NumberFormat();
     ExportPanel,
     ImportPanel,
     ExplainPanel,
+    BulkPanel,
   ],
   providers: [
     CollectionResults,
@@ -161,8 +163,8 @@ export class CollectionView {
   protected readonly rawFormat = signal<RawFormat>('shell');
   /** What the explain panel explains (the query bar at the last Explain); `null`: closed. */
   protected readonly explainParams = signal<ExplainParams | null>(null);
-  /** The open import or export panel. */
-  protected readonly ioPanel = signal<'export' | 'import' | null>(null);
+  /** The open import, export or bulk update/delete panel. */
+  protected readonly ioPanel = signal<'export' | 'import' | 'bulk' | null>(null);
 
   /** Reopening the tab gives a new tab object; only a changed namespace runs the query again. */
   protected readonly target = computed(
@@ -556,13 +558,18 @@ export class CollectionView {
     });
   }
 
-  protected toggleIo(panel: 'export' | 'import'): void {
+  protected toggleIo(panel: 'export' | 'import' | 'bulk'): void {
     this.ioPanel.update((open) => (open === panel ? null : panel));
   }
 
   /** An import into this tab's collection shows its documents. */
   protected imported(coll: string): void {
     if (coll === this.target().coll) this.results.run(this.results.query());
+  }
+
+  /** A bulk update or delete changed documents: the page is read again. */
+  protected bulkChanged(): void {
+    this.results.run(this.results.query());
   }
 
   protected errorId(field: QueryField): string {
