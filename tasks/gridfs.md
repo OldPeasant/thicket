@@ -5,7 +5,7 @@ owner: dell26/agent-3
 deps: [browse-backend,app-layout]
 touches: [packages/backend/src/gridfs,packages/renderer/src/app/gridfs]
 prio: 4
-lease_until: 2026-11-17T06:48:24Z
+lease_until: 2026-11-17T06:53:29Z
 ---
 ## Goal
 List buckets and files, download, upload with progress, delete with confirm.
