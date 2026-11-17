@@ -2,8 +2,8 @@
  * The Windows signing gate of the release workflow (.github/workflows/release.yml):
  * scripts/signpath-enabled.mjs decides from the SignPath secret and variable whether to sign.
  */
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,5 +47,29 @@ describe('signpath-enabled.mjs', () => {
     expect(result.output).toBe('enabled=false\n');
     expect(result.log).toMatch(/^::notice title=Windows signing skipped::SignPath signing skipped/);
     expect(result.log).toContain(missing);
+  });
+
+  it('appends to an existing GITHUB_OUTPUT instead of overwriting earlier outputs', () => {
+    writeFileSync(output, 'earlier=1\n');
+    const result = run({ SIGNPATH_API_TOKEN: 'fictitious-token', SIGNPATH_ORGANIZATION_ID: 'org' });
+    expect(result.output).toBe('earlier=1\nenabled=true\n');
+  });
+
+  it('never prints the token value, also when the organization id is missing', () => {
+    const result = run({ SIGNPATH_API_TOKEN: 'fictitious-secret-value' });
+    expect(result.output).toBe('enabled=false\n');
+    expect(result.log).not.toContain('fictitious-secret-value');
+  });
+
+  it('runs without GITHUB_OUTPUT (local run) and exits 0 either way', () => {
+    for (const vars of [{}, { SIGNPATH_API_TOKEN: 'token', SIGNPATH_ORGANIZATION_ID: 'org' }]) {
+      const result = spawnSync(process.execPath, [script], {
+        env: { PATH: process.env.PATH, ...vars },
+        encoding: 'utf8',
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toMatch(/SignPath signing (enabled|skipped)/);
+    }
+    expect(existsSync(output)).toBe(false);
   });
 });
