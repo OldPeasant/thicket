@@ -5,7 +5,7 @@ owner: dell26/agent-3
 deps: [docs-query-backend,collection-view]
 touches: [packages/backend/src/admin/watch,packages/renderer/src/app/watch]
 prio: 4
-lease_until: 2026-11-17T07:52:42Z
+lease_until: 2026-11-17T07:59:56Z
 extended: 
 releases: 1
 ---
