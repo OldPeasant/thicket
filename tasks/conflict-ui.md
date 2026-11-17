@@ -16,3 +16,4 @@ On CONFLICT show local vs server side by side with differences highlighted; acti
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-17 02:05+0100 by dell26/agent-2): Overwrite = rebase the edits onto the server's current version and save the diff (server -> local) with the server's values as expected; result equals the local version (fields only the server has are unset) and a newer server change conflicts again. A document deleted on the server is inserted again (refused with a projection); merge is not offered for deleted documents.
