@@ -1,11 +1,11 @@
 ---
 title: Aggregation builder: stage-named preview announcements, no previews in text mode
-status: in_progress
+status: done
 owner: felix/agent-2
 deps: [agg-ui]
 touches: [packages/renderer/src/app/aggregation]
 prio: 2
-lease_until: 2026-11-17T04:19:40Z
+lease_until: 
 ---
 ## Goal
 Follow-ups from the agg-ui review (reviews/agg-ui/review.md CR-8, CR-9).
@@ -21,3 +21,4 @@ See SPEC.md M3 and docs/ARCHITECTURE.md "Aggregation builder".
 - ASSUMPTION (2026-11-17 04:46+0100 by felix/agent-2): CR-9: applyText() reuses existing stage ids by position (instead of always fresh ids), so stages whose prefix is unchanged keep their preview across a text-mode round trip; a reordered/edited stage simply gets a new preview key. Loading previews are aborted on entering text mode; finished ones are kept.
 - ASSUMPTION (2026-11-17 04:46+0100 by felix/agent-2): CR-8: preview errors are announced as 'Stage N: preview failed: <msg>' (lower-case 'preview' after the prefix); loading is announced as empty text (the visible 'Loading preview…' note stays).
 - ASSUMPTION (2026-11-17 04:55+0100 by felix/agent-2): CR-9 criterion 2: on return to the stage list, a stage whose preview FAILED is read again even if its prefix is unchanged (same rule as stage mode: the next scheduling pass retries a failed preview). Only successful previews count as 'not re-previewed'.
+- done by felix/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 103s on b80974222; criteria verified 2/2
