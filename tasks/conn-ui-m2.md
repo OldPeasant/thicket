@@ -13,7 +13,8 @@ Extend the connection editor with SSH tab, certificate fields, proxy and read pr
 ## Acceptance criteria
 - [x] e2e: SSH-tunnelled profile created and connected, host key dialog accepted
   - verified (2026-11-17 03:36+0100 by dell26/agent-2): npm run test:e2e -- ssh.e2e.ts (Playwright _electron, built app, Podman: SSH fixture = openssh-server in front of 2-member replica set rs3 reachable only via tunnel) on b34b61a -> 1 passed (not skipped): profile created in editor with SSH password, saved, sidebar connect -> host key dialog (host:port, ssh-ed25519, SHA256 fingerprint) -> Trust and connect -> data-state connected; known_hosts written; reconnect without dialog; Test connection ok (replicaSet). connections.e2e.ts also 2 passed
-- [ ] Component tests for field validation and URI sync of the new options
+- [x] Component tests for field validation and URI sync of the new options
+  - verified (2026-11-17 03:36+0100 by dell26/agent-2): cd packages/renderer && npx ng test --include src/app/connections (form model M2 validation and URI-sync tests, editor M2 and M2-gaps tests, host-key-dialog spec) + app-shell.spec on b34b61a -> 236 passed; npm run check -> lint/typecheck ok, 3465 + 2228 tests passed. Covers SSH, proxy, X.509, key file without certificate (CR-2), tags with primary (CR-3), write concern validation and form-to-URI sync both ways
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
