@@ -6,7 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
 import { ConfirmService, type ConfirmRequest } from '../safety/confirm.service';
 import { ProfileSafetyService } from '../safety/profile-safety.service';
-import { DocumentActions, type DocumentHost } from './document-actions.service';
+import {
+  DocumentActions,
+  type DocumentHost,
+  isTopLevelProjection,
+  visibleFields,
+} from './document-actions.service';
 import { DocumentEdits } from './edit-session';
 
 /** `{_id: id, total, qty}` as canonical EJSON. */
@@ -381,12 +386,63 @@ describe('DocumentActions', () => {
       expect(edits.isModified(keyOf(1))).toBe(true);
     });
 
-    it('still reports a conflict whose detail is malformed', async () => {
+    it('reads the server version again when the conflict detail is malformed', async () => {
+      projection = '{"total":{"$numberInt":"1"}}';
       fake.fail('docs.update', { code: 'CONFLICT', message: 'changed', detail: { current: 42 } });
       edits.edit(order(1), order(1, 15));
       await actions.save(keyOf(1));
-      expect(actions.conflicts().get(keyOf(1))).toEqual({ key: keyOf(1), current: null });
+      // Read in full, without the query's projection.
+      expect(params('docs.get')).toEqual([
+        { profileId: 'p1', db: 'shop', coll: 'orders', id: keyOf(1) },
+      ]);
+      const conflict = actions.conflicts().get(keyOf(1));
+      expect(stringifyEJson(conflict?.current as BsonDocument)).toBe(orderText(1, 99, 99));
       expect(actions.message()?.text).toContain('changed on the server');
+      expect(actions.resolveBlocker(keyOf(1))).toBeNull();
+    });
+
+    it.each([
+      ['no detail', undefined],
+      ['a server version that is not EJSON', { current: '{not ejson' }],
+    ])('reads the server version again for %s', async (_name, detail) => {
+      fake.fail('docs.update', { code: 'CONFLICT', message: 'changed', detail });
+      edits.edit(order(1), order(1, 15));
+      await actions.save(keyOf(1));
+      expect(params('docs.get')).toHaveLength(1);
+      const conflict = actions.conflicts().get(keyOf(1));
+      expect(stringifyEJson(conflict?.current as BsonDocument)).toBe(orderText(1, 99, 99));
+    });
+
+    it('says deleted only when the reread finds no document', async () => {
+      fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: 42 } });
+      fake.respond('docs.get', { doc: null, sliced: [] });
+      edits.edit(order(1), order(1, 15));
+      await actions.save(keyOf(1));
+      expect(actions.conflicts().get(keyOf(1))).toEqual({ key: keyOf(1), current: null });
+      expect(actions.message()?.text).toBe(
+        'Not saved: the document was deleted on the server since it was loaded.',
+      );
+
+      fake.fail('docs.get', { code: 'NOT_FOUND', message: 'No document with this _id' });
+      edits.edit(order(2), order(2, 25));
+      await actions.save(keyOf(2));
+      expect(actions.conflicts().get(keyOf(2))).toEqual({ key: keyOf(2), current: null });
+    });
+
+    it('keeps the server version unknown when the reread fails', async () => {
+      fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: 42 } });
+      fake.fail('docs.get', { code: 'SERVER_ERROR', message: 'connection reset' });
+      edits.edit(order(1), order(1, 15));
+      expect(await actions.save(keyOf(1))).toBe(false);
+      expect(actions.isBusy(keyOf(1))).toBe(false);
+      expect(actions.conflicts().get(keyOf(1))).toStrictEqual({
+        key: keyOf(1),
+        current: undefined,
+      });
+      expect(actions.message()?.text).toBe(
+        'Not saved: the document was changed on the server since it was loaded. Your edits are kept.',
+      );
+      expect(actions.resolveBlocker(keyOf(1))).toBe('server-unknown');
     });
 
     it('drops the conflict once the document is saved, and on revertAll', async () => {
@@ -406,6 +462,991 @@ describe('DocumentActions', () => {
       expect(actions.conflicts().size).toBe(0);
       expect(edits.modified()).toBe(false);
       expect(actions.message()).toBeNull();
+    });
+  });
+
+  describe('conflict resolution', () => {
+    const PROJECTION_RESOLVE_REFUSED =
+      'Not saved: the document was loaded with a projection that hides parts of fields or is no ' +
+      'longer active, so this could change data you did not load. Clear the projection, run the ' +
+      'query again and edit again.';
+    const SERVER_UNKNOWN_REFUSED =
+      "Not saved: the server's current version of the document could not be read. Keep the " +
+      'server version, then edit again.';
+
+    /** Edits order 1 (total 10 → 15) and saves it into a conflict with `server`. */
+    async function conflictWith(server: string | null): Promise<void> {
+      fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: server } });
+      edits.edit(order(1), order(1, 15));
+      expect(await actions.save(keyOf(1))).toBe(false);
+      fake.respond('docs.update', { modified: true });
+      fake.respond('docs.replace', { modified: true });
+      fake.respond('docs.insert', { insertedIds: [keyOf(1)] });
+      fake.requests.length = 0;
+    }
+
+    it('overwrite writes the local version with the new server version as the conflict check', async () => {
+      await conflictWith(orderText(1, 77, 3));
+      expect(await actions.overwrite(keyOf(1))).toBe(true);
+      expect(params('docs.update')).toEqual([
+        {
+          profileId: 'p1',
+          db: 'shop',
+          coll: 'orders',
+          id: keyOf(1),
+          update: '{"$set":{"total":{"$numberInt":"15"},"qty":{"$numberInt":"1"}}}',
+          expected: '{"total":{"$eq":{"$numberInt":"77"}},"qty":{"$eq":{"$numberInt":"3"}}}',
+        },
+      ]);
+      expect(actions.conflicts().size).toBe(0);
+      expect(edits.modified()).toBe(false);
+      expect(changed.at(-1)?.[0]).toBe(keyOf(1));
+    });
+
+    it('overwrite reports a new conflict when the server changed again', async () => {
+      await conflictWith(orderText(1, 77));
+      fake.fail('docs.update', {
+        code: 'CONFLICT',
+        message: 'x',
+        detail: { current: orderText(1, 88) },
+      });
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      const conflict = actions.conflicts().get(keyOf(1));
+      expect(stringifyEJson(conflict?.current as BsonDocument)).toBe(orderText(1, 88));
+      expect(stringifyEJson(edits.get(keyOf(1))?.current as BsonDocument)).toBe(orderText(1, 15));
+    });
+
+    it('overwrite inserts the local version again when the server deleted it', async () => {
+      await conflictWith(null);
+      expect(await actions.overwrite(keyOf(1))).toBe(true);
+      expect(params('docs.insert')).toEqual([
+        { profileId: 'p1', db: 'shop', coll: 'orders', docs: [orderText(1, 15)] },
+      ]);
+      expect(actions.conflicts().size).toBe(0);
+      expect(edits.modified()).toBe(false);
+    });
+
+    it('overwrite refuses to insert a document loaded with a projection', async () => {
+      await conflictWith(null);
+      projection = '{"total":{"$numberInt":"1"}}';
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      expect(fake.requests).toHaveLength(0);
+      expect(actions.message()?.text).toMatch(/^Not inserted: with a projection/);
+    });
+
+    it('overwrite with a projection compares only the loaded fields (hidden ones are not unset)', async () => {
+      projection = '{"total":{"$numberInt":"1"}}';
+      const loaded = parseEJsonDocument('{"_id":{"$numberInt":"1"},"total":{"$numberInt":"10"}}');
+      fake.fail('docs.update', {
+        code: 'CONFLICT',
+        message: 'x',
+        detail: { current: orderText(1, 77, 3) },
+      });
+      edits.edit(
+        loaded,
+        parseEJsonDocument('{"_id":{"$numberInt":"1"},"total":{"$numberInt":"15"}}'),
+        true,
+      );
+      await actions.save(keyOf(1));
+      fake.respond('docs.update', { modified: true });
+      fake.requests.length = 0;
+      expect(await actions.overwrite(keyOf(1))).toBe(true);
+      expect(params('docs.update')[0]).toMatchObject({
+        update: '{"$set":{"total":{"$numberInt":"15"}}}',
+        expected: '{"total":{"$eq":{"$numberInt":"77"}}}',
+      });
+    });
+
+    it('keepServer discards the edits and shows the server version', async () => {
+      await conflictWith(orderText(1, 77));
+      await actions.keepServer(keyOf(1));
+      expect(fake.requestsFor('docs.update')).toHaveLength(0);
+      expect(edits.modified()).toBe(false);
+      expect(actions.conflicts().size).toBe(0);
+      expect(changed.at(-1)).toEqual([keyOf(1), orderText(1, 99, 99)]);
+      expect(actions.message()?.text).toMatch(/Kept the server version/);
+    });
+
+    it('keepServer of a deleted document removes it from the page', async () => {
+      await conflictWith(null);
+      await actions.keepServer(keyOf(1));
+      expect(changed.at(-1)).toEqual([keyOf(1), null]);
+      expect(edits.modified()).toBe(false);
+    });
+
+    it('saveMerged saves the merged document over the server version', async () => {
+      await conflictWith(orderText(1, 77, 3));
+      expect(await actions.saveMerged(keyOf(1), order(1, 15, 3))).toBe(true);
+      expect(params('docs.update')).toEqual([
+        expect.objectContaining({
+          update: '{"$set":{"total":{"$numberInt":"15"}}}',
+          expected: '{"total":{"$eq":{"$numberInt":"77"}}}',
+        }),
+      ]);
+      expect(actions.conflicts().size).toBe(0);
+      expect(edits.modified()).toBe(false);
+    });
+
+    it('saveMerged equal to the server version writes nothing and keeps it', async () => {
+      await conflictWith(orderText(1, 77, 3));
+      expect(await actions.saveMerged(keyOf(1), order(1, 77, 3))).toBe(true);
+      expect(fake.requestsFor('docs.update')).toHaveLength(0);
+      expect(actions.conflicts().size).toBe(0);
+      expect(edits.modified()).toBe(false);
+    });
+
+    it('saveMerged refuses a document with another _id', async () => {
+      await conflictWith(orderText(1, 77));
+      expect(await actions.saveMerged(keyOf(1), order(2, 15))).toBe(false);
+      expect(fake.requests).toHaveLength(0);
+      expect(actions.message()?.text).toMatch(/must keep the _id/);
+      expect(actions.conflicts().size).toBe(1);
+    });
+
+    it('does nothing for a key without a conflict', async () => {
+      edits.edit(order(1), order(1, 15));
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      expect(await actions.saveMerged(keyOf(1), order(1, 15))).toBe(false);
+      await actions.keepServer(keyOf(1));
+      expect(fake.requests).toHaveLength(0);
+      expect(edits.isModified(keyOf(1))).toBe(true);
+    });
+
+    const useProfile = (readOnly: boolean, production: boolean) =>
+      TestBed.inject(ProfileSafetyService).set({
+        id: 'p1',
+        name: readOnly ? 'Reports' : 'Prod',
+        readOnly,
+        production,
+      });
+
+    it('overwrite on a production profile asks first, showing the updateOne', async () => {
+      await conflictWith(orderText(1, 77));
+      useProfile(false, true);
+      expect(await actions.overwrite(keyOf(1))).toBe(true);
+      expect(confirms).toHaveLength(1);
+      expect(confirms[0]?.operation).toContain('updateOne(');
+      expect(confirms[0]?.operation).toContain('total: 15');
+      expect(params('docs.update')[0]).toMatchObject({ confirmed: true });
+      expect(actions.conflicts().size).toBe(0);
+    });
+
+    it('overwrite cancelled in the confirm dialog sends nothing and keeps the conflict and edits', async () => {
+      await conflictWith(orderText(1, 77));
+      useProfile(false, true);
+      confirmAnswer = false;
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      expect(confirms).toHaveLength(1);
+      expect(fake.requests).toHaveLength(0);
+      expect(actions.message()).toBeNull();
+      expect(actions.conflicts().has(keyOf(1))).toBe(true);
+      expect(stringifyEJson(edits.get(keyOf(1))?.current as BsonDocument)).toBe(orderText(1, 15));
+      expect(actions.isBusy(keyOf(1))).toBe(false);
+    });
+
+    it('overwrite is refused on a read-only profile', async () => {
+      await conflictWith(orderText(1, 77));
+      useProfile(true, false);
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      expect(fake.requests).toHaveLength(0);
+      expect(actions.message()?.text).toContain('Reports is read-only.');
+      expect(actions.conflicts().has(keyOf(1))).toBe(true);
+      expect(edits.isModified(keyOf(1))).toBe(true);
+    });
+
+    it('overwrite that fails for another reason keeps the conflict and the local version', async () => {
+      await conflictWith(orderText(1, 77));
+      fake.fail('docs.update', { code: 'SERVER_ERROR', message: 'Document failed validation' });
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      expect(actions.message()?.text).toMatch(/^Not saved: .*Document failed validation/s);
+      expect(actions.conflicts().has(keyOf(1))).toBe(true);
+      expect(stringifyEJson(edits.get(keyOf(1))?.current as BsonDocument)).toBe(orderText(1, 15));
+      expect(changed).toEqual([]);
+    });
+
+    it('overwrite ignores a second click while the first write runs', async () => {
+      await conflictWith(orderText(1, 77));
+      const answer = deferred<{ modified: boolean }>();
+      fake.handle('docs.update', () => answer.promise);
+      const first = actions.overwrite(keyOf(1));
+      await Promise.resolve();
+      expect(actions.isBusy(keyOf(1))).toBe(true);
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      expect(await actions.saveMerged(keyOf(1), order(1, 15, 3))).toBe(false);
+      answer.resolve({ modified: true });
+      expect(await first).toBe(true);
+      expect(params('docs.update')).toHaveLength(1);
+    });
+
+    it('overwrite with nothing left to write (the server has the local version) keeps it', async () => {
+      await conflictWith(orderText(1, 15));
+      expect(await actions.overwrite(keyOf(1))).toBe(true);
+      expect(fake.requestsFor('docs.update')).toHaveLength(0);
+      expect(actions.conflicts().size).toBe(0);
+      expect(edits.modified()).toBe(false);
+    });
+
+    it('overwrite does nothing when no edits are left (undone after the conflict)', async () => {
+      await conflictWith(orderText(1, 77));
+      edits.undo();
+      expect(edits.isModified(keyOf(1))).toBe(false);
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      expect(fake.requests).toHaveLength(0);
+      expect(actions.conflicts().has(keyOf(1))).toBe(true);
+      // Keep server version still resolves it.
+      await actions.keepServer(keyOf(1));
+      expect(actions.conflicts().size).toBe(0);
+      expect(changed.at(-1)).toEqual([keyOf(1), orderText(1, 99, 99)]);
+    });
+
+    it('overwrite and merge are refused for a document edited under a since-cleared projection', async () => {
+      const loaded = parseEJsonDocument('{"_id":{"$numberInt":"1"},"total":{"$numberInt":"10"}}');
+      fake.fail('docs.update', {
+        code: 'CONFLICT',
+        message: 'x',
+        detail: { current: orderText(1, 77, 3) },
+      });
+      edits.edit(
+        loaded,
+        parseEJsonDocument('{"_id":{"$numberInt":"1"},"total":{"$numberInt":"15"}}'),
+        true,
+      );
+      await actions.save(keyOf(1));
+      fake.respond('docs.update', { modified: true });
+      fake.requests.length = 0;
+      projection = undefined;
+      expect(actions.isPartial(keyOf(1))).toBe(true);
+      expect(actions.resolveBlocker(keyOf(1))).toBe('projection');
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      expect(actions.message()?.text).toBe(PROJECTION_RESOLVE_REFUSED);
+      expect(await actions.saveMerged(keyOf(1), order(1, 15, 3))).toBe(false);
+      expect(fake.requests).toHaveLength(0);
+      expect(actions.conflicts().has(keyOf(1))).toBe(true);
+      expect(stringifyEJson(edits.get(keyOf(1))?.original as BsonDocument)).toBe(
+        stringifyEJson(loaded),
+      );
+    });
+
+    describe('with a projection that hides parts of fields', () => {
+      const loaded = parseEJsonDocument(
+        '{"_id":{"$numberInt":"1"},"addr":{"city":"Bonn"},"tags":["p"]}',
+      );
+      const server =
+        '{"_id":{"$numberInt":"1"},"addr":{"city":"Köln","street":"Hauptstr. 1"},"tags":["p","q"]}';
+
+      async function projectedConflict(query: string): Promise<void> {
+        projection = query;
+        fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: server } });
+        edits.edit(
+          loaded,
+          parseEJsonDocument('{"_id":{"$numberInt":"1"},"addr":{"city":"Berlin"},"tags":["p"]}'),
+        );
+        expect(await actions.save(keyOf(1))).toBe(false);
+        fake.respond('docs.update', { modified: true });
+        fake.requests.length = 0;
+      }
+
+      it.each([
+        ['a dotted path', '{"addr.city":{"$numberInt":"1"},"tags":{"$numberInt":"1"}}'],
+        ['$slice', '{"addr":{"$numberInt":"1"},"tags":{"$slice":{"$numberInt":"1"}}}'],
+        ['$elemMatch', '{"addr":{"$numberInt":"1"},"tags":{"$elemMatch":{"$eq":"p"}}}'],
+      ])(
+        'refuses overwrite and merge under %s, never unsetting hidden sub-fields',
+        async (_name, query) => {
+          await projectedConflict(query);
+          expect(actions.resolveBlocker(keyOf(1))).toBe('projection');
+          expect(await actions.overwrite(keyOf(1))).toBe(false);
+          expect(actions.message()?.text).toBe(PROJECTION_RESOLVE_REFUSED);
+          const merged = parseEJsonDocument(
+            '{"_id":{"$numberInt":"1"},"addr":{"city":"Berlin"},"tags":["p"]}',
+          );
+          expect(await actions.saveMerged(keyOf(1), merged)).toBe(false);
+          expect(fake.requests).toHaveLength(0);
+          expect(actions.conflicts().has(keyOf(1))).toBe(true);
+          expect(edits.isModified(keyOf(1))).toBe(true);
+          // Keep server version stays available.
+          await actions.keepServer(keyOf(1));
+          expect(actions.conflicts().size).toBe(0);
+          expect(edits.modified()).toBe(false);
+        },
+      );
+    });
+
+    it('allows overwrite under an exclusion projection of top-level fields; hidden ones stay', async () => {
+      projection = '{"qty":{"$numberInt":"0"}}';
+      const loaded = parseEJsonDocument('{"_id":{"$numberInt":"1"},"total":{"$numberInt":"10"}}');
+      fake.fail('docs.update', {
+        code: 'CONFLICT',
+        message: 'x',
+        detail: { current: orderText(1, 77, 3) },
+      });
+      edits.edit(
+        loaded,
+        parseEJsonDocument('{"_id":{"$numberInt":"1"},"total":{"$numberInt":"15"}}'),
+      );
+      await actions.save(keyOf(1));
+      fake.respond('docs.update', { modified: true });
+      fake.requests.length = 0;
+      expect(actions.resolveBlocker(keyOf(1))).toBeNull();
+      expect(await actions.overwrite(keyOf(1))).toBe(true);
+      expect(params('docs.update')[0]).toMatchObject({
+        update: '{"$set":{"total":{"$numberInt":"15"}}}',
+        expected: '{"total":{"$eq":{"$numberInt":"77"}}}',
+      });
+    });
+
+    it('cancelled, refused or failed overwrites leave the edit session as it was', async () => {
+      await conflictWith(orderText(1, 77, 3));
+      edits.edit(order(1), order(1, 15, 4));
+      const before = edits.get(keyOf(1));
+      const unchanged = () => {
+        expect(edits.get(keyOf(1))).toEqual(before);
+        expect(edits.canUndo()).toBe(true);
+        expect(actions.conflicts().has(keyOf(1))).toBe(true);
+      };
+      // Cancelled in the production confirm dialog.
+      useProfile(false, true);
+      confirmAnswer = false;
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      expect(await actions.saveMerged(keyOf(1), order(1, 15, 3))).toBe(false);
+      unchanged();
+      // Refused on a read-only profile.
+      useProfile(true, false);
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      unchanged();
+      // Failed for another reason, and a new conflict.
+      useProfile(false, false);
+      fake.fail('docs.update', { code: 'SERVER_ERROR', message: 'Document failed validation' });
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      unchanged();
+      fake.fail('docs.update', {
+        code: 'CONFLICT',
+        message: 'x',
+        detail: { current: orderText(1, 88) },
+      });
+      expect(await actions.saveMerged(keyOf(1), order(1, 15, 3))).toBe(false);
+      unchanged();
+      // Undo still walks the user's own edits from the loaded version.
+      edits.undo();
+      expect(stringifyEJson(edits.get(keyOf(1))?.current as BsonDocument)).toBe(orderText(1, 15));
+      // A plain Save still checks against the loaded version, not the server version shown.
+      fake.respond('docs.update', { modified: true });
+      fake.requests.length = 0;
+      edits.redo();
+      expect(await actions.save(keyOf(1))).toBe(true);
+      expect(params('docs.update')[0]).toMatchObject({
+        expected: '{"total":{"$eq":{"$numberInt":"10"}},"qty":{"$eq":{"$numberInt":"1"}}}',
+      });
+    });
+
+    it('a successful overwrite or merge leaves no unsaved edits and no undo steps for the document', async () => {
+      await conflictWith(orderText(1, 77, 3));
+      edits.edit(order(2), order(2, 25));
+      expect(await actions.overwrite(keyOf(1))).toBe(true);
+      expect(edits.isModified(keyOf(1))).toBe(false);
+      // Only document 2's step is left.
+      edits.undo();
+      expect(edits.canUndo()).toBe(false);
+      expect(edits.modified()).toBe(false);
+      edits.redo();
+
+      fake.fail('docs.update', {
+        code: 'CONFLICT',
+        message: 'x',
+        detail: { current: orderText(1, 88) },
+      });
+      edits.edit(order(1), order(1, 16));
+      expect(await actions.save(keyOf(1))).toBe(false);
+      fake.respond('docs.update', { modified: true });
+      expect(await actions.saveMerged(keyOf(1), order(1, 16, 5))).toBe(true);
+      expect(edits.isModified(keyOf(1))).toBe(false);
+      edits.undo();
+      expect(edits.isModified(keyOf(2))).toBe(false);
+      expect(edits.canUndo()).toBe(false);
+    });
+
+    it('overwrite and merge are refused while the server version is unknown; keep server reads it', async () => {
+      fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: 42 } });
+      fake.fail('docs.get', { code: 'SERVER_ERROR', message: 'connection reset' });
+      edits.edit(order(1), order(1, 15));
+      await actions.save(keyOf(1));
+      fake.respond('docs.update', { modified: true });
+      fake.requests.length = 0;
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      expect(actions.message()?.text).toBe(SERVER_UNKNOWN_REFUSED);
+      expect(await actions.saveMerged(keyOf(1), order(1, 15))).toBe(false);
+      expect(fake.requestsFor('docs.update')).toHaveLength(0);
+      expect(fake.requestsFor('docs.insert')).toHaveLength(0);
+      expect(edits.isModified(keyOf(1))).toBe(true);
+
+      // Still unreadable: the page keeps its loaded version (not removed, not replaced).
+      await actions.keepServer(keyOf(1));
+      expect(changed).toEqual([]);
+      expect(edits.modified()).toBe(false);
+      expect(actions.conflicts().size).toBe(0);
+    });
+
+    it('keep server version of an unknown server version shows it once readable', async () => {
+      fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: 42 } });
+      fake.fail('docs.get', { code: 'SERVER_ERROR', message: 'connection reset' });
+      edits.edit(order(1), order(1, 15));
+      await actions.save(keyOf(1));
+      fake.respond('docs.get', { doc: orderText(1, 99, 99), sliced: [] });
+      await actions.keepServer(keyOf(1));
+      expect(changed).toEqual([[keyOf(1), orderText(1, 99, 99)]]);
+    });
+
+    it('re-insert on a production profile asks first, showing the insertOne', async () => {
+      await conflictWith(null);
+      useProfile(false, true);
+      expect(await actions.overwrite(keyOf(1))).toBe(true);
+      expect(confirms).toHaveLength(1);
+      expect(confirms[0]?.operation).toMatch(/insert/i);
+      expect(params('docs.insert')[0]).toMatchObject({ confirmed: true });
+    });
+
+    it('re-insert that fails keeps the conflict and the local version', async () => {
+      await conflictWith(null);
+      fake.fail('docs.insert', { code: 'SERVER_ERROR', message: 'E11000 duplicate key error' });
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      expect(actions.message()?.text).toMatch(/^Not inserted: .*duplicate key/s);
+      expect(actions.conflicts().has(keyOf(1))).toBe(true);
+      expect(edits.isModified(keyOf(1))).toBe(true);
+    });
+
+    it('re-insert shows the local version when it cannot be read back', async () => {
+      await conflictWith(null);
+      fake.fail('docs.get', { code: 'SERVER_ERROR', message: 'connection reset' });
+      expect(await actions.overwrite(keyOf(1))).toBe(true);
+      expect(changed.at(-1)).toEqual([keyOf(1), orderText(1, 15)]);
+      expect(actions.message()?.text).toBe('Inserted your version again.');
+    });
+
+    it('keepServer reads the server version back with the query projection', async () => {
+      await conflictWith(orderText(1, 77));
+      projection = '{"total":{"$numberInt":"1"}}';
+      await actions.keepServer(keyOf(1));
+      expect(params('docs.get')).toEqual([
+        { profileId: 'p1', db: 'shop', coll: 'orders', id: keyOf(1), projection },
+      ]);
+    });
+
+    it('keepServer shows the server version from the conflict when it cannot be read back', async () => {
+      await conflictWith(orderText(1, 77, 3));
+      fake.fail('docs.get', { code: 'SERVER_ERROR', message: 'connection reset' });
+      await actions.keepServer(keyOf(1));
+      expect(changed.at(-1)).toEqual([keyOf(1), orderText(1, 77, 3)]);
+      expect(edits.modified()).toBe(false);
+      expect(actions.conflicts().size).toBe(0);
+      expect(actions.message()?.text).toMatch(/Kept the server version/);
+    });
+
+    it('saveMerged works when the local edits were undone (merged from the server version)', async () => {
+      await conflictWith(orderText(1, 77, 3));
+      edits.undo();
+      expect(await actions.saveMerged(keyOf(1), order(1, 77, 5))).toBe(true);
+      expect(params('docs.update')[0]).toMatchObject({
+        update: '{"$set":{"qty":{"$numberInt":"5"}}}',
+        expected: '{"qty":{"$eq":{"$numberInt":"3"}}}',
+      });
+      expect(actions.conflicts().size).toBe(0);
+    });
+
+    it('saveMerged is not offered for a document deleted on the server', async () => {
+      await conflictWith(null);
+      expect(await actions.saveMerged(keyOf(1), order(1, 15))).toBe(false);
+      expect(fake.requests).toHaveLength(0);
+      expect(actions.conflicts().has(keyOf(1))).toBe(true);
+    });
+
+    it('saveMerged refuses a document without an _id', async () => {
+      await conflictWith(orderText(1, 77));
+      const noId = parseEJsonDocument('{"total":{"$numberInt":"15"}}');
+      expect(await actions.saveMerged(keyOf(1), noId)).toBe(false);
+      expect(fake.requests).toHaveLength(0);
+      expect(actions.message()?.text).toMatch(/must keep the _id/);
+    });
+
+    it('saveMerged with a projection unsets a loaded field removed, never a hidden one', async () => {
+      projection = '{"total":{"$numberInt":"1"},"note":{"$numberInt":"1"}}';
+      const loaded = parseEJsonDocument(
+        '{"_id":{"$numberInt":"1"},"total":{"$numberInt":"10"},"note":"call first"}',
+      );
+      fake.fail('docs.update', {
+        code: 'CONFLICT',
+        message: 'x',
+        detail: {
+          current:
+            '{"_id":{"$numberInt":"1"},"total":{"$numberInt":"77"},"qty":{"$numberInt":"3"},"note":"call first"}',
+        },
+      });
+      edits.edit(
+        loaded,
+        parseEJsonDocument(
+          '{"_id":{"$numberInt":"1"},"total":{"$numberInt":"15"},"note":"call first"}',
+        ),
+        true,
+      );
+      await actions.save(keyOf(1));
+      fake.respond('docs.update', { modified: true });
+      fake.requests.length = 0;
+      // The merge keeps total 15 and drops the note; qty is hidden by the projection.
+      const merged = parseEJsonDocument('{"_id":{"$numberInt":"1"},"total":{"$numberInt":"15"}}');
+      expect(await actions.saveMerged(keyOf(1), merged)).toBe(true);
+      expect(params('docs.update')[0]).toMatchObject({
+        update: '{"$set":{"total":{"$numberInt":"15"}},"$unset":{"note":""}}',
+        expected: '{"total":{"$eq":{"$numberInt":"77"}},"note":{"$eq":"call first"}}',
+      });
+    });
+
+    it('saveMerged with a projection after the edits were undone compares only the merged fields', async () => {
+      await conflictWith(orderText(1, 77, 3));
+      edits.undo();
+      projection = '{"total":{"$numberInt":"1"}}';
+      const merged = parseEJsonDocument('{"_id":{"$numberInt":"1"},"total":{"$numberInt":"20"}}');
+      expect(await actions.saveMerged(keyOf(1), merged)).toBe(true);
+      // qty is not in the merged document: it is not unset.
+      expect(params('docs.update')[0]).toMatchObject({
+        update: '{"$set":{"total":{"$numberInt":"20"}}}',
+        expected: '{"total":{"$eq":{"$numberInt":"77"}}}',
+      });
+    });
+
+    it('isPartial follows the projection and the partial flag of the edits', async () => {
+      edits.edit(order(1), order(1, 15));
+      expect(actions.isPartial(keyOf(1))).toBe(false);
+      projection = '{"total":{"$numberInt":"1"}}';
+      expect(actions.isPartial(keyOf(1))).toBe(true);
+      expect(actions.isPartial(keyOf(9))).toBe(true);
+      projection = undefined;
+      edits.edit(order(2), order(2, 25), true);
+      expect(actions.isPartial(keyOf(2))).toBe(true);
+      expect(actions.isPartial(keyOf(9))).toBe(false);
+    });
+  });
+
+  // Round 2: the paths the CR-1..CR-6 fixes added.
+  describe('conflict resolution after the fixes', () => {
+    const addrLoaded = parseEJsonDocument('{"_id":{"$numberInt":"1"},"addr":{"city":"Bonn"}}');
+    const addrEdited = parseEJsonDocument('{"_id":{"$numberInt":"1"},"addr":{"city":"Berlin"}}');
+    const addrServer = '{"_id":{"$numberInt":"1"},"addr":{"city":"Köln","street":"Hauptstr. 1"}}';
+
+    it('resolveBlocker is null without a conflict and for a document deleted on the server', async () => {
+      expect(actions.resolveBlocker(keyOf(1))).toBeNull();
+      projection = '{"addr.city":{"$numberInt":"1"}}';
+      fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: null } });
+      edits.edit(order(1), order(1, 15));
+      await actions.save(keyOf(1));
+      expect(actions.conflicts().get(keyOf(1))?.current).toBeNull();
+      expect(actions.resolveBlocker(keyOf(1))).toBeNull();
+      // The re-insert is still refused because the document may be partial.
+      fake.requests.length = 0;
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      expect(fake.requests).toHaveLength(0);
+      expect(actions.message()?.text).toMatch(/^Not inserted: with a projection/);
+    });
+
+    it('resolveBlocker is null for a whole document without a projection', async () => {
+      fake.fail('docs.update', {
+        code: 'CONFLICT',
+        message: 'x',
+        detail: { current: orderText(1, 77) },
+      });
+      edits.edit(order(1), order(1, 15));
+      await actions.save(keyOf(1));
+      expect(actions.resolveBlocker(keyOf(1))).toBeNull();
+    });
+
+    // TW-2: the projection check looks only at the projection active now, not at the one the
+    // document was loaded with. Recorded assumption: hidden (sub-)fields are never unset.
+    // The edit is recorded as CollectionView and RawEditor do under a dotted projection
+    // (hidesSubFields), which still refuses once a top-level projection is run (TW-3).
+    it.each([
+      ['overwrite', () => actions.overwrite(keyOf(1))],
+      ['merge', () => actions.saveMerged(keyOf(1), addrEdited)],
+    ])(
+      '%s never unsets a sub-field hidden by a dotted projection after a top-level one is run',
+      async (_name, resolve) => {
+        // Edited under {"addr.city": 1}: the loaded addr has only city.
+        projection = '{"addr.city":{"$numberInt":"1"}}';
+        fake.fail('docs.update', {
+          code: 'CONFLICT',
+          message: 'x',
+          detail: { current: addrServer },
+        });
+        edits.edit(addrLoaded, addrEdited, true, true);
+        expect(await actions.save(keyOf(1))).toBe(false);
+        expect(actions.resolveBlocker(keyOf(1))).toBe('projection');
+        fake.respond('docs.update', { modified: true });
+        fake.requests.length = 0;
+        // The user runs a top-level projection; the unsaved edit (loaded with addr.city only) stays.
+        projection = '{"addr":{"$numberInt":"1"}}';
+        await resolve();
+        // Refused, or written without touching addr.street (which the user never loaded).
+        expect(params('docs.replace')).toHaveLength(0);
+        for (const update of params('docs.update')) {
+          expect(String(update['update'])).not.toContain('street');
+        }
+      },
+    );
+
+    // TW-2 fix: the edit remembers that its projection hid parts of fields.
+    it('keeps Overwrite and Merge blocked for an edit made under a dotted projection', async () => {
+      projection = '{"addr.city":{"$numberInt":"1"}}';
+      fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: addrServer } });
+      edits.edit(addrLoaded, addrEdited, true, true);
+      expect(await actions.save(keyOf(1))).toBe(false);
+      fake.respond('docs.update', { modified: true });
+      fake.requests.length = 0;
+      projection = '{"addr":{"$numberInt":"1"}}';
+      expect(actions.resolveBlocker(keyOf(1))).toBe('projection');
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      expect(await actions.saveMerged(keyOf(1), addrEdited)).toBe(false);
+      expect(fake.requests).toHaveLength(0);
+      expect(actions.message()?.text).toMatch(/hides parts of fields/);
+      expect(edits.get(keyOf(1))?.current).toBe(addrEdited);
+    });
+
+    // TW-3: under a top-level projection addr was loaded whole, so a sub-field only the server has
+    // is a server change the user is shown: Overwrite and Merge write the local version and unset it.
+    it.each([
+      ['overwrite', () => actions.overwrite(keyOf(1))],
+      ['merge', () => actions.saveMerged(keyOf(1), addrEdited)],
+    ])(
+      '%s under a top-level projection unsets a sub-field the server added to a loaded field',
+      async (_name, resolve) => {
+        projection = '{"total":{"$numberInt":"1"},"addr":{"$numberInt":"1"}}';
+        fake.fail('docs.update', {
+          code: 'CONFLICT',
+          message: 'x',
+          detail: { current: addrServer },
+        });
+        edits.edit(addrLoaded, addrEdited, true);
+        expect(await actions.save(keyOf(1))).toBe(false);
+        expect(actions.resolveBlocker(keyOf(1))).toBeNull();
+        fake.respond('docs.update', { modified: true });
+        fake.requests.length = 0;
+        expect(await resolve()).toBe(true);
+        expect(params('docs.replace')).toHaveLength(0);
+        const [update] = params('docs.update');
+        expect(update?.['update']).toBe(
+          '{"$set":{"addr.city":"Berlin"},"$unset":{"addr.street":""}}',
+        );
+        expect(actions.message()?.text).not.toMatch(/projection/);
+      },
+    );
+
+    it('still unsets a loaded sub-field the user removed, under a top-level projection', async () => {
+      projection = '{"addr":{"$numberInt":"1"}}';
+      const loaded = parseEJsonDocument(
+        '{"_id":{"$numberInt":"1"},"addr":{"city":"Bonn","street":"Hauptstr. 1"}}',
+      );
+      fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: addrServer } });
+      edits.edit(loaded, addrEdited, true);
+      expect(await actions.save(keyOf(1))).toBe(false);
+      fake.respond('docs.update', { modified: true });
+      fake.requests.length = 0;
+      expect(await actions.overwrite(keyOf(1))).toBe(true);
+      const [update] = params('docs.update');
+      expect(String(update?.['update'])).toContain('"$unset":{"addr.street":""}');
+    });
+
+    // Round 4 (TW-3 fix): the unset of server-only sub-fields applies only to entries without
+    // hidesSubFields; flagged entries stay refused whatever projection is active now.
+    describe('TW-3: server-only sub-fields of loaded fields', () => {
+      const conflictOn = async (doc: BsonDocument, current: string, hides = false) => {
+        fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current } });
+        edits.edit(addrLoaded, doc, true, hides);
+        expect(await actions.save(keyOf(1))).toBe(false);
+        fake.respond('docs.update', { modified: true });
+        fake.requests.length = 0;
+      };
+
+      it('Overwrite under a top-level exclusion projection unsets the sub-field, not the hidden field', async () => {
+        projection = '{"note":{"$numberInt":"0"}}';
+        await conflictOn(
+          addrEdited,
+          '{"_id":{"$numberInt":"1"},"note":"hidden","addr":{"city":"Köln","street":"Hauptstr. 1"}}',
+        );
+        expect(actions.resolveBlocker(keyOf(1))).toBeNull();
+        expect(await actions.overwrite(keyOf(1))).toBe(true);
+        const [update] = params('docs.update');
+        expect(update?.['update']).toBe(
+          '{"$set":{"addr.city":"Berlin"},"$unset":{"addr.street":""}}',
+        );
+        expect(String(update?.['expected'])).not.toContain('note');
+      });
+
+      it('an Overwrite that unsets the sub-field and meets a newer server change conflicts again', async () => {
+        projection = '{"addr":{"$numberInt":"1"}}';
+        await conflictOn(addrEdited, addrServer);
+        const newer = '{"_id":{"$numberInt":"1"},"addr":{"city":"Ulm","street":"Hauptstr. 2"}}';
+        fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: newer } });
+        expect(await actions.overwrite(keyOf(1))).toBe(false);
+        const [update] = params('docs.update');
+        expect(String(update?.['update'])).toContain('"$unset":{"addr.street":""}');
+        expect(String(update?.['expected'])).toContain('Hauptstr. 1');
+        expect(edits.get(keyOf(1))?.current).toBe(addrEdited);
+        const street = actions
+          .conflicts()
+          .get(keyOf(1))
+          ?.current?.fields.find((f) => f.key === 'addr');
+        expect(JSON.stringify(street)).toContain('Hauptstr. 2');
+        expect(actions.resolveBlocker(keyOf(1))).toBeNull();
+      });
+
+      it.each([
+        ['a top-level projection', '{"addr":{"$numberInt":"1"}}'],
+        ['no projection', undefined],
+      ])(
+        'a flagged entry is still refused with %s active now, and nothing is sent',
+        async (_name, now) => {
+          projection = '{"addr.city":{"$numberInt":"1"}}';
+          await conflictOn(addrEdited, addrServer, true);
+          projection = now;
+          expect(actions.resolveBlocker(keyOf(1))).toBe('projection');
+          expect(await actions.overwrite(keyOf(1))).toBe(false);
+          expect(await actions.saveMerged(keyOf(1), addrEdited)).toBe(false);
+          expect(fake.requests).toHaveLength(0);
+          expect(actions.message()?.text).toMatch(/hides parts of fields/);
+          expect(edits.get(keyOf(1))?.hidesSubFields).toBe(true);
+        },
+      );
+
+      it('a plain Save of a flagged entry still writes its loaded sub-field edit', async () => {
+        projection = '{"addr.city":{"$numberInt":"1"}}';
+        edits.edit(addrLoaded, addrEdited, true, true);
+        expect(await actions.save(keyOf(1))).toBe(true);
+        const [update] = params('docs.update');
+        expect(update?.['update']).toBe('{"$set":{"addr.city":"Berlin"}}');
+      });
+    });
+
+    // Round 3: the unset safety net must not block legitimate writes of partial documents.
+    describe('the unset safety net lets legitimate writes through', () => {
+      const full = parseEJsonDocument(
+        '{"_id":{"$numberInt":"1"},"total":{"$numberInt":"10"},"note":"n","addr":{"city":"Bonn","street":"Hauptstr. 1"}}',
+      );
+      const without = (doc: BsonDocument, ...keys: string[]): BsonDocument => ({
+        type: 'object',
+        fields: doc.fields.filter((f) => !keys.includes(f.key)),
+      });
+
+      it('a plain Save of a partial document unsets a loaded top-level field', async () => {
+        projection = '{"total":{"$numberInt":"1"},"note":{"$numberInt":"1"}}';
+        const loaded = without(full, 'addr');
+        edits.edit(loaded, without(loaded, 'note'), true);
+        expect(await actions.save(keyOf(1))).toBe(true);
+        expect(params('docs.update')[0]).toMatchObject({
+          update: '{"$unset":{"note":""}}',
+          expected: '{"note":{"$eq":"n"}}',
+        });
+      });
+
+      it('a plain Save under a dotted projection unsets a loaded sub-field', async () => {
+        projection = '{"addr.city":{"$numberInt":"1"}}';
+        edits.edit(
+          addrLoaded,
+          parseEJsonDocument('{"_id":{"$numberInt":"1"},"addr":{}}'),
+          true,
+          true,
+        );
+        expect(await actions.save(keyOf(1))).toBe(true);
+        expect(params('docs.update')[0]?.['update']).toBe('{"$unset":{"addr.city":""}}');
+      });
+
+      it('a second Save after the first one unsets a field of the saved baseline', async () => {
+        projection = '{"total":{"$numberInt":"1"},"note":{"$numberInt":"1"}}';
+        const loaded = without(full, 'addr');
+        const first = parseEJsonDocument(
+          '{"_id":{"$numberInt":"1"},"total":{"$numberInt":"15"},"note":"n"}',
+        );
+        edits.edit(loaded, first, true);
+        expect(await actions.save(keyOf(1))).toBe(true);
+        // The read-back answers with a different document; edit on from what the user has.
+        edits.edit(first, without(first, 'note'), true);
+        expect(await actions.save(keyOf(1))).toBe(true);
+        expect(params('docs.update')[1]?.['update']).toBe('{"$unset":{"note":""}}');
+      });
+
+      it('Overwrite unsets a loaded top-level field the user removed, under a top-level projection', async () => {
+        projection = '{"total":{"$numberInt":"1"},"note":{"$numberInt":"1"}}';
+        const loaded = without(full, 'addr');
+        fake.fail('docs.update', {
+          code: 'CONFLICT',
+          message: 'x',
+          detail: { current: stringifyEJson(full).replace('"n"', '"server"') },
+        });
+        edits.edit(loaded, without(loaded, 'note'), true);
+        expect(await actions.save(keyOf(1))).toBe(false);
+        fake.respond('docs.update', { modified: true });
+        fake.requests.length = 0;
+        expect(await actions.overwrite(keyOf(1))).toBe(true);
+        // addr is hidden by the projection: it is neither unset nor checked.
+        expect(params('docs.update')[0]).toMatchObject({
+          update: '{"$unset":{"note":""}}',
+          expected: '{"note":{"$eq":"server"}}',
+        });
+      });
+
+      it('Merge manually without a loaded field unsets it, under a top-level projection', async () => {
+        projection = '{"total":{"$numberInt":"1"},"note":{"$numberInt":"1"}}';
+        const loaded = without(full, 'addr');
+        fake.fail('docs.update', {
+          code: 'CONFLICT',
+          message: 'x',
+          detail: { current: stringifyEJson(full).replace('"n"', '"server"') },
+        });
+        edits.edit(
+          loaded,
+          parseEJsonDocument('{"_id":{"$numberInt":"1"},"total":{"$numberInt":"15"},"note":"n"}'),
+          true,
+        );
+        expect(await actions.save(keyOf(1))).toBe(false);
+        fake.respond('docs.update', { modified: true });
+        fake.requests.length = 0;
+        const merged = parseEJsonDocument('{"_id":{"$numberInt":"1"},"total":{"$numberInt":"15"}}');
+        expect(await actions.saveMerged(keyOf(1), merged)).toBe(true);
+        expect(params('docs.update')[0]?.['update']).toBe(
+          '{"$set":{"total":{"$numberInt":"15"}},"$unset":{"note":""}}',
+        );
+      });
+
+      it('Overwrite without a projection unsets a sub-field only the server has', async () => {
+        fake.fail('docs.update', {
+          code: 'CONFLICT',
+          message: 'x',
+          detail: { current: addrServer },
+        });
+        edits.edit(addrLoaded, addrEdited);
+        expect(await actions.save(keyOf(1))).toBe(false);
+        fake.respond('docs.update', { modified: true });
+        fake.requests.length = 0;
+        expect(await actions.overwrite(keyOf(1))).toBe(true);
+        expect(String(params('docs.update')[0]?.['update'])).toContain(
+          '"$unset":{"addr.street":""}',
+        );
+      });
+    });
+
+    it('reads the server version as unknown when the reread returns text that is not EJSON', async () => {
+      fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: 42 } });
+      fake.respond('docs.get', { doc: '{not ejson', sliced: [] });
+      edits.edit(order(1), order(1, 15));
+      expect(await actions.save(keyOf(1))).toBe(false);
+      expect(actions.conflicts().get(keyOf(1))).toStrictEqual({
+        key: keyOf(1),
+        current: undefined,
+      });
+      expect(actions.resolveBlocker(keyOf(1))).toBe('server-unknown');
+      // Not mistaken for a deletion.
+      expect(actions.message()?.text).not.toMatch(/deleted/);
+    });
+
+    it('keeps the document busy while a conflict without a readable version is read again', async () => {
+      const reread = deferred<{ doc: string | null; sliced: never[] }>();
+      fake.handle('docs.get', () => reread.promise);
+      fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: 42 } });
+      edits.edit(order(1), order(1, 15));
+      const saving = actions.save(keyOf(1));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(params('docs.get')).toHaveLength(1);
+      expect(actions.isBusy(keyOf(1))).toBe(true);
+      // No conflict is shown yet, and a second save is ignored.
+      expect(actions.conflicts().has(keyOf(1))).toBe(false);
+      expect(await actions.save(keyOf(1))).toBe(false);
+      reread.resolve({ doc: orderText(1, 77), sliced: [] });
+      expect(await saving).toBe(false);
+      expect(actions.isBusy(keyOf(1))).toBe(false);
+      expect(stringifyEJson(actions.conflicts().get(keyOf(1))?.current as BsonDocument)).toBe(
+        orderText(1, 77),
+      );
+      expect(params('docs.update')).toHaveLength(1);
+    });
+
+    it('keeps an edit made while the overwrite was on its way', async () => {
+      fake.fail('docs.update', {
+        code: 'CONFLICT',
+        message: 'x',
+        detail: { current: orderText(1, 77, 1) },
+      });
+      const loaded = order(1);
+      edits.edit(loaded, order(1, 15));
+      await actions.save(keyOf(1));
+      const answer = deferred<{ modified: boolean }>();
+      fake.handle('docs.update', () => answer.promise);
+      fake.requests.length = 0;
+      const writing = actions.overwrite(keyOf(1));
+      await Promise.resolve();
+      edits.edit(loaded, order(1, 15, 4));
+      answer.resolve({ modified: true });
+      expect(await writing).toBe(true);
+      expect(params('docs.update')[0]).toMatchObject({
+        update: '{"$set":{"total":{"$numberInt":"15"}}}',
+        expected: '{"total":{"$eq":{"$numberInt":"77"}}}',
+      });
+      // The written version is the baseline; the qty edit is left to save.
+      expect(stringifyEJson(edits.get(keyOf(1))?.original as BsonDocument)).toBe(orderText(1, 15));
+      expect(stringifyEJson(edits.get(keyOf(1))?.current as BsonDocument)).toBe(
+        orderText(1, 15, 4),
+      );
+      expect(actions.conflicts().size).toBe(0);
+    });
+
+    it('keepServer of an unknown server version reads it back with the query projection', async () => {
+      fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: 42 } });
+      fake.fail('docs.get', { code: 'SERVER_ERROR', message: 'connection reset' });
+      edits.edit(order(1), order(1, 15));
+      await actions.save(keyOf(1));
+      fake.respond('docs.get', { doc: orderText(1, 99, 99), sliced: [] });
+      fake.requests.length = 0;
+      projection = '{"total":{"$numberInt":"1"}}';
+      await actions.keepServer(keyOf(1));
+      expect(params('docs.get')).toEqual([
+        { profileId: 'p1', db: 'shop', coll: 'orders', id: keyOf(1), projection },
+      ]);
+    });
+  });
+
+  describe('visibleFields', () => {
+    it("keeps the top-level fields one of the shown documents has, in the document's order", () => {
+      const server = parseEJsonDocument('{"_id":1,"c":3,"b":2,"a":1,"hidden":0}');
+      const shown = [parseEJsonDocument('{"a":9,"_id":1}'), parseEJsonDocument('{"b":8}')];
+      expect(stringifyEJson(visibleFields(server, shown))).toBe(
+        stringifyEJson(parseEJsonDocument('{"_id":1,"b":2,"a":1}')),
+      );
+    });
+
+    it('is empty without shown documents', () => {
+      expect(visibleFields(order(1), []).fields).toEqual([]);
+    });
+  });
+
+  describe('isTopLevelProjection', () => {
+    it.each([
+      '{}',
+      '{"a":{"$numberInt":"1"},"b":{"$numberInt":"1"}}',
+      '{"a":{"$numberInt":"0"}}',
+      '{"a":true,"_id":false}',
+      '{"a":{"$numberDouble":"1.0"},"b":{"$numberLong":"0"}}',
+      '{"a":{"$numberDouble":"0.0"},"b":{"$numberLong":"1"}}',
+    ])('accepts %s', (projection) => {
+      expect(isTopLevelProjection(projection)).toBe(true);
+    });
+
+    it.each([
+      '{"addr.city":{"$numberInt":"1"}}',
+      '{"tags":{"$slice":{"$numberInt":"2"}}}',
+      '{"tags":{"$elemMatch":{"x":{"$numberInt":"1"}}}}',
+      '{"score":{"$meta":"textScore"}}',
+      '{"a":"$b"}',
+      '{"a":{"$numberInt":"2"}}',
+      '{"a":{"$numberLong":"2"}}',
+      '{"a":{"$numberDouble":"0.5"}}',
+      '{"$a":{"$numberInt":"1"}}',
+      'not ejson',
+    ])('refuses %s', (projection) => {
+      expect(isTopLevelProjection(projection)).toBe(false);
     });
   });
 

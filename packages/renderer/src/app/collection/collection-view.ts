@@ -21,6 +21,7 @@ import { printShellSyntax } from '@thicket/core/shellsyntax';
 
 import { ApiService } from '../api';
 import {
+  ConflictView,
   DocumentActions,
   DocumentEdits,
   DocumentHeader,
@@ -28,6 +29,7 @@ import {
   DraftDocuments,
   EditBar,
   handleEditKeys,
+  isTopLevelProjection,
 } from '../document';
 import { fromExplorerValue, toExplorerValue } from '../explorer/bson-value.util';
 import { ExportPanel } from '../io/export-panel';
@@ -95,6 +97,7 @@ const numberFormat = new Intl.NumberFormat();
     JsonExplorerComponent,
     JsonFormComponent,
     EditBar,
+    ConflictView,
     DocumentHeader,
     DraftDocuments,
     RawEditor,
@@ -257,6 +260,11 @@ export class CollectionView {
   private readonly rawDocs = signal<ReadonlySet<string>>(new Set());
   /** The page was read with a projection: its documents may be partial (see `docChanged`). */
   protected readonly partialDocs = computed(() => this.results.query().projection !== undefined);
+  /** That projection may hide parts of fields (see `DocumentEdits.edit`). */
+  protected readonly subFieldDocs = computed(() => {
+    const projection = this.results.query().projection;
+    return projection !== undefined && !isTopLevelProjection(projection);
+  });
   protected readonly readOnly = computed(() => this.safety.readOnly(this.target().profileId)());
 
   /**
@@ -422,7 +430,9 @@ export class CollectionView {
     // Save then refuses edits that would replace what wasn't loaded, also after the projection
     // was cleared.
     const partial = this.isPartial(index);
-    if (original && edited !== null) this.edits.edit(original, edited, partial);
+    if (original && edited !== null) {
+      this.edits.edit(original, edited, partial, this.subFieldDocs());
+    }
   }
 
   protected keydown(event: KeyboardEvent): void {

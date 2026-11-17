@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "task": "conflict-ui",
+  "reviewed_revision": "d7a1a385f7565992ea88723d630c2ab8c6f3cc44",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/conflict-ui/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/conflict-ui/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/conflict-ui/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P1", "disposition": "fixed", "note": "Overwrite/merge refused unless the projection selects whole top-level fields; hidesSubFields flag is sticky"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "session rebased only after a successful write"},
+    {"id": "CR-3", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "unknown server version is distinct from deleted; re-read with docs.get"},
+    {"id": "CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "server version shown unfiltered without an edit entry"},
+    {"id": "CR-5", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "merge textarea id includes a per-view uid"},
+    {"id": "CR-6", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "visually hidden change prefixes for assistive technology"},
+    {"id": "CR-7", "source": "code-reviewer", "severity": "P3", "disposition": "deferred", "note": "merge editor open state not reset when its conflict disappears; follow-up task conflict-merge-close"},
+    {"id": "TW-1", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "same defect as CR-3"},
+    {"id": "TW-2", "source": "test-writer", "severity": "Medium", "disposition": "fixed", "note": "projection-hidden sub-fields remembered across projection changes"},
+    {"id": "TW-3", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "unset-of-unloaded check applied only to edits under sub-field projections"},
+    {"id": "O-1", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "same defect as CR-2"},
+    {"id": "O-2", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "same defect as CR-4"},
+    {"id": "O-R4-1", "source": "test-writer", "severity": "Low", "disposition": "accepted", "note": "unreachable unset-of-unloaded check kept as defense in depth; reviewer round 2 agreed"}
+  ],
+  "validation": [
+    {"command": "npm run test:e2e -- test/e2e/conflict.e2e.ts", "result": "pass"},
+    {"command": "cd packages/renderer && npx ng test --include='src/app/document/**/*.spec.ts' --include='src/app/collection/**/*.spec.ts' --include='src/app/raw-editor/**/*.spec.ts'", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}

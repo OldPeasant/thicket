@@ -1,21 +1,24 @@
 ---
 title: M1: Conflict resolution view
-status: in_progress
+status: done
 owner: dell26/agent-2
 deps: [doc-edit-save]
 touches: [packages/renderer/src/app/document/conflict]
 prio: 1
-lease_until: 2026-11-17T02:14:08Z
+lease_until: 
 ---
 ## Goal
 On CONFLICT show local vs server side by side with differences highlighted; actions overwrite (replace with conflict check on the new server version), keep server version, merge manually.
 
 ## Acceptance criteria
-- [ ] e2e reproduces demo step 7: external change between load and save → conflict view appears
-- [ ] Overwrite writes the local version; keep-server discards local edits; manual merge saves the merged doc (tests)
+- [x] e2e reproduces demo step 7: external change between load and save → conflict view appears
+  - verified (2026-11-17 02:58+0100 by dell26/agent-2): npm run test:e2e -- test/e2e/conflict.e2e.ts (Electron app + MongoDB container, HEAD fda519b) -> 2 passed: external change between load and save shows the conflict view; Overwrite writes the local version / Keep server + Merge manually
+- [x] Overwrite writes the local version; keep-server discards local edits; manual merge saves the merged doc (tests)
+  - verified (2026-11-17 02:58+0100 by dell26/agent-2): cd packages/renderer && npx ng test --include=document/collection/raw-editor specs -> 13 files, 693 passed (service + component tests for overwrite, keep-server, manual merge, projection safety); e2e test/e2e/conflict.e2e.ts -> 2 passed; npm run check -> pass (3264 root + 2154 renderer tests)
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 02:05+0100 by dell26/agent-2): Overwrite = rebase the edits onto the server's current version and save the diff (server -> local) with the server's values as expected; result equals the local version (fields only the server has are unset) and a newer server change conflicts again. A document deleted on the server is inserted again (refused with a projection); merge is not offered for deleted documents.
 - ASSUMPTION (2026-11-17 02:05+0100 by dell26/agent-2): Merge manually = a shell-syntax textarea prefilled with the local version, saved like Overwrite (must keep the _id); not a 3-way field picker. With a projection active, both sides and Overwrite/Merge consider only the top-level fields the user loaded/edited, so hidden fields are neither shown nor unset. The side-by-side diff is a line diff (LCS) of the shell-syntax pretty print; above 4M cells it pairs the differing middle without LCS.
 - ASSUMPTION (2026-11-17 02:25+0100 by dell26/agent-2): Overwrite and Merge manually are offered for a document loaded with a projection only when the active projection selects whole top-level fields (no dotted paths or operators); otherwise only Keep server version is offered, with a note to clear the projection and edit again (prevents unsetting hidden sub-fields). A CONFLICT whose server version cannot be read is reloaded with docs.get; if that fails only Keep server version is offered.
+- done by dell26/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 33s on 2ac5a10cf; criteria verified 2/2
