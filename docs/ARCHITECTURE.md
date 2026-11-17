@@ -497,6 +497,26 @@ Contract layout (`packages/contract/src/`):
   render it call `installJsdomLayoutStubs()` (`raw-editor/testing.ts`: jsdom has no `Range`
   rectangles for CodeMirror's measuring).
 
+## Aggregation builder (`packages/renderer/src/app/aggregation`)
+- `AggregationView` is the `aggregation` tab view (id `aggregationTabId(profileId, db, coll)`,
+  `data` like a collection tab), opened with "Aggregate…" (`open-aggregation`) on the
+  collection tab; dropping or renaming the collection closes it too.
+- `pipeline.model.ts` (pure): a `Stage` is `{ id, operator, body, enabled }`, the body in shell
+  syntax; `parseStage` → `{ [operator]: value }` with line/column errors (core's parser, never
+  `eval`). The full-text mode (`printPipeline` / `parsePipeline`) is one shell-syntax array;
+  disabled stages are lines starting with `//- ` (comments for the parser) and come back
+  disabled.
+- Previews: each enabled, valid stage gets `agg.previewStage` with the enabled, valid stages up
+  to it (debounced 400 ms, only when its prefix changed, older requests aborted). A stage with an
+  error blocks only its own preview; later stages are previewed without it and say so.
+  `$out`/`$merge` stages are not previewed.
+- Run: `agg.run` with `$skip`/`$limit` appended (20 per page + 1 to know whether there is a next
+  page); a pipeline with `$out`/`$merge` runs unpaged through `WriteGuard.approve` with
+  `alwaysConfirm`. Export: core's `generateCode` (`@thicket/core/codegen`) for shell, Node,
+  Python and Java, with the profile's connection string. Create view: `agg.createView` through
+  `WriteGuard.run`. Saving pipelines is task `saved-pipelines`. e2e:
+  `test/e2e/aggregation.e2e.ts` (demo step 8).
+
 ## Write safety in the renderer (`packages/renderer/src/app/safety`)
 - Every write UI sends writes through `WriteGuard.run(method, params, options)` (or `approve()`,
   which returns the params to send, e.g. for `agg.run` with `$out` over `ApiService.stream`).

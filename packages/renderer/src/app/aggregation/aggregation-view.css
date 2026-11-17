@@ -208,6 +208,7 @@
 
 .rail {
   grid-row: 1 / span 2;
+  align-self: stretch;
   position: relative;
   display: flex;
   justify-content: center;

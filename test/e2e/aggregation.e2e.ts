@@ -151,9 +151,7 @@ test('demo step 8: $match → $group → $sort with a preview per stage, export 
   // Export as shell code.
   await builder.getByTestId('agg-export').click();
   const code = builder.getByTestId('agg-code');
-  await expect(code).toContainText(
-    `db.getSiblingDB("${DB}").getCollection("${COLL}").aggregate(`,
-  );
+  await expect(code).toContainText(`db.getSiblingDB("${DB}").getCollection("${COLL}").aggregate(`);
   const shell = (await code.textContent()) ?? '';
   expect(shell).toMatch(/\$match[\s\S]*status: "open"[\s\S]*\$group[\s\S]*\$sort/);
 
