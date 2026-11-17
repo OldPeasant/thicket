@@ -12,7 +12,7 @@ import {
   type PageRequest,
   type SortSpec,
 } from '@thicket/core';
-import { BSON, type Document, type ReadPreferenceLike } from 'mongodb';
+import { BSON, MongoWriteConcernError, type Document, type ReadPreferenceLike } from 'mongodb';
 
 import {
   RAW,
@@ -97,6 +97,11 @@ async function command(
     const options = readPreference === undefined ? RAW : { ...RAW, readPreference };
     return await client.db(db).command(cmd, options);
   } catch (error) {
+    // A write the server applied but could not acknowledge with the requested write concern:
+    // the driver throws, but its reply (`n`, `writeErrors`, `writeConcernError`) is the answer.
+    if (error instanceof MongoWriteConcernError && 'writeConcernError' in error.result) {
+      return error.result;
+    }
     throw toBrowseError(error);
   }
 }
