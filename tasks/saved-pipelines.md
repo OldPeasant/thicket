@@ -3,7 +3,7 @@ title: M3: Save and reopen aggregation pipelines (pipelines.json)
 status: todo
 owner:
 deps: [agg-ui]
-touches: [packages/contract/src/agg.ts,apps/desktop/src,packages/renderer/src/app/aggregation]
+touches: [packages/contract/src/pipelines.ts,apps/desktop/src/pipelines,packages/renderer/src/app/aggregation]
 prio: 2
 ---
 ## Goal
