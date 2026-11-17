@@ -115,6 +115,7 @@ describe('usersHandlers', () => {
             { user: 'amy', db: 'shop' },
           ],
           showPrivileges: true,
+          showAuthenticationRestrictions: true,
         },
       },
     ]);
@@ -163,6 +164,7 @@ describe('usersHandlers', () => {
     expect(sent[1]?.command).toEqual({
       usersInfo: [{ user: 'amy', db: 'shop' }],
       showPrivileges: true,
+      showAuthenticationRestrictions: true,
     });
   });
 

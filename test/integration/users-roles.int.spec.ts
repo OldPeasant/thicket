@@ -77,6 +77,12 @@ beforeAll(async () => {
       { role: 'read', db: OTHER_DB },
     ],
   });
+  await db.command({
+    createUser: 'carol',
+    pwd: randomBytes(12).toString('hex'),
+    roles: [{ role: 'orderReader', db: DB }],
+    authenticationRestrictions: [{ clientSource: ['192.0.2.10'] }],
+  });
 
   manager = new ConnectionManager({
     loadProfile: (id) =>
@@ -105,7 +111,7 @@ describe('admin.users', () => {
   it('lists the users of the database with roles, inherited roles and privileges', async () => {
     const { users } = await call('admin.users', { profileId: PROFILE.id, db: DB });
     const docs = users.map(parse);
-    expect(docs.map((u) => u['user'])).toEqual(['alice', 'bob']);
+    expect(docs.map((u) => u['user'])).toEqual(['alice', 'bob', 'carol']);
 
     const alice = docs[0] as Document;
     expect(alice['db']).toBe(DB);
@@ -126,6 +132,18 @@ describe('admin.users', () => {
         { role: 'read', db: OTHER_DB },
       ]),
     );
+  });
+
+  it('includes authentication restrictions together with the privileges', async () => {
+    const { users } = await call('admin.users', { profileId: PROFILE.id, db: DB });
+    const docs = users.map(parse);
+    const carol = docs.find((u) => u['user'] === 'carol') as Document;
+    expect(carol['authenticationRestrictions']).toEqual([{ clientSource: ['192.0.2.10'] }]);
+    expect(carol['inheritedPrivileges']).toEqual(
+      expect.arrayContaining([{ resource: { db: DB, collection: 'orders' }, actions: ['find'] }]),
+    );
+    const alice = docs.find((u) => u['user'] === 'alice') as Document;
+    expect(alice['authenticationRestrictions']).toEqual([]);
   });
 
   it('never sends credentials to the renderer', async () => {

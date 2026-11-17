@@ -406,6 +406,23 @@ describe('UsersRolesView', () => {
     expect(get('user-detail').querySelector('.title')?.textContent).toContain('alice');
   });
 
+  it('reopening the same tab (a new, equal tab object) sends nothing and keeps the selection', async () => {
+    await create();
+    view.selectUser('bob');
+    get('mode-roles').click();
+    await settle();
+    view.selectRole('reader');
+    await settle();
+    fixture.componentRef.setInput('tab', { ...TAB, data: { profileId: 'p1', db: 'shop' } });
+    await settle();
+    expect(fake.requestsFor('admin.users')).toHaveLength(1);
+    expect(rolesParams()).toHaveLength(1);
+    expect(get('role-detail').querySelector('.title')?.textContent).toContain('reader');
+    get('mode-users').click();
+    await settle();
+    expect(get('user-detail').querySelector('.title')?.textContent).toContain('bob');
+  });
+
   it('sends nothing for a tab without a profile or database', async () => {
     await create({ ...TAB, data: { profileId: 'p1' } });
     await create({ ...TAB, data: undefined });

@@ -68,10 +68,17 @@ export class UsersRolesView {
 
   private readonly api = inject(ApiService);
 
-  protected readonly target = computed<UsersTabData>(() => {
-    const data = this.tab().data as Partial<UsersTabData> | undefined;
-    return { profileId: data?.profileId ?? '', db: data?.db ?? '' };
-  });
+  /**
+   * Equal by value: reopening the tab gives a new tab object with the same data, which must not
+   * reload the lists or drop the selection.
+   */
+  protected readonly target = computed<UsersTabData>(
+    () => {
+      const data = this.tab().data as Partial<UsersTabData> | undefined;
+      return { profileId: data?.profileId ?? '', db: data?.db ?? '' };
+    },
+    { equal: (a, b) => a.profileId === b.profileId && a.db === b.db },
+  );
 
   readonly mode = signal<UsersMode>('users');
   readonly builtin = signal(false);

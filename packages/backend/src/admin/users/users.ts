@@ -39,8 +39,8 @@ function entries(answer: Document, field: string): Document[] {
  * `admin.users`: the users defined in `db`, sorted by name, each with its roles, inherited roles
  * and privileges. The server gives privileges only for exact-match queries, so the names come
  * first (`usersInfo: 1`) and the details second (`usersInfo: [{ user, db }, …]` with
- * `showPrivileges`). Credentials are never asked for (`showCredentials` stays off) and dropped if
- * present.
+ * `showPrivileges` and `showAuthenticationRestrictions`, both off by default). Credentials are
+ * never asked for (`showCredentials` stays off) and dropped if present.
  */
 export async function listUsers(client: ClientLike, db: string): Promise<ResultOf<'admin.users'>> {
   const names = entries(await runCommand(client, db, { usersInfo: 1 }), 'users')
@@ -50,6 +50,7 @@ export async function listUsers(client: ClientLike, db: string): Promise<ResultO
   const answer = await runCommand(client, db, {
     usersInfo: names.map((user) => ({ user, db })),
     showPrivileges: true,
+    showAuthenticationRestrictions: true,
   });
   const users = entries(answer, 'users').map(withoutSecrets).sort(byName('user'));
   return { users: users.map(canonical) };
