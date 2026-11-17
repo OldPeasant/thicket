@@ -5,7 +5,7 @@ owner: dell26/agent-2
 deps: [ssh-tunnel,x509-proxy,connection-ui]
 touches: [packages/renderer/src/app/connections]
 prio: 2
-lease_until: 2026-11-17T02:49:27Z
+lease_until: 2026-11-17T02:54:31Z
 ---
 ## Goal
 Extend the connection editor with SSH tab, certificate fields, proxy and read preference/write concern; host-key trust dialog; copyable connection string with masked password. Use the frontend-design skill for the visual direction; respect the Business and Tron tokens (no hard-coded colors).
