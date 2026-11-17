@@ -631,6 +631,24 @@ Contract layout (`packages/contract/src/`):
   `test/e2e/explain.e2e.ts` (demo step 9; the test creates the index with `idx.create` over the
   bridge, not through the Indexes tab).
 
+## Validator tab (`packages/renderer/src/app/validator`)
+- Backend: `packages/backend/src/browse/validator` (`validatorHandlers`): `coll.validator.get`
+  (`listCollections` options; level/action default `strict`/`error`, `{}` counts as none),
+  `coll.validator.set` (`collMod`; `null` sends `validator: {}`), `coll.validator.check` (the
+  `_id`s among at most `MAX_VALIDATOR_CHECK_IDS` given ones whose documents fail: a
+  `{ _id: { $in }, $nor: [validator] }` find, so the server evaluates `$jsonSchema`; an optional
+  draft `validator` instead of the stored one). Int tests `test/integration/validator.int.spec.ts`.
+- `ValidatorView` is the `validator` tab view (id `validatorTabId(profileId, db, coll)`), opened with
+  "Validator…" (`open-validator`) on the collection tab; closed with the collection like the
+  indexes tab. The validator is edited as shell syntax (`validator.model.ts`, core's parser; empty
+  text or `{}` removes it), level and action as selects; Save goes through `WriteGuard` and then
+  bumps `ValidatorChanges` for that collection.
+- Markers: each collection tab has its own `ValidatorMarks`; whenever its page changes (a saved
+  document included) or `ValidatorChanges` bumps, it sends the page's `_id`s to
+  `coll.validator.check`. The document list marks failing documents (`data-invalid`,
+  `doc-invalid` tag, red edge); every view shows a summary line (`validator-summary`). Marks are
+  about the stored documents, not unsaved edits. e2e: `test/e2e/validator.e2e.ts`.
+
 ## Write safety in the renderer (`packages/renderer/src/app/safety`)
 - Every write UI sends writes through `WriteGuard.run(method, params, options)` (or `approve()`,
   which returns the params to send, e.g. for `agg.run` with `$out` over `ApiService.stream`).
