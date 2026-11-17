@@ -4,96 +4,118 @@ Date: 2026-11-17
 
 Task: validator - M3 (Should): Collection validator
 
-Scope: task commits after base `3c0e3cbe86b245e9e551fc2aed38cb292f270599` up to HEAD `0c4d1efd1e8d832f221579212fe13b28c5197d7b` on `main` (c1274e5 backend + integration test, b39cd00 validator tab and markers, 0c4d1ef e2e test and architecture notes; all by dell26/agent-1), plus the new uncommitted test files listed below. No uncommitted production changes.
+Scope: second pass, final revision. Task commits after base `1fef92fde38609ff3d0ebadae6fbbff5145caef1` up to HEAD `6a0b73ef449ce7dbb3581eeee2e62e03664de3a0` on `main`: 5e290eb (backend and integration test), 7f1e0ec (validator tab and markers), 0fd662a (e2e and architecture notes), 096e68a (unit tests and first-pass reports), 6a0b73e (fixer: CR-1, CR-3, CR-4, CR-5). Uncommitted input: this pass's additions to `packages/renderer/src/app/validator/validator-view.spec.ts`. There are no uncommitted production changes. `reviews/validator/review.md` is also modified in the working tree. This helper did not change it.
 
 Requirements:
-- `tasks/validator.md` acceptance criteria and recorded assumptions (check method `coll.validator.check` with `{_id:{$in}, $nor:[validator]}`; marks in the list view, summary plus link in the table view; marks reflect stored documents)
+- `tasks/validator.md` acceptance criteria and recorded assumptions
 - `SPEC.md` M3 "Collection validator", `docs/ARCHITECTURE.md` (Coverage, Conventions), `AGENTS.md`
-- Parent instructions (unit specs for backend validator.ts and handlers, renderer validator.model.ts, validator-marks.service.ts, validator-view.ts, collection-view marker rendering)
+- `reviews/validator/review.md` findings CR-1, CR-3, CR-4, CR-5 and `reviews/validator/fixes.md` (the behaviour the fixes must now guarantee)
+- Parent instructions for the second pass
 
 ## Test files changed
 
-- `packages/backend/src/browse/validator/validator.spec.ts` (new)
-- `packages/backend/src/browse/validator/handlers.spec.ts` (new)
-- `packages/renderer/src/app/validator/validator.model.spec.ts` (new)
-- `packages/renderer/src/app/validator/validator-marks.service.spec.ts` (new)
-- `packages/renderer/src/app/validator/validator-view.spec.ts` (new)
-- `packages/renderer/src/app/collection/collection-view.spec.ts` (new `validator marks` describe block; no existing test changed)
+First pass (committed in 096e68a):
+- `packages/backend/src/browse/validator/validator.spec.ts`
+- `packages/backend/src/browse/validator/handlers.spec.ts`
+- `packages/renderer/src/app/validator/validator.model.spec.ts`
+- `packages/renderer/src/app/validator/validator-marks.service.spec.ts`
+- `packages/renderer/src/app/validator/validator-view.spec.ts`
+- `packages/renderer/src/app/collection/collection-view.spec.ts`
+
+Fixer (committed in 6a0b73e, reviewed in this pass): `validator-view.spec.ts`, `validator-marks.service.spec.ts`, `collection-view.spec.ts`.
+
+This pass (uncommitted):
+- `packages/renderer/src/app/validator/validator-view.spec.ts`
 
 ## Tests added or updated
 
-Count: 124 test cases (backend 54 including `it.each` rows; renderer validator specs 58; collection-view 12).
+Count: 4 tests added in this pass. All are in `validator-view.spec.ts`:
+- "Ctrl+Enter right after a successful save sends no second collMod". This is a CR-3 regression test: once a save succeeds, the editor is clean again, so a repeated shortcut sends no no-op `collMod`.
+- "Ctrl+Enter saves a change of the level alone, with the stored validator". The new `dirty()` guard must still allow saves that change only the level or action.
+- "unlocks the editor after a refused save, and a retry sends again". CR-4 lock: the editor stays locked while the save is pending, is released after a server refusal, keeps the edit, and lets the user retry.
+- "locks the editor while the confirmation is open and unlocks it after Cancel". CR-4 on a production profile: the editor is locked while the confirmation dialog is open and is unlocked with the text kept after Cancel.
+
+The fixer's tests are adequate, so I did not change them: check-error notice shown and cleared, Ctrl+Enter or a direct save without a change, Ctrl+Enter on production without a change, read-only Ctrl+Enter or direct save, editor/selects/template locked while saving, per-collection `ValidatorChanges` signal, and no re-check from another collection's change. The fixer replaced the read-only spec "refuses a save called directly". The replacement checks the behaviour that CR-3 requires: nothing is sent and the edit is kept. It does not weaken a requirement.
 
 ## Requirement coverage
 
 | Requirement | Tests | Command | Result |
 |---|---|---|---|
-| AC1 Integration test: set validator, invalid doc flagged by the check method | existing `test/integration/validator.int.spec.ts` (not changed or re-run by this helper); unit level: `checkValidator` "finds the failing _ids with the collection's validator as {_id: {$in}, $nor: [validator]}", "keeps the BSON types of the failing _ids", "collects every batch", "checks a draft validator without reading the stored one"; handlers "passes db, collection and parameters of each request to the server" | `cd packages/backend && npx vitest run src/browse/validator` | Pass (54/54); integration suite Not run by test-writer: the parent reported it passing |
-| AC2 e2e: edit validator; failing document shows a marker | existing `test/e2e/validator.e2e.ts` (not re-run by this helper); unit level: CollectionView `validator marks` (marks failing docs in list view, summary text 1/n, table view link "Show them marked", next page, re-check on ValidatorChanges, failure clears marks, stale page answer, closing the tab cancels, Validator… opens the tab) and ValidatorView save/dirty/parse-error/WriteGuard tests | `cd packages/renderer && npx ng test --include='src/app/validator/**/*.spec.ts' --include='src/app/collection/collection-view.spec.ts'` | Pass (128/128 then 58/58 after the last addition); e2e Not run by test-writer: the parent reported it passing |
-| validator/ids parse errors -> INVALID_PARAMS; ids limit (1000 ok, 1001 refused); nothing sent on bad input | `parseValidator`/`parseIds` `it.each` rows, `checkValidator` "refuses %s with INVALID_PARAMS before sending anything", "refuses more than MAX_VALIDATOR_CHECK_IDS" | backend vitest above | Pass |
-| get defaults (no options, empty validator, unknown level/action -> strict/error), NOT_FOUND, server errors | `getValidator` tests | backend vitest above | Pass |
-| set: one collMod; null -> `validator: {}`; server refusal -> SERVER_ERROR | `setValidator` tests, handler "coll.validator.set with a null validator removes it" | backend vitest above | Pass |
-| check: no validator / empty draft -> hasValidator false without find; empty ids -> no find; cancel kills the cursor | `checkValidator` tests | backend vitest above | Pass |
-| Handlers: exact method set, NOT_CONNECTED, reads cancellable, set not cancellable once sent | `validatorHandlers` tests | backend vitest above | Pass |
-| Renderer model: shell syntax to and from canonical EJSON, empty/{} = remove, code refused, error position | `validator.model.spec.ts` | renderer ng test above | Pass |
-| Marks: stale answers dropped (success and failure), keys normalized (`$numberDouble "1.0"`), no ids/no profile = no request, max ids, error clears marks, CANCELLED ignored, stop() | `validator-marks.service.spec.ts` | renderer ng test above | Pass |
-| View: load, loading, no validator + template, load error + Refresh, stale reads (success and failure), dirty/revert, parse error on Save, save via WriteGuard + ValidatorChanges bump, remove, refused save, double Save, Ctrl+Enter, production confirm/cancel, read-only | `validator-view.spec.ts` | renderer ng test above | Pass |
+| AC1: integration test; set validator; the check method flags an invalid doc | `test/integration/validator.int.spec.ts` (run by the parent on this revision: 14 passed). Unit level: `checkValidator` and handler specs in `packages/backend/src/browse/validator/*.spec.ts` | `cd packages/backend && npx vitest run src/browse/validator src/server/backend.spec.ts --coverage …` | Unit: Pass (102/102). Integration: not run by this helper; the parent reports 14 passed |
+| AC2: e2e; edit the validator; a failing document shows a marker | `test/e2e/validator.e2e.ts` (run by the parent on this revision: 1 passed). Unit level: CollectionView `validator marks` block, ValidatorView save specs | `cd packages/renderer && npx ng test --include='src/app/validator/**/*.spec.ts' --include='src/app/collection/collection-view.spec.ts'` | Unit: Pass (148/148). e2e: not run by this helper; the parent reports 1 passed |
+| CR-1: a failed check is visible and is cleared by a successful check | "says why when the check fails, and drops the notice after a successful check" (collection-view.spec.ts) | renderer focused command above | Pass |
+| CR-3: Ctrl+Enter and direct `save()` do nothing when Save is disabled (unchanged, saving, read-only) | "Ctrl+Enter without a change sends nothing…", "Ctrl+Enter right after a successful save sends no second collMod", "a second Save while one is running sends nothing", "Ctrl+Enter without a change asks nothing" (production), "Ctrl+Enter and a direct save do nothing…" (read-only), "Ctrl+Enter saves a change of the level alone…" (guard does not block real changes) | renderer focused command above | Pass |
+| CR-4: the editor is locked while saving, unlocked afterwards (success, refusal, Cancel) | "locks the editor while saving…", "locks the template button while saving", "unlocks the editor after a refused save, and a retry sends again", "locks the editor while the confirmation is open and unlocks it after Cancel" | renderer focused command above | Pass |
+| CR-5: a validator change re-checks only that collection's tabs | "notifies readers of the changed collection only" (validator-marks.service.spec.ts), "keeps this tab's marks when the validator of another collection changes" (asserts no new check) | renderer focused command above | Pass |
+| Backend parse/limits/get/set/check/handlers, renderer model and marks service (first-pass rows) | first-pass specs, unchanged | `npm run check` | Pass |
 
 ## Focused test execution
 
 Command:
 
-`cd packages/backend && npx vitest run src/browse/validator`
 `cd packages/renderer && npx ng test --include='src/app/validator/**/*.spec.ts' --include='src/app/collection/collection-view.spec.ts'`
 
 Result:
 
-Pass (backend 54/54; renderer 128/128; after the last added test, validator specs 58/58).
+Pass: 4 files, 148 tests.
 
 ## Full test execution
 
 Command:
 
-`npm run check` (repository root: eslint + prettier --check, tsc for every workspace, `vitest run` and `ng test`)
+`npm run check` (repository root: eslint and prettier --check, tsc for every workspace, root `vitest run`, renderer `ng test`)
 
 Result:
 
-Pass: root vitest 75 files / 4100 tests, renderer 87 files / 2730 tests, lint and typecheck clean.
+Pass. Lint and Prettier clean, typecheck clean, root vitest 75 files / 4100 tests passed, renderer 92 files / 2948 tests passed. This run includes this pass's added tests.
 
 ## .taskcheck
 
 Result:
 
-Pass. `.taskcheck` runs `npm run check`, and that command passed on the final test snapshot (see above). `.taskcheck` was not invoked separately.
+Pass. `.taskcheck` runs `npm run check`, which passed on the final test snapshot. I did not invoke `.taskcheck` separately.
 
 ## Bugs found
 
 No production defects found. No test fails.
 
-Observations, not requirement violations, so they have no failing tests (the parent decides whether they matter):
-
-- `ValidatorChanges.version(target)` reads the whole versions map signal. So saving the validator of any collection re-checks every open collection tab, not only tabs of that collection. Results stay correct; the cost is extra `coll.validator.check` requests (`packages/renderer/src/app/validator/validator-marks.service.ts:28-30`). The test "keeps this tab's marks when the validator of another collection changes" checks only correctness.
-- `ValidatorMarks.error` is set when a check fails, but nothing in `collection-view.html` displays it. A failed check (for example, missing `listCollections` privilege) silently shows no marks. The task does not define the expected behaviour.
+The first-pass observations (silent check error, every tab re-checked on any change) were reported as CR-1 and CR-5. The fixer fixed both, and tests now cover them.
 
 ## Coverage
 
-Status: verified (backend, contract and renderer runs exited 0 on the final snapshot).
+Status: verified. All three coverage runs exited 0 on the final snapshot: production at HEAD 6a0b73e plus the uncommitted test additions.
 
 Metric: whole-file coverage of task-changed production files.
-Changed-line coverage: not measured. However, every uncovered statement or branch in `collection-view.ts`, `workspace.service.ts` and `backend.ts` lies outside the lines this task added (checked against `git diff 3c0e3cb..HEAD`).
+Changed-line coverage: not measured. I compared the uncovered branch lines from `lcov.info` with the hunks of `git diff 1fef92f..HEAD`. In `collection-view.ts`, `workspace.service.ts` and `backend.ts`, every uncovered location lies outside the task's added lines. The task's lines in `collection-view.ts` are new 148-164, 368-389 and 587-606. In the task-new files, the remaining gaps are listed in the table below.
 
 Evidence:
-- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: `validator`; base `3c0e3cbe86b245e9e551fc2aed38cb292f270599`; HEAD `0c4d1efd1e8d832f221579212fe13b28c5197d7b`; commits c1274e5, b39cd00, 0c4d1ef (parent-supplied, confirmed with `git log 3c0e3cb..HEAD` and `git diff --stat 3c0e3cb..HEAD`).
-- Source/test snapshot identifier (including uncommitted inputs): production files unchanged from HEAD (sha256 prefixes stable before and after the runs: validator.ts de772128, handlers.ts 797aaba2, validator-marks.service.ts a4e2a7ea, validator-view.ts 8455301a, validator.model.ts 6ec6c0db, collection-view.ts 9713c97d). Uncommitted tests: validator.spec.ts 3183d2bf, handlers.spec.ts 6c955dac, validator-marks.service.spec.ts bcbf4c19, validator-view.spec.ts d66a7017, validator.model.spec.ts 9acb718d, collection-view.spec.ts af6b49c1.
-- Exact included files: backend `src/browse/validator/validator.ts`, `src/browse/validator/handlers.ts`, `src/browse/validator/index.ts`, `src/server/backend.ts`; contract `src/coll.ts`; renderer `src/app/validator/validator-view.ts`, `validator-marks.service.ts`, `validator.model.ts`, `index.ts`, `src/app/collection/collection-view.ts`, `src/app/layout/workspace.service.ts`, `src/app/sidebar/sidebar-tree.service.ts`, `src/app/app.config.ts`. Excluded: `collection-view.html/.css`, `validator-view.html/.css` (templates and styles: v8 cannot instrument them; the template is exercised by the component specs), `docs/ARCHITECTURE.md`, test files, `test/integration` and `test/e2e`. No renamed or deleted files.
+- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: `validator`. Base `1fef92fde38609ff3d0ebadae6fbbff5145caef1` (parent-supplied). HEAD `6a0b73ef449ce7dbb3581eeee2e62e03664de3a0`. Commits 5e290eb, 7f1e0ec, 0fd662a, 096e68a, 6a0b73e. Ownership was established from the parent-supplied commit list, confirmed with `git log 1fef92f..HEAD` (all by dell26/agent-1) and `git diff --stat 1fef92f..HEAD`.
+- Source/test snapshot identifier (including uncommitted inputs): sha256 prefixes. They were identical before and after the coverage runs. Production: backend `validator.ts` de772128, `handlers.ts` 797aaba2, `backend.ts` fd9f22f2; contract `coll.ts` e01be718; renderer `validator-view.ts` ffa0b7c5, `validator-marks.service.ts` 39416998, `validator.model.ts` 6ec6c0db, `collection-view.ts` 6c34b532, `collection-view.html` 95d8220e, `validator-view.html` 7a94856e. Tests: `validator-view.spec.ts` 136a1d8b (uncommitted), `validator-marks.service.spec.ts` 919caa8c, `collection-view.spec.ts` 72ab8db8.
+- Exact included files:
+  - backend: `src/browse/validator/validator.ts`, `src/browse/validator/handlers.ts`, `src/browse/validator/index.ts`, `src/browse/index.ts`, `src/server/backend.ts`
+  - contract: `src/coll.ts`
+  - renderer: `src/app/validator/validator-view.ts`, `validator-marks.service.ts`, `validator.model.ts`, `index.ts`, `src/app/collection/collection-view.ts`, `src/app/layout/workspace.service.ts`, `src/app/sidebar/sidebar-tree.service.ts`, `src/app/app.config.ts`
+
+  Excluded:
+  - `collection-view.html/.css` and `validator-view.html/.css`: templates and styles. v8 does not instrument them; the component specs exercise them through DOM assertions.
+  - `docs/ARCHITECTURE.md`, test files, `test/integration`, `test/e2e`, `reviews/`.
+
+  No files were renamed or deleted.
 - Provider/version, command, working directory, and test selection: Vitest 5.1.0 with `@vitest/coverage-v8`.
-  - `packages/backend`: `npx vitest run src/browse/validator src/server/backend.spec.ts --coverage --coverage.include='src/browse/validator/validator.ts' --coverage.include='src/browse/validator/handlers.ts' --coverage.include='src/browse/validator/index.ts' --coverage.include='src/server/backend.ts' --coverage.reporter=text --coverage.reporter=json-summary`
-  - `packages/contract`: `npx vitest run --coverage --coverage.include='src/coll.ts' --coverage.reporter=text` (all contract specs)
-  - `packages/renderer`: `npx ng test --coverage` with one `--coverage-include='src/app/…'` per renderer file listed above (8 flags; full renderer suite)
-- Run start/completion time and exit status: backend 2026-11-17 04:41:44 (about 4 s), exit 0; contract 04:44:44, exit 0; renderer final run 04:44:16 (about 21 s), exit 0.
-- Generated report paths and report hashes/run identifier: `packages/backend/coverage/coverage-summary.json` sha256 bb8bc2c3…; `packages/renderer/coverage/renderer/coverage-summary.json` sha256 ef3af140…, `packages/renderer/coverage/renderer/lcov.info` sha256 ee9a8ebf…; contract: text output only. `packages/renderer/coverage/coverage-summary.json` is a stale file from 2026-11-16 and was not used.
-- Evidence outputs are fresh and inputs stayed unchanged: yes. The report files are timestamped at the run, and the production hashes are identical before and after.
-- Final run after latest test additions and production fixes: yes for renderer and contract. The backend run came after the last backend spec change (backend specs did not change afterwards). No production fixes were made.
+  - `packages/backend`: `npx vitest run src/browse/validator src/browse/index.spec.ts src/server/backend.spec.ts --coverage --coverage.reportsDirectory=coverage/validator-pass2 --coverage.include=…` (the five backend files above) `--coverage.reporter=text --coverage.reporter=json-summary`. 3 files and 102 tests ran; `src/browse/index.spec.ts` does not exist and matched nothing.
+  - `packages/contract`: `npx vitest run --coverage --coverage.reportsDirectory=coverage/validator-pass2 --coverage.include='src/coll.ts' --coverage.reporter=text --coverage.reporter=json-summary`. All contract specs ran.
+  - `packages/renderer`: `npx ng test --coverage` with one `--coverage-include='src/app/…'` per renderer file listed above (8 flags). The full renderer suite ran: 92 files, 2948 tests.
+- Run start/completion time and exit status: all exited 0.
+  - backend: 2026-11-17T04:56:12 to 04:56:16 +01:00
+  - contract: 04:56:22 to 04:56:23
+  - renderer: 04:56:24 to 04:56:53
+- Generated report paths and report hashes/run identifier:
+  - `packages/backend/coverage/validator-pass2/coverage-summary.json`: sha256 1fc9b0ea…
+  - `packages/contract/coverage/validator-pass2/coverage-summary.json`: sha256 fc2cb418…
+  - `packages/renderer/coverage/renderer/coverage-summary.json`: sha256 ba653ff9…, mtime 04:56:53
+  - `packages/renderer/coverage/renderer/lcov.info`: sha256 14f597f4…
+- Evidence outputs are fresh and inputs stayed unchanged: yes. The backend and contract runs wrote to new directories. The renderer report is timestamped within its run. The production and test hashes were the same before and after the runs.
+- Final run after latest test additions and production fixes: yes. All three runs came after the fixer's commit 6a0b73e and after this pass's last spec change.
 
 Values below use covered/total (percentage); zero-denominator or unsupported metrics are N/A.
 
@@ -102,36 +124,38 @@ Values below use covered/total (percentage); zero-denominator or unsupported met
 | `packages/backend/src/browse/validator/validator.ts` | 47/47 (100%) | 39/40 (97.5%) | 10/10 (100%) | 40/40 (100%) |
 | `packages/backend/src/browse/validator/handlers.ts` | 4/4 (100%) | N/A (0/0) | 4/4 (100%) | 4/4 (100%) |
 | `packages/backend/src/browse/validator/index.ts` | N/A (0/0) | N/A | N/A | N/A |
+| `packages/backend/src/browse/index.ts` | N/A (0/0) | N/A | N/A | N/A |
 | `packages/backend/src/server/backend.ts` | 54/62 (87.1%) | 16/18 (88.9%) | 16/23 (69.6%) | 51/57 (89.5%) |
 | `packages/contract/src/coll.ts` | 8/8 (100%) | N/A (0/0) | N/A (0/0) | 8/8 (100%) |
-| `packages/renderer/src/app/validator/validator-view.ts` | 86/87 (98.9%) | 42/46 (91.3%) | 15/15 (100%) | 77/77 (100%) |
-| `packages/renderer/src/app/validator/validator-marks.service.ts` | 44/45 (97.8%) | 26/27 (96.3%) | 9/9 (100%) | 34/34 (100%) |
+| `packages/renderer/src/app/validator/validator-view.ts` | 87/88 (98.9%) | 45/49 (91.8%) | 15/15 (100%) | 78/78 (100%) |
+| `packages/renderer/src/app/validator/validator-marks.service.ts` | 49/50 (98.0%) | 24/25 (96.0%) | 10/10 (100%) | 39/39 (100%) |
 | `packages/renderer/src/app/validator/validator.model.ts` | 14/14 (100%) | 7/8 (87.5%) | 2/2 (100%) | 12/12 (100%) |
 | `packages/renderer/src/app/validator/index.ts` | N/A (0/0) | N/A | N/A | N/A |
-| `packages/renderer/src/app/collection/collection-view.ts` | 256/263 (97.3%) | 139/161 (86.3%) | 77/78 (98.7%) | 217/217 (100%) |
+| `packages/renderer/src/app/collection/collection-view.ts` | 266/273 (97.4%) | 141/163 (86.5%) | 78/79 (98.7%) | 227/227 (100%) |
 | `packages/renderer/src/app/layout/workspace.service.ts` | 55/55 (100%) | 37/38 (97.4%) | 16/16 (100%) | 38/38 (100%) |
-| `packages/renderer/src/app/sidebar/sidebar-tree.service.ts` | 227/227 (100%) | 97/97 (100%) | 65/65 (100%) | 181/181 (100%) |
+| `packages/renderer/src/app/sidebar/sidebar-tree.service.ts` | 235/235 (100%) | 103/103 (100%) | 67/67 (100%) | 188/188 (100%) |
 | `packages/renderer/src/app/app.config.ts` | 1/1 (100%) | N/A (0/0) | N/A (0/0) | 1/1 (100%) |
-| **Aggregate (summed counters, measured files above)** | 796/815 (97.7%) | 403/435 (92.6%) | 214/222 (96.4%) | 663/670 (99.0%) |
+| **Aggregate (summed counters, measured files above)** | 820/837 (98.0%) | 412/444 (92.8%) | 218/226 (96.5%) | 686/692 (99.1%) |
 
-The aggregate excludes the HTML/CSS templates and styles (not instrumentable). Every scoped `.ts` file was measured; none is missing.
+The aggregate leaves out the HTML/CSS templates and styles, which v8 cannot instrument. Every scoped `.ts` file was measured; none is missing. The renderer totals differ from the first pass because the files changed: the fixer edited `validator-view.ts` and `validator-marks.service.ts`, and the rebase onto a newer main changed `collection-view.ts` and `sidebar-tree.service.ts`.
 
 | File and uncovered lines/branch locations | Required behavior or risk | Action/test added or reason left uncovered |
 |---|---|---|
-| `backend/src/browse/validator/validator.ts:29` (non-`Error` arm of the message ternary) | none: `BSON.EJSON.parse` always throws `Error` | Justified gap (defensive) |
-| `backend/src/server/backend.ts:68-78,84` | code that existed before this task; the task changed one line (handler registration), and that line is covered | Out of task scope |
-| `renderer/src/app/validator/validator-view.ts:71-73` (`??` fallbacks for a tab without `data`) | a validator tab is always opened with collection data (`openValidator`) | Justified gap |
-| `renderer/src/app/validator/validator-view.ts:127` (stale read failure) | ordering: an older failed read must not overwrite a newer result | Covered after adding "ignores an older read that fails after a newer one answered". The remaining partial arm in the final report is the `finally`/`return` pairing |
-| `renderer/src/app/validator/validator-view.ts:157` (`revert` with `saved === null`) | unreachable from the UI: the form appears only once `saved` is set | Justified gap |
-| `renderer/src/app/validator/validator-marks.service.ts:80` (`aborted` after a successful answer) | `ApiService.request` rejects on abort, so a success after abort cannot reach this line; stale answers are covered via the reject path | Justified gap (defensive) |
-| `renderer/src/app/validator/validator.model.ts:51` (non-`Error` arm) | the parser throws `ShellSyntaxError` only | Justified gap (defensive) |
-| `renderer/src/app/collection/collection-view.ts` lines 183-185, 216-224, 251, 309, 333-334, 358, 415, 448-536 (22 branch arms) | all in code that existed before this task; the task's new lines (152-159, 366-382, 569-580) have every branch covered | Out of task scope |
-| `renderer/src/app/layout/workspace.service.ts` (1 branch arm) | code that existed before this task; the task changed only the `TabKind` union | Out of task scope |
+| `backend/src/browse/validator/validator.ts:29` (non-`Error` arm of the message ternary) | None: `BSON.EJSON.parse` always throws `Error` | Justified gap (defensive) |
+| `backend/src/server/backend.ts:68-78,84` | Code that existed before this task. The task changed one line (handler registration), and that line is covered | Out of task scope |
+| `renderer/src/app/validator/validator-view.ts:73-75` (`??` fallbacks for a tab without `data`) | A validator tab is always opened with collection data (`openValidator`) | Justified gap |
+| `renderer/src/app/validator/validator-view.ts:159` (`revert` with `saved === null`) | Unreachable from the UI: the form appears only once `saved` is set | Justified gap |
+| `renderer/src/app/validator/validator-view.ts:172` (new `save()` guard) | CR-3 and CR-4 | All three arms covered: saving, not dirty, read-only, plus the pass-through. Tests added in this pass |
+| `renderer/src/app/validator/validator-marks.service.ts:90` (`aborted` after a successful answer) | `ApiService.request` rejects on abort, so a success after an abort cannot reach this line. Stale answers are covered through the reject path | Justified gap (defensive) |
+| `renderer/src/app/validator/validator-marks.service.ts` `ValidatorChanges.versionOf` (lazy per-key signal) | CR-5 | Fully covered |
+| `renderer/src/app/validator/validator.model.ts:51` (non-`Error` arm) | The parser throws only `ShellSyntaxError` | Justified gap (defensive) |
+| `renderer/src/app/collection/collection-view.ts` lines 187-189, 220, 225, 228, 255, 313, 337-338, 363, 437, 470, 476-477, 489, 500, 502, 520, 544, 552, 558 (22 branch arms, 1 function) | All in code that existed before this task. Every branch in the task's new lines (148-164, 368-389, 587-606) is covered | Out of task scope |
+| `renderer/src/app/layout/workspace.service.ts:85` (1 branch arm) | Code that existed before this task. The task changed only the `TabKind` union | Out of task scope |
 
 ## Unable to test
 
-- AC1 and AC2 need real MongoDB containers and the Electron/Playwright stack. This helper did not re-run them; the parent reported that `test/integration/validator.int.spec.ts` and `test/e2e/validator.e2e.ts` pass, and the parent should record that evidence with `tasks.py verify`.
-- HTML/CSS of the validator tab and collection markers: covered only through component DOM assertions, not visually.
+- AC1 and AC2 need real MongoDB containers and the Electron/Playwright stack. This helper did not re-run them. The parent reports `test/integration/validator.int.spec.ts` (14 passed) and `test/e2e/validator.e2e.ts` (1 passed) on this revision, and should record that evidence with `tasks.py verify`.
+- The HTML/CSS of the validator tab, the check-error notice and the collection markers are covered only through component DOM assertions. They were not checked visually.
 
 ## Summary
 

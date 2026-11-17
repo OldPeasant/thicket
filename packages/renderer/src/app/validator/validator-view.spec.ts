@@ -3,6 +3,7 @@ import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import type { ResultOf } from '@thicket/contract';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { ApiError } from '../api/api-error';
 import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
 import type { WorkspaceTab } from '../layout/workspace.service';
 import { ConfirmService } from '../safety/confirm.service';
@@ -388,6 +389,55 @@ describe('ValidatorView', () => {
       expect(get<HTMLSelectElement>('val-action').disabled).toBe(false);
     });
 
+    it('Ctrl+Enter right after a successful save sends no second collMod', async () => {
+      await typeText('{ a: 1 }');
+      await click('val-save');
+      expect(sets()).toHaveLength(1);
+      expect(view.dirty()).toBe(false);
+      get('val-text').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
+      await settle();
+      expect(sets()).toHaveLength(1);
+      expect(text(get('val-message'))).toBe('Saved the validator.');
+    });
+
+    it('Ctrl+Enter saves a change of the level alone, with the stored validator', async () => {
+      await choose('val-level', 'off');
+      get('val-text').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true }));
+      await settle();
+      expect(sets()).toEqual([
+        { ...T, validator: SCHEMA, validationLevel: 'off', validationAction: 'warn' },
+      ]);
+    });
+
+    it('unlocks the editor after a refused save, and a retry sends again', async () => {
+      const answer = deferred<Record<string, never>>();
+      let calls = 0;
+      fake.handle('coll.validator.set', () => {
+        calls++;
+        if (calls === 1) {
+          return answer.promise.then(() => {
+            throw new ApiError({ code: 'SERVER_ERROR', message: 'The server refused the command' });
+          });
+        }
+        return {};
+      });
+      await typeText('{ a: 1 }');
+      const pending = view.save();
+      await settle();
+      expect(get<HTMLTextAreaElement>('val-text').readOnly).toBe(true);
+      answer.resolve({});
+      await pending;
+      await settle();
+      expect(get('val-message').getAttribute('role')).toBe('alert');
+      expect(get<HTMLTextAreaElement>('val-text').readOnly).toBe(false);
+      expect(get<HTMLSelectElement>('val-level').disabled).toBe(false);
+      expect(get<HTMLSelectElement>('val-action').disabled).toBe(false);
+      expect(view.dirty()).toBe(true);
+      await click('val-save');
+      expect(sets()).toHaveLength(2);
+      expect(text(get('val-message'))).toBe('Saved the validator.');
+    });
+
     it('locks the template button while saving', async () => {
       const answer = deferred<Record<string, never>>();
       fake.handle('coll.validator.set', () => answer.promise);
@@ -434,6 +484,18 @@ describe('ValidatorView', () => {
       expect(changes.version(T)).toBe(0);
       expect(view.dirty()).toBe(true);
       expect(view.saving()).toBe(false);
+    });
+
+    it('locks the editor while the confirmation is open and unlocks it after Cancel', async () => {
+      const confirm = TestBed.inject(ConfirmService);
+      await typeText('{ a: 1 }');
+      await click('val-save');
+      expect(confirm.current()).not.toBeNull();
+      expect(get<HTMLTextAreaElement>('val-text').readOnly).toBe(true);
+      confirm.answer(false);
+      await settle();
+      expect(get<HTMLTextAreaElement>('val-text').readOnly).toBe(false);
+      expect(get<HTMLTextAreaElement>('val-text').value).toBe('{ a: 1 }');
     });
 
     it('Ctrl+Enter without a change asks nothing', async () => {
