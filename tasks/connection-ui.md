@@ -1,11 +1,11 @@
 ---
 title: M1: Connection editor and manager
-status: in_progress
+status: done
 owner: felix/agent-2
 deps: [app-layout,api-client,profiles-store,uri-model,safety-ui]
 touches: [packages/renderer/src/app/connections]
 prio: 1
-lease_until: 2026-11-17T00:47:27Z
+lease_until: 
 ---
 ## Goal
 Profile list (folders, colors), editor with form and connection-string tabs kept in sync, SCRAM and TLS fields, secrets options (save / ask each time, weak-keychain warning), read-only and production flags, Test connection with explained errors. Use the frontend-design skill for the visual direction; respect the Business and Tron tokens (no hard-coded colors).
@@ -27,3 +27,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 00:54+0100 by felix/agent-2): Profile list = new /connections manager page (grouped by folder, color edge, edit/duplicate/delete with inline confirm) plus sidebar 'Manage connections' button and 'Edit connection…' context item; the sidebar tree itself does not group by folder yet
 - ASSUMPTION (2026-11-17 00:54+0100 by felix/agent-2): Profile colors are six preset swatches (user data hex values, no red so it never looks like the production accent) plus 'no color'; no free color picker
 - ASSUMPTION (2026-11-17 01:11+0100 by felix/agent-2): Secret URI options (proxyPassword, tlsCertificateKeyFilePassword, AWS_SESSION_TOKEN) pasted into the URI tab are dropped with a visible note instead of being stored as secrets; entry UI for proxy/TLS secrets belongs to later connection tasks.
+- done by felix/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 52s on 88d718dfd; criteria verified 3/3
