@@ -5,7 +5,7 @@ owner: dell26/agent-1
 deps: [e2e-harness]
 touches: [test/e2e/harness]
 prio: 2
-lease_until: 2026-11-17T05:51:14Z
+lease_until: 2026-11-17T05:56:19Z
 ---
 ## Goal
 On headless Linux (no DISPLAY, Chromium's headless Ozone), `page.screenshot()` hangs until it times out after a click switches the collection view (e.g. Table → Documents): the hidden window produces no new frame, so Playwright waits forever. `webContents.capturePage()` returns but shows the view from *before* the switch. A workaround that worked on 2026-11-17: in the main process, call `webContents.invalidate()`, wait about 400 ms and capture, three times, then use the last capture. Add a harness helper, e.g. `screenshot(electronApp, window, path)`, that reliably shows the current state (find the cleanest fix: force repaints, `backgroundThrottling: false` / paint settings for test windows only, or the invalidate loop), and use it in place of `window.screenshot` in the existing e2e suites. The `final-demo` task needs screenshots of every step and will hit this.
