@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { release } from 'node:os';
 import { MongoClient } from 'mongodb';
 import {
   GenericContainer,
@@ -28,6 +29,30 @@ export const LDAP_BASE_DN = 'dc=thicket,dc=test';
 export const LDAP_USER = 'alice';
 const LDAP_ALIAS = 'thicket-ldap';
 const MONGO_PORT = 27017;
+
+/**
+ * Whether `kernel` (a Linux release such as `7.0.9-200.fc44.x86_64`) is in the range where mongo
+ * 8.0 images refuse to start (6.19.0 to 7.0.13, SERVER-121912).
+ */
+export function kernelBreaksMongo80(kernel: string): boolean {
+  const match = /^(\d+)\.(\d+)(?:\.(\d+))?/.exec(kernel);
+  if (!match) return false;
+  const [major, minor, patch] = [match[1], match[2], match[3] ?? '0'].map(Number) as [
+    number,
+    number,
+    number,
+  ];
+  const v = major * 1_000_000 + minor * 1_000 + patch;
+  return v >= 6_019_000 && v <= 7_000_013;
+}
+
+/**
+ * The Enterprise 8.0 container did not start and the host kernel is one it refuses to run on: the
+ * fixture can't run on this host (not a test failure). Tests skip with `message`.
+ */
+export class LdapFixtureUnsupportedError extends Error {
+  override readonly name = 'LdapFixtureUnsupportedError';
+}
 
 export interface LdapFixture {
   /** Connection string of the Enterprise server (no credentials, `directConnection`). */
@@ -154,8 +179,21 @@ export async function startLdapFixture(): Promise<LdapFixture> {
       startMongoEnterprise(network, root),
     ]);
     for (const result of started) if (result.status === 'fulfilled') containers.push(result.value);
-    const failed = started.find((r) => r.status === 'rejected');
-    if (failed) throw (failed as PromiseRejectedResult).reason;
+    const [ldapStart, mongoStart] = started;
+    if (mongoStart.status === 'rejected' && process.platform === 'linux') {
+      // Containers share the host kernel (Docker or Podman on Linux, no VM in between).
+      const kernel = release();
+      if (kernelBreaksMongo80(kernel)) {
+        throw new LdapFixtureUnsupportedError(
+          `${MONGO_ENTERPRISE_IMAGE} does not start on Linux ${kernel} (kernels 6.19.0-7.0.13, ` +
+            `SERVER-121912) and there is no newer Enterprise image: LDAP fixture unavailable ` +
+            `(${String(mongoStart.reason)})`,
+        );
+      }
+    }
+    for (const result of [ldapStart, mongoStart]) {
+      if (result.status === 'rejected') throw result.reason;
+    }
     const [ldap, mongo] = containers as [StartedTestContainer, StartedTestContainer];
 
     await seedDirectory(ldap, adminPassword, password);

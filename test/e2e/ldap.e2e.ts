@@ -1,7 +1,11 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { startLdapFixture, type LdapFixture } from '../integration/fixtures/ldap.ts';
+import {
+  LdapFixtureUnsupportedError,
+  startLdapFixture,
+  type LdapFixture,
+} from '../integration/fixtures/ldap.ts';
 import { expect, test } from './harness';
 import { containerRuntimeUnavailable } from './harness/mongo';
 
@@ -21,7 +25,13 @@ test.beforeAll(async () => {
   if (process.env['DOCKER_HOST']?.includes('podman')) {
     process.env['TESTCONTAINERS_RYUK_DISABLED'] ??= 'true';
   }
-  ldap = await startLdapFixture();
+  try {
+    ldap = await startLdapFixture();
+  } catch (error) {
+    // Host kernel the Enterprise image can't run on: skip with the reason instead of failing.
+    if (!(error instanceof LdapFixtureUnsupportedError)) throw error;
+    unavailable = error.message;
+  }
 });
 
 test.afterAll(async () => {
