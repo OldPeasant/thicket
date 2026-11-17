@@ -201,7 +201,8 @@ export function buildExplained(p: ParsedParamsOf<'agg.explain'>): Document {
   const verbosity = p.verbosity ?? DEFAULT_EXPLAIN_VERBOSITY;
   const target = p.target;
   if (target.kind === 'find') {
-    const { kind: _kind, ...query } = target;
+    const query: Omit<typeof target, 'kind'> & { kind?: 'find' } = { ...target };
+    delete query.kind;
     return buildFind({ profileId: p.profileId, db: p.db, coll: p.coll, ...query }).command;
   }
   const pipeline = parsePipeline(target.pipeline);
