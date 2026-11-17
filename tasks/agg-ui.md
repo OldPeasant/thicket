@@ -5,7 +5,7 @@ owner: felix/agent-1
 deps: [agg-backend,collection-view,codegen,raw-editor]
 touches: [packages/renderer/src/app/aggregation]
 prio: 2
-lease_until: 2026-11-17T02:08:28Z
+lease_until: 2026-11-17T02:08:58Z
 ---
 ## Goal
 Stage list (add/remove/reorder/disable), each stage in shell syntax with live preview, full-text mode, run with paging, save pipelines, export code, create view. Use the frontend-design skill for the visual direction; respect the Business and Tron tokens (no hard-coded colors).
