@@ -126,7 +126,7 @@ test('updateMany on 1 500 documents needs the collection name typed; preview cou
 
   const outcome = window.getByTestId('bulk-outcome');
   await expect(outcome).toContainText('Updated');
-  const text = (await outcome.innerText()).replace(/ /g, ' ');
+  const text = (await outcome.innerText()).replace(/\u202f/g, ' ');
   // "Updated 1 500 documents (1 500 matched)."
   const [modified, executed] = (text.match(/\d[\d ]*\d/g) ?? []).map((s) =>
     Number(s.replace(/\D/g, '')),

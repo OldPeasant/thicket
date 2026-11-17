@@ -7,6 +7,7 @@ import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
 import { DocumentEdits } from '../document';
 import findIxscan from '../explain/fixtures/find-ixscan-8.2.json';
 import { WorkspaceService, type WorkspaceTab } from '../layout/workspace.service';
+import { ConfirmService } from '../safety/confirm.service';
 import { ProfileSafetyService } from '../safety/profile-safety.service';
 import { CollectionView } from './collection-view';
 
@@ -834,6 +835,70 @@ describe('CollectionView', () => {
     await settle();
     expect(q('export-panel')).toBeNull();
     expect(q('io-export')?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('opens the bulk panel on the applied query; a second click closes it', async () => {
+    type('query-filter', '{ status: "open" }');
+    type('query-collation', '{ locale: "de" }');
+    click('query-run');
+    await settle();
+    // Typed but not run: the bulk panel keeps the applied query.
+    type('query-filter', '{ status: "closed" }');
+    click('bulk-open');
+    await settle();
+    expect(q('bulk-open')?.getAttribute('aria-pressed')).toBe('true');
+    expect(q('bulk-command')?.textContent).toContain(
+      'db.orders.updateMany({ status: "open" }, <update>, { collation: { locale: "de" } })',
+    );
+
+    click('bulk-open');
+    await settle();
+    expect(q('bulk-panel')).toBeNull();
+    expect(q('bulk-open')?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('the bulk panel close button closes it', async () => {
+    click('bulk-open');
+    await settle();
+    click('bulk-close');
+    await settle();
+    expect(q('bulk-panel')).toBeNull();
+  });
+
+  it('does not offer bulk update/delete on a read-only profile, and closes an open panel', async () => {
+    click('bulk-open');
+    await settle();
+    expect(q('bulk-panel')).not.toBeNull();
+    TestBed.inject(ProfileSafetyService).set({
+      id: 'p1',
+      name: 'Reporting',
+      readOnly: true,
+      production: false,
+    });
+    await settle();
+    expect(q('bulk-open')).toBeNull();
+    expect(q('bulk-panel')).toBeNull();
+  });
+
+  it('a bulk delete reads the shown page again', async () => {
+    fake.respond('docs.previewMany', { matched: 3, sample: docs(1, 3) });
+    fake.respond('docs.deleteMany', { deleted: 3 });
+    const confirm = TestBed.inject(ConfirmService);
+    click('bulk-open');
+    await settle();
+    click('bulk-mode-delete');
+    await settle();
+    click('bulk-preview');
+    await settle();
+    expect(finds()).toHaveLength(1);
+    click('bulk-execute');
+    await settle();
+    expect(confirm.current()).not.toBeNull();
+    confirm.answer(true);
+    await settle();
+    expect(fake.requestsFor('docs.deleteMany')).toHaveLength(1);
+    expect(finds()).toHaveLength(2);
+    expect(lastFind()).toMatchObject({ coll: 'orders', filter: '{}' });
   });
 
   /** Opens the import panel, chooses a file and imports it into `coll`; the stream ends at once. */

@@ -187,4 +187,280 @@ describe('BulkPanel', () => {
     expect(q('bulk-error')).toBeNull();
     expect(get<HTMLButtonElement>('bulk-execute').disabled).toBe(false);
   });
+
+  /** Makes `docs.previewMany` wait until the returned function answers it. */
+  const holdPreview = () => {
+    let answer: (matched: number) => void = () => undefined;
+    fake.handle(
+      'docs.previewMany',
+      () =>
+        new Promise((resolve) => {
+          answer = (matched) => resolve({ matched, sample: [] });
+        }),
+    );
+    return (matched: number) => answer(matched);
+  };
+
+  it('sends the filter, the collation and the sample size to the preview and the write', async () => {
+    const collation = '{"locale":"de","strength":{"$numberInt":"2"}}';
+    fixture.componentRef.setInput('query', { ...QUERY, collation });
+    matching = 3;
+    await typeUpdate('{ $set: { status: "archived" } }');
+    expect(text(get('bulk-command'))).toBe(
+      'db.orders.updateMany({ status: "open" }, { $set: { status: "archived" } }, ' +
+        '{ collation: { locale: "de", strength: 2 } })',
+    );
+    get('bulk-preview').click();
+    await settle();
+    expect(fake.requestsFor('docs.previewMany')[0]?.params).toEqual({
+      ...TARGET,
+      filter: QUERY.filter,
+      collation,
+      sampleSize: 5,
+    });
+    get('bulk-execute').click();
+    await settle();
+    expect(q('confirm-type', dlg())).toBeNull();
+    get('confirm-ok', dlg()).click();
+    await settle();
+    expect(fake.requestsFor('docs.updateMany')[0]?.params).toMatchObject({
+      ...TARGET,
+      filter: QUERY.filter,
+      collation,
+      expectedCount: 3,
+    });
+  });
+
+  it('sends no collation key when the query has none', async () => {
+    get('bulk-mode-delete').click();
+    await settle();
+    get('bulk-preview').click();
+    await settle();
+    expect(fake.requestsFor('docs.previewMany')[0]?.params).not.toHaveProperty('collation');
+  });
+
+  it('a failed preview shows the error, ends the spinner and can be retried', async () => {
+    fake.fail('docs.previewMany', { code: 'SERVER_ERROR', message: 'not primary (fictitious)' });
+    get('bulk-mode-delete').click();
+    await settle();
+    get('bulk-preview').click();
+    await settle();
+    expect(get('bulk-error').textContent).toContain('not primary (fictitious)');
+    expect(q('bulk-cancel')).toBeNull();
+    expect(get<HTMLButtonElement>('bulk-execute').disabled).toBe(true);
+    expect(get<HTMLButtonElement>('bulk-preview').disabled).toBe(false);
+
+    fakeCollection(fake, () => matching);
+    get('bulk-preview').click();
+    await settle();
+    expect(q('bulk-error')).toBeNull();
+    expect(text(get('bulk-matched'))).toBe('1 500');
+    expect(get<HTMLButtonElement>('bulk-execute').disabled).toBe(false);
+  });
+
+  it('cancels a running preview: the request is cancelled, no error, back to idle', async () => {
+    const answer = holdPreview();
+    get('bulk-mode-delete').click();
+    await settle();
+    get('bulk-preview').click();
+    await settle();
+    expect(text(get('bulk-status'))).toContain('Counting matching documents');
+    expect(get<HTMLButtonElement>('bulk-preview').disabled).toBe(true);
+    expect(get<HTMLButtonElement>('bulk-mode-update').disabled).toBe(true);
+
+    get('bulk-cancel').click();
+    await settle();
+    const id = fake.requestsFor('docs.previewMany')[0]?.id;
+    expect(fake.cancels).toContain(id);
+    expect(q('bulk-cancel')).toBeNull();
+    expect(q('bulk-error')).toBeNull();
+    expect(get<HTMLButtonElement>('bulk-preview').disabled).toBe(false);
+    expect(get<HTMLButtonElement>('bulk-execute').disabled).toBe(true);
+
+    // A late answer of the cancelled request changes nothing.
+    answer(42);
+    await settle();
+    expect(q('bulk-matched')).toBeNull();
+    expect(get<HTMLButtonElement>('bulk-execute').disabled).toBe(true);
+  });
+
+  it('a filter applied while the preview runs makes its answer stale', async () => {
+    const answer = holdPreview();
+    get('bulk-mode-delete').click();
+    await settle();
+    get('bulk-preview').click();
+    await settle();
+    fixture.componentRef.setInput('query', { filter: '{"status":"closed"}' });
+    await settle();
+    answer(7);
+    await settle();
+    expect(get('bulk-match').classList).toContain('stale');
+    expect(text(get('bulk-status'))).toContain('Preview again');
+    expect(get<HTMLButtonElement>('bulk-execute').disabled).toBe(true);
+  });
+
+  it('closing the panel during a preview cancels it and emits closed', async () => {
+    holdPreview();
+    let closed = 0;
+    fixture.componentInstance.closed.subscribe(() => closed++);
+    get('bulk-mode-delete').click();
+    await settle();
+    get('bulk-preview').click();
+    await settle();
+    get('bulk-close').click();
+    await settle();
+    expect(closed).toBe(1);
+    expect(fake.cancels).toHaveLength(1);
+  });
+
+  it('destroying the panel cancels a running preview', async () => {
+    holdPreview();
+    get('bulk-mode-delete').click();
+    await settle();
+    get('bulk-preview').click();
+    await settle();
+    fixture.destroy();
+    await dialog.whenStable();
+    expect(fake.cancels).toHaveLength(1);
+  });
+
+  it.each([
+    ['update', 'Nothing to update.'],
+    ['delete', 'Nothing to delete.'],
+  ] as const)('zero matches (%s): nothing to run, no sample', async (mode, message) => {
+    fake.handle('docs.previewMany', () => ({ matched: 0, sample: [] }));
+    get(`bulk-mode-${mode}`).click();
+    await settle();
+    if (mode === 'update') await typeUpdate('{ $set: { status: "archived" } }');
+    get('bulk-preview').click();
+    await settle();
+    expect(text(get('bulk-matched'))).toBe('0');
+    expect(text(get('bulk-status'))).toContain(message);
+    expect(q('bulk-sample')).toBeNull();
+    expect(get<HTMLButtonElement>('bulk-execute').disabled).toBe(true);
+  });
+
+  it('asks for the typed name at 1 001 documents, also for a delete', async () => {
+    matching = 1001;
+    get('bulk-mode-delete').click();
+    await settle();
+    get('bulk-preview').click();
+    await settle();
+    expect(text(get('bulk-status'))).toContain('type the collection name');
+    get('bulk-execute').click();
+    await settle();
+    const ok = get<HTMLButtonElement>('confirm-ok', dlg());
+    const typed = get<HTMLInputElement>('confirm-type', dlg());
+    typed.value = 'order';
+    typed.dispatchEvent(new Event('input'));
+    await settle();
+    expect(ok.disabled).toBe(true);
+    typed.value = 'orders';
+    typed.dispatchEvent(new Event('input'));
+    await settle();
+    expect(ok.disabled).toBe(false);
+    ok.click();
+    await settle();
+    expect(outcomes).toEqual([{ mode: 'delete', deleted: 1001 }]);
+  });
+
+  it('an update of exactly 1 000 documents needs no typed name', async () => {
+    matching = 1000;
+    await typeUpdate('{ $set: { status: "archived" } }');
+    get('bulk-preview').click();
+    await settle();
+    expect(text(get('bulk-status'))).not.toContain('type the collection name');
+    get('bulk-execute').click();
+    await settle();
+    expect(q('confirm-type', dlg())).toBeNull();
+    get('confirm-ok', dlg()).click();
+    await settle();
+    expect(outcomes).toEqual([{ mode: 'update', matched: 1000, modified: 1000 }]);
+  });
+
+  it('sends an update pipeline as canonical EJSON and labels one document singular', async () => {
+    matching = 1;
+    await typeUpdate('[{ $set: { total: { $add: ["$a", "$b"] } } }]');
+    get('bulk-preview').click();
+    await settle();
+    expect(text(get('bulk-execute'))).toBe('Update 1 document…');
+    get('bulk-execute').click();
+    await settle();
+    get('confirm-ok', dlg()).click();
+    await settle();
+    expect(fake.requestsFor('docs.updateMany')[0]?.params).toMatchObject({
+      update: '[{"$set":{"total":{"$add":["$a","$b"]}}}]',
+      expectedCount: 1,
+    });
+    expect(text(get('bulk-outcome'))).toBe('Updated 1 document (1 matched).');
+    // After the write the preview is gone: running again needs a new preview.
+    expect(get<HTMLButtonElement>('bulk-execute').disabled).toBe(true);
+  });
+
+  it('a failed write shows the error and keeps the preview for a retry', async () => {
+    matching = 4;
+    fake.fail('docs.updateMany', { code: 'SERVER_ERROR', message: 'write failed (fictitious)' });
+    await typeUpdate('{ $set: { status: "archived" } }');
+    get('bulk-preview').click();
+    await settle();
+    get('bulk-execute').click();
+    await settle();
+    get('confirm-ok', dlg()).click();
+    await settle();
+    expect(get('bulk-error').textContent).toContain('write failed (fictitious)');
+    expect(outcomes).toEqual([]);
+    expect(get<HTMLButtonElement>('bulk-execute').disabled).toBe(false);
+  });
+
+  it('switching the mode makes an update preview stale for a delete', async () => {
+    matching = 4;
+    await typeUpdate('{ $set: { status: "archived" } }');
+    get('bulk-preview').click();
+    await settle();
+    expect(get<HTMLButtonElement>('bulk-execute').disabled).toBe(false);
+    get('bulk-mode-delete').click();
+    await settle();
+    expect(get<HTMLButtonElement>('bulk-execute').disabled).toBe(true);
+    expect(get('bulk-match').classList).toContain('stale');
+  });
+
+  it('pressing Preview with an empty update shows why nothing is sent', async () => {
+    expect(q('bulk-update-error')).toBeNull();
+    expect(get<HTMLButtonElement>('bulk-preview').disabled).toBe(true);
+    await fixture.componentInstance.runPreview();
+    await settle();
+    expect(get('bulk-update-error').textContent).toContain('Type an update');
+    expect(fake.requestsFor('docs.previewMany')).toHaveLength(0);
+  });
+
+  it('Ctrl+Enter in the update runs the preview', async () => {
+    matching = 2;
+    await typeUpdate('{ $set: { status: "archived" } }');
+    get('bulk-update').dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }),
+    );
+    await settle();
+    expect(fake.requestsFor('docs.previewMany')).toHaveLength(1);
+    expect(text(get('bulk-matched'))).toBe('2');
+  });
+
+  it('a read-only profile refuses the write before anything is sent', async () => {
+    matching = 4;
+    get('bulk-mode-delete').click();
+    await settle();
+    get('bulk-preview').click();
+    await settle();
+    TestBed.inject(ProfileSafetyService).set({
+      id: 'p1',
+      name: 'local',
+      readOnly: true,
+      production: false,
+    });
+    get('bulk-execute').click();
+    await settle();
+    expect(confirm.current()).toBeNull();
+    expect(fake.requestsFor('docs.deleteMany')).toHaveLength(0);
+    expect(q('bulk-error')).not.toBeNull();
+    expect(outcomes).toEqual([]);
+  });
 });
