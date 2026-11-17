@@ -1,11 +1,11 @@
 ---
 title: Conflict view: one re-insert rule shared with DocumentActions
-status: in_progress
+status: done
 owner: dell26/agent-2
 deps: [conflict-partial-docs]
 touches: [packages/renderer/src/app/document/conflict,packages/renderer/src/app/document/document-actions.service.ts]
 prio: 3
-lease_until: 2026-11-17T05:46:27Z
+lease_until: 
 ---
 ## Goal
 Follow-up of conflict-partial-docs (reviews/conflict-partial-docs/review.md CR-4): the conflict view
@@ -22,3 +22,4 @@ partial only because of a projection still offers the button, and clicking it is
 ## Notes
 See conflict-partial-docs, SPEC.md "Conflict detection".
 - ASSUMPTION (2026-11-17 06:23+0100 by dell26/agent-2): Added DocumentActions.reinsertBlocker(key) ('projection'|'partial'|null) instead of extending resolveBlocker, so resolveBlocker keeps its contract (null for deleted docs); the conflict view shows one generic 'loaded only partly' insert-again note for both blockers, wording 'data' instead of 'items' since it now covers projections too.
+- done by dell26/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 55s on 78a5aea38; criteria verified 2/2
