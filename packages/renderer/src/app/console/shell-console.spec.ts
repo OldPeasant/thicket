@@ -329,6 +329,27 @@ describe('ShellConsole', () => {
     await settle();
     expect(q('shell-error')).not.toBeNull();
     expect(q('shell-reopen')).not.toBeNull();
+    // The way back sits outside the scrolling transcript, so it stays in view.
+    expect(get('shell-transcript').contains(get('shell-failed'))).toBe(false);
+    expect(get('shell-announce').textContent).toMatch(/Run failed: .*No shell session s1/s);
+  });
+
+  it('announces a short summary of each run instead of making the transcript live', async () => {
+    await create();
+    expect(get('shell-transcript').hasAttribute('aria-live')).toBe(false);
+    expect(get('shell-announce').getAttribute('aria-live')).toBe('polite');
+    expect(input().hasAttribute('aria-controls')).toBe(false);
+    await type('db.orders.find()');
+    await key('Enter');
+    fake.data('shell.eval', 'st1', { kind: 'result', type: 'Cursor', text: '[ { a: 1 } ]' });
+    fake.end('st1');
+    await settle();
+    expect(get('shell-announce').textContent?.trim()).toBe('Run finished: Cursor');
+    await type('while (true) {}');
+    await key('Enter');
+    get('shell-stop').click();
+    await settle();
+    expect(get('shell-announce').textContent?.trim()).toBe('Run stopped');
   });
 
   it('closes the session when the tab goes away', async () => {
@@ -572,6 +593,58 @@ describe('ShellConsole', () => {
       const other = await key('e');
       expect(other.defaultPrevented).toBe(false);
       expect(q('shell-completions')).not.toBeNull();
+    });
+
+    it('closes the popup when the caret moves, and never applies at a moved caret', async () => {
+      fake.respond('shell.complete', { completions: ['db.orders', 'db.orgs'] });
+      await create();
+      await type('db.or');
+      await key('Tab');
+      expect(q('shell-completions')).not.toBeNull();
+      expect(input().getAttribute('aria-controls')).toMatch(/-completions$/);
+      // ArrowLeft: the caret moves, keyup closes the list.
+      input().setSelectionRange(4, 4);
+      input().dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowLeft', bubbles: true }));
+      await settle();
+      expect(q('shell-completions')).toBeNull();
+      expect(input().getAttribute('aria-controls')).toBeNull();
+      const enter = await key('Enter');
+      expect(enter.defaultPrevented).toBe(true); // complete input: it runs, nothing is completed
+      expect(evals().map((e) => e.code)).toEqual(['db.or']);
+      expect(input().value).toBe('');
+
+      // A click moving the caret closes it too.
+      await type('db.or');
+      await key('Tab');
+      input().setSelectionRange(2, 2);
+      input().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await settle();
+      expect(q('shell-completions')).toBeNull();
+    });
+
+    it('applies at the caret the completions were asked for even if no caret event came', async () => {
+      fake.respond('shell.complete', { completions: ['db.orders', 'db.orgs'] });
+      await create();
+      await type('db.or');
+      await key('Tab');
+      input().setSelectionRange(4, 4); // moved without keyup/click/select
+      await key('Enter');
+      expect(input().value).toBe('db.orders');
+      expect(evals()).toEqual([]);
+    });
+
+    it('keyup that leaves the caret in place keeps the popup open', async () => {
+      fake.respond('shell.complete', { completions: ['db.orders', 'db.orgs'] });
+      await create();
+      await type('db.or');
+      await key('Tab');
+      input().dispatchEvent(new KeyboardEvent('keyup', { key: 'Tab', bubbles: true }));
+      await key('ArrowDown');
+      input().dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowDown', bubbles: true }));
+      await settle();
+      expect(q('shell-completions')).not.toBeNull();
+      await key('Enter');
+      expect(input().value).toBe('db.orgs');
     });
 
     it('closes the popup when the input loses focus', async () => {

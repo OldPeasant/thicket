@@ -92,6 +92,14 @@ describe('isInputComplete edge cases', () => {
     ['x = 1 /* { */', true],
     ['f(\n  // )\n', false],
     ['[1, 2]]', true],
+    // Regex literals (CR-2): brackets and slashes inside them do not count.
+    ['db.c.find({ name: /^\\(/ })', true],
+    ['db.c.find({ p: /\\// })', true],
+    ['db.c.find({ p: /[/(]/i })', true],
+    ['db.c.find({ p: /a(/ ', false],
+    ['x = a / b / (c', false],
+    ['x = (a) / 2 / (3)', true],
+    ['/{/.test(s)', true],
   ])('%j -> %s', (code, expected) => {
     expect(isInputComplete(code)).toBe(expected);
   });

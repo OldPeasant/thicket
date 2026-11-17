@@ -40,19 +40,9 @@
     </div>
   }
 
-  <div class="transcript" #transcript data-testid="shell-transcript" aria-live="polite">
-    @switch (session().state) {
-      @case ('opening') {
-        <p class="note" data-testid="shell-opening">Starting mongosh…</p>
-      }
-      @case ('failed') {
-        <div class="note error" role="alert" data-testid="shell-failed">
-          <span>{{ failure() }}</span>
-          <button type="button" class="btn" data-testid="shell-reopen" (click)="open()">
-            Open new session
-          </button>
-        </div>
-      }
+  <div class="transcript" #transcript data-testid="shell-transcript">
+    @if (session().state === 'opening') {
+      <p class="note" data-testid="shell-opening">Starting mongosh…</p>
     }
     @for (run of runs(); track run.id) {
       <article class="run" data-testid="shell-run" [attr.data-state]="run.state">
@@ -91,6 +81,19 @@
     }
   </div>
 
+  <!-- Outside the scrolling transcript, so the way back stays in view after a lost session. -->
+  @if (failure(); as message) {
+    <div class="failed" role="alert" data-testid="shell-failed">
+      <span>{{ message }}</span>
+      <button type="button" class="btn" data-testid="shell-reopen" (click)="open()">
+        Open new session
+      </button>
+    </div>
+  }
+  <p class="sr-only" role="status" aria-live="polite" data-testid="shell-announce">
+    {{ announcement() }}
+  </p>
+
   <div class="input-row">
     <label class="prompt" [for]="uid + '-input'" data-testid="shell-prompt">{{ prompt() }}</label>
     <div class="input-box">
@@ -104,7 +107,7 @@
         role="combobox"
         aria-autocomplete="list"
         [attr.aria-expanded]="completions().length > 0"
-        [attr.aria-controls]="uid + '-completions'"
+        [attr.aria-controls]="completions().length > 0 ? uid + '-completions' : null"
         [attr.aria-activedescendant]="
           completions().length > 0 ? uid + '-completion-' + selected() : null
         "
@@ -114,6 +117,9 @@
         [disabled]="session().state !== 'open'"
         (input)="onInput($event)"
         (keydown)="onKeydown($event)"
+        (keyup)="onCaret($event)"
+        (click)="onCaret($event)"
+        (select)="onCaret($event)"
         (blur)="closeCompletions()"
       ></textarea>
       @if (completions().length > 0) {

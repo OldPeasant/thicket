@@ -139,8 +139,7 @@ pre {
   color: var(--text);
 }
 
-.out.error,
-.note.error {
+.out.error {
   color: var(--danger-text);
 }
 
@@ -162,6 +161,27 @@ pre {
   align-items: center;
   gap: 0.75rem;
   font-family: var(--font-ui);
+}
+
+/* Lost or failed session: between the transcript and the input, always in view. */
+.failed {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem 0.5rem 1rem;
+  color: var(--danger-text);
+  background: var(--danger-bg);
+  border-top: 1px solid var(--danger-border);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /* Input */

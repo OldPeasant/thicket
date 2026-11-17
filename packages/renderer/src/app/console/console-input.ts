@@ -11,10 +11,16 @@
 export function isInputComplete(code: string): boolean {
   if (code.trim() === '') return false;
   const stack: string[] = [];
+  /** Last significant (non-space, non-comment) character, for the regex-literal heuristic. */
+  let last = '';
   let i = 0;
   while (i < code.length) {
     const ch = code[i] as string;
     const next = code[i + 1];
+    if (ch === ' ' || ch === '\t' || ch === '\r' || ch === '\n') {
+      i++;
+      continue;
+    }
     if (ch === '/' && next === '/') {
       const end = code.indexOf('\n', i);
       i = end < 0 ? code.length : end;
@@ -28,12 +34,19 @@ export function isInputComplete(code: string): boolean {
     }
     if (ch === '"' || ch === "'") {
       i = stringEnd(code, i, ch);
+      last = ch;
       continue;
     }
     if (ch === '`') {
       const end = templateEnd(code, i);
       if (end < 0) return false;
       i = end;
+      last = ch;
+      continue;
+    }
+    if (ch === '/' && regexMayStart(last)) {
+      i = regexEnd(code, i);
+      last = '/';
       continue;
     }
     if (ch === '(' || ch === '[' || ch === '{') stack.push(ch);
@@ -42,9 +55,45 @@ export function isInputComplete(code: string): boolean {
       if (stack.length === 0) return true;
       stack.pop();
     }
+    last = ch;
     i++;
   }
   return stack.length === 0;
+}
+
+/**
+ * Whether a `/` after `last` (the previous significant character, `''` at the start) begins a
+ * regex literal rather than a division. The same heuristic as the backend's input splitter
+ * (`packages/backend/src/shell/split.ts`).
+ */
+function regexMayStart(last: string): boolean {
+  return last === '' || '(,=:[!&|?{};+-*%<>~^'.includes(last);
+}
+
+/**
+ * Index after the regex literal at `start` (its flags included), honouring escapes and `[...]`
+ * classes. An unterminated literal ends at its line end: a syntax error that mongosh reports.
+ */
+function regexEnd(code: string, start: number): number {
+  let i = start + 1;
+  let inClass = false;
+  while (i < code.length) {
+    const ch = code[i];
+    if (ch === '\\') {
+      i += 2;
+      continue;
+    }
+    if (ch === '\n') return i;
+    if (ch === '[') inClass = true;
+    else if (ch === ']') inClass = false;
+    else if (ch === '/' && !inClass) {
+      i++;
+      while (i < code.length && /[a-z]/i.test(code[i] as string)) i++;
+      return i;
+    }
+    i++;
+  }
+  return code.length;
 }
 
 /**

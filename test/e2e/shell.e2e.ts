@@ -40,17 +40,23 @@ function treeNode(window: Page, kind: 'conn' | 'db' | 'coll', name: string): Loc
   return window.locator(`[data-testid="tree-${kind}"][data-name="${name}"]`);
 }
 
-/** Connects the profile `name` and opens its shell from the database's context menu. */
-async function openShell(window: Page, name: string): Promise<Locator> {
+/**
+ * Connects the profile `name` and opens its shell from the context menu of the connection (the
+ * session starts in the connection's default database) or of the database `DB`.
+ */
+async function openShell(window: Page, name: string, from: 'conn' | 'db'): Promise<Locator> {
   await window.getByTestId('sidebar-refresh').click();
   const conn = treeNode(window, 'conn', name);
   await conn.click();
   await expect(conn).toHaveAttribute('data-state', 'connected');
-  await treeNode(window, 'db', DB).click({ button: 'right' });
+  await (from === 'conn' ? conn : treeNode(window, 'db', DB)).click({ button: 'right' });
   await window.getByTestId('menu-open-shell').click();
   const console = window.locator('app-shell-console');
   await expect(console).toBeVisible();
-  await expect(console.getByTestId('shell-prompt')).toHaveText(`${DB}>`, { timeout: 30_000 });
+  await expect(console.getByTestId('shell-prompt')).toHaveText(
+    from === 'db' ? `${DB}>` : /^[\w-]+>$/,
+    { timeout: 30_000 },
+  );
   return console;
 }
 
@@ -77,13 +83,17 @@ test('demo step 11: run db.orders.countDocuments() in the mongosh console', asyn
 
   await window.setViewportSize({ width: 1400, height: 900 });
   await saveProfile(window, 'Shell', mongo.uri, { readOnly: false, production: true });
-  const console = await openShell(window, 'Shell');
+  // Demo step 11: the console of the connection, then `use` the database.
+  const console = await openShell(window, 'Shell', 'conn');
   // Production: the red accent; writable: no read-only warning.
   await expect(console).toHaveClass(/production/);
   await expect(console.getByTestId('shell-production')).toBeVisible();
   await expect(console.getByTestId('shell-readonly-banner')).toHaveCount(0);
 
   const input = console.getByTestId('shell-input');
+  await input.fill(`use ${DB}`);
+  await input.press('Enter');
+  await expect(console.getByTestId('shell-prompt')).toHaveText(`${DB}>`, { timeout: 30_000 });
   await input.fill('db.orders.countDocuments()');
   await input.press('Enter');
   const run = console.getByTestId('shell-run').last();
@@ -121,7 +131,7 @@ test('a read-only profile opens the shell with a warning', async ({ window, mong
     await client.close();
   }
   await saveProfile(window, 'ReadOnly', mongo.uri, { readOnly: true, production: false });
-  const console = await openShell(window, 'ReadOnly');
+  const console = await openShell(window, 'ReadOnly', 'db');
   await expect(console.getByTestId('shell-readonly-banner')).toContainText('Read-only connection');
   await expect(console).not.toHaveClass(/production/);
 });

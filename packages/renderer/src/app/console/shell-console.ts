@@ -90,6 +90,25 @@ export function showOutput(output: ShellOutput): ShownOutput | null {
   };
 }
 
+/** Longest error text the live region reads out. */
+const ANNOUNCE_LIMIT = 200;
+
+/**
+ * What the live region says when a run ends: a short summary instead of the whole output (results
+ * can be large document grids), plus the first error, which a user must not miss.
+ */
+export function announce(run: Run): string {
+  if (run.state === 'stopped') return 'Run stopped';
+  const error = run.outputs.find((o) => o.kind === 'error');
+  if (error) {
+    const text =
+      error.text.length > ANNOUNCE_LIMIT ? `${error.text.slice(0, ANNOUNCE_LIMIT)}…` : error.text;
+    return `Run failed: ${text}`;
+  }
+  const result = run.outputs.find((o) => o.kind === 'result');
+  return result?.type ? `Run finished: ${result.type}` : 'Run finished';
+}
+
 let nextUid = 0;
 
 /**
@@ -142,6 +161,8 @@ export class ShellConsole {
   readonly completions = signal<readonly string[]>([]);
   readonly selected = signal(0);
   protected readonly completionNote = signal('');
+  /** Short screen-reader summary of the newest run (the transcript itself is not live). */
+  protected readonly announcement = signal('');
 
   protected readonly failure = computed(() => {
     const session = this.session();
@@ -157,6 +178,8 @@ export class ShellConsole {
   private nextRunId = 1;
   private evalSub: Subscription | undefined;
   private completeAbort: AbortController | undefined;
+  /** Input and caret the open completion list was requested for (mongosh completes up to it). */
+  private completionAt: { code: string; cursor: number } | undefined;
   /** Bumped per open: an answer of an older open is closed instead of used. */
   private openSeq = 0;
   private closed = false;
@@ -263,12 +286,14 @@ export class ShellConsole {
   }
 
   private finishRun(id: number, state: 'done' | 'stopped', extra?: ShownOutput): void {
-    this.patchRun(id, (run) =>
-      run.state === 'running'
-        ? { ...run, state, outputs: extra ? [...run.outputs, extra] : run.outputs }
-        : run,
-    );
+    let finished: Run | undefined;
+    this.patchRun(id, (run) => {
+      if (run.state !== 'running') return run;
+      finished = { ...run, state, outputs: extra ? [...run.outputs, extra] : run.outputs };
+      return finished;
+    });
     if (state === 'done') this.evalSub = undefined;
+    if (finished) this.announcement.set(announce(finished));
   }
 
   private patchRun(id: number, fn: (run: Run) => Run): void {
@@ -385,6 +410,7 @@ export class ShellConsole {
       } else if (completions.length === 0) {
         this.completionNote.set('No completions');
       } else {
+        this.completionAt = { code, cursor };
         this.completions.set(completions);
         this.selected.set(0);
       }
@@ -397,12 +423,33 @@ export class ShellConsole {
     }
   }
 
-  /** Takes completion `index` of the open list. */
+  /**
+   * Takes completion `index` of the open list, at the input and caret it was requested for. If the
+   * input changed since, the list no longer applies and just closes.
+   */
   choose(index: number): void {
     const completion = this.completions()[index];
+    const at = this.completionAt;
     const el = this.inputEl()?.nativeElement;
-    if (completion === undefined || !el) return;
-    this.applyAt(el.value, el.selectionStart, completion);
+    if (completion === undefined || !at || !el) return;
+    if (el.value !== at.code) {
+      this.closeCompletions();
+      return;
+    }
+    this.applyAt(at.code, at.cursor, completion);
+  }
+
+  /**
+   * The caret may have moved (keyup, click, select): an open list belongs to the caret it was
+   * requested for, so it closes once the caret or the input differs.
+   */
+  protected onCaret(event: Event): void {
+    const at = this.completionAt;
+    if (!at || this.completions().length === 0) return;
+    const el = event.target as HTMLTextAreaElement;
+    if (el.value !== at.code || el.selectionStart !== at.cursor || el.selectionEnd !== at.cursor) {
+      this.closeCompletions();
+    }
   }
 
   private applyAt(code: string, cursor: number, completion: string): void {
@@ -412,6 +459,7 @@ export class ShellConsole {
   }
 
   protected closeCompletions(): void {
+    this.completionAt = undefined;
     if (this.completions().length > 0) this.completions.set([]);
     this.completionNote.set('');
   }
