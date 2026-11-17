@@ -20,6 +20,8 @@ export interface MultiEditProblem {
   /** `_id` in shell syntax. */
   readonly label: string;
   readonly reason: string;
+  /** A conflict: the document was deleted on the server (and left the page). */
+  readonly deleted?: true;
 }
 
 /** What a batch save did. */
@@ -66,20 +68,43 @@ export class MultiEdit {
   private readonly busyState = signal(false);
   /** A batch is being confirmed or sent. */
   readonly busy = this.busyState.asReadonly();
+  private readonly resultState = signal<MultiEditResult | null>(null);
+  /**
+   * What the last batch did, until `clearResult`. Kept here, not in the panel, so the report
+   * outlives the rows it was about (a document deleted on the server leaves the page).
+   */
+  readonly result = this.resultState.asReadonly();
 
   setHost(host: DocumentHost): void {
     this.host = host;
   }
 
+  clearResult(): void {
+    this.resultState.set(null);
+  }
+
   /**
    * Applies `edit` to every selected document and saves them together. Rejects with an `Error`
-   * whose message is for the user when nothing can be sent (unsaved edits, a nested path in a
-   * partly loaded document, no document to change), with `CANCELLED` when the dialog was
-   * cancelled and `READ_ONLY` on read-only profiles.
+   * whose message is for the user when nothing can be sent (unsaved edits, a nested path or a
+   * field that isn't loaded whole in a partly loaded document, no document to change), with
+   * `CANCELLED` when the dialog was cancelled and `READ_ONLY` on read-only profiles. The result
+   * is also kept in `result`.
    */
   async save(selected: readonly SelectedDocument[], edit: FieldEdit): Promise<MultiEditResult> {
     const host = this.requireHost();
     if (this.busyState()) throw new Error('A save of the selected documents is already running.');
+    this.resultState.set(null);
+    const result = await this.run(host, selected, edit);
+    this.resultState.set(result);
+    return result;
+  }
+
+  private async run(
+    host: DocumentHost,
+    selected: readonly SelectedDocument[],
+    edit: FieldEdit,
+  ): Promise<MultiEditResult> {
+    const top = edit.path.split('.')[0] as string;
     const planned: Planned[] = [];
     let unchanged = 0;
     const invalid: MultiEditProblem[] = [];
@@ -101,6 +126,10 @@ export class MultiEdit {
           `${label} was loaded only partly (projection or a large document): ` +
             'only top-level fields can be changed across rows.',
         );
+      }
+      if (partial) {
+        const refused = partialRefusal(host, key, doc, top);
+        if (refused !== null) throw new Error(`${label} was loaded only partly: ${refused}`);
       }
       const plan = planFieldEdit(doc, edit);
       if (plan.kind === 'unchanged') unchanged++;
@@ -157,12 +186,11 @@ export class MultiEdit {
           if (e.code === 'CONFLICT') {
             const detail = conflictDetail.safeParse(e.detail);
             const deleted = detail.success && detail.data.current === null;
-            conflicts.push({
-              label: p.label,
-              reason: deleted
-                ? 'deleted on the server since it was loaded'
-                : 'changed on the server since it was loaded',
-            });
+            conflicts.push(
+              deleted
+                ? { label: p.label, reason: 'deleted on the server since it was loaded', deleted }
+                : { label: p.label, reason: 'changed on the server since it was loaded' },
+            );
             if (deleted) host.documentChanged(p.key, null);
             else await this.readBack(p.key);
           } else {
@@ -204,4 +232,26 @@ export class MultiEdit {
 
 function labelOf(id: BsonValue): string {
   return printShellSyntax(id);
+}
+
+/**
+ * Why top-level field `top` of the partly loaded document `doc` can't be changed across rows, or
+ * `null`. Under a projection a field missing from the loaded document may only be hidden (remove
+ * would claim success without sending anything, set would always conflict); a cut array would
+ * always conflict too. Without a projection only arrays are cut, so a missing field is missing.
+ */
+function partialRefusal(
+  host: DocumentHost,
+  key: string,
+  doc: BsonDocument,
+  top: string,
+): string | null {
+  if (host.projection() !== undefined && !doc.fields.some((f) => f.key === top)) {
+    return `${top} isn’t loaded, clear the projection to change it across rows.`;
+  }
+  const cut = host.slicedOf?.(key)?.arrays ?? [];
+  if (cut.some((a) => a.path === top || a.path.startsWith(`${top}.`))) {
+    return `${top} was loaded cut (a long array), open the document to change it.`;
+  }
+  return null;
 }

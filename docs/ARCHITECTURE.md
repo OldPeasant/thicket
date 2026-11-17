@@ -754,6 +754,18 @@ Contract layout (`packages/contract/src/`):
   confirmed, the write is sent without a cancel signal (a killed bulk write would be partly
   applied): the panel can't be closed and the tab's Export/Import/bulk toggles are disabled until
   it answers (`writing` output). A `CONFLICT` (more matches now) asks for a new preview. e2e: `test/e2e/bulk.e2e.ts`.
+- Edit a field across rows (`packages/renderer/src/app/collection/multi-edit`): the collection
+  tab provides `RowSelectionService` (`explorer/services`), which gives the explorer's root table a
+  checkbox column in the table view, in edit mode, on writable profiles ("Select all rows" takes the
+  rows shown: search and explorer page applied). Selection is by row index; it is cleared when the
+  page's `_id` list changes (paging, a new query) or edit mode ends, and moves up when a row is
+  deleted. `MultiEditPanel` sets or removes one field (dotted path, value in shell syntax);
+  `MultiEdit` refuses rows with unsaved edits and, for partly loaded rows, nested paths and
+  top-level fields not loaded whole. `WriteGuard.approveAll` asks one confirm for the batch (always,
+  with the document count and the first `BATCH_SHOWN` = 10 operations), then each document gets its
+  own conflict-checked `docs.update`, sent one after the other without a cancel signal. Conflicting
+  documents are listed (changed ones reloaded, deleted ones removed from the page); the report is
+  kept in `MultiEdit.result`, so it outlives the selection. e2e: `test/e2e/multi-edit.e2e.ts`.
 
 ## Install (development)
 All OSes: Node 24 LTS, 24.15.0 or newer (Angular 22 and jsdom require it), with npm, git, Python 3

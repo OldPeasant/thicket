@@ -28,9 +28,33 @@ export class RowSelectionService {
     });
   }
 
-  /** Selects the indices `0 … total-1`, or none. */
-  setAll(total: number, on: boolean): void {
-    this.rows.set(on ? new Set(Array.from({ length: total }, (_, i) => i)) : new Set());
+  /**
+   * The "select all" box of the rows shown (`indices`): on selects exactly them (rows hidden by the
+   * search or on another page are dropped), off unselects them.
+   */
+  setAll(indices: readonly number[], on: boolean): void {
+    if (on) {
+      this.rows.set(new Set(indices));
+      return;
+    }
+    this.rows.update((set) => {
+      const next = new Set(set);
+      for (const i of indices) next.delete(i);
+      return next.size === set.size ? set : next;
+    });
+  }
+
+  /** Row `index` left the list: it is unselected and the rows below it move up one. */
+  removeRow(index: number): void {
+    this.rows.update((set) => {
+      if (set.size === 0) return set;
+      const next = new Set<number>();
+      for (const i of set) {
+        if (i < index) next.add(i);
+        else if (i > index) next.add(i - 1);
+      }
+      return next;
+    });
   }
 
   clear(): void {

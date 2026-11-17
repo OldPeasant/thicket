@@ -39,15 +39,36 @@ describe('RowSelectionService', () => {
     expect(s.selected()).toBe(before);
   });
 
-  it('setAll selects 0 … total-1, or none', () => {
+  it('setAll on selects exactly the rows shown (other rows are dropped)', () => {
     const s = new RowSelectionService();
     s.toggle(7, true);
-    s.setAll(3, true);
-    expect(s.selected()).toEqual([0, 1, 2]);
-    s.setAll(3, false);
-    expect(s.selected()).toEqual([]);
-    s.setAll(0, true);
+    s.setAll([0, 2, 4], true);
+    expect(s.selected()).toEqual([0, 2, 4]);
+    s.setAll([], true);
     expect(s.count()).toBe(0);
+  });
+
+  it('setAll off unselects only the rows shown', () => {
+    const s = new RowSelectionService();
+    for (const i of [1, 2, 7]) s.toggle(i, true);
+    s.setAll([1, 2, 3], false);
+    expect(s.selected()).toEqual([7]);
+    const before = s.selected();
+    s.setAll([0, 3], false);
+    expect(s.selected()).toBe(before);
+  });
+
+  it('removeRow unselects the row and moves the rows below it up', () => {
+    const s = new RowSelectionService();
+    for (const i of [0, 2, 3, 5]) s.toggle(i, true);
+    s.removeRow(2);
+    expect(s.selected()).toEqual([0, 2, 4]);
+    s.removeRow(9);
+    expect(s.selected()).toEqual([0, 2, 4]);
+    const empty = new RowSelectionService();
+    const before = empty.selected();
+    empty.removeRow(0);
+    expect(empty.selected()).toBe(before);
   });
 
   it('clear empties the selection and is a no-op when already empty', () => {

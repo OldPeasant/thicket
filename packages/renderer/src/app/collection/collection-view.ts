@@ -260,6 +260,18 @@ export class CollectionView {
     }
     return selected;
   });
+  /**
+   * The edit-across-rows panel: while rows are selected, and while a batch runs or its report is
+   * shown (a document deleted on the server leaves the page, maybe the last selected one).
+   */
+  protected readonly showMultiEdit = computed(
+    () =>
+      (this.rowSelection.enabled() && this.selectedDocs().length > 0) ||
+      this.multiEdit.busy() ||
+      this.multiEdit.result() !== null,
+  );
+  /** The page's `_id`s the row selection belongs to (see `pageKeys`). */
+  private selectionKeys: string | null = null;
   /** The `_id`s of the page's rows, in order: a different list ends the row selection. */
   private readonly pageKeys = computed(() =>
     this.docs()
@@ -426,14 +438,16 @@ export class CollectionView {
     effect(() => {
       const enabled = this.rowSelection.enabled();
       untracked(() => {
-        if (!enabled) this.rowSelection.clear();
+        if (!enabled) this.endSelection();
       });
     });
-    let keys: string | null = null;
+    // A row deleted from this page (documentChanged) moves the selection along instead.
     effect(() => {
       const next = this.pageKeys();
-      if (keys !== null && next !== keys) untracked(() => this.rowSelection.clear());
-      keys = next;
+      untracked(() => {
+        if (this.selectionKeys !== null && next !== this.selectionKeys) this.endSelection();
+        this.selectionKeys = next;
+      });
     });
     // The table view shows one row per document: the root table (path '') starts horizontal
     // (the explorer's default is one row per field). The user can still flip it.
@@ -668,7 +682,26 @@ export class CollectionView {
   /** A document of this tab was saved or deleted: the shown page follows. */
   private documentChanged(key: string, doc: string | null, sliced?: readonly SlicedArray[]): void {
     const index = this.docs().findIndex((d) => d !== null && documentKey(d) === key);
-    if (index !== -1) this.results.patchDocument(index, doc, sliced);
+    if (index === -1) return;
+    this.results.patchDocument(index, doc, sliced);
+    if (doc === null) {
+      // The row left the page: the rows below it move up, and so does their selection. The
+      // page's `_id` list changed on purpose, so the selection (and a batch's report) stays.
+      this.rowSelection.removeRow(index);
+      this.selectionKeys = this.pageKeys();
+    }
+  }
+
+  /** The row selection ends (paging, a new query, edit mode off): so does the last batch report. */
+  private endSelection(): void {
+    this.rowSelection.clear();
+    if (!this.multiEdit.busy()) this.multiEdit.clearResult();
+  }
+
+  /** "Clear selection" / "Close" in the edit-across-rows panel. */
+  protected closeMultiEdit(): void {
+    this.rowSelection.clear();
+    this.multiEdit.clearResult();
   }
 
   /** The cut arrays of the shown large document `key` (`undefined`: it was loaded whole). */

@@ -47,7 +47,7 @@
       type="submit"
       class="btn primary"
       data-testid="multi-edit-save"
-      [disabled]="multi.busy()"
+      [disabled]="multi.busy() || count() === 0"
     >
       {{ multi.busy() ? 'Saving…' : saveLabel() }}
     </button>
@@ -58,29 +58,32 @@
       [disabled]="multi.busy()"
       (click)="cleared.emit()"
     >
-      Clear selection
+      {{ count() === 0 ? 'Close' : 'Clear selection' }}
     </button>
   </form>
   @if (error(); as e) {
     <p class="message error" data-testid="multi-edit-error" role="alert">{{ e }}</p>
   }
-  @if (result(); as r) {
-    <div class="message" data-testid="multi-edit-result" role="status">
-      <p data-testid="multi-edit-summary">{{ summary() }}</p>
-      @if (r.conflicts.length > 0 || r.failed.length > 0) {
-        <ul class="problems">
-          @for (c of r.conflicts; track $index) {
-            <li data-testid="multi-edit-conflict">
-              <code>{{ c.label }}</code> {{ c.reason }}
-            </li>
-          }
-          @for (f of r.failed; track $index) {
-            <li data-testid="multi-edit-failed">
-              <code>{{ f.label }}</code> {{ f.reason }}
-            </li>
-          }
-        </ul>
-      }
-    </div>
-  }
+  <!-- Always in the DOM (empty without a result), so screen readers announce what it gets. -->
+  <div class="status" role="status">
+    @if (result(); as r) {
+      <div class="message" data-testid="multi-edit-result">
+        <p data-testid="multi-edit-summary">{{ summary() }}</p>
+        @if (r.conflicts.length > 0 || r.failed.length > 0) {
+          <ul class="problems">
+            @for (c of r.conflicts; track $index) {
+              <li data-testid="multi-edit-conflict">
+                <code>{{ c.label }}</code> {{ c.reason }}
+              </li>
+            }
+            @for (f of r.failed; track $index) {
+              <li data-testid="multi-edit-failed">
+                <code>{{ f.label }}</code> {{ f.reason }}
+              </li>
+            }
+          </ul>
+        }
+      </div>
+    }
+  </div>
 </section>

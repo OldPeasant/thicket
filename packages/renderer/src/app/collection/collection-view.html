@@ -396,8 +396,8 @@
       } @else {
         @switch (view()) {
           @case ('table') {
-            @if (rowSelection.enabled() && selectedDocs().length > 0) {
-              <app-multi-edit-panel [selected]="selectedDocs()" (cleared)="rowSelection.clear()" />
+            @if (showMultiEdit()) {
+              <app-multi-edit-panel [selected]="selectedDocs()" (cleared)="closeMultiEdit()" />
             }
             <app-json-explorer
               [value]="explorerDocs()"

@@ -7,6 +7,7 @@ import { ApiError } from '../../api';
 import { FakeThicketBridge, provideFakeThicket } from '../../api/testing';
 import { DocumentEdits } from '../../document';
 import { EditModeService } from '../../explorer/services/edit-mode.service';
+import { NestedPageSizeService } from '../../explorer/services/nested-page-size.service';
 import { NumberDefaultService } from '../../explorer/services/number-default.service';
 import type { WorkspaceTab } from '../../layout/workspace.service';
 import { ConfirmService, type ConfirmRequest } from '../../safety/confirm.service';
@@ -270,6 +271,94 @@ describe('Edit a field across selected rows (collection view)', () => {
     expect(all('multi-edit-conflict').map((li) => text(li))).toEqual([
       '2 deleted on the server since it was loaded',
     ]);
+    // Deleted, not changed: the summary says so.
+    expect(text(get('multi-edit-summary'))).toContain('1 not saved: deleted on the server');
+    expect(text(get('multi-edit-summary'))).not.toContain('changed on the server');
+    // The deleted row left the page; the other two stay selected (the rows below moved up).
+    expect(rowBoxes()).toHaveLength(2);
+    expect(rowBoxes().every((b) => b.checked)).toBe(true);
+    expect(text(get('multi-edit-count'))).toBe('2 rows selected');
+  });
+
+  it('when every selected row was deleted on the server the report stays until closed', async () => {
+    fake.fail('docs.update', { code: 'CONFLICT', message: 'gone', detail: { current: null } });
+    await enterEditMode();
+    await check(rowBoxes()[0]);
+    await type('multi-edit-field', 'status');
+    await type('multi-edit-value', '"shipped"');
+    await save();
+    expect(rowBoxes()).toHaveLength(2);
+    expect(rowBoxes().some((b) => b.checked)).toBe(false);
+    expect(text(get('multi-edit-count'))).toBe('No rows selected');
+    expect(get<HTMLButtonElement>('multi-edit-save').disabled).toBe(true);
+    expect(text(get('multi-edit-summary'))).toBe(
+      'Saved 0 documents. 1 not saved: deleted on the server since they were loaded (removed from the page).',
+    );
+    expect(text(get('multi-edit-clear'))).toBe('Close');
+    get('multi-edit-clear').click();
+    await settle();
+    expect(q('multi-edit')).toBeNull();
+  });
+
+  it('a page with other documents also ends the report of the last batch', async () => {
+    await enterEditMode();
+    await check(rowBoxes()[0]);
+    await type('multi-edit-field', 'status');
+    await type('multi-edit-value', '"shipped"');
+    await save();
+    expect(q('multi-edit-result')).not.toBeNull();
+    page = [4, 5, 6];
+    get('query-run').click();
+    await settle();
+    expect(q('multi-edit')).toBeNull();
+  });
+
+  it('the result live region is in the DOM before there is a result', async () => {
+    await enterEditMode();
+    await check(rowBoxes()[0]);
+    const region = get('multi-edit').querySelector('[role="status"]');
+    expect(region).not.toBeNull();
+    expect(text(region)).toBe('');
+    await type('multi-edit-field', 'status');
+    await type('multi-edit-value', '"shipped"');
+    await save();
+    // The same element gets the report (a region added with its text may not be announced).
+    expect(get('multi-edit').querySelector('[role="status"]')).toBe(region);
+    expect(region?.querySelector('[data-testid="multi-edit-summary"]')).not.toBeNull();
+  });
+
+  it('select all takes only the rows the explorer search shows', async () => {
+    await enterEditMode();
+    await check(rowBoxes()[0]);
+    const search = el().querySelector<HTMLInputElement>('input[placeholder^="Search names"]');
+    if (search === null) throw new Error('no search box');
+    search.value = '3';
+    search.dispatchEvent(new Event('input'));
+    await settle();
+    expect(rowBoxes()).toHaveLength(1);
+    // Row 1 is selected but hidden: the header box is mixed, not checked.
+    expect(selectAll().checked).toBe(false);
+    expect(selectAll().indeterminate).toBe(true);
+    await check(selectAll());
+    expect(text(get('multi-edit-count'))).toBe('1 row selected');
+    expect(selectAll().checked).toBe(true);
+    expect(selectAll().indeterminate).toBe(false);
+    search.value = '';
+    search.dispatchEvent(new Event('input'));
+    await settle();
+    expect(rowBoxes().map((b) => b.checked)).toEqual([false, false, true]);
+    expect(selectAll().indeterminate).toBe(true);
+  });
+
+  it('select all takes only the rows on the explorer page shown', async () => {
+    TestBed.inject(NestedPageSizeService).size.set(2);
+    await enterEditMode();
+    expect(rowBoxes()).toHaveLength(2);
+    await check(selectAll());
+    expect(text(get('multi-edit-count'))).toBe('2 rows selected');
+    expect(selectAll().checked).toBe(true);
+    await check(selectAll(), false);
+    expect(q('multi-edit')).toBeNull();
   });
 
   it('one conflicting document is listed; the others are saved', async () => {
@@ -405,6 +494,13 @@ describe('Edit a field across selected rows (collection view)', () => {
     await type('multi-edit-field', 'status');
     await save();
     expect(q('multi-edit-error')).toBeNull();
+    expect(updates()).toHaveLength(1);
+    // A top-level field the loaded row doesn't have may only be hidden by the projection.
+    await type('multi-edit-field', 'priority');
+    await save();
+    expect(text(get('multi-edit-error'))).toBe(
+      '1 was loaded only partly: priority isn’t loaded, clear the projection to change it across rows.',
+    );
     expect(updates()).toHaveLength(1);
   });
 

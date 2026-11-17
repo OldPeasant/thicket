@@ -168,9 +168,11 @@ describe('MultiEdit', () => {
     const result = await multi.save(rows(1, 2), SHIPPED);
     expect(result.saved).toBe(1);
     expect(result.conflicts).toEqual([
-      { label: '1', reason: 'deleted on the server since it was loaded' },
+      { label: '1', reason: 'deleted on the server since it was loaded', deleted: true },
     ]);
     expect(changed).toContainEqual([keyOf(1), null]);
+    // The report is kept for the panel, which may outlive the deleted rows.
+    expect(multi.result()).toEqual(result);
     expect(fake.requestsFor('docs.get').map((r) => (r.params as { id: string }).id)).toEqual([
       keyOf(2),
     ]);
@@ -259,6 +261,58 @@ describe('MultiEdit', () => {
     await expect(multi.save(selected, nested)).rejects.toThrow(/^2 was loaded only partly/);
     expect(fake.requests).toHaveLength(0);
     await expect(multi.save(selected, SHIPPED)).resolves.toMatchObject({ saved: 2 });
+  });
+
+  it('under a projection, a top-level field the loaded row lacks is refused (set and remove)', async () => {
+    projection = '{"name":{"$numberInt":"1"}}';
+    const selected = [
+      { doc: parseEJsonDocument('{"_id":{"$numberInt":"1"},"name":"a"}'), partial: true },
+    ];
+    const msg =
+      '1 was loaded only partly: status isn’t loaded, clear the projection to change it across rows.';
+    await expect(multi.save(selected, SHIPPED)).rejects.toThrow(msg);
+    await expect(multi.save(selected, { action: 'unset', path: 'status' })).rejects.toThrow(msg);
+    expect(confirms).toHaveLength(0);
+    expect(fake.requests).toHaveLength(0);
+    // A loaded top-level field is fine.
+    const name: FieldEdit = { action: 'set', path: 'name', value: { type: 'string', value: 'b' } };
+    await expect(multi.save(selected, name)).resolves.toMatchObject({ saved: 1 });
+  });
+
+  it('a top-level field that is a cut array is refused; other fields of the row are fine', async () => {
+    multi.setHost({
+      ...host(),
+      slicedOf: (key) =>
+        key === keyOf(1)
+          ? { above: 50, arrays: [{ path: 'items', total: 120, loaded: 50 }] }
+          : undefined,
+    });
+    const selected = [
+      {
+        doc: parseEJsonDocument('{"_id":{"$numberInt":"1"},"status":"open","items":[]}'),
+        partial: true,
+      },
+    ];
+    await expect(multi.save(selected, { action: 'unset', path: 'items' })).rejects.toThrow(
+      '1 was loaded only partly: items was loaded cut (a long array), open the document to change it.',
+    );
+    expect(fake.requests).toHaveLength(0);
+    // Without a projection a missing top-level field is really missing: set adds it.
+    const extra: FieldEdit = { action: 'set', path: 'tag', value: { type: 'string', value: 'x' } };
+    await expect(multi.save(selected, extra)).resolves.toMatchObject({ saved: 1 });
+    await expect(multi.save(selected, SHIPPED)).resolves.toMatchObject({ saved: 1 });
+  });
+
+  it('keeps the last result until clearResult or the next batch', async () => {
+    expect(multi.result()).toBeNull();
+    const result = await multi.save(rows(1), SHIPPED);
+    expect(multi.result()).toBe(result);
+    multi.clearResult();
+    expect(multi.result()).toBeNull();
+    await multi.save(rows(1), SHIPPED);
+    confirmAnswer = () => Promise.resolve(false);
+    await expect(multi.save(rows(2), SHIPPED)).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(multi.result()).toBeNull();
   });
 
   it('a document the edit cannot apply to refuses the batch, naming it and how many more', async () => {

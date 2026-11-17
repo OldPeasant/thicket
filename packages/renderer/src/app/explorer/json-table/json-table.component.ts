@@ -98,19 +98,21 @@ export class JsonTableComponent implements OnInit {
     this.rowSelection?.toggle(index, (event.target as HTMLInputElement).checked);
   }
 
+  // "All" means every row shown (search and page applied) and no other row;
+  // rows selected but hidden by the search or on another page make it mixed.
   get allRowsSelected(): boolean {
-    const n = this.arr.length;
-    return n > 0 && (this.rowSelection?.count() ?? 0) === n;
+    const shown = this.visibleArrayIndices;
+    const c = this.rowSelection?.count() ?? 0;
+    return shown.length > 0 && c === shown.length && shown.every((i) => this.isRowSelected(i));
   }
 
   get someRowsSelected(): boolean {
-    const c = this.rowSelection?.count() ?? 0;
-    return c > 0 && c < this.arr.length;
+    return (this.rowSelection?.count() ?? 0) > 0 && !this.allRowsSelected;
   }
 
   selectAllRows(event: Event): void {
     event.stopPropagation();
-    this.rowSelection?.setAll(this.arr.length, (event.target as HTMLInputElement).checked);
+    this.rowSelection?.setAll(this.visibleArrayIndices, (event.target as HTMLInputElement).checked);
   }
 
   // Expanding a node by hand shows everything below it, whatever the filter
