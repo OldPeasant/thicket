@@ -24,3 +24,4 @@ Fix the code where Windows behaviour is wrong for users (e.g. paths), and the te
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 17:31+0100 by dell26/agent-2): gh is refused in this agent's environment (needs approval), so CI logs are read from the task description and verification of the CI run relies on the runner backing up wip/ci-windows-macos; fixes are based on code reading for the listed failures
+- ASSUMPTION (2026-11-17 17:33+0100 by dell26/agent-2): SSH agent on Windows: SSH_AUTH_SOCK now wins when set (lets users point at the Windows OpenSSH agent named pipe or a Cygwin agent), else Pageant as before, so the product never reports no-agent on Windows. Not switching the default to the OpenSSH pipe because the UI documents Pageant
