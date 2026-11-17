@@ -332,6 +332,13 @@ describe('startBackend: connections', () => {
     );
   });
 
+  it('serves the idx.* index handlers', () => {
+    const parentPort: ParentPortLike = { on: () => undefined };
+    expect(Object.keys(startBackend({ parentPort, pid: 1 }))).toEqual(
+      expect.arrayContaining(['idx.list', 'idx.stats', 'idx.create', 'idx.drop', 'idx.hide']),
+    );
+  });
+
   it('serves the docs.* query handlers, unguarded on a read-only profile', async () => {
     const parentPort: ParentPortLike = { on: () => undefined };
     expect(Object.keys(startBackend({ parentPort, pid: 1 }))).toEqual(

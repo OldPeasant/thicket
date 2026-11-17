@@ -295,6 +295,12 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   stops the same way (earlier documents inserted, last progress, `INVALID_PARAMS` "Line N: …");
   a failed write to the export file (cannot be created, disk full) answers `INTERNAL`. `end.delivered` is the number of
   documents written (export) or inserted (import). `io.import` is behind the write guard.
+- Indexes (`packages/backend/src/indexes/`, `indexHandlers`): `idx.list` (`listIndexes`, server
+  order), `idx.stats` (`$collStats` `indexSizes` + `$indexStats` usage; summed over shards,
+  earliest `since`; without the `indexStats` privilege sizes only), `idx.create` (`createIndexes`,
+  options passed as given; without `options.name` the driver's default name `a_1_b_-1`, which it
+  answers), `idx.drop` (one index by name; `*` is `INVALID_PARAMS`), `idx.hide` (`collMod`
+  `index.hidden`). The writes are behind the write guard; int tests `test/integration/indexes.int.spec.ts`.
 - Write guard (`packages/backend/src/guard/`): `startBackend` wraps every handler of a
   `WRITE_METHODS` method with `guardWrites()`, which loads the profile from main (fresh, per
   write) and throws `READ_ONLY` for read-only profiles (even when confirmed), and

@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "task": "index-backend",
+  "reviewed_revision": "782ea95430abf6dc996f877ee92de2f2001a2767",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/index-backend/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/index-backend/review.md" },
+    "fixer": {
+      "status": "not_required",
+      "reason": "No production defects found. The first review's P2 (missing unit tests) was resolved by the test-writer's indexes.spec.ts and handlers.spec.ts, and the final review confirmed this. The only remaining finding is an optional P3 cleanup."
+    }
+  },
+  "fixes_required": false,
+  "findings": [
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "accepted",
+      "note": "UNAUTHORIZED/isUnauthorized duplicated from docs/query/query.ts; a shared helper would touch modules owned by other tasks, so the small local copy is kept"
+    }
+  ],
+  "validation": [
+    { "command": "cd packages/backend && npx vitest run src/indexes", "result": "pass" },
+    {
+      "command": "npx vitest run --config test/integration/vitest.config.ts test/integration/indexes.int.spec.ts",
+      "result": "pass"
+    },
+    { "command": "npm run check", "result": "pass" }
+  ]
+}
