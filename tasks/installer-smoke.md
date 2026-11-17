@@ -12,7 +12,8 @@ After building, each OS job starts the packaged app with Playwright: welcome scr
 
 ## Acceptance criteria
 - [ ] Smoke test passes locally against the Linux AppImage
-- [ ] CI run green on all three OSes — skip with reason if no remote yet
+- [~] CI run green on all three OSes — skip with reason if no remote yet
+  - skipped (2026-11-17 06:03+0100 by dell26/agent-2): A release.yml run needs a pushed v* tag on the GitHub remote; agents must not push (done pushes main only, no tags) and gh is not usable here. macOS/Windows runners can't be reproduced on this Linux host. Needs a human to push a test tag and watch the build jobs.
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
