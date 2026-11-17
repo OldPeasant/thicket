@@ -595,6 +595,37 @@ describe('startBackend: connections', () => {
     }
   });
 
+  it('a conn.status broadcast to error or disconnected closes that profile’s shell sessions', async () => {
+    const closeProfile = vi
+      .spyOn(ShellHost.prototype, 'closeProfile')
+      .mockImplementation(() => Promise.resolve());
+    // The manager built by startBackend, caught on its first use (conn.status).
+    const statuses = vi.spyOn(ConnectionManager.prototype, 'statuses');
+    try {
+      const m = withMain();
+      m.renderer.send({ id: 's', method: 'conn.status', params: {} });
+      expect(await m.answer('s')).toMatchObject({ ok: true });
+      // The manager's deps.onStatus is what tunnelLost calls (manager.spec covers that call).
+      const manager = statuses.mock.contexts[0] as unknown as {
+        deps: { onStatus: (status: unknown) => void };
+      };
+      const onStatus = manager.deps.onStatus;
+      onStatus({ profileId: 'prod', state: 'connected' });
+      onStatus({ profileId: 'prod', state: 'connecting' });
+      expect(closeProfile).not.toHaveBeenCalled();
+      onStatus({
+        profileId: 'ssh',
+        state: 'error',
+        error: { code: 'SSH_ERROR', message: 'The SSH tunnel was closed' },
+      });
+      onStatus({ profileId: 'p1', state: 'disconnected' });
+      expect(closeProfile.mock.calls).toEqual([['ssh'], ['p1']]);
+    } finally {
+      closeProfile.mockRestore();
+      statuses.mockRestore();
+    }
+  });
+
   it('shell.open answers UNSUPPORTED without a shell worker once connected', async () => {
     const parentPort: ParentPortLike = { on: () => undefined };
     const configOf = vi

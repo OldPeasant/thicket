@@ -63,6 +63,10 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
   });
   const loadProfile = async (profileId: string): Promise<Profile> =>
     ((await link().call('profiles.forConnect', { profileId })) as { profile: Profile }).profile;
+  const shells = new ShellHost({
+    workerUrl: options.shellWorker,
+    log: (message) => log(`shell: ${message}`),
+  });
   const connections = new ConnectionManager({
     loadProfile,
     loadSecrets: async (profileId) =>
@@ -76,6 +80,13 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
       for (const send of renderers) {
         send({ stream: BROADCAST_STREAMS.connStatus, kind: 'data', payload: status });
       }
+      // A lost connection (SSH tunnel gone) ends its shell sessions: their clients use the
+      // closed tunnel, and a reopen builds a new one.
+      if (status.state === 'error' || status.state === 'disconnected') {
+        shells.closeProfile(status.profileId).catch((error: unknown) => {
+          log(`shell: closing the sessions of ${status.profileId} failed: ${String(error)}`);
+        });
+      }
     },
     ...(options.userData !== undefined
       ? {
@@ -85,10 +96,6 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
           },
         }
       : {}),
-  });
-  const shells = new ShellHost({
-    workerUrl: options.shellWorker,
-    log: (message) => log(`shell: ${message}`),
   });
   const conn = connHandlers(connections);
   const connClose = conn['conn.close'];

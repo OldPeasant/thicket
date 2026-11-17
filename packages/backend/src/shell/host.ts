@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
 
 import type { ShellOutput } from '@thicket/contract';
+import type { AWSCredentials, MongoClientOptions } from 'mongodb';
 
 import { toConnectError } from '../connections/errors';
 import { abortable } from '../connections/manager';
@@ -364,11 +365,12 @@ export class ShellHost {
     if (this.workerUrl === undefined)
       throw new RpcError('UNSUPPORTED', 'This backend was started without a shell worker');
     const worker = this.createWorker(this.workerUrl);
+    let secrets = secretsOf(config);
     const opened = new Promise<string>((resolve, reject) => {
       worker.on('message', (message) => {
         if (message.type === 'opened') resolve(message.db);
         else if (message.type === 'openFailed') {
-          reject(toConnectError(fromWorkerError(message.error), secretsOf(config), true));
+          reject(toConnectError(fromWorkerError(message.error), secrets, true));
         }
       });
       worker.on('error', (error) => {
@@ -378,15 +380,54 @@ export class ShellHost {
         reject(new RpcError('INTERNAL', `The shell stopped while starting (exit code ${code})`));
       });
     });
-    worker.postMessage({ type: 'open', uri: config.uri, options: config.options, db });
+    // Nothing can be unhandled while the open message is prepared (it may fail first).
+    opened.catch(() => undefined);
     try {
+      const { options, awsCredentials } = await abortable(cloneableOptions(config.options), signal);
+      secrets = secretsOf(config, awsCredentials);
+      worker.postMessage({
+        type: 'open',
+        uri: config.uri,
+        options,
+        db,
+        ...(awsCredentials ? { awsCredentials } : {}),
+      });
       return { worker, db: await abortable(opened, signal) };
     } catch (error) {
       await worker.terminate().catch(() => undefined);
-      this.log(`shell ${id}: open failed: ${(error as Error).message}`);
-      throw error;
+      const failure = toConnectError(error, secrets, true);
+      this.log(`shell ${id}: open failed: ${failure.message}`);
+      throw failure;
     }
   }
+}
+
+/**
+ * Driver options that survive `postMessage` (structured clone): a MONGODB-AWS
+ * `AWS_CREDENTIAL_PROVIDER` (a function, `auth/aws`) is called here and its credentials go to the
+ * worker as data, which builds a static provider from them again (`withAwsCredentials`).
+ */
+async function cloneableOptions(
+  options: MongoClientOptions,
+): Promise<{ options: MongoClientOptions; awsCredentials?: AWSCredentials }> {
+  const properties = options.authMechanismProperties;
+  const provider = properties?.AWS_CREDENTIAL_PROVIDER;
+  if (provider === undefined) return { options };
+  const rest = { ...properties };
+  delete rest.AWS_CREDENTIAL_PROVIDER;
+  const resolved = await provider();
+  const awsCredentials: AWSCredentials = {
+    accessKeyId: resolved.accessKeyId,
+    secretAccessKey: resolved.secretAccessKey,
+    ...(resolved.sessionToken !== undefined ? { sessionToken: resolved.sessionToken } : {}),
+    ...(resolved.expiration !== undefined ? { expiration: resolved.expiration } : {}),
+  };
+  const others = { ...options };
+  delete others.authMechanismProperties;
+  return {
+    options: Object.keys(rest).length > 0 ? { ...others, authMechanismProperties: rest } : others,
+    awsCredentials,
+  };
 }
 
 function notFound(sessionId: string): RpcError {
@@ -404,10 +445,15 @@ function fromWorkerError(error: WorkerError): Error {
   return out;
 }
 
-/** Secrets in a driver configuration, masked in error messages. */
-function secretsOf(config: ClientConfig): string[] {
+/** Secrets in a driver configuration (and its resolved AWS credentials), masked in errors. */
+function secretsOf(config: ClientConfig, aws?: AWSCredentials): string[] {
   const o = config.options;
-  return [o.auth?.password, o.proxyPassword, o.passphrase, o.tlsCertificateKeyFilePassword].filter(
-    (s): s is string => typeof s === 'string' && s.length > 0,
-  );
+  return [
+    o.auth?.password,
+    o.proxyPassword,
+    o.passphrase,
+    o.tlsCertificateKeyFilePassword,
+    aws?.secretAccessKey,
+    aws?.sessionToken,
+  ].filter((s): s is string => typeof s === 'string' && s.length > 0);
 }

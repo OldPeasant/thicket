@@ -1,6 +1,7 @@
 import type { ShellOutput } from '@thicket/contract';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { awsAuthOptions } from '../auth/aws/aws';
 import type { ClientConfig } from '../connections/options';
 import { RpcError } from '../server/rpc';
 import {
@@ -10,7 +11,7 @@ import {
   type ShellHostOptions,
   type WorkerLike,
 } from './host';
-import type { FromWorker, ToWorker } from './protocol';
+import { withAwsCredentials, type FromWorker, type ToWorker } from './protocol';
 
 /** Fictitious secrets; none of them is a real credential. */
 const PASSWORD = 'fictitious-shell-Pw1';
@@ -18,6 +19,24 @@ const PASSWORD = 'fictitious-shell-Pw1';
 const CONFIG: ClientConfig = {
   uri: 'mongodb://db.example.test:27017',
   options: { appName: 'Thicket', auth: { username: 'alice', password: PASSWORD } },
+};
+
+/** Fictitious AWS keys (not real credentials). */
+const AWS_KEY_ID = 'AKIAFICTITIOUSKEY01';
+const AWS_SECRET = 'fictitious-aws-Secret-Key-1';
+const AWS_TOKEN = 'fictitious-aws-Session-Token-1';
+
+/** MONGODB-AWS with explicit keys, as `auth/aws` builds it (a function provider in the options). */
+const AWS_CONFIG: ClientConfig = {
+  uri: 'mongodb://db.example.test:27017',
+  options: {
+    appName: 'Thicket',
+    ...awsAuthOptions(
+      { mechanism: 'MONGODB-AWS', username: AWS_KEY_ID, secretMode: 'saved' },
+      { password: AWS_SECRET, awsSessionToken: AWS_TOKEN },
+      undefined,
+    ),
+  },
 };
 
 type Listener = (value: never) => void;
@@ -229,6 +248,142 @@ describe('ShellHost.open', () => {
     expect((await rejection(opening)).code).toBe('CANCELLED');
     expect(worker.terminated).toBe(1);
     expect(host.sessionIds()).toEqual([]);
+  });
+});
+
+describe('ShellHost.open: driver options cross postMessage (MONGODB-AWS)', () => {
+  it('posts clone-safe options: the AWS provider is resolved to plain credentials', async () => {
+    expect(() => structuredClone(AWS_CONFIG.options)).toThrow();
+    const { host, workers } = setup();
+    await host.open('aws', AWS_CONFIG, undefined);
+    const [open] = (workers[0] as FakeWorker).of('open');
+    expect(() => structuredClone(open)).not.toThrow();
+    expect(open).toMatchObject({
+      type: 'open',
+      uri: AWS_CONFIG.uri,
+      options: { appName: 'Thicket', authMechanism: 'MONGODB-AWS', authSource: '$external' },
+      awsCredentials: {
+        accessKeyId: AWS_KEY_ID,
+        secretAccessKey: AWS_SECRET,
+        sessionToken: AWS_TOKEN,
+      },
+    });
+    expect(open?.options.authMechanismProperties).toBeUndefined();
+    // The configuration the session keeps (for restarts) is unchanged.
+    expect(AWS_CONFIG.options.authMechanismProperties?.AWS_CREDENTIAL_PROVIDER).toBeTypeOf(
+      'function',
+    );
+  });
+
+  it('the worker side rebuilds a static provider from the posted credentials', async () => {
+    const { host, workers } = setup();
+    await host.open('aws', AWS_CONFIG, undefined);
+    const [open] = (workers[0] as FakeWorker).of('open');
+    const cloned = structuredClone(open) as Extract<ToWorker, { type: 'open' }>;
+    const options = withAwsCredentials(cloned.options, cloned.awsCredentials);
+    expect(options).toMatchObject({ authMechanism: 'MONGODB-AWS', authSource: '$external' });
+    const provider = options.authMechanismProperties?.AWS_CREDENTIAL_PROVIDER;
+    expect(provider).toBeTypeOf('function');
+    await expect(provider?.()).resolves.toEqual({
+      accessKeyId: AWS_KEY_ID,
+      secretAccessKey: AWS_SECRET,
+      sessionToken: AWS_TOKEN,
+    });
+    // Options without AWS credentials are used as they are.
+    expect(withAwsCredentials(CONFIG.options, undefined)).toBe(CONFIG.options);
+  });
+
+  it('keeps other auth mechanism properties and calls a non-static provider on each start', async () => {
+    let calls = 0;
+    const config: ClientConfig = {
+      uri: AWS_CONFIG.uri,
+      options: {
+        authMechanism: 'MONGODB-AWS',
+        authMechanismProperties: {
+          SERVICE_NAME: 'mongodb',
+          AWS_CREDENTIAL_PROVIDER: () => {
+            calls++;
+            return Promise.resolve({
+              accessKeyId: `${AWS_KEY_ID}${calls}`,
+              secretAccessKey: AWS_SECRET,
+            });
+          },
+        },
+      },
+    };
+    const { host, workers } = setup();
+    await host.open('aws', config, undefined);
+    await host.open('aws', config, undefined);
+    const opens = workers.map((w) => w.of('open')[0]);
+    expect(opens.map((o) => o?.options.authMechanismProperties)).toEqual([
+      { SERVICE_NAME: 'mongodb' },
+      { SERVICE_NAME: 'mongodb' },
+    ]);
+    expect(opens.map((o) => o?.awsCredentials?.accessKeyId)).toEqual([
+      `${AWS_KEY_ID}1`,
+      `${AWS_KEY_ID}2`,
+    ]);
+    for (const open of opens) expect(() => structuredClone(open)).not.toThrow();
+  });
+
+  it('a postMessage that throws on open terminates the worker and rejects', async () => {
+    class Unclonable extends FakeWorker {
+      override postMessage(message: ToWorker): void {
+        if (message.type === 'open') {
+          throw new DOMException('function could not be cloned', 'DataCloneError');
+        }
+        super.postMessage(message);
+      }
+    }
+    const worker = new Unclonable();
+    const { host } = setup({ workers: [worker] });
+    const error = await rejection(host.open('p1', CONFIG, undefined));
+    expect(error.code).toBe('INTERNAL');
+    expect(error.message).toContain('could not be cloned');
+    expect(worker.terminated).toBe(1);
+    expect(host.sessionIds()).toEqual([]);
+  });
+
+  it('a failing credential provider terminates the worker and rejects without posting', async () => {
+    const config: ClientConfig = {
+      uri: AWS_CONFIG.uri,
+      options: {
+        authMechanism: 'MONGODB-AWS',
+        authMechanismProperties: {
+          AWS_CREDENTIAL_PROVIDER: () => Promise.reject(new Error('no AWS credentials found')),
+        },
+      },
+    };
+    const worker = new FakeWorker();
+    const { host } = setup({ workers: [worker] });
+    const error = await rejection(host.open('aws', config, undefined));
+    expect(error.message).toContain('no AWS credentials found');
+    expect(worker.posted).toEqual([]);
+    expect(worker.terminated).toBe(1);
+    expect(host.sessionIds()).toEqual([]);
+  });
+
+  it('masks the AWS secret access key and session token in open errors and logs', async () => {
+    const worker = new FakeWorker(false);
+    const { host, logs } = setup({ workers: [worker] });
+    const opening = host.open('aws', AWS_CONFIG, undefined);
+    await vi.waitFor(() => expect(worker.of('open')).toHaveLength(1));
+    worker.reply({
+      type: 'openFailed',
+      error: {
+        name: 'MongoServerError',
+        message: `Authentication failed: secret ${AWS_SECRET} token ${AWS_TOKEN}`,
+        code: 18,
+      },
+    });
+    const error = await rejection(opening);
+    expect(error.code).toBe('AUTH_FAILED');
+    expect(error.message).not.toContain(AWS_SECRET);
+    expect(error.message).not.toContain(AWS_TOKEN);
+    expect(error.message).toContain('secret **** token ****');
+    expect(logs.join('\n')).not.toContain(AWS_SECRET);
+    expect(logs.join('\n')).not.toContain(AWS_TOKEN);
+    expect(worker.terminated).toBe(1);
   });
 });
 

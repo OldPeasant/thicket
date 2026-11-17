@@ -4,9 +4,12 @@ Date: 2026-11-17
 
 Task: shell-backend — mongosh host in worker threads (shell.open/eval/complete/close)
 
-Scope: current task. This report covers two fix rounds, each with exactly one approved finding:
-CR-5 from `reviews/shell-backend/review.md` (round 3, commit 02d12f9) and TW-2 from
-`reviews/shell-backend/tests.md` (round 4, this change).
+Scope: current task. This report covers three fix rounds: CR-5 from
+`reviews/shell-backend/review.md` (round 3, commit 02d12f9), TW-2 from
+`reviews/shell-backend/tests.md` (round 4) and CR-2 and CR-3 from the "round 5: merge
+resolutions" section of `reviews/shell-backend/review.md` (round 5, on top of e4661bc, this
+change, uncommitted). The round-5 finding IDs are those of the round-5 review section, not the
+resolved CR-2/CR-3 of round 1.
 
 ## Fixed findings
 
@@ -95,6 +98,80 @@ Validation (round 4):
   fixture) — Pass (1 file, 17 tests)
 - `npm run check` — Pass
 
+### CR-2 (round 5) — shell.open fails for MONGODB-AWS profiles with explicit keys and leaks a worker thread
+
+Round: 5 (on top of e4661bc)
+
+Files changed:
+- `packages/backend/src/shell/host.ts`
+- `packages/backend/src/shell/protocol.ts`
+- `packages/backend/src/shell/worker.ts`
+- `packages/backend/src/shell/host.spec.ts`
+
+Problem:
+Confirmed at e4661bc: `auth/aws/aws.ts` puts a function (`AWS_CREDENTIAL_PROVIDER`) into
+`authMechanismProperties`; `ShellHost.startWorker` posted `config.options` as is, so
+`postMessage` threw `DataCloneError` synchronously. The call was before the `try`, so the new
+worker was never terminated, and `shell.open` failed with a non-`RpcError`. The AWS secret access
+key and session token were not in the masked secrets.
+
+Fix:
+- `host.ts`: `cloneableOptions` removes `AWS_CREDENTIAL_PROVIDER` from the options sent to the
+  worker and calls it in the host (works for static and non-static providers, on every start
+  including restarts); the plain credentials (access key id, secret, optional session token and
+  expiration) go to the worker as `awsCredentials` in the `open` message. Other
+  `authMechanismProperties` are kept. The session keeps its original `ClientConfig`.
+- The options are prepared and `postMessage` is called inside the `try`, so a provider failure,
+  a cancel or a throwing `postMessage` terminates the worker; the error is mapped with
+  `toConnectError` (secrets masked) before it is logged and thrown.
+- `secretsOf` also masks the resolved AWS secret access key and session token (open errors from
+  the worker and the log line).
+- `protocol.ts`: the `open` message gets a typed optional `awsCredentials: AWSCredentials`;
+  `withAwsCredentials(options, credentials)` rebuilds a static
+  `AWS_CREDENTIAL_PROVIDER: () => Promise.resolve(credentials)`. `worker.ts` applies it before
+  `ShellRuntime.open`.
+- Tests (`host.spec.ts`, new describe "driver options cross postMessage (MONGODB-AWS)"):
+  options built by `awsAuthOptions` are posted as clone-safe data (`structuredClone` of the posted
+  message succeeds, no provider in the posted options, credentials present); the worker side
+  rebuilds a provider that resolves to the credentials after a structured clone; other mechanism
+  properties are kept and a non-static provider is called on each start; a `postMessage` that
+  throws `DataCloneError` on open rejects (INTERNAL) and terminates the worker; a failing
+  provider rejects, posts nothing and terminates the worker; the AWS secret and session token are
+  masked in the open error and the logs.
+
+Validation:
+- `npx vitest run src/shell/host.spec.ts` (packages/backend) — Pass (53 tests)
+- `npx vitest run --config test/integration/vitest.config.ts test/integration/shell.int.spec.ts`
+  (repo root, Podman, real worker from source) — Pass (17 tests)
+- `npm run build` in `apps/desktop` — Pass (`dist/shell-worker.cjs` bundles
+  `withAwsCredentials`; build output is not tracked)
+
+Not verified here: a shell against a real MONGODB-AWS server (no AWS fixture in this round); the
+driver gets the same static provider shape that `conn.open` uses.
+
+### CR-3 (round 5) — Shell sessions of an SSH profile keep a dead tunnel after the tunnel is lost
+
+Round: 5 (on top of e4661bc)
+
+Files changed:
+- `packages/backend/src/server/backend.ts`
+- `packages/backend/src/server/backend.spec.ts`
+
+Problem:
+Confirmed: shell sessions were closed only by the `conn.close` wrapper; the manager's
+`onStatus` broadcast (called by `tunnelLost`, state `error`) did not touch them, so they kept a
+config pointing at the closed tunnel.
+
+Fix:
+In `startBackend`, the `ShellHost` is now created before the `ConnectionManager`, and its
+`onStatus` callback, after broadcasting `conn.status`, calls `shells.closeProfile(profileId)` when
+the state is `error` or `disconnected` (`CONN_STATES` in `packages/contract/src/conn.ts`); a
+failure is logged, never unhandled. New test in `backend.spec.ts`: the manager's `onStatus`
+closes the shells for `error` and `disconnected`, not for `connected`/`connecting`.
+
+Validation:
+- `npx vitest run src/server/backend.spec.ts` (packages/backend) — Pass
+
 ## Not fixed
 
 None.
@@ -119,6 +196,15 @@ Remaining unresolved findings:
 0
 
 No coverage was run in these rounds.
+
+Round 5 (CR-2, CR-3):
+- `npx vitest run` in `packages/backend` — Pass, 33 files, 1421 tests
+- `npx vitest run --config test/integration/vitest.config.ts test/integration/shell.int.spec.ts`
+  (repo root, Podman) — Pass, 17 tests
+- `npm run check` (eslint, prettier --check, type checks, unit suites: root 68 files / 3764
+  tests, renderer 80 files / 2418 tests) — Pass; `.taskcheck` runs exactly this command
+- `npm run build` in `apps/desktop` — Pass
+- Remaining unresolved findings after round 5: 0
 
 ## Final status
 

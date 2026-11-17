@@ -6,7 +6,12 @@
  */
 import { parentPort } from 'node:worker_threads';
 
-import type { FromWorker, ToWorker, WorkerError } from './protocol.ts';
+import {
+  withAwsCredentials,
+  type FromWorker,
+  type ToWorker,
+  type WorkerError,
+} from './protocol.ts';
 import { ShellRuntime } from './runtime.ts';
 
 if (!parentPort) throw new Error('The shell worker must run in a worker_thread');
@@ -36,7 +41,11 @@ async function handle(message: ToWorker): Promise<void> {
   switch (message.type) {
     case 'open':
       try {
-        runtime = await ShellRuntime.open(message.uri, message.options, message.db);
+        runtime = await ShellRuntime.open(
+          message.uri,
+          withAwsCredentials(message.options, message.awsCredentials),
+          message.db,
+        );
         post({ type: 'opened', db: runtime.db() });
       } catch (error) {
         post({ type: 'openFailed', error: workerError(error) });
