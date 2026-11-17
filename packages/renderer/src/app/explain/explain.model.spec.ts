@@ -401,6 +401,67 @@ describe('summarizeExplain (edge cases)', () => {
     expect(s.root.docsExamined).toBe(7);
   });
 
+  it('slot-based ixscan reads are keys examined; zero reads stay 0, not missing', () => {
+    const s = summarizeExplain({
+      explainVersion: '2',
+      queryPlanner: {
+        winningPlan: {
+          queryPlan: {
+            stage: 'FETCH',
+            planNodeId: 2,
+            inputStage: { stage: 'IXSCAN', planNodeId: 1, indexName: 'sku_1' },
+          },
+        },
+      },
+      executionStats: {
+        executionStages: {
+          stage: 'nlj',
+          planNodeId: 2,
+          outerStage: { stage: 'ixscan', planNodeId: 1, numReads: 3 },
+          innerStage: { stage: 'seek', planNodeId: 2, numReads: 0 },
+        },
+      },
+    });
+    expect(s.root.docsExamined).toBe(0);
+    expect(s.root.children[0]?.keysExamined).toBe(3);
+    expect(s.root.children[0]?.docsExamined).toBeUndefined();
+  });
+
+  it('slot-based: stages without numReads, or that are not scans, add no keys/docs examined', () => {
+    const s = summarizeExplain({
+      explainVersion: '2',
+      queryPlanner: { winningPlan: { queryPlan: { stage: 'COLLSCAN', planNodeId: 1 } } },
+      executionStats: {
+        executionStages: {
+          stage: 'filter',
+          planNodeId: 1,
+          numReads: 50,
+          inputStage: { stage: 'scan', planNodeId: 1 },
+        },
+      },
+    });
+    expect(s.root.docsExamined).toBeUndefined();
+    expect(s.root.keysExamined).toBeUndefined();
+  });
+
+  it('slot-based: a stage without planNodeId or name is passed through to the scans below', () => {
+    const s = summarizeExplain({
+      explainVersion: '2',
+      queryPlanner: { winningPlan: { queryPlan: { stage: 'COLLSCAN', planNodeId: 1 } } },
+      executionStats: {
+        executionStages: {
+          stage: 'limit',
+          inputStage: {
+            planNodeId: 1,
+            numReads: 9,
+            inputStage: { stage: 'scan', planNodeId: 1, numReads: 4 },
+          },
+        },
+      },
+    });
+    expect(s.root.docsExamined).toBe(4);
+  });
+
   it('pipeline stages: stats keys and false flags are not details; other keys are', () => {
     const s = summarizeExplain({
       stages: [

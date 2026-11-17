@@ -1480,6 +1480,19 @@ describe('AggregationView', () => {
       expect(explains().at(-1)).toMatchObject({ coll: 'invoices' });
     });
 
+    it('pointing the tab at another collection clears a refused Explain message', async () => {
+      await setBody(0, '{ status: ');
+      await click(get('agg-explain'));
+      expect(get('agg-explain-error').textContent).toContain('Fix stage 1 first');
+      fixture.componentRef.setInput('tab', {
+        ...TAB,
+        data: { profileId: 'p1', db: 'shop', coll: 'invoices', type: 'collection' },
+      });
+      await settle();
+      expect(q('agg-explain-error')).toBeNull();
+      expect(explains()).toHaveLength(0);
+    });
+
     it('the same collection given again keeps the panel', async () => {
       await click(get('agg-explain'));
       fixture.componentRef.setInput('tab', { ...TAB, data: { ...TAB.data } });

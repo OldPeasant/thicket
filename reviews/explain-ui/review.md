@@ -4,23 +4,27 @@ Date: 2026-11-17
 
 Task: explain-ui - M3: Explain plan viewer
 
-Scope: code commits of the task, `git diff f73fabc..65e75e1` (3 commits). Later test-writer and
-architecture-note commits and uncommitted working-tree changes are outside this scope.
+Scope: round 2. The whole task diff on the final code, `git diff 6d14cda..8d2acb3` (6 commits:
+implementation, model/component tests, e2e, architecture notes, test-writer tests and reports, and
+the fixer commit). The fixer commit 8d2acb3 got the closest reading. There are no uncommitted
+changes. Round 1 reviewed the implementation commits only. Since then the branch has been rebased,
+so the round-1 hashes (f73fabc..65e75e1) are now 6d14cda..f0cb232.
 
 Requirements:
-- tasks/explain-ui.md (goal, 2 acceptance criteria, recorded assumption on idx.create in the e2e)
-- SPEC.md M3 "Explain plan for find and aggregate", section 2 demo step 9, section 4 `agg.*`
-- docs/ARCHITECTURE.md ("Explain plan viewer", explorer, e2e harness)
-- docs/QUALITY.md, AGENTS.md "Quality sub-agent boundaries"
-- packages/contract/src/agg.ts (`agg.explain` contract), packages/backend/src/agg/agg.ts (`explain`)
+- tasks/explain-ui.md (goal, 2 acceptance criteria, recorded assumptions: index created over the
+  bridge in the e2e, and the query-bar Explain explains the query as typed)
+- SPEC.md M3 "Explain plan for find and aggregate", demo step 9
+- docs/ARCHITECTURE.md ("Explain plan viewer"), docs/QUALITY.md, AGENTS.md "Quality sub-agent
+  boundaries"
+- reviews/explain-ui/fixes.md, reviews/explain-ui/tests.md (round-1 findings and their fixes)
 
 Git range:
 - Branch: main
-- HEAD: 65e75e1 (end of reviewed range)
-- Base/start: f73fabc20516fdd249b095471a17ecc764c12b6c
-- Commits reviewed: 3 (5fad4b8, a2fb559, 65e75e1)
+- HEAD: 8d2acb332a69eb6ccf8e65fb9e061f71dcfd5fc4
+- Base/start: 6d14cda876ae5d665a9861e7e0ead68b908762d9 (`git merge-base HEAD origin/main`)
+- Commits reviewed: 6 (f0cb232, abb6b20, 4ed92b2, 24eea68, e0df0ad, 8d2acb3)
 
-Summary: 0 P0, 0 P1, 1 P2, 2 P3
+Summary: 0 P0, 0 P1, 0 P2, 0 P3 open (round 1 found 1 P2 and 2 P3; all 3 are resolved)
 
 ## P0 Critical
 
@@ -32,39 +36,38 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | Host-view Explain wiring has no unit tests (verbosity choice for $out/$merge, query-bar mapping, reset on target change)**
-    - File: `packages/renderer/src/app/aggregation/aggregation-view.ts:486`, `packages/renderer/src/app/collection/collection-view.ts:381`, `packages/renderer/src/app/collection/collection-view.ts:329`
+- [x] **CR-1 | Host-view Explain wiring has no unit tests (round 1). Resolved.**
+    - File: `packages/renderer/src/app/aggregation/aggregation-view.spec.ts:1371-1530`, `packages/renderer/src/app/collection/collection-view.spec.ts:1247-1360`
     - Category: Tests
-    - Problem: At 65e75e1 no spec in `aggregation/` or `collection/` mentions explain. Three behaviours are untested: `AggregationView.explain()` asks for `verbosity: 'queryPlanner'` when the pipeline has `$out`/`$merge`, and otherwise `executionStats`. It refuses an invalid pipeline or invalid text-mode input. `CollectionView.explain()` maps the parsed query bar (filter, projection, sort, collation, limit) to the `agg.explain` find target. The query-bar errors block the request. The panel closes when the collection target changes. The e2e covers only the happy path (find with filter+sort, aggregate without `$out`).
-    - Why it matters: if the `$out`/`$merge` downgrade breaks, the server is never written to (the backend `buildExplained` refuses it), but the user then gets an INVALID_PARAMS error instead of a plan. Mapping mistakes (for example dropping collation or limit) would explain a different query than the one on the bar, and nothing would catch it.
-    - Suggested fix: add component tests with `FakeThicketBridge`. Click `agg-explain` with a `$out` pipeline and assert `verbosity: 'queryPlanner'`. Without one, assert `executionStats`. Click `query-explain` with filter/sort/collation/limit and assert the exact `agg.explain` params. Assert that an invalid query sends no request and that changing the target removes the panel.
+    - Problem (round 1): no spec covered these behaviours: the `$out`/`$merge` switch to `queryPlanner`, the mapping from the query bar to the find target, the refusal of invalid input, and the panel reset when the target changes.
+    - Resolution: the test-writer's specs now check all of them. The aggregation specs check `executionStats` vs `queryPlanner` with `$out`, the refusal message, closing on an invalid stage or invalid text, closing on a target change, and Explain again/Close. The collection specs check the exact `agg.explain` params (filter, projection, sort, collation, limit), that an invalid query sends nothing and closes the plan, Close, and closing on a target change.
 
 ## P3 Low
 
-- [ ] **CR-2 | Slot-based plans show no keys/docs examined per stage**
-    - File: `packages/renderer/src/app/explain/explain.model.ts:131-141`, `packages/renderer/src/app/explain/explain.model.ts:176-177`
+- [x] **CR-2 | Slot-based plans show no keys/docs examined per stage (round 1). Resolved.**
+    - File: `packages/renderer/src/app/explain/explain.model.ts:139-167`, `packages/renderer/src/app/explain/explain.model.ts:199-200`
     - Category: Correctness
-    - Problem: For SBE plans, `collectSbe` only copies `nReturned` and `executionTimeMillisEstimate` from the SBE stages. `keysExamined`/`docsExamined` come from the `queryPlan` stage, and that stage never has them. In the captured `agg-group-8.2.json`, the SBE `scan` stage of plan node 1 has `numReads: 2000`, but the COLLSCAN row only shows "1 500 returned". It has no docs figure, and its flow bar has no examined part. The totals (2 000 docs examined) are correct.
-    - Why it matters: the task goal asks for a "tree of stages with keys/docs examined". On SBE plans, the per-stage figure is missing, and that figure is exactly what shows which stage discards most. Classic plans are fine.
-    - Suggested fix: when collecting SBE stats, also take `numReads` of `scan`/`seek` stages as docs examined, and the key reads of `ixseek`/`ixscan` stages as keys examined, for the same `planNodeId`. Assert this on the captured `agg-group-8.2.json` fixture.
+    - Problem (round 1): on SBE plans, `collectSbe` copied only `nReturned` and the time from the SBE stages, so the COLLSCAN/IXSCAN/FETCH rows had no examined figure.
+    - Resolution: `collectSbe` now adds up `numReads` per `planNodeId`. The `scan`/`seek` stages count as docs examined, and `ixseek`/`ixscan`/`ixscan_generic` as keys examined. `nReturned`/time still come from the outermost stage of each node, because the walk is pre-order. A number on the classic stage takes precedence, and the totals still come from `executionStats`. Tests check the captured `agg-group-8.2.json` (COLLSCAN 2000 docs, GROUP none), a synthetic SBE plan (two index stages of one node add up, `$numberLong` reads, FETCH takes the `seek` reads, a classic number is kept), and the rendered "2,000 docs" row. I found no regression.
 
-- [ ] **CR-3 | Explain with invalid input leaves the previous plan open (and clears the builder's run result)**
-    - File: `packages/renderer/src/app/collection/collection-view.ts:382-386`, `packages/renderer/src/app/aggregation/aggregation-view.ts:487-491`
+- [x] **CR-3 | Explain with invalid input leaves the previous plan open and clears the builder's run result (round 1). Resolved.**
+    - File: `packages/renderer/src/app/collection/collection-view.ts:381-395`, `packages/renderer/src/app/aggregation/aggregation-view.ts:493-518`, `packages/renderer/src/app/aggregation/aggregation-view.html:64-69`
     - Category: Correctness
-    - Problem: When the query bar does not parse, `CollectionView.explain()` sets the field errors and returns. `explainParams` stays unchanged, so the panel keeps showing the plan of the earlier query. `AggregationView.explain()` behaves the same, and on an invalid pipeline it also calls `failRun()`, which sets `result` to `null`. Clicking Explain therefore throws away the shown run result.
-    - Why it matters: a stale plan next to an edited, invalid query can be mistaken for the plan of the current input. Losing the run result is an unexpected side effect of a read-only action.
-    - Suggested fix: when the input is invalid, close the panel (`explainParams.set(null)`), or mark the shown plan as belonging to the earlier query. In the builder, report the error without clearing `result`, for example with a separate explain error or the panel's error state.
+    - Problem (round 1): an invalid query bar or pipeline left the earlier plan open. In the builder, the refusal also went through `failRun`, which set `result` to `null`.
+    - Resolution: the collection view sets `explainParams` to `null` on parse errors. The builder calls `closeExplain()` for invalid text and for a stage with an error, and shows the refusal in its own `agg-explain-error` alert, so `result`/`runError` stay as they are. The message clears on the next successful Explain, on Close (the panel's `closed` now calls `closeExplain()`), and on a target change. The new target effect depends only on `target()`, and that computed has a custom equality on profileId/db/coll. So the panel survives an edit in the same tab, as `aggregation-view.spec.ts` checks with "setting the same collection again keeps the panel". The run on construction is harmless because nothing is open yet.
+
+Other fixer changes, reviewed with no findings:
+- TW-1 (`packages/renderer/src/app/explain/explain-raw.ts:45-81`): a parse error inside the `computed` is now caught. The text is shown through Angular interpolation in a `<pre>`, which escapes it, so no unsafe HTML rendering is introduced. `explain-plan.spec.ts:104` covers it.
+- A2 (builder panel closes on a target change): see CR-3. It matches the collection view (`collection-view.ts:325-338`).
 
 ## Review conclusion
 
-Material issues found; fix before completing the task.
+No material issues found.
 
 Both acceptance criteria are addressed:
-- The e2e `test/e2e/explain.e2e.ts` covers COLLSCAN before the index and IXSCAN after it, through the real query bar and the builder. The index is created over the bridge, as the recorded assumption says.
-- `explain-plan.spec.ts` renders the captured mongo 8.2 fixtures.
+- `test/e2e/explain.e2e.ts` covers demo step 9 (COLLSCAN before the index, IXSCAN after it) through the real query bar and builder. The index is created over the bridge, as the recorded assumption says. The parent reports that it reran the explain, aggregation and collection e2e specs on the final code: 3 passed. I did not run them myself.
+- `explain-plan.spec.ts` renders the captured mongo 8.2 fixtures, now including the SBE per-stage docs examined.
 
-These criteria are not yet recorded with `tasks.py verify`. The parent worker must still do that.
+The `verify` commits for both criteria (7ec485b, 6d14cda) are older than the fixer commit. The parent should check that the recorded evidence still describes the run on the final code, and record it again if it does not.
 
-The explain model, panel cancellation and raw-view isolation look correct. The panel aborts the older request when a newer one starts, ignores results and errors of an aborted request, and always ends the loading state.
-
-The findings are a non-blocking test gap (P2) and two minor behaviour gaps (P3). They do not block any acceptance criterion, so the parent may decide to fix them or record them with their disposition.
+Review method: Bash was refused for most git commands in this session. The scope was resolved with `git log`, `git merge-base`, `git status`, `git diff --stat` and `git show 8d2acb3`. The changed production files were read in full from the working tree, which matches HEAD (it is clean).

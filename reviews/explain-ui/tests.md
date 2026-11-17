@@ -2,174 +2,144 @@
 
 Date: 2026-11-17
 
-Task: explain-ui - M3: Explain plan viewer
+Task: explain-ui - M3: Explain plan viewer (round 2, after the fixer)
 
-Scope: task commits `f73fabc20516fdd249b095471a17ecc764c12b6c..0b46eaca42794ab432df20598cbeecd7d66e6d67`
-on `main` (5fad4b8 implementation, a2fb559 model/component tests, 65e75e1 e2e, 0b46eac
-architecture notes only). Base and task commits were given by the parent worker and match
-`git log f73fabc..HEAD`. Uncommitted inputs: only the test files listed below (no production
-changes in the working tree).
+Scope: task commits `6d14cda876ae5d665a9861e7e0ead68b908762d9..8d2acb332a69eb6ccf8e65fb9e061f71dcfd5fc4`
+on `main`. Base = `git merge-base HEAD origin/main`. Task commits (`git log 6d14cda..HEAD`): f0cb232 (implementation:
+explain plan viewer, Explain on the query bar and the pipeline builder), abb6b20 (model/component
+tests), 4ed92b2 (e2e), 24eea68 (architecture notes), e0df0ad (round-1 tests and review reports),
+8d2acb3 (fixer: CR-2, CR-3, TW-1, A2). HEAD moved from 85e5b10 to 8d2acb3 during this round because
+the branch was rebased onto a newer main. `git diff 85e5b10 8d2acb3` changes only `tasks/explain-ui.md`,
+so the production code measured here is the fixer's final code. Focus of this round: the fixer
+commit's production changes in `explain.model.ts`, `explain-raw.ts`, `collection-view.ts`,
+`aggregation-view.ts` and `aggregation-view.html`. Uncommitted inputs: the two test files listed
+below. `reviews/explain-ui/review.md` was also modified in the working tree, by the code-reviewer
+and not by this helper.
 
 Requirements:
-- `tasks/explain-ui.md` acceptance criteria (1) e2e demo step 9, (2) component test renders a captured 8.x explain fixture
-- `SPEC.md` line 158 (Explain plan for find and aggregate: stage tree, keys/docs examined, time, index used; raw output in the document viewer) and demo step 9 (line 42)
-- `docs/ARCHITECTURE.md` "Explain plan viewer" (query-explain / agg-explain, `$out`/`$merge` only with `queryPlanner`, a new Explain aborts the previous request)
-- Parent worker's instructions (collection-view and aggregation-view Explain behaviour, model edge cases)
+- `tasks/explain-ui.md` acceptance criteria: (1) e2e demo step 9; (2) a component test renders a captured 8.x explain fixture
+- `SPEC.md` (Explain plan for find and aggregate: stage tree, keys/docs examined, time, index used; raw output in the document viewer; demo step 9)
+- `docs/ARCHITECTURE.md` "Explain plan viewer"
+- `reviews/explain-ui/fixes.md` (fixed findings CR-2, CR-3/A3, TW-1, A2) and `reviews/explain-ui/review.md`
+- Parent worker's round-2 instructions
 
 ## Test files changed
 
-- `packages/renderer/src/app/collection/collection-view.spec.ts` (new `describe('Explain (explain-ui)')`)
-- `packages/renderer/src/app/aggregation/aggregation-view.spec.ts` (new `describe('Explain (explain-ui)')`)
-- `packages/renderer/src/app/explain/explain-panel.spec.ts` (new file)
-- `packages/renderer/src/app/explain/explain-plan.spec.ts` (6 tests added to the `ExplainPlan` describe)
-- `packages/renderer/src/app/explain/explain.model.spec.ts` (new `describe('summarizeExplain (edge cases)')`)
+- `packages/renderer/src/app/explain/explain.model.spec.ts` (3 tests added to `summarizeExplain (edge cases)`)
+- `packages/renderer/src/app/aggregation/aggregation-view.spec.ts` (1 test added to `Explain (explain-ui)`)
 
 No existing test was changed, weakened, skipped or removed.
 
 ## Tests added or updated
 
-Count: 50 added (collection-view 8, aggregation-view 11, explain-panel 8, explain-plan 6, explain.model 17); 0 updated.
+Count: 4 added in round 2, 0 updated:
+- `slot-based ixscan reads are keys examined; zero reads stay 0, not missing`: covers the plain SBE `ixscan` stage name. The fixer's tests and the captured fixtures only use `ixseek`/`ixscan_generic`/`scan`/`seek`. It also checks that `numReads: 0` gives 0, not undefined.
+- `slot-based: stages without numReads, or that are not scans, add no keys/docs examined`: a `filter` stage's `numReads` is not counted, and a `scan` without `numReads` leaves the figure missing.
+- `slot-based: a stage without planNodeId or name is passed through to the scans below`: covers the new false branches at `explain.model.ts:151` and `:160`.
+- `pointing the tab at another collection clears a refused Explain message` (aggregation view): `closeExplain()` from the target effect also clears `explainError`. The fixer only tested that it closes the panel.
+
+Review of the fixer's own tests (8 added, 2 assertions retargeted from `agg-run-error` to `agg-explain-error`, each with an added "no run error" check): each fix has a direct, behaviour-level test. CR-2 is covered on the captured `agg-group-8.2.json` fixture (model and component, including flow bar widths) and on a synthetic plan. CR-3 has tests for the collection view, the aggregation view and full-text mode. TW-1 renders `'{ not json'` with no throw. A2 is tested for both a target change and the same target. The retargeted assertions are not weaker: the message moved to its own element by design (fixes.md), and the tests now also check that no run error appears.
 
 ## Requirement coverage
 
-Focused command (F): `cd packages/renderer && npx ng test --include 'src/app/explain/**/*.spec.ts' --include 'src/app/collection/collection-view.spec.ts' --include 'src/app/aggregation/aggregation-view.spec.ts'` -> 5 files, 201 tests passed.
+Focused command (F): `cd packages/renderer && npx ng test --include 'src/app/explain/**/*.spec.ts' --include 'src/app/collection/**/*.spec.ts' --include 'src/app/aggregation/**/*.spec.ts'` -> 8 files, 306 tests passed. That is the final run, the coverage run below. The first run before the last test was added had 305 tests passed.
 
 | Requirement | Tests | Command | Result |
 |---|---|---|---|
-| AC1: e2e demo step 9 (COLLSCAN before the index, IXSCAN after) | `test/e2e/explain.e2e.ts` (written by the parent) | not run by the test-writer (needs the e2e stack with MongoDB containers) | Not run: the parent reports it ran and passed; this report does not count as evidence for it |
-| AC2: component test renders a captured 8.x explain fixture | existing `ExplainPlan with captured MongoDB 8.2 explain output` tests, plus added `a new explain output replaces the shown plan and keeps the chosen view` | F | Pass |
-| Query bar Explain: sends the parsed query bar to `agg.explain` as a find on the tab collection, shows the plan, does not run the query | `explains the parsed query bar as a find on the tab collection and shows the plan`, `an empty query bar explains the empty filter without optional fields` | F | Pass |
-| Query bar Explain: an invalid query shows the field errors and sends nothing | `an invalid query shows the field errors and sends nothing` | F | Pass |
-| Query bar Explain: each click asks again with the current query; a failure shows in the panel | `each Explain asks again, with the query bar at that moment`, `shows a failed explain in the panel, not as a query error` | F | Pass |
-| Query bar panel closes on Close and on target change | `Close closes the panel`, `pointing the tab at another collection closes the panel`, `the same collection opened again keeps the panel` | F | Pass |
-| Pipeline builder Explain: enabled stages, `executionStats`, plan shown, nothing run | `explains the enabled stages with execution stats and shows the plan` | F | Pass |
-| `$out`/`$merge` pipelines only with `queryPlanner` (and without the write confirmation) | `a pipeline with $out is only planned (verbosity queryPlanner), without asking`, `a pipeline with $merge is only planned too`, `a disabled $out stage does not limit the verbosity` | F | Pass |
-| Pipeline builder Explain: an invalid stage or operator sends nothing and names the stage | `an enabled stage with an error sends nothing and names the stage`, `an invalid operator is refused the same way` | F | Pass |
-| Pipeline builder Explain in full-text mode | `in full-text mode explains the text as typed`, `in full-text mode refuses text that does not parse and sends nothing` | F | Pass |
-| Pipeline builder: asks again per click, Close, failure in the panel, read-only profile | `each Explain asks again with the pipeline at that moment; Close closes the panel`, `shows a failed explain in the panel, not as a run error`, `explains on a read-only profile (it does not write)` | F | Pass |
-| A new Explain aborts the previous request (ordering) | explain-panel.spec: `new params cancel the running request; its late answer does not replace the newer plan`, `an older request that fails after the newer one answered shows no error`, `a newer request still running keeps the loading state when the older one answers`, `params set back to null cancel the running request and show nothing`, `closing the panel (destroying it) cancels the running request` | F | Pass |
-| Loading state ends after failure and can retry | `shows a loading state until the answer, then the plan`, `a failure ends the loading state and Explain again can retry`, `shows nothing and asks nothing for null params` | F | Pass |
-| Stage tree, keys/docs examined, time, index used (verdict variants, flow bars) | explain-plan.spec: `several indexes and a collection scan: ...`, `neither an index nor a collection scan: ...`, `flow bars: ...`, `planned only: no flow bars (nothing to compare)` | F | Pass |
-| Parser handles 7/8 shapes (classic, SBE, aggregate stages, sharded) and refuses non-explain output | explain.model.spec `summarizeExplain (edge cases)` (17 tests: toPlain wrappers, non-documents, empty stages/shards, stats without winning plan, OR/inputStages, joins, express/_id stages, details filtering, nameless stage, SBE without stats, outermost SBE stage, pipeline stage details, `$documents` pipeline, `$cursor` without a plan, partly executed sharded aggregate, sharded SBE, SHARD_MERGE shard without plan) | F | Pass |
+| AC1: e2e demo step 9 (COLLSCAN before the index, IXSCAN after) | `test/e2e/explain.e2e.ts` | not run by the test-writer (needs the e2e stack with MongoDB containers) | Not run: the parent reports `npx playwright test test/e2e/explain.e2e.ts test/e2e/aggregation.e2e.ts test/e2e/collection.e2e.ts` against the mongo8 fixture -> 3 passed on the final code; this report is not evidence for it |
+| AC2: component test renders a captured 8.x explain fixture | `ExplainPlan with captured MongoDB 8.2 explain output` (incl. fixer's COLLSCAN "2,000 docs" row and 100 %/75 % flow bars), `summarizeExplain (captured MongoDB 8.2 output)` | F | Pass |
+| CR-2: slot-based plans show keys/docs examined per stage (SBE `numReads` per `planNodeId`) | fixer: `slot-based keys/docs examined: the reads of the index and fetch stages per planNodeId`, `slot-based fetch without a plan-stage number takes the seek reads`, fixture assertions; round 2: `slot-based ixscan reads are keys examined; zero reads stay 0, not missing`, `slot-based: stages without numReads, or that are not scans, add no keys/docs examined`, `slot-based: a stage without planNodeId or name is passed through to the scans below` | F | Pass |
+| CR-3/A3 (collection): an invalid query closes the earlier plan, sends nothing | `an invalid query closes the plan of an earlier query`, `an invalid query shows the field errors and sends nothing` | F | Pass |
+| CR-3/A3 (builder): a refused Explain closes the plan, keeps the run result, shows `agg-explain-error`, not a run error; the message clears on the next Explain | `a refused Explain closes the earlier plan and keeps the shown run result`, `an enabled stage with an error sends nothing and names the stage`, `an invalid operator is refused the same way`, `in full-text mode, text that does not parse closes the earlier plan` | F | Pass |
+| A2: the builder's panel closes on a target change, and the refusal message clears too | `pointing the tab at another collection closes the panel`, `the same collection given again keeps the panel`, round 2: `pointing the tab at another collection clears a refused Explain message` | F | Pass |
+| TW-1: `ExplainRaw` shows unreadable output as text, without throwing | `output that is not EJSON shows a message and the text, without throwing` | F | Pass |
+| Round-1 behaviour (query-bar/builder Explain requests, `$out`/`$merge` planned only, ordering/abort, loading/retry, verdicts, parser edge cases) | round-1 tests, unchanged (see the requirement list in round 1, all still in the suites) | F | Pass |
 
 ## Focused test execution
 
 Command:
 
-`cd packages/renderer && npx ng test --include 'src/app/explain/**/*.spec.ts' --include 'src/app/collection/collection-view.spec.ts' --include 'src/app/aggregation/aggregation-view.spec.ts'`
+`cd packages/renderer && npx ng test --include 'src/app/explain/**/*.spec.ts' --include 'src/app/collection/**/*.spec.ts' --include 'src/app/aggregation/**/*.spec.ts'`
 
 Result:
 
-Pass (5 files, 201 tests)
+Pass (8 files, 305 tests; the same selection with coverage after the last added test: 306 passed)
 
 ## Full test execution
 
 Command:
 
-`npm run check` (repository root: eslint + prettier --check, tsc / ngc typecheck of all workspaces, all Vitest projects, renderer `ng test`)
+`npm run check` (repository root), then its parts separately
 
 Result:
 
-Pass on the final run: lint and typecheck clean; workspaces 64 files / 3545 tests passed; renderer 83 files / 2505 tests passed.
-One earlier run of the same command failed once in `packages/backend/src/server/backend.spec.ts` ("Cannot parse privateKey: Malformed OpenSSH private key", SSH key generated at test time); it passed on the next two runs. Unrelated to this task (no backend files changed); intermittent, worth a separate look.
+Fail, for a reason outside this task (environment). `npm run lint` (eslint --max-warnings 0, prettier --check) passed. `npm run typecheck` failed in `packages/backend`: `src/shell/runtime.ts(5..8): TS2307 Cannot find module '@mongosh/browser-runtime-core/...' / '@mongosh/service-provider-node-driver' / '@mongosh/shell-api' / '@mongosh/shell-evaluator'`. These packages are declared in `packages/backend/package.json` (added by task shell-backend, 2f0b3d7, now on main), but `node_modules/@mongosh` does not exist in this clone. The rebase brought the dependency in, and `npm install` has not been run since. This helper may not install dependencies. The other parts, run separately, passed:
+- `cd packages/renderer && npm run typecheck` (ngc + tsc spec): Pass
+- `cd packages/renderer && npm test` (renderer `ng test`): Pass, 84 files / 2536 tests
+- `npx vitest run` (repository root, all workspace Vitest projects): Pass, 69 files / 3866 tests
+
+Follow-up for the parent: run `npm install` (or `npm ci`) and rerun `npm run check` / `.taskcheck` before `done`.
 
 ## .taskcheck
 
 Result:
 
-Pass (`.taskcheck` runs `npm run check`; run via `sh .taskcheck`, output 64 files / 3545 tests and 83 files / 2505 tests passed; the following direct `npm run check` run also passed).
+Fail (not run separately). `.taskcheck` runs `npm run check`, and that failed at the backend typecheck for the uninstalled `@mongosh/*` dependencies described above. This is not caused by this task's code. It must pass after `npm install` before `done`.
 
 ## Bugs found
 
-No production defect that violates a task requirement was found.
+No production defect was found in the fixer's changes or in the rest of the task scope. No failing test is kept.
 
-Observations for the parent (not blocking, no failing test kept):
-
-### ExplainRaw throws on text that is not valid EJSON
-
-Finding ID:
-
-`TW-1`
-
-Test:
-
-None kept (a probe test `fixture.componentRef.setInput('explain', '{')` on `ExplainPlan` raised an uncaught `BsonModelError` from `ExplainRaw`; replaced because the input is not reachable through the backend contract).
-
-Production source:
-
-`packages/renderer/src/app/explain/explain-raw.ts:51` (`computed(() => toExplorerValue(parseEJson(this.explain())))`), reached from the error branch of `packages/renderer/src/app/explain/explain-plan.html` (line 1-6) which always renders `<app-explain-raw>`.
-
-Requirement:
-
-Not a stated requirement. The error branch says "The raw output is below", which cannot hold for unparseable text.
-
-Expected behavior:
-
-The error message shows; the raw view is left out or shows the text without throwing.
-
-Actual behavior:
-
-The `ExplainRaw` template throws during change detection (uncaught error). `agg.explain` results are produced by the backend's EJSON serializer, and the contract only checks the first character (`{`), so this happens only on a backend bug.
-
-Severity:
-
-Low
-
-Fix required:
-
-No for this task (optional hardening); the parent decides.
-
-Requirement ambiguities for the parent:
-
-- A1: The query bar Explain explains the query as typed (`filter`, `projection`, `sort`, `collation`, `limit`). Run additionally uses the implied paging sort `{_id: 1}` and the page size, so the plan shown can differ from the plan of the query Run executes (for example an `_id` index scan with a sort versus an `IXSCAN` on the filter index). SPEC demo step 9 says "run the earlier query with Explain"; the current choice is reasonable but not recorded as an assumption.
-- A2: In the pipeline builder the explain panel stays open, still explaining the old collection, when the tab is pointed at another collection. In the collection view it closes. This matches how the builder keeps a shown result pinned to its collection, but the two views differ.
-- A3: A pipeline Explain refused for a stage error uses `failRun`, which also clears an earlier run result, and leaves an earlier explain panel (for the previous pipeline) open. Run behaves the same way.
+All round-1 observations are resolved: TW-1 is fixed (ExplainRaw no longer throws), and A2 and A3 were fixed with CR-3. A1 (the query-bar Explain explains the query as typed, without the paging sort and limit) is now recorded as an assumption in `tasks/explain-ui.md`, so the parent has handled it.
 
 ## Coverage
 
-Status: verified (fresh run, exit 0, tests all passed).
+Status: verified (fresh run on the final code, exit 0, all 306 tests passed).
 
 Metric: whole-file coverage of task-changed production files.
-Changed-line coverage: 213/213 executable added lines hit (100%). Method: added line numbers from `git diff -U0 f73fabc..HEAD` per file, intersected with `DA:` lines from the run's `lcov.info` (V8 duplicate `DA` entries for a line merged by the maximum hit count). Changed branches are not measured separately.
+Changed-line coverage: whole task diff 230/230 executable added/modified lines hit (100%); fixer commit alone 36/36 (100%). Method: added line numbers from `git diff -U0 6d14cda..HEAD` (task) and `git diff -U0 85e5b10~1 85e5b10` (fixer; same code as 8d2acb3) per file, intersected with the `DA:` lines of this run's `lcov.info`. Duplicate V8 `DA` entries for a line were merged by the maximum hit count. Changed branches are not measured separately.
 
 Evidence:
-- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: `explain-ui`; base `f73fabc20516fdd249b095471a17ecc764c12b6c`; HEAD `0b46eaca42794ab432df20598cbeecd7d66e6d67`; commits 5fad4b8, a2fb559, 65e75e1, 0b46eac (from the parent and `git log f73fabc..HEAD`).
-- Source/test snapshot identifier (including uncommitted inputs): HEAD 0b46eac plus uncommitted test files with sha256: `explain.model.spec.ts` 38807601…a7a7, `explain-panel.spec.ts` 0e8dd127…4a54d, `explain-plan.spec.ts` 612f1ece…6a36, `collection-view.spec.ts` 986023bf…caf1f, `aggregation-view.spec.ts` 21d046c0…f902. Same hashes before and after the coverage run.
-- Exact included files; renamed/deleted/excluded files and reasons: included `packages/renderer/src/app/explain/{explain.model,explain-plan,explain-panel,explain-raw,index}.ts`, `packages/renderer/src/app/collection/collection-view.ts`, `packages/renderer/src/app/aggregation/aggregation-view.ts`. Excluded: `explain/fixtures/capture.mjs` (developer script that captures fixtures from a live server, not part of the app), `explain/fixtures/*.json` (data), `*.html`/`*.css` (templates and styles, not instrumented by V8; template behaviour is covered by the component tests above), `test/e2e/explain.e2e.ts` and `*.spec.ts` (tests), `docs/ARCHITECTURE.md` (docs). No renames or deletions.
-- Provider/version, command, working directory, and test selection: Vitest 5.1.0 with `@vitest/coverage-v8` ^5.1.0 via the Angular builder; working directory `packages/renderer`; `npx ng test --coverage --include 'src/app/explain/**/*.spec.ts' --include 'src/app/collection/**/*.spec.ts' --include 'src/app/aggregation/**/*.spec.ts' --coverage-include='src/app/explain/explain.model.ts' --coverage-include='src/app/explain/explain-plan.ts' --coverage-include='src/app/explain/explain-panel.ts' --coverage-include='src/app/explain/explain-raw.ts' --coverage-include='src/app/explain/index.ts' --coverage-include='src/app/collection/collection-view.ts' --coverage-include='src/app/aggregation/aggregation-view.ts'` (8 spec files, 294 tests).
-- Run start/completion time and exit status: started 2026-11-17 04:12:45 +0100, report written 04:13 +0100; all 294 tests passed, summary printed (exit 0).
-- Generated report paths and report hashes/run identifier: `packages/renderer/coverage/renderer/coverage-summary.json` (sha256 a267a97a8df4046a529c31aaab6ce2dde5cfb8844b4a1489875f7844fe3f3b4d), `packages/renderer/coverage/renderer/lcov.info` (sha256 57006e7dc6b9c8e2a2634af34cedacfd3cc775c4a6922cf7c2d21fab77f8a7dc), `packages/renderer/coverage/renderer/lcov-report/`.
-- Evidence outputs are fresh and inputs stayed unchanged: report files timestamped 04:13 by this run and contain exactly the 7 included files; test file hashes and HEAD identical before and after.
-- Final run after latest test additions and production fixes: yes (no production fixes were made; the run used the final tests).
+- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: `explain-ui`; base `6d14cda876ae5d665a9861e7e0ead68b908762d9` (`git merge-base HEAD origin/main` after the rebase); HEAD `8d2acb332a69eb6ccf8e65fb9e061f71dcfd5fc4`. Task commits and file list come from the parent, `git log`, and the round-1 scope. `git diff 85e5b10 8d2acb3` touches only `tasks/explain-ui.md`.
+- Source/test snapshot identifier (including uncommitted inputs): HEAD 8d2acb3, plus the uncommitted test files `explain.model.spec.ts` (sha256 2c0bc9f83991804bc013c050500efb52f96e754e00fa2a52c16fbb065551d2ee) and `aggregation-view.spec.ts` (sha256 5e31c4e97f0f5fabae4bad8075017a25b7760e94c0810b31217d07006dfbade1). No uncommitted production changes.
+- Exact included files; renamed/deleted/excluded files and reasons: included `packages/renderer/src/app/explain/{explain.model,explain-plan,explain-panel,explain-raw,index}.ts`, `packages/renderer/src/app/collection/collection-view.ts`, `packages/renderer/src/app/aggregation/aggregation-view.ts`. Excluded: `explain/fixtures/capture.mjs` (a developer script that captures fixtures from a live server, not app code), `explain/fixtures/*.json` (data), `*.html`/`*.css` including the fixer's `aggregation-view.html` change (templates and styles; V8 does not instrument them, and the component tests above assert `agg-explain-error` and the panel), `*.spec.ts` and `test/e2e/explain.e2e.ts` (tests), `docs/ARCHITECTURE.md` (docs). No renames or deletions. All 7 included files are in the report; none is unmeasured.
+- Provider/version, command, working directory, and test selection: Vitest 5.1.0 with `@vitest/coverage-v8` (v8 provider) via the Angular builder; working directory `packages/renderer`; `npx ng test --coverage --include 'src/app/explain/**/*.spec.ts' --include 'src/app/collection/**/*.spec.ts' --include 'src/app/aggregation/**/*.spec.ts' --coverage-include='src/app/explain/explain.model.ts' --coverage-include='src/app/explain/explain-plan.ts' --coverage-include='src/app/explain/explain-panel.ts' --coverage-include='src/app/explain/explain-raw.ts' --coverage-include='src/app/explain/index.ts' --coverage-include='src/app/collection/collection-view.ts' --coverage-include='src/app/aggregation/aggregation-view.ts'` (8 spec files, 306 tests).
+- Run start/completion time and exit status: started 2026-11-17 04:26:30 +0100, reports written 04:26:48 +0100; 306/306 passed, summary printed (exit 0).
+- Generated report paths and report hashes/run identifier: `packages/renderer/coverage/renderer/coverage-summary.json` (sha256 5caf18832bf849201b3b4fbab08f0864afe40470710475ca362938c621b1a6ac), `packages/renderer/coverage/renderer/lcov.info` (sha256 a48db34889afa83fec7325406f534b4325feef159f4ccf16d23069d758eef70c), `packages/renderer/coverage/renderer/lcov-report/`.
+- Evidence outputs are fresh and inputs stayed unchanged: the coverage directory was regenerated by this run (directory and files timestamped 04:26:30-04:26:48) and contains exactly the 7 included files. HEAD and the test file hashes were the same before and after the run. An earlier coverage run at 04:25:40, before the last model test was added, is superseded.
+- Final run after latest test additions and production fixes: yes. It ran on the fixer's final code with all round-2 tests.
 
 Values below use covered/total (percentage); zero-denominator or unsupported metrics are N/A.
 
 | Changed file | Statements | Branches | Functions | Lines |
 |---|---:|---:|---:|---:|
-| `packages/renderer/src/app/explain/explain.model.ts` | 143/144 (99.30%) | 144/147 (97.96%) | 35/35 (100%) | 117/117 (100%) |
+| `packages/renderer/src/app/explain/explain.model.ts` | 155/156 (99.36%) | 158/161 (98.14%) | 36/36 (100%) | 127/127 (100%) |
 | `packages/renderer/src/app/explain/explain-plan.ts` | 29/30 (96.67%) | 33/36 (91.67%) | 8/8 (100%) | 24/24 (100%) |
 | `packages/renderer/src/app/explain/explain-panel.ts` | 57/57 (100%) | 24/25 (96.00%) | 9/9 (100%) | 37/37 (100%) |
-| `packages/renderer/src/app/explain/explain-raw.ts` | 11/11 (100%) | 10/10 (100%) | 3/3 (100%) | 6/6 (100%) |
+| `packages/renderer/src/app/explain/explain-raw.ts` | 23/23 (100%) | 13/14 (92.86%) | 3/3 (100%) | 15/15 (100%) |
 | `packages/renderer/src/app/explain/index.ts` | N/A (0/0) | N/A (0/0) | N/A (0/0) | N/A (0/0) |
-| `packages/renderer/src/app/collection/collection-view.ts` | 217/247 (87.85%) | 116/153 (75.82%) | 65/71 (91.55%) | 188/205 (91.71%) |
-| `packages/renderer/src/app/aggregation/aggregation-view.ts` | 306/315 (97.14%) | 144/159 (90.57%) | 74/74 (100%) | 261/262 (99.62%) |
-| Aggregate (summed counters, 7 files; no file unmeasured) | 763/804 (94.90%) | 471/530 (88.87%) | 194/200 (97.00%) | 633/651 (97.24%) |
+| `packages/renderer/src/app/collection/collection-view.ts` | 218/248 (87.90%) | 116/153 (75.82%) | 65/71 (91.55%) | 189/206 (91.75%) |
+| `packages/renderer/src/app/aggregation/aggregation-view.ts` | 316/325 (97.23%) | 144/159 (90.57%) | 77/77 (100%) | 271/272 (99.63%) |
+| Aggregate (summed counters, 7 files; no file unmeasured; templates/fixtures/capture script excluded as listed) | 798/839 (95.11%) | 488/548 (89.05%) | 198/204 (97.06%) | 663/681 (97.36%) |
 
-`collection-view.ts` and `aggregation-view.ts` are whole pre-existing files of which the task changed 9 and 8 executable lines; their gaps are in code outside this task.
+`collection-view.ts` and `aggregation-view.ts` are pre-existing files. Most of their gaps are in code this task did not change, and all of their changed lines were hit.
 
 | File and uncovered lines/branch locations | Required behavior or risk | Action/test added or reason left uncovered |
 |---|---|---|
-| `explain/explain.model.ts`: branches at 226 (`winning ?? {}` with neither plan), 253 (`stage[op] ?? null`), 293 (`maxOf` with `b` undefined) | Defensive fallbacks; the inputs cannot occur after the guards above them | Justified gap |
-| `explain/explain-plan.ts`: branches at 37 (`String(e)` for a non-Error throw), 44 (`maxFlow` when not parsed), 62 (`n > 0 ? 1 : 0` with n = 0) | Defensive; `summarizeExplain` throws only `Error`s, the flow bar is not rendered when not parsed | Justified gap |
-| `explain/explain-panel.ts`: branch at 143 (`signal.aborted` true after a successful answer) | A request aborted after its answer resolved but before the continuation: a microtask race that cannot be ordered from a test without reaching into internals | Justified gap; the visible late-answer cases are tested |
-| `collection/collection-view.ts`: lines 296-301, 432-443, 461-462 and 30 branches | Pre-existing behaviour (not changed by this task) | Out of task scope; all 9 changed lines (329, 380-394) hit |
-| `aggregation/aggregation-view.ts`: line 245 and 15 branches | Pre-existing behaviour | Out of task scope; all 8 changed lines (486-497) hit |
+| `explain/explain.model.ts`: branches at 151 and 160 (new in the fixer's `collectSbe`) | An SBE stage without `planNodeId` or a string `stage` name must still pass its children through | Covered in round 2: `slot-based: a stage without planNodeId or name is passed through to the scans below` |
+| `explain/explain.model.ts`: branches at 249 (`winning ?? {}` with neither plan), 276 (`stage[op] ?? null`), 316 (`maxOf` with `b` undefined) | Defensive fallbacks; the guards above them rule these inputs out (same as round 1, lines shifted) | Justified gap |
+| `explain/explain-raw.ts`: branch at 78 (`String(e)` for a non-`Error` throw) | Defensive; `parseEJson`/`toExplorerValue` throw `Error`s only | Justified gap; the `Error` path is tested |
+| `explain/explain-plan.ts`: branches at 37, 44, 62 | Defensive (non-Error throw; `maxFlow` when not parsed; `n > 0` with n = 0) | Justified gap (unchanged since round 1) |
+| `explain/explain-panel.ts`: branch at 143 (`signal.aborted` true after a successful answer) | A microtask race that a test cannot order without reaching into internals | Justified gap; the visible late-answer cases are tested |
+| `collection/collection-view.ts`: 30 branches and 17 lines (e.g. 296-301, 432-443, 461-462) | Pre-existing behaviour not changed by this task | Out of task scope; all changed lines hit (incl. the fixer's line 386) |
+| `aggregation/aggregation-view.ts`: 15 branches, 1 line | Pre-existing behaviour | Out of task scope; all changed lines hit (incl. the fixer's target effect, `explainError`, `closeExplain`) |
 
 ## Unable to test
 
-- AC1 (e2e demo step 9) was not executed by the test-writer: it needs the e2e stack (Electron/browser and MongoDB containers). The parent reports `test/e2e/explain.e2e.ts` ran and passed; the parent must record that run as evidence. Follow-up: none if the parent's run is recorded.
-- `fixtures/capture.mjs` (captures fixtures from a live `mongo:8.2`) is a developer script; not tested.
+- AC1 (e2e demo step 9) was not run by the test-writer, because it needs the e2e stack with MongoDB containers. The parent reports that it ran on the final code against the mongo8 fixture with 3 passed. The parent must record that run as evidence.
+- `npm run check` / `.taskcheck` could not pass in this clone: the `@mongosh/*` dependencies from main are not installed, and this helper may not install them. Follow-up: the parent runs `npm install` and reruns the check.
+- `fixtures/capture.mjs` (a developer script that captures fixtures from a live `mongo:8.2`) is not tested.
 
 ## Summary
 
-Tests and task-scoped coverage are sufficient; no production defects found. 50 tests were added and all validation passed. One optional hardening item (TW-1) and three ambiguities (A1-A3) are left for the parent to decide.
+Tests and task-scoped coverage are sufficient; no production defects were found. The fixer's tests cover each fixed behaviour. Round 2 added 4 tests: the SBE `ixscan` name and zero reads, stages that are not scans or have no reads, a stage without an id or name, and the refusal message clearing on a target change. All focused, renderer and workspace tests pass. The full `npm run check` / `.taskcheck` currently fails at the backend typecheck only because the `@mongosh/*` dependencies brought in from main are not installed. The parent must run `npm install` and get `.taskcheck` to pass before `done`.
