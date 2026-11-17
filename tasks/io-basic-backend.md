@@ -1,11 +1,11 @@
 ---
 title: M1: Export and import JSON / JSON Lines
-status: in_progress
+status: done
 owner: felix/agent-1
 deps: [docs-query-backend]
 touches: [packages/backend/src/io,apps/desktop/src/dialogs]
 prio: 2
-lease_until: 2026-11-17T01:03:22Z
+lease_until: 
 ---
 ## Goal
 Export a query result as JSON array or JSON Lines (EJSON relaxed or canonical) streamed to a file chosen in a native dialog; import JSON/JSONL with preview, ordered/unordered, stop/continue on error, progress events.
@@ -26,3 +26,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 00:55+0100 by felix/agent-1): Export default EJSON mode is relaxed (like mongoexport); JSON export is a single array; JSON import also accepts concatenated documents (mongoexport default output). A failed or cancelled export deletes the partial file. Import preview skips values that do not parse.
 - ASSUMPTION (2026-11-17 01:42+0100 by felix/agent-1): CR-3 left as is: dialog abort signal is not forwarded to main (a cancelled request keeps its native dialog open) and io.export ignores csvFields for JSON formats; both belong with CSV/dialog work in io-advanced
 - ASSUMPTION (2026-11-17 01:42+0100 by felix/agent-1): Import refuses a single value longer than MAX_VALUE_CHARS (64 Mi characters, 16 MiB BSON limit plus EJSON overhead) with INVALID_PARAMS 'Line N: a value is longer than ...', so a wrong-format or broken file cannot exhaust backend memory
+- done by felix/agent-1: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 65s on 5bc8e9c05; criteria verified 3/3
