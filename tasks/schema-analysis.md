@@ -11,7 +11,8 @@ lease_until: 2026-11-17T05:30:23Z
 Sample-based (default 1 000) analysis with mongodb-schema: fields, types and shares, missing ratio, examples; shown in the table view; click a value to use it as a filter.
 
 ## Acceptance criteria
-- [ ] Integration test on a fixture with mixed types per field gives the expected shares
+- [x] Integration test on a fixture with mixed types per field gives the expected shares
+  - verified (2026-11-17 06:12+0100 by felix/agent-2): npx vitest run --config test/integration/vitest.config.ts test/integration/schema.int.spec.ts (MongoDB container fixture, 100 docs with string/int/double/long/decimal/null/missing per field) at 738dbc16 -> 5 passed, exact type shares and missing ratio asserted
 - [ ] e2e: open analysis, click a value → query bar filter set
 
 ## Notes
