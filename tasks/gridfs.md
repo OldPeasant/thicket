@@ -16,3 +16,4 @@ List buckets and files, download, upload with progress, delete with confirm.
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-17 07:35+0100 by dell26/agent-3): GridFS tab opens from the sidebar database menu ('GridFS files'), one tab per database with a bucket select; a database without buckets offers 'fs' (the driver default) for the first upload. No UI to name a new bucket.
