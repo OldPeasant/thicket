@@ -759,6 +759,32 @@ describe('ConnectionEditor', () => {
         { profileId: 'p1', kind: 'password', value: 'rotated-pw' },
       ]);
       expect(el.querySelector('[data-testid="save-error"]')).toBeNull();
+      // The newer edits are not saved, so the editor does not say "Saved.".
+      expect(el.querySelector('[data-testid="saved-notice"]')).toBeNull();
+    });
+
+    it('leaving a new profile while Save runs does not navigate back to it', async () => {
+      let release: (() => void) | undefined;
+      fake.handle(
+        'profiles.save',
+        ({ profile }) =>
+          new Promise((resolve) => {
+            release = () => resolve({ profile: { ...profile, id: 'new-id' } });
+          }),
+      );
+      await start();
+      await input(must('field-name'), 'Fresh');
+      await click('save');
+      expect(release).toBeDefined();
+      const router = TestBed.inject(Router);
+      await router.navigateByUrl('/connections/elsewhere');
+      fixture.destroy();
+      const listsBefore = fake.requestsFor('profiles.list').length;
+      release?.();
+      for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r));
+      expect(router.url).toBe('/connections/elsewhere');
+      // The sidebar still learns about the saved profile.
+      expect(fake.requestsFor('profiles.list').length).toBeGreaterThan(listsBefore);
     });
 
     it('a saved profile holding a secret option loads without it and says it is not stored', async () => {

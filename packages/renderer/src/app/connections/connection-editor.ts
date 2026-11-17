@@ -149,7 +149,11 @@ export class ConnectionEditor {
     this.tree.start();
     const navState = this.router.currentNavigation()?.extras.state;
     if (navState?.[SAVED_STATE] === true) this.savedNotice.set(true);
-    inject(DestroyRef).onDestroy(() => this.testAbort?.abort());
+    inject(DestroyRef).onDestroy(() => {
+      this.testAbort?.abort();
+      // A destroyed editor (the user left the page) ignores answers that arrive later.
+      ++this.loadGeneration;
+    });
     // Loads the profile, again when the route switches to another one (same editor instance).
     effect(() => {
       const id = this.id();
@@ -494,7 +498,8 @@ export class ConnectionEditor {
     this.attempted.set(true);
     if (this.problems().length > 0 || this.saving()) return;
     const state = this.state();
-    // A profile switch while saving (same editor instance) must not show the saved profile.
+    // A profile switch while saving (same editor instance) or leaving the page (destroyed
+    // instance) must not show the saved profile or navigate to it.
     const gen = this.loadGeneration;
     const current = (): boolean => gen === this.loadGeneration;
     this.saving.set(true);
@@ -553,10 +558,11 @@ export class ConnectionEditor {
         this.storedSecrets.update((kinds) => kinds.filter((k) => k !== 'password'));
       }
       if (!current()) return;
-      // Edits made while the password was being stored stay.
-      this.state.update((s) => (s === pending ? adopted : s));
+      // Edits made while the password was being stored stay, and are not reported as saved.
+      const unchanged = this.state() === pending;
+      if (unchanged) this.state.set(adopted);
       this.attempted.set(false);
-      this.savedNotice.set(true);
+      this.savedNotice.set(unchanged);
       if (this.id() === undefined) {
         // Continue on the saved profile's own page (a new editor instance shows the notice).
         void this.router.navigate(['/connections', profile.id], {
