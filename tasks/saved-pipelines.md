@@ -11,7 +11,8 @@ lease_until: 2026-11-17T05:16:06Z
 SPEC M3 "save pipelines": the aggregation builder (agg-ui, `packages/renderer/src/app/aggregation`) saves a pipeline under a name per namespace (stages incl. disabled ones, as canonical EJSON) and lists, reopens, renames and deletes saved ones. Stored by the main process in `userData/pipelines.json` (SPEC section 5), atomic writes like `settings.json`; new contract methods (e.g. `pipelines.list/save/delete`, route `main`).
 
 ## Acceptance criteria
-- [ ] Unit tests for the store (missing/corrupt file, atomic write) and contract samples
+- [x] Unit tests for the store (missing/corrupt file, atomic write) and contract samples
+  - verified (2026-11-17 05:56+0100 by dell26/agent-2): npx vitest run apps/desktop/src/pipelines packages/contract at 7724ccb -> 856 passed (store: missing file, 10 corrupt variants moved to .corrupt-<time>, EACCES unreadable never overwritten, newer version read-only, tmp+flush+rename atomic write, failed rename keeps old file, stale temp removed; contract valid/invalid param+result samples for pipelines.list/save/rename/delete)
 - [ ] Component test: save a pipeline with a disabled stage, reopen it in a new builder tab: same stages and enabled flags
 
 ## Notes
