@@ -22,6 +22,7 @@ The release for tag `v0.1.0-rc.1` (GitHub Actions run 44118230764, 2026-11-17) f
   - verified (2026-11-17 17:47+0100 by dell26/agent-3): check.yml new job 'bundle (ubuntu-latest, native addons)'. GitHub run 44127846813 on wip/release-native-modules: bundle job green in 1m59s (npm ci compiled the addons, dist:dir built, smoke-packaged on linux-unpacked -> 'smoke: OK', all fuses as expected, backendPing ok). actionlint v1.7.12 (docker.io/rhysd/actionlint, with shellcheck) -> 'Found 0 errors in 2 files'. (macOS/Windows check failures in that run are the pre-existing ones owned by ci-windows-macos; native-addons.spec passed there.)
 - [x] `npm run check` passes
   - verified (2026-11-17 17:47+0100 by dell26/agent-3): npm run check (lint, typecheck, unit tests) at 574bc497 rebased on main -> all passed (5222 + 4137 renderer tests)
+  - verified (2026-11-17 18:00+0100 by dell26/agent-3): npm run check at final code (rebased on main, ec861585) -> lint/typecheck pass, 5238 + 4137 renderer tests passed
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
