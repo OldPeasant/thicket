@@ -3,7 +3,14 @@ import { randomBytes } from 'node:crypto';
 import { BSON, MongoClient, type Document } from 'mongodb';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 
-import { ConnectionManager, RpcClient, RpcError, docsQueryHandlers, serve } from '@thicket/backend';
+import {
+  ConnectionManager,
+  RpcClient,
+  RpcError,
+  connHandlers,
+  docsQueryHandlers,
+  serve,
+} from '@thicket/backend';
 import {
   methods,
   type ErrorInfo,
@@ -68,7 +75,7 @@ function backendFor() {
   const stop = serve(serverPort, {
     table: methods,
     route: 'backend',
-    handlers: docsQueryHandlers(manager),
+    handlers: { ...docsQueryHandlers(manager), ...connHandlers(manager) },
   });
   const client = new RpcClient(clientPort);
   const events = new Map<string, Event[]>();
@@ -442,8 +449,7 @@ describe('cancel', () => {
     expect(ops).toEqual([]);
   });
 
-  it('conn.close during a running find ends its stream with CANCELLED', async () => {
-    // A separate collection: the closed client cannot kill its own operation on the server.
+  it('conn.close during a running find ends its stream with CANCELLED and kills the server operation', async () => {
     const CLOSING = 'slow_close';
     await direct
       .db(DB)
@@ -460,9 +466,11 @@ describe('cancel', () => {
       (ops) => ops.length > 0,
     );
     try {
-      await backend.manager.close(PROFILE.id);
+      await backend.call('conn.close', { profileId: PROFILE.id });
       const outcome = await backend.finished(streamId);
       expect(outcome.error).toEqual({ code: 'CANCELLED', message: 'The connection was closed' });
+      // conn.close cancelled the stream before closing the client: its operation is gone.
+      expect(await serverOps(CLOSING)).toEqual([]);
     } finally {
       await backend.manager.open(PROFILE.id, undefined);
     }

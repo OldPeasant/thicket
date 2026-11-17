@@ -61,7 +61,21 @@ interface Entry {
   opening?: Promise<ConnStatus>;
   /** `open` callers waiting for `opening`; when the last one cancels, the connect is closed. */
   waiters: number;
+  /** Work running on the client (streams) that `close` cancels and waits for first. */
+  work?: Set<RunningWork>;
 }
+
+interface RunningWork {
+  abort: AbortController;
+  /** Settles when the work is over (its cleanup included). */
+  done: Promise<unknown>;
+}
+
+/**
+ * Longest wait of `close` for the cancelled work of a connection (its server cleanup: `killOp`,
+ * `killCursors`) before the client is closed anyway.
+ */
+export const CLOSE_CANCEL_GRACE_MS = 5000;
 
 /**
  * Open connections, one per profile. `conn.*` handlers use it, and later backend handlers get the
@@ -323,12 +337,61 @@ export class ConnectionManager {
     if (client) await closeQuietly(client);
   }
 
+  /**
+   * Runs `work` (e.g. a stream's producer) on `client`, the open connection of the profile, so that
+   * `close` cancels it: closing aborts the signal `work` gets (also aborted with `signal`) and
+   * waits for `work` to settle (at most {@link CLOSE_CANCEL_GRACE_MS}) before it closes the
+   * client, so the work's cleanup can still kill its server operation. Fails with `CANCELLED`
+   * when `client` is no longer the profile's open connection.
+   */
+  async cancelOnClose<T>(
+    profileId: string,
+    client: ClientLike,
+    signal: AbortSignal | undefined,
+    work: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    const entry = this.entries.get(profileId);
+    if (entry?.state !== 'connected' || entry.client !== client) throw connectionClosed();
+    const abort = new AbortController();
+    const forward = () => abort.abort();
+    if (signal?.aborted) abort.abort();
+    else signal?.addEventListener('abort', forward, { once: true });
+    let done: Promise<T>;
+    try {
+      done = work(abort.signal);
+    } catch (error) {
+      done = Promise.reject(error);
+    }
+    const running: RunningWork = { abort, done };
+    const set = (entry.work ??= new Set());
+    set.add(running);
+    try {
+      return await done;
+    } finally {
+      set.delete(running);
+      signal?.removeEventListener('abort', forward);
+    }
+  }
+
   /** Closes the connection of a profile; nothing happens when it isn't open. */
   async close(profileId: string): Promise<void> {
     const entry = this.entries.get(profileId);
     if (!entry) return;
     this.entries.delete(profileId);
     entry.abort.abort();
+    const work = [...(entry.work ?? [])];
+    if (work.length > 0) {
+      // Cancel the connection's streams first: their cleanup needs the open client.
+      for (const w of work) w.abort.abort();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        Promise.allSettled(work.map((w) => w.done)),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, CLOSE_CANCEL_GRACE_MS);
+        }),
+      ]);
+      clearTimeout(timer);
+    }
     if (entry.client) await closeQuietly(entry.client);
     await entry.tunnel?.close();
     this.log(`close ${profileId}`);
@@ -440,6 +503,10 @@ async function closeQuietly(client: ClientLike): Promise<void> {
 
 function cancelled(): RpcError {
   return new RpcError('CANCELLED', 'The operation was cancelled');
+}
+
+function connectionClosed(): RpcError {
+  return new RpcError('CANCELLED', 'The connection was closed');
 }
 
 function closedWhileConnecting(): RpcError {
