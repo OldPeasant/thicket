@@ -4,7 +4,7 @@ Date: 2026-11-17
 
 Task: server-stats - M6 (Could): Server stats dashboard
 
-Scope: re-review of the final code of task server-stats at revision b23468b382a7dbe5d2dd34297c182f2e684ed0c7, after the fixer resolved CR-1, CR-2 and TW-1 (`reviews/server-stats/fixes.md`). Full task diff `git diff 27adc3ab..b23468b3`, without `reviews/` and `tasks/` (33 files, 4592 insertions, 1 deletion). The fix commit b23468b3 and the commit ae53d546 (e2e, chart axis ticks, tile wrapping), which came after the first review, were read in detail. Committed changes only. One uncommitted test-writer change was in the working tree when the review ended. I read it and ran it, but it is not part of the reviewed revision (see "Commands run").
+Scope: re-review of the final code of task server-stats at revision b23468b382a7dbe5d2dd34297c182f2e684ed0c7, after the fixer resolved CR-1, CR-2 and TW-1 (`reviews/server-stats/fixes.md`). Full task diff `git diff 27adc3ab..b23468b3`, without `reviews/` and `tasks/` (33 files, 4592 insertions, 1 deletion). The fix commit b23468b3 and the commit ae53d546 (e2e, chart axis ticks, tile wrapping), which came after the first review, were read in detail. Committed changes only. One uncommitted test-writer change was in the working tree when the review ended. I read it and ran it, but it is not part of the reviewed revision (see "Commands run"). It was committed later as 2a34290d (see "Addendum").
 
 Requirements:
 - tasks/server-stats.md: goal, acceptance criteria 1 (integration test for the data methods) and 2 (component tests with recorded serverStatus fixtures), and the three recorded assumptions (admin.replSetStatus, dropped `$` fields, UI choices)
@@ -15,9 +15,9 @@ Requirements:
 
 Git range:
 - Branch: main
-- HEAD: b23468b382a7dbe5d2dd34297c182f2e684ed0c7 (reviewed revision)
+- HEAD: b23468b382a7dbe5d2dd34297c182f2e684ed0c7 (reviewed revision); test-only follow-up 2a34290dee7fff4f03fd29dc837f1647b39034b6 also reviewed (see "Addendum")
 - Base/start: 27adc3abd4885ca9a8f0496a7abc21d3a21853d1
-- Commits reviewed: 5 (5564d1da, ba0fd12e, ae53d546, 06eda52b, b23468b3)
+- Commits reviewed: 6 (5564d1da, ba0fd12e, ae53d546, 06eda52b, b23468b3, and the test-only 2a34290d)
 
 Summary: 0 P0, 0 P1, 0 P2, 0 P3
 
@@ -62,3 +62,11 @@ None.
 ## Review conclusion
 
 No material issues found.
+
+## Addendum: revision 2a34290dee7fff4f03fd29dc837f1647b39034b6
+
+Revision 2a34290dee7fff4f03fd29dc837f1647b39034b6 is reviewed. Findings are unchanged: 0 P0, 0 P1, 0 P2, 0 P3.
+
+- `git diff b23468b3..2a34290d -- packages/` changes only `packages/renderer/src/app/admin/stats/server-stats.model.spec.ts` (+54 lines, no deletions). The rest of commit 2a34290d changes only `reviews/server-stats/review.md` and `reviews/server-stats/tests.md`. No production code, fixture or configuration changed.
+- The new "recorded fixtures" block is the same test change I read and ran before it was committed. It checks that the four recorded fixtures have no `$`-named fields other than canonical EJSON type wrappers, as `withoutDollarFields` guarantees for the backend answers. It also checks that `$clusterTime` is absent from the replSetGetStatus fixture and `operationTime` is present. A second test confirms the detector itself: it finds a `$`-named field next to normal fields and ignores EJSON wrappers. The block adds a regression test for CR-1 and does not weaken any existing test.
+- `cd packages/renderer && npx ng test --include='src/app/admin/stats/**/*.spec.ts'` at 2a34290d -> 3 files, 56 tests passed.
