@@ -14,7 +14,8 @@ and `io.export`/`io.import` the same way so their cleanup (killOp, killCursors, 
 removal) runs before the driver client closes (review CR-2 of conn-close-streams).
 
 ## Acceptance criteria
-- [ ] Integration test: `conn.close` during a slow agg.run ends the stream with CANCELLED, the backend sent killOp and the server op is gone (like the docs-query conn.close test)
+- [x] Integration test: `conn.close` during a slow agg.run ends the stream with CANCELLED, the backend sent killOp and the server op is gone (like the docs-query conn.close test)
+  - verified (2026-11-17 05:12+0100 by dell26/agent-1): npx vitest run --config test/integration/vitest.config.ts test/integration/agg.int.spec.ts (mongo8rs container fixture) -> 16 passed; new test 'conn.close during a slow agg.run' ($function sleep pipeline) gets stream error {CANCELLED, 'The connection was closed'}, $currentOp empty for the ns, backend's own killOp count increased (monitorCommands); same test with the old agg handler fails (op still in currentOp)
 - [ ] Unit tests: io.export / io.import streams end CANCELLED on conn.close and their cleanup runs before the client closes
 
 ## Notes
