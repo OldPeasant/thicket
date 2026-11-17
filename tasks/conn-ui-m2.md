@@ -11,7 +11,8 @@ lease_until: 2026-11-17T02:54:31Z
 Extend the connection editor with SSH tab, certificate fields, proxy and read preference/write concern; host-key trust dialog; copyable connection string with masked password. Use the frontend-design skill for the visual direction; respect the Business and Tron tokens (no hard-coded colors).
 
 ## Acceptance criteria
-- [ ] e2e: SSH-tunnelled profile created and connected, host key dialog accepted
+- [x] e2e: SSH-tunnelled profile created and connected, host key dialog accepted
+  - verified (2026-11-17 03:36+0100 by dell26/agent-2): npm run test:e2e -- ssh.e2e.ts (Playwright _electron, built app, Podman: SSH fixture = openssh-server in front of 2-member replica set rs3 reachable only via tunnel) on b34b61a -> 1 passed (not skipped): profile created in editor with SSH password, saved, sidebar connect -> host key dialog (host:port, ssh-ed25519, SHA256 fingerprint) -> Trust and connect -> data-state connected; known_hosts written; reconnect without dialog; Test connection ok (replicaSet). connections.e2e.ts also 2 passed
 - [ ] Component tests for field validation and URI sync of the new options
 
 ## Notes
