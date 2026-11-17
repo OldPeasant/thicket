@@ -787,6 +787,48 @@ describe('ConnectionEditor', () => {
       expect(fake.requestsFor('profiles.list').length).toBeGreaterThan(listsBefore);
     });
 
+    it('leaving a new profile while its password is stored keeps the store but stays on the new page', async () => {
+      let release: (() => void) | undefined;
+      fake.handle(
+        'profiles.setSecret',
+        () =>
+          new Promise((resolve) => {
+            release = () => resolve({ secureStorage: true });
+          }),
+      );
+      await start();
+      await input(must('field-name'), 'Fresh');
+      await change(must<HTMLSelectElement>('field-mechanism'), 'SCRAM-SHA-256');
+      await input(must('field-username'), 'fay');
+      await input(must('field-password'), 'typed-pw');
+      await check('secret-saved');
+      await click('save');
+      // profiles.save has answered; the password store is still running.
+      expect(release).toBeDefined();
+      const router = TestBed.inject(Router);
+      await router.navigateByUrl('/connections/elsewhere');
+      fixture.destroy();
+      release?.();
+      for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r));
+      expect(router.url).toBe('/connections/elsewhere');
+      // The password of the saved profile is still stored for it, exactly once.
+      expect(fake.requestsFor('profiles.setSecret').map((r) => r.params)).toEqual([
+        { profileId: 'new-id', kind: 'password', value: 'typed-pw' },
+      ]);
+    });
+
+    it('a new profile saved without edits during the store navigates to its page with the Saved notice state', async () => {
+      await start();
+      await input(must('field-name'), 'Fresh');
+      const router = TestBed.inject(Router);
+      await click('save');
+      expect(router.url).toBe('/connections/new-id');
+      // The next editor instance reads this state to show "Saved.".
+      expect(router.lastSuccessfulNavigation()?.extras.state).toEqual({
+        thicketProfileSaved: true,
+      });
+    });
+
     it('a saved profile holding a secret option loads without it and says it is not stored', async () => {
       stored = saved({
         connectionString:
