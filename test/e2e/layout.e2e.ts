@@ -44,7 +44,7 @@ test('welcome buttons navigate to the connection editor and the Compass import',
   await expect(window).toHaveURL(/#\/$/);
   await window.getByTestId('welcome-import').click();
   await expect(window).toHaveURL(/#\/connections\/import\/compass$/);
-  await expect(window.getByTestId('page-heading')).toHaveText('Import from Compass');
+  await expect(window.getByTestId('page-heading')).toHaveText('Import and export connections');
 });
 
 test('Ctrl+W does not close the window', async ({ electronApp, window }) => {
