@@ -132,6 +132,9 @@ Two downloads are available for Windows x64:
   and desktop shortcuts.
 - `thicket-<version>-win-x64.zip`: a portable version. Unpack it anywhere and run `Thicket.exe`.
 
+On a company laptop without administrator rights, see
+[Running Thicket on a locked-down Windows laptop](windows-company-laptop.md).
+
 ### SmartScreen warning
 
 Signed releases show the publisher "SignPath Foundation" in the Windows prompts (check it under
