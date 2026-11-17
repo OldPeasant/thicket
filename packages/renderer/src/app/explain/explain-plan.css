@@ -1,0 +1,223 @@
+/*
+ * Explain plan. Colors only from the theme tokens. The tree reads like the server's plan: the
+ * output stage on top, its inputs indented below, the scans at the leaves. The one expressive
+ * element is the flow bar under each stage: faint for what it examined, solid for what it
+ * returned, scaled to the busiest stage, so a collection scan that reads everything to return
+ * little is visible at a glance. A collection scan is marked in the read-only (warning) color, an
+ * index scan in the accent.
+ */
+:host {
+  display: block;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  color: var(--text);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.verdict {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 0.375rem 0.625rem;
+  border-left: 3px solid var(--border-strong);
+  background: var(--bg-panel);
+}
+
+.verdict.indexed {
+  border-left-color: var(--accent);
+}
+
+.verdict.scan {
+  border-left-color: var(--readonly);
+  color: var(--readonly-text);
+  background: var(--readonly-bg);
+}
+
+.verdict code,
+.index {
+  font-family: var(--font-mono);
+}
+
+.verdict.indexed code {
+  color: var(--accent);
+}
+
+.also {
+  color: var(--text-muted);
+}
+
+.views {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.views button {
+  padding: 0.25rem 0.75rem;
+  font: inherit;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.views button + button {
+  border-left: 1px solid var(--border);
+}
+
+.views button[aria-pressed='true'] {
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.views button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.message {
+  margin: 0.5rem 0;
+  color: var(--text-muted);
+}
+
+.message.error {
+  padding: 0.375rem 0.625rem;
+  color: var(--danger-text);
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  border-radius: 4px;
+}
+
+/* Totals: label above number, numbers in the data face. */
+.totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.75rem;
+  margin: 0 0 0.75rem;
+}
+
+.totals dt {
+  color: var(--text-muted);
+}
+
+.totals dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 1.125em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Tree */
+.tree {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tree .tree {
+  margin-left: 0.5rem;
+  padding-left: 1rem;
+  border-left: 1px solid var(--border);
+}
+
+.node {
+  padding: 0.375rem 0 0.125rem;
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+}
+
+.stage {
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.node.scan > .row > .stage {
+  color: var(--accent);
+}
+
+.node.collscan > .row > .stage {
+  color: var(--readonly-text);
+}
+
+.index {
+  padding: 0 0.375rem;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-radius: 3px;
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.75rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.stats b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.flow {
+  position: relative;
+  height: 4px;
+  max-width: 28rem;
+  margin: 0.25rem 0 0.125rem;
+  background: var(--bg-input);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.flow span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 2px;
+}
+
+.flow .examined {
+  background: var(--border-strong);
+}
+
+.flow .returned {
+  background: var(--accent);
+}
+
+.node.collscan > .flow .examined {
+  background: var(--readonly);
+}
+
+.details {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0 0.75rem;
+  margin: 0.125rem 0 0;
+  font-size: 0.9em;
+}
+
+.details > div {
+  display: contents;
+}
+
+.details dt {
+  color: var(--text-faint);
+}
+
+.details dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}

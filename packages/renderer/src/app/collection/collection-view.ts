@@ -32,6 +32,7 @@ import {
   isTopLevelProjection,
 } from '../document';
 import { fromExplorerValue, toExplorerValue } from '../explorer/bson-value.util';
+import { ExplainPanel, type ExplainParams } from '../explain';
 import { ExportPanel } from '../io/export-panel';
 import { ImportPanel } from '../io/import-panel';
 import { JsonExplorerComponent } from '../explorer/json-explorer.component';
@@ -105,6 +106,7 @@ const numberFormat = new Intl.NumberFormat();
     RawEditor,
     ExportPanel,
     ImportPanel,
+    ExplainPanel,
   ],
   providers: [
     CollectionResults,
@@ -157,6 +159,8 @@ export class CollectionView {
   );
   protected readonly view = signal<ResultView>('table');
   protected readonly rawFormat = signal<RawFormat>('shell');
+  /** What the explain panel explains (the query bar at the last Explain); `null`: closed. */
+  protected readonly explainParams = signal<ExplainParams | null>(null);
   /** The open import or export panel. */
   protected readonly ioPanel = signal<'export' | 'import' | null>(null);
 
@@ -323,6 +327,7 @@ export class CollectionView {
       const target = this.target();
       untracked(() => {
         this.results.setTarget(target);
+        this.explainParams.set(null);
         this.actions.setHost({
           ...target,
           projection: () => this.results.query().projection,
@@ -371,6 +376,21 @@ export class CollectionView {
     }
     this.errors.set({});
     this.results.run(parsed.query);
+  }
+
+  /** Explains the query bar's query (with execution stats) in the explain panel. */
+  protected explain(): void {
+    const parsed = parseQuery(this.text());
+    if (!parsed.ok) {
+      this.errors.set(parsed.errors);
+      return;
+    }
+    this.errors.set({});
+    const { filter, projection, sort, collation, limit } = parsed.query;
+    this.explainParams.set({
+      ...this.target(),
+      target: { kind: 'find', filter, projection, sort, collation, limit },
+    });
   }
 
   protected reset(): void {

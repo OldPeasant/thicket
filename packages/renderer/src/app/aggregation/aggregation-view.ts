@@ -22,6 +22,7 @@ import type { Subscription } from 'rxjs';
 
 import { ApiError, describeError } from '../api/api-error';
 import { ApiService } from '../api/api.service';
+import { ExplainPanel, type ExplainParams } from '../explain';
 import type { WorkspaceTab } from '../layout/workspace.service';
 import { WriteControl } from '../safety/write-control.directive';
 import { WriteGuard } from '../safety/write-guard.service';
@@ -95,7 +96,7 @@ function stageDoc(key: string, value: BsonValue): BsonDocument {
 @Component({
   selector: 'app-aggregation-view',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [WriteControl],
+  imports: [WriteControl, ExplainPanel],
   templateUrl: './aggregation-view.html',
   styleUrl: './aggregation-view.css',
 })
@@ -197,6 +198,8 @@ export class AggregationView {
     target: { profileId: string; db: string; coll: string };
   } | null>(null);
   protected readonly runError = signal<string | null>(null);
+  /** What the explain panel explains (the pipeline at the last Explain); `null`: closed. */
+  protected readonly explainParams = signal<ExplainParams | null>(null);
   private runSub: Subscription | undefined;
 
   /** Export panel. */
@@ -474,6 +477,24 @@ export class AggregationView {
       return;
     }
     await this.runPage(pipeline, this.target(), 0);
+  }
+
+  /**
+   * Explains the pipeline as it is now in the explain panel: with execution stats, except for a
+   * pipeline with `$out`/`$merge`, which is only planned (running it would write).
+   */
+  explain(): void {
+    if (this.mode() === 'text' && !this.applyText()) return;
+    const pipeline = this.pipeline();
+    if (pipeline === null) {
+      this.failRun(this.fixFirst());
+      return;
+    }
+    this.explainParams.set({
+      ...this.target(),
+      target: { kind: 'aggregate', pipeline: stringifyEJson({ type: 'array', items: pipeline }) },
+      verbosity: writesOutput(pipeline) ? 'queryPlanner' : 'executionStats',
+    });
   }
 
   /** Shows another page of the shown result: same pipeline and collection, even after edits. */

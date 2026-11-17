@@ -1,0 +1,148 @@
+@let p = parsed();
+@if (!p.ok) {
+  <p class="message error" data-testid="explain-error" role="alert">
+    This explain output can't be shown as a plan: {{ p.message }} The raw output is below.
+  </p>
+  <app-explain-raw [explain]="explain()" />
+} @else {
+  @let s = p.summary;
+  <div class="head">
+    <p
+      class="verdict"
+      data-testid="explain-verdict"
+      [class.scan]="s.indexes.length === 0 && s.collscan"
+      [class.indexed]="s.indexes.length > 0"
+    >
+      @if (s.indexes.length > 0) {
+        Index used:
+        @for (name of s.indexes; track name; let last = $last) {
+          <code data-testid="explain-index">{{ name }}</code>{{ last ? '' : ', ' }}
+        }
+        @if (s.collscan) {
+          <span class="also">and a collection scan</span>
+        }
+      } @else if (s.collscan) {
+        No index used: <code>COLLSCAN</code> reads every document of the collection.
+      } @else {
+        No index used.
+      }
+    </p>
+    <div class="views" role="group" aria-label="Explain view">
+      <button
+        type="button"
+        data-testid="explain-view-plan"
+        [attr.aria-pressed]="view() === 'plan'"
+        (click)="view.set('plan')"
+      >
+        Plan
+      </button>
+      <button
+        type="button"
+        data-testid="explain-view-raw"
+        [attr.aria-pressed]="view() === 'raw'"
+        (click)="view.set('raw')"
+      >
+        Raw output
+      </button>
+    </div>
+  </div>
+
+  @if (view() === 'plan') {
+    @if (s.executed) {
+      <dl class="totals" data-testid="explain-totals">
+        <div>
+          <dt>Returned</dt>
+          <dd data-testid="explain-returned">{{ format(s.nReturned) }}</dd>
+        </div>
+        <div>
+          <dt>Keys examined</dt>
+          <dd data-testid="explain-keys">{{ format(s.keysExamined) }}</dd>
+        </div>
+        <div>
+          <dt>Documents examined</dt>
+          <dd data-testid="explain-docs">{{ format(s.docsExamined) }}</dd>
+        </div>
+        <div>
+          <dt>Time</dt>
+          <dd data-testid="explain-time">{{ format(s.timeMs) }} ms</dd>
+        </div>
+        <div>
+          <dt>Engine</dt>
+          <dd data-testid="explain-engine">{{ s.engine === 'sbe' ? 'Slot-based' : 'Classic' }}</dd>
+        </div>
+      </dl>
+    } @else {
+      <p class="message" data-testid="explain-not-executed">
+        Planned only, not run: no counts or times.
+      </p>
+    }
+    <ul class="tree root" role="tree" aria-label="Plan stages" data-testid="explain-tree">
+      <ng-container *ngTemplateOutlet="nodeTpl; context: { $implicit: s.root, depth: 1 }" />
+    </ul>
+  } @else {
+    <app-explain-raw [explain]="explain()" data-testid="explain-raw" />
+  }
+}
+
+<ng-template #nodeTpl let-node let-depth="depth">
+  <li
+    class="node"
+    role="treeitem"
+    data-testid="explain-stage"
+    [attr.data-stage]="node.stage"
+    [attr.aria-level]="depth"
+    [attr.aria-expanded]="node.children.length ? true : null"
+    [class.scan]="isScan(node)"
+    [class.collscan]="node.stage === 'COLLSCAN'"
+  >
+    <div class="row">
+      <span class="stage" data-testid="explain-stage-name">{{ node.stage }}</span>
+      @if (node.indexName) {
+        <code class="index" data-testid="explain-stage-index">{{ node.indexName }}</code>
+      }
+      <span class="stats">
+        @if (node.nReturned !== undefined) {
+          <span title="Documents returned by this stage"
+            ><b>{{ format(node.nReturned) }}</b> returned</span
+          >
+        }
+        @if (node.keysExamined !== undefined) {
+          <span title="Index keys examined">{{ format(node.keysExamined) }} keys</span>
+        }
+        @if (node.docsExamined !== undefined) {
+          <span title="Documents examined">{{ format(node.docsExamined) }} docs</span>
+        }
+        @if (node.timeMs !== undefined) {
+          <span title="Estimated time, including the stages below"
+            >≈{{ format(node.timeMs) }} ms</span
+          >
+        }
+      </span>
+    </div>
+    @if (maxFlow() > 0 && (node.nReturned !== undefined || examined(node) !== undefined)) {
+      <div class="flow" aria-hidden="true">
+        <span class="examined" [style.width.%]="share(examined(node))"></span>
+        <span class="returned" [style.width.%]="share(node.nReturned)"></span>
+      </div>
+    }
+    @if (node.details.length) {
+      <dl class="details">
+        @for (d of node.details; track d.label) {
+          <div>
+            <dt>{{ d.label }}</dt>
+            <dd>{{ d.value }}</dd>
+          </div>
+        }
+      </dl>
+    }
+    @if (node.children.length) {
+      <ul class="tree" role="group">
+        @for (child of node.children; track $index) {
+          <ng-container
+            *ngTemplateOutlet="nodeTpl; context: { $implicit: child, depth: depth + 1 }"
+          />
+        }
+      </ul>
+    }
+  </li>
+</ng-template>

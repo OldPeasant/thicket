@@ -88,6 +88,15 @@
             Cancel
           </button>
         }
+        <button
+          type="button"
+          class="btn quiet"
+          data-testid="query-explain"
+          title="Show how the server runs this query: plan stages, index used, keys and documents examined"
+          (click)="explain()"
+        >
+          Explain
+        </button>
         <button #runButton type="submit" class="btn run" data-testid="query-run">Run</button>
       </span>
     </div>
@@ -101,6 +110,10 @@
       </ul>
     }
   </form>
+
+  @if (explainParams(); as params) {
+    <app-explain-panel [params]="params" (closed)="explainParams.set(null)" />
+  }
 
   <div class="bar">
     <nav class="pager" aria-label="Pages">
