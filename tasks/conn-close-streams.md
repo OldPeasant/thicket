@@ -18,3 +18,4 @@ because `ConnectionManager.close` closes the client first (review round 2, CR-2)
 
 ## Notes
 See SPEC.md section 4 and docs/ARCHITECTURE.md (streams, document reads).
+- ASSUMPTION (2026-11-17 03:47+0100 by dell26/agent-1): Only docs.find streams are registered with ConnectionManager.cancelOnClose (task scope/touches); agg.run and io.export/import streams can adopt the same 1-line wrapper in their own task. The int test also asserts killOp count rises, because mongod 8.2 interrupts the op on client disconnect anyway, so the currentOp check alone did not distinguish old from new code.
