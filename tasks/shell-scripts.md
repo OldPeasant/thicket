@@ -16,3 +16,4 @@ Choose a .js/.mongodb file and run it in the current shell with progress and out
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 06:45+0100 by dell26/agent-3): Script file is chosen with the renderer's own <input type=file> and its text sent via the existing shell.eval (no new contract method, no path crosses the bridge); limited to .js/.mongodb and 5 MB
+- ASSUMPTION (2026-11-17 06:45+0100 by dell26/agent-3): 'Progress' = the run shows 'Running <file>… N outputs so far' while print()/results stream in, then a finished/failed announcement; no per-statement progress (mongosh evaluates the JS as one program)
