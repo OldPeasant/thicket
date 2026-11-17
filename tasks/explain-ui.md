@@ -11,7 +11,8 @@ lease_until: 2026-11-17T03:44:19Z
 Explain button on the query bar and the pipeline builder; tree of stages with keys/docs examined, time, index used; raw explain output in the document viewer.
 
 ## Acceptance criteria
-- [ ] e2e: demo step 9 (COLLSCAN before index, IXSCAN after)
+- [x] e2e: demo step 9 (COLLSCAN before index, IXSCAN after)
+  - verified (2026-11-17 04:24+0100 by felix/agent-2): npm run build -w packages/renderer && npm run build -w apps/desktop && npx playwright test test/e2e/explain.e2e.ts (mongo8 fixture, mongo:8.2 via podman; real UI: query bar filter {status:'open',total:{$gt:100}} + sort, Explain -> verdict 'No index used: COLLSCAN', COLLSCAN stage, 3000 docs examined; idx.create {status:1,total:1}; Explain again -> 'Index used: status_1_total_1', IXSCAN stage, no COLLSCAN; builder Explain -> IXSCAN) -> 1 passed (with aggregation/collection e2e: 3 passed)
 - [ ] Component test renders a captured 8.x explain fixture correctly
 
 ## Notes
