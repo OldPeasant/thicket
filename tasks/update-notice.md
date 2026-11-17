@@ -11,7 +11,8 @@ lease_until: 2026-11-17T07:02:06Z
 Check the GitHub releases API at start (and daily) unless disabled in settings; show a non-modal notice with a link to the release.
 
 ## Acceptance criteria
-- [ ] Unit tests with recorded API responses: newer, same, pre-release ignored, network error silent
+- [x] Unit tests with recorded API responses: newer, same, pre-release ignored, network error silent
+  - verified (2026-11-17 07:41+0100 by dell26/agent-1): cd apps/desktop && npx vitest run src/update src/main -> 119 passed; checker.spec.ts 'UpdateChecker with recorded API responses' uses fixtures/releases.json, releases-prerelease.json, rate-limited.json: newer (0.2.0 -> 0.3.0 update), same (0.3.0 no update), pre-release ignored (flag and -beta tag), network error/HTTP 403/timeout silent (no update, logged only); renderer: cd packages/renderer && npx ng test --include src/app/update --include src/app/layout/app-shell.spec.ts -> 97 passed (check failure silent)
 - [ ] Setting off → no request made (test)
 
 ## Notes
