@@ -2,7 +2,7 @@
 title: Test: fix failing e2e tests (layout Compass heading, sidebar drag, LDAP fixture start)
 status: todo
 owner:
-deps: []
+deps: [e2e-screenshot-repaint]
 touches: [test/e2e/layout.e2e.ts,test/e2e/ldap.e2e.ts,test/integration]
 prio: 2
 ---
