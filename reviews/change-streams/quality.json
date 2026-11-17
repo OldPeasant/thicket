@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "task": "change-streams",
+  "reviewed_revision": "1577c362703a037ed94e6ea07bdc47cba6b75434",
+  "helpers": {
+    "test-writer":   {"status": "completed", "report": "reviews/change-streams/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/change-streams/review.md"},
+    "fixer":         {"status": "completed", "report": "reviews/change-streams/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1 (first review)", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "getMore/killCursors not pinned to the server that opened the change stream; now one raw driver cursor (fixes.md CR-1, verified in re-review)"},
+    {"id": "CR-2 (first review)", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "cursor leaked when cancelled while the opening aggregate was in flight; close deferred until the round settles (fixes.md CR-2, verified in re-review)"},
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "re-selecting 'Watch changes' for an open watch tab restarts the stream after Stop; optional polish outside the acceptance criteria, recorded as an assumption in tasks/change-streams.md"}
+  ],
+  "validation": [
+    {"command": "npx vitest run --config test/integration/vitest.config.ts test/integration/change-streams.int.spec.ts (Podman, mongo8rs + mongo8)", "result": "pass"},
+    {"command": "cd packages/renderer && npx ng test --include='src/app/watch/**/*.spec.ts'", "result": "pass"},
+    {"command": "npm run check (after merging origin/main incl. server-stats)", "result": "pass"}
+  ]
+}
