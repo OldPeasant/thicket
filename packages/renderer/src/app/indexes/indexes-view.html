@@ -1,0 +1,147 @@
+<section class="indexes" [attr.aria-label]="'Indexes of ' + target().coll">
+  <header class="head">
+    <span class="code ns" [title]="target().db + '.' + target().coll"
+      >db.<span class="coll">{{ target().coll }}</span
+      >.getIndexes()</span
+    >
+    @if (rows(); as list) {
+      <span class="count" data-testid="idx-count"
+        >{{ list.length }} {{ list.length === 1 ? 'index' : 'indexes' }}</span
+      >
+    }
+    <div class="actions">
+      <button
+        type="button"
+        class="btn quiet"
+        data-testid="idx-refresh"
+        [disabled]="loading()"
+        (click)="reload()"
+      >
+        Refresh
+      </button>
+      <button
+        type="button"
+        class="btn primary"
+        data-testid="idx-create"
+        [appWriteControl]="target().profileId"
+        [disabledWhen]="creating()"
+        (click)="openCreate()"
+      >
+        Create index…
+      </button>
+    </div>
+  </header>
+
+  <div class="body">
+    @if (creating()) {
+      <app-index-create-form
+        [target]="target()"
+        (created)="created($event)"
+        (cancelled)="creating.set(false)"
+      />
+    }
+
+    @if (message(); as m) {
+      <p
+        class="message"
+        [class.error]="m.error"
+        [attr.role]="m.error ? 'alert' : 'status'"
+        data-testid="idx-message"
+      >
+        {{ m.text }}
+      </p>
+    }
+
+    @if (loadError(); as e) {
+      <p class="message error" role="alert" data-testid="idx-load-error">{{ e }}</p>
+    }
+
+    @if (rows(); as list) {
+      @if (statsError(); as e) {
+        <p class="note" data-testid="idx-stats-error">No size or usage: {{ e }}</p>
+      }
+      <table class="list" data-testid="idx-list">
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Key</th>
+            <th scope="col">Options</th>
+            <th scope="col" class="num">Size</th>
+            <th scope="col" class="num">Uses</th>
+            <th scope="col"><span class="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (row of list; track row.name) {
+            <tr data-testid="idx-row" [attr.data-name]="row.name" [class.hidden]="row.hidden">
+              <th scope="row" class="name" data-testid="idx-name-cell">{{ row.name }}</th>
+              <td>
+                <span class="key" data-testid="idx-key">
+                  @for (k of row.keys; track $index) {
+                    <span class="part" [attr.data-kind]="k.kind"
+                      >{{ k.field }}<span class="dir">{{ arrow(k.kind) }}</span></span
+                    >
+                  }
+                </span>
+              </td>
+              <td>
+                <span class="tags" data-testid="idx-tags">
+                  @if (row.hidden) {
+                    <span class="tag muted" data-testid="idx-tag">hidden</span>
+                  }
+                  @for (t of row.tags; track t.label) {
+                    <span class="tag" data-testid="idx-tag" [attr.title]="t.title ?? null">{{
+                      t.label
+                    }}</span>
+                  }
+                </span>
+                @if (row.partialFilter !== null) {
+                  <code class="detail" data-testid="idx-partial-filter">{{
+                    row.partialFilter
+                  }}</code>
+                }
+              </td>
+              <td class="num" data-testid="idx-size">{{ size(row) }}</td>
+              <td class="num usage" data-testid="idx-uses" [attr.title]="sinceText(row) || null">
+                <span>{{ uses(row) }}</span>
+                @if (row.usage !== null) {
+                  <span class="meter" aria-hidden="true"
+                    ><span class="fill" [style.width.%]="row.usage * 100"></span
+                  ></span>
+                }
+              </td>
+              <td class="row-actions">
+                @if (!row.isId) {
+                  <button
+                    type="button"
+                    class="btn quiet small"
+                    data-testid="idx-hide"
+                    [appWriteControl]="target().profileId"
+                    [disabledWhen]="busy() !== null"
+                    [attr.aria-label]="(row.hidden ? 'Unhide ' : 'Hide ') + row.name"
+                    (click)="toggleHidden(row)"
+                  >
+                    {{ row.hidden ? 'Unhide' : 'Hide' }}
+                  </button>
+                  <button
+                    type="button"
+                    class="btn quiet small danger"
+                    data-testid="idx-drop"
+                    [appWriteControl]="target().profileId"
+                    [disabledWhen]="busy() !== null"
+                    [attr.aria-label]="'Drop ' + row.name"
+                    (click)="drop(row)"
+                  >
+                    Drop…
+                  </button>
+                }
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    } @else if (loading()) {
+      <p class="note" role="status">Reading indexes…</p>
+    }
+  </div>
+</section>

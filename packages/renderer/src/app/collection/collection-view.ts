@@ -54,6 +54,7 @@ import { SchemaService } from '../explorer/services/schema.service';
 import { TableOrientationService } from '../explorer/services/table-orientation.service';
 import { WorkspaceService, type WorkspaceTab } from '../layout/workspace.service';
 import { aggregationTabId } from '../aggregation/aggregation-view';
+import { indexesTabId } from '../indexes/indexes-view';
 import { RawEditor } from '../raw-editor/raw-editor';
 import { ProfileSafetyService } from '../safety/profile-safety.service';
 import type { CollectionTabData } from '../sidebar/sidebar-tree.service';
@@ -513,6 +514,20 @@ export class CollectionView {
       id: aggregationTabId(profileId, db, coll),
       kind: 'aggregation',
       title: `${coll} aggregation`,
+      detail: tab.detail,
+      production: tab.production,
+      data: { ...tab.data },
+    });
+  }
+
+  /** Opens the indexes of this collection in their own tab. */
+  protected openIndexes(): void {
+    const tab = this.tab();
+    const { profileId, db, coll } = this.target();
+    this.workspace.open({
+      id: indexesTabId(profileId, db, coll),
+      kind: 'indexes',
+      title: `${coll} indexes`,
       detail: tab.detail,
       production: tab.production,
       data: { ...tab.data },

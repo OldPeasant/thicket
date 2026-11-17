@@ -1,0 +1,292 @@
+<form
+  class="create"
+  data-testid="idx-create-form"
+  aria-label="Create index"
+  novalidate
+  (submit)="create($event)"
+>
+  <fieldset class="group">
+    <legend>Key</legend>
+    <ol class="fields">
+      @for (f of draft().fields; track $index; let i = $index) {
+        @let fieldError = error('field.' + i);
+        <li class="field-row" data-testid="idx-key-row">
+          <input
+            class="input mono"
+            data-testid="idx-key-field"
+            placeholder="field.path or $**"
+            spellcheck="false"
+            autocomplete="off"
+            [attr.aria-label]="'Field ' + (i + 1)"
+            [value]="f.field"
+            (input)="setField(i, $event)"
+            [attr.aria-invalid]="fieldError ? true : null"
+            [attr.aria-describedby]="fieldError ? id('field.' + i) : null"
+          />
+          <select
+            class="input"
+            data-testid="idx-key-type"
+            [attr.aria-label]="'Type of field ' + (i + 1)"
+            (change)="setType(i, $event)"
+          >
+            @for (t of keyTypes; track t.value) {
+              <option [value]="t.value" [selected]="t.value === f.type">{{ t.label }}</option>
+            }
+          </select>
+          <button
+            type="button"
+            class="btn quiet icon"
+            data-testid="idx-key-remove"
+            [attr.aria-label]="'Remove field ' + (i + 1)"
+            [disabled]="draft().fields.length === 1"
+            (click)="removeField(i)"
+          >
+            ×
+          </button>
+          @if (fieldError) {
+            <p class="error" role="alert" data-testid="idx-error" [id]="id('field.' + i)">
+              {{ fieldError }}
+            </p>
+          }
+        </li>
+      }
+    </ol>
+    <button type="button" class="btn quiet" data-testid="idx-key-add" (click)="addField()">
+      Add field
+    </button>
+    @if (error('fields'); as e) {
+      <p class="error" role="alert" data-testid="idx-error-fields">{{ e }}</p>
+    }
+  </fieldset>
+
+  <fieldset class="group options">
+    <legend>Options</legend>
+    <div class="grid">
+      <label class="opt" [for]="id('name')">Name</label>
+      <div class="ctl">
+        <input
+          class="input mono"
+          data-testid="idx-name"
+          placeholder="default: from the key, e.g. a_1_b_-1"
+          spellcheck="false"
+          autocomplete="off"
+          [id]="id('name')"
+          [value]="draft().name"
+          (input)="setText('name', $event)"
+          [attr.aria-invalid]="error('name') ? true : null"
+          [attr.aria-describedby]="error('name') ? id('name-error') : null"
+        />
+        @if (error('name'); as e) {
+          <p class="error" role="alert" data-testid="idx-error" [id]="id('name-error')">{{ e }}</p>
+        }
+      </div>
+
+      <span class="opt">Flags</span>
+      <div class="ctl flags">
+        <label class="flag">
+          <input
+            type="checkbox"
+            data-testid="idx-unique"
+            [checked]="draft().unique"
+            (change)="setFlag('unique', $event)"
+            [attr.aria-describedby]="error('unique') ? id('unique-error') : null"
+          />
+          Unique
+        </label>
+        <label class="flag">
+          <input
+            type="checkbox"
+            data-testid="idx-sparse"
+            [checked]="draft().sparse"
+            (change)="setFlag('sparse', $event)"
+            [attr.aria-describedby]="error('sparse') ? id('sparse-error') : null"
+          />
+          Sparse
+        </label>
+        <label class="flag">
+          <input
+            type="checkbox"
+            data-testid="idx-hidden"
+            [checked]="draft().hidden"
+            (change)="setFlag('hidden', $event)"
+          />
+          Hidden
+        </label>
+        @if (error('unique'); as e) {
+          <p class="error" role="alert" data-testid="idx-error" [id]="id('unique-error')">
+            {{ e }}
+          </p>
+        }
+        @if (error('sparse'); as e) {
+          <p class="error" role="alert" data-testid="idx-error" [id]="id('sparse-error')">
+            {{ e }}
+          </p>
+        }
+      </div>
+
+      <label class="opt" [for]="id('ttl')">TTL</label>
+      <div class="ctl">
+        <span class="inline">
+          <input
+            class="input mono ttl"
+            data-testid="idx-ttl"
+            inputmode="numeric"
+            placeholder="none"
+            autocomplete="off"
+            [id]="id('ttl')"
+            [value]="draft().ttl"
+            (input)="setText('ttl', $event)"
+            [attr.aria-invalid]="error('ttl') ? true : null"
+            [attr.aria-describedby]="error('ttl') ? id('ttl-error') : null"
+          />
+          <span class="hint">seconds after the date in the field</span>
+        </span>
+        @if (error('ttl'); as e) {
+          <p class="error" role="alert" data-testid="idx-error" [id]="id('ttl-error')">{{ e }}</p>
+        }
+      </div>
+
+      <label class="opt" [for]="id('partial')">Partial filter</label>
+      <div class="ctl">
+        <input
+          class="input mono"
+          data-testid="idx-partial"
+          placeholder="{ status: 'active' }"
+          spellcheck="false"
+          autocomplete="off"
+          [id]="id('partial')"
+          [value]="draft().partialFilter"
+          (input)="setText('partialFilter', $event)"
+          [attr.aria-invalid]="error('partialFilter') ? true : null"
+          [attr.aria-describedby]="error('partialFilter') ? id('partial-error') : null"
+        />
+        @if (error('partialFilter'); as e) {
+          <p class="error" role="alert" data-testid="idx-error" [id]="id('partial-error')">
+            {{ e }}
+          </p>
+        }
+      </div>
+    </div>
+
+    <button
+      type="button"
+      class="disclose"
+      data-testid="idx-more"
+      [attr.aria-expanded]="more()"
+      [attr.aria-controls]="id('more')"
+      (click)="toggleMore()"
+    >
+      Collation, text and wildcard options
+    </button>
+    @if (more()) {
+      <div class="grid" [id]="id('more')">
+        <label class="opt" [for]="id('collation')">Collation</label>
+        <div class="ctl">
+          <input
+            class="input mono"
+            data-testid="idx-collation"
+            placeholder="{ locale: 'en', strength: 2 }"
+            spellcheck="false"
+            autocomplete="off"
+            [id]="id('collation')"
+            [value]="draft().collation"
+            (input)="setText('collation', $event)"
+            [attr.aria-invalid]="error('collation') ? true : null"
+            [attr.aria-describedby]="error('collation') ? id('collation-error') : null"
+          />
+          @if (error('collation'); as e) {
+            <p class="error" role="alert" data-testid="idx-error" [id]="id('collation-error')">
+              {{ e }}
+            </p>
+          }
+        </div>
+
+        <label class="opt" [for]="id('weights')" [class.off]="!hasText()">Text weights</label>
+        <div class="ctl">
+          <input
+            class="input mono"
+            data-testid="idx-weights"
+            placeholder="{ title: 10, body: 1 }"
+            spellcheck="false"
+            autocomplete="off"
+            [id]="id('weights')"
+            [value]="draft().weights"
+            (input)="setText('weights', $event)"
+            [attr.aria-invalid]="error('weights') ? true : null"
+            [attr.aria-describedby]="error('weights') ? id('weights-error') : null"
+          />
+          @if (error('weights'); as e) {
+            <p class="error" role="alert" data-testid="idx-error" [id]="id('weights-error')">
+              {{ e }}
+            </p>
+          }
+        </div>
+
+        <label class="opt" [for]="id('language')" [class.off]="!hasText()">Text language</label>
+        <div class="ctl">
+          <input
+            class="input mono"
+            data-testid="idx-language"
+            placeholder="english"
+            spellcheck="false"
+            autocomplete="off"
+            [id]="id('language')"
+            [value]="draft().defaultLanguage"
+            (input)="setText('defaultLanguage', $event)"
+            [attr.aria-invalid]="error('defaultLanguage') ? true : null"
+            [attr.aria-describedby]="error('defaultLanguage') ? id('language-error') : null"
+          />
+          @if (error('defaultLanguage'); as e) {
+            <p class="error" role="alert" data-testid="idx-error" [id]="id('language-error')">
+              {{ e }}
+            </p>
+          }
+        </div>
+
+        <label class="opt" [for]="id('wildcard')" [class.off]="!hasWildcard()"
+          >Wildcard projection</label
+        >
+        <div class="ctl">
+          <input
+            class="input mono"
+            data-testid="idx-wildcard-projection"
+            placeholder="{ 'meta.private': 0 }"
+            spellcheck="false"
+            autocomplete="off"
+            [id]="id('wildcard')"
+            [value]="draft().wildcardProjection"
+            (input)="setText('wildcardProjection', $event)"
+            [attr.aria-invalid]="error('wildcardProjection') ? true : null"
+            [attr.aria-describedby]="error('wildcardProjection') ? id('wildcard-error') : null"
+          />
+          @if (error('wildcardProjection'); as e) {
+            <p class="error" role="alert" data-testid="idx-error" [id]="id('wildcard-error')">
+              {{ e }}
+            </p>
+          }
+        </div>
+      </div>
+    }
+  </fieldset>
+
+  <pre class="preview" data-testid="idx-preview" aria-label="Command">{{ preview() }}</pre>
+
+  @if (serverError(); as e) {
+    <p class="error server" role="alert" data-testid="idx-create-error">{{ e }}</p>
+  }
+
+  <div class="actions">
+    <button type="button" class="btn quiet" data-testid="idx-create-cancel" (click)="cancel()">
+      Cancel
+    </button>
+    <button
+      type="submit"
+      class="btn primary"
+      data-testid="idx-create-submit"
+      [appWriteControl]="target().profileId"
+      [disabledWhen]="saving()"
+    >
+      {{ saving() ? 'Creating…' : 'Create index' }}
+    </button>
+  </div>
+</form>
