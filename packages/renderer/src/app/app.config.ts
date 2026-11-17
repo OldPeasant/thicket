@@ -9,6 +9,7 @@ import { UsersRolesView } from './admin/users';
 import { AggregationView } from './aggregation';
 import { routes } from './app.routes';
 import { CollectionView } from './collection';
+import { ShellConsole } from './console';
 import { IndexesView } from './indexes';
 import { provideTabView } from './layout';
 import { provideTheme } from './theme';
@@ -24,5 +25,6 @@ export const appConfig: ApplicationConfig = {
     provideTabView('aggregation', AggregationView),
     provideTabView('indexes', IndexesView),
     provideTabView('users', UsersRolesView),
+    provideTabView('shell', ShellConsole),
   ],
 };

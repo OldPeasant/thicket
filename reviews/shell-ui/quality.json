@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "task": "shell-ui",
+  "reviewed_revision": "30315747e58f2fcde7681e57cc5949340cea3724",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/shell-ui/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/shell-ui/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/shell-ui/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "completion applied at a moved caret corrupted the input; now anchored to the requested code/cursor and the list closes when the caret moves"
+    },
+    {
+      "id": "CR-2",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "isInputComplete skips regex literals (same heuristic as backend split.ts)"
+    },
+    {
+      "id": "CR-3",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "session failure notice with Open new session moved outside the scrolling transcript"
+    },
+    {
+      "id": "CR-4",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "aria-controls only while the listbox exists; transcript no longer aria-live, short summaries via a hidden live region"
+    },
+    {
+      "id": "CR-5",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "lifecycle/Ctrl+C specs added by test-writer; e2e opens the shell from the connection menu for demo step 11"
+    },
+    {
+      "id": "CR-6",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "accepted",
+      "note": "two consecutive runs with the identical summary are not re-announced by the live region; minor screen-reader nicety, not in the acceptance criteria"
+    }
+  ],
+  "validation": [
+    {
+      "command": "npm run test:e2e -- shell",
+      "result": "pass"
+    },
+    {
+      "command": "cd packages/renderer && npx ng test --include='src/app/console/**/*.spec.ts' --include='src/app/sidebar/**/*.spec.ts'",
+      "result": "pass"
+    },
+    { "command": "npm run check", "result": "pass" }
+  ]
+}

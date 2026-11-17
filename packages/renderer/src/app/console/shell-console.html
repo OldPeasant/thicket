@@ -1,0 +1,172 @@
+<section class="console" [attr.aria-label]="'Shell: ' + tab().title">
+  <header class="head">
+    <span class="title">mongosh</span>
+    <span class="where" data-testid="shell-db">{{ tab().detail ?? tab().title }}</span>
+    @if (production()) {
+      <span class="tag production-tag" data-testid="shell-production">Production</span>
+    }
+    <div class="actions">
+      <div class="seg" role="group" aria-label="Show results">
+        <button
+          type="button"
+          class="seg-btn"
+          data-testid="shell-view-viewer"
+          [attr.aria-pressed]="!plain()"
+          (click)="plain.set(false)"
+        >
+          Viewer
+        </button>
+        <button
+          type="button"
+          class="seg-btn"
+          data-testid="shell-view-text"
+          [attr.aria-pressed]="plain()"
+          (click)="plain.set(true)"
+        >
+          Plain text
+        </button>
+      </div>
+      <button type="button" class="btn quiet" data-testid="shell-clear" (click)="clear()">
+        Clear
+      </button>
+    </div>
+  </header>
+
+  @if (readOnly()) {
+    <div class="banner readonly" role="status" data-testid="shell-readonly-banner">
+      <strong>Read-only connection.</strong>
+      The shell runs whatever you type: Thicket does not block writes here. Only the server's
+      permissions for this user decide what is allowed.
+    </div>
+  }
+
+  <div class="transcript" #transcript data-testid="shell-transcript">
+    @if (session().state === 'opening') {
+      <p class="note" data-testid="shell-opening">Starting mongosh…</p>
+    }
+    @for (run of runs(); track run.id) {
+      <article class="run" data-testid="shell-run" [attr.data-state]="run.state">
+        <div class="line in">
+          <span class="prompt">{{ run.prompt }}</span>
+          <pre class="code">{{ run.code }}</pre>
+        </div>
+        @for (out of run.outputs; track $index) {
+          @switch (out.kind) {
+            @case ('print') {
+              <pre class="out print" data-testid="shell-print">{{ out.text }}</pre>
+            }
+            @case ('error') {
+              <pre class="out error" data-testid="shell-error">{{ out.text }}</pre>
+            }
+            @case ('result') {
+              @if (!plain() && out.tree !== undefined) {
+                <div class="out viewer" data-testid="shell-result-viewer">
+                  <app-shell-result [tree]="out.tree" />
+                  @if (out.text.endsWith('Type "it" for more')) {
+                    <p class="more">Type <code>it</code> for more</p>
+                  }
+                </div>
+              } @else {
+                <pre class="out result" data-testid="shell-result">{{ out.text }}</pre>
+              }
+            }
+          }
+        }
+        @if (run.state === 'running') {
+          <p class="status" data-testid="shell-running">Running…</p>
+        } @else if (run.state === 'stopped') {
+          <p class="status" data-testid="shell-stopped">Stopped</p>
+        }
+      </article>
+    }
+  </div>
+
+  <!-- Outside the scrolling transcript, so the way back stays in view after a lost session. -->
+  @if (failure(); as message) {
+    <div class="failed" role="alert" data-testid="shell-failed">
+      <span>{{ message }}</span>
+      <button type="button" class="btn" data-testid="shell-reopen" (click)="open()">
+        Open new session
+      </button>
+    </div>
+  }
+  <p class="sr-only" role="status" aria-live="polite" data-testid="shell-announce">
+    {{ announcement() }}
+  </p>
+
+  <div class="input-row">
+    <label class="prompt" [for]="uid + '-input'" data-testid="shell-prompt">{{ prompt() }}</label>
+    <div class="input-box">
+      <textarea
+        #input
+        class="input"
+        [id]="uid + '-input'"
+        data-testid="shell-input"
+        spellcheck="false"
+        autocomplete="off"
+        role="combobox"
+        aria-autocomplete="list"
+        [attr.aria-expanded]="completions().length > 0"
+        [attr.aria-controls]="completions().length > 0 ? uid + '-completions' : null"
+        [attr.aria-activedescendant]="
+          completions().length > 0 ? uid + '-completion-' + selected() : null
+        "
+        [attr.aria-describedby]="uid + '-hint'"
+        [rows]="rows()"
+        [value]="code()"
+        [disabled]="session().state !== 'open'"
+        (input)="onInput($event)"
+        (keydown)="onKeydown($event)"
+        (keyup)="onCaret($event)"
+        (click)="onCaret($event)"
+        (select)="onCaret($event)"
+        (blur)="closeCompletions()"
+      ></textarea>
+      @if (completions().length > 0) {
+        <ul
+          class="completions"
+          role="listbox"
+          [id]="uid + '-completions'"
+          aria-label="Completions"
+          data-testid="shell-completions"
+        >
+          @for (c of completions(); track c; let i = $index) {
+            <li
+              role="option"
+              [id]="uid + '-completion-' + i"
+              data-testid="shell-completion"
+              [class.selected]="i === selected()"
+              [attr.aria-selected]="i === selected()"
+              [title]="c"
+              (mousedown)="$event.preventDefault(); choose(i)"
+            >
+              {{ label(c) }}
+            </li>
+          }
+        </ul>
+      }
+    </div>
+    @if (running()) {
+      <button type="button" class="btn danger" data-testid="shell-stop" (click)="stop()">
+        Stop
+      </button>
+    } @else {
+      <button
+        type="button"
+        class="btn primary"
+        data-testid="shell-run-btn"
+        [disabled]="!canRun()"
+        (click)="run()"
+      >
+        Run
+      </button>
+    }
+  </div>
+  <p class="hint" [id]="uid + '-hint'">
+    @if (completionNote()) {
+      <span data-testid="shell-completion-note">{{ completionNote() }}</span>
+    } @else {
+      Enter runs, Shift+Enter adds a line, ↑ and ↓ step through the history, Tab completes
+    }
+  </p>
+</section>
