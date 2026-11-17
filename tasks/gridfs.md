@@ -1,11 +1,11 @@
 ---
 title: M6 (Could): GridFS
-status: in_progress
+status: done
 owner: dell26/agent-3
 deps: [browse-backend,app-layout]
 touches: [packages/backend/src/gridfs,packages/renderer/src/app/gridfs]
 prio: 4
-lease_until: 2026-11-17T07:33:47Z
+lease_until: 
 ---
 ## Goal
 List buckets and files, download, upload with progress, delete with confirm.
@@ -21,3 +21,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 07:35+0100 by dell26/agent-3): GridFS tab opens from the sidebar database menu ('GridFS files'), one tab per database with a bucket select; a database without buckets offers 'fs' (the driver default) for the first upload. No UI to name a new bucket.
 - ASSUMPTION (2026-11-17 07:35+0100 by dell26/agent-3): Driver 7 has no contentType upload option, so uploads store none; listing shows top-level contentType or metadata.contentType. gridfs.files lists at most 1000 files (newest first, name filter) with a total instead of paging UI.
 - ASSUMPTION (2026-11-17 07:35+0100 by dell26/agent-3): Upload is a write (write guard, confirm only on production profiles); delete always asks for confirmation. A cancelled/failed upload deletes its chunks and files doc; a cancelled download removes the partial local file.
+- done by dell26/agent-3: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 62s on 0e6ed3bd3; criteria verified 2/2
