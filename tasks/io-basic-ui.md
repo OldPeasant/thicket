@@ -11,7 +11,8 @@ lease_until: 2026-11-17T01:23:29Z
 Export current query results (JSON/JSONL, relaxed/canonical) and import a JSON/JSONL file with preview, options and progress.
 
 ## Acceptance criteria
-- [ ] e2e: export the fixture, import into a new collection, counts match
+- [x] e2e: export the fixture, import into a new collection, counts match
+  - verified (2026-11-17 02:05+0100 by dell26/agent-1): npm run test:e2e -- test/e2e/io.e2e.ts (mongo8 fixture via Podman, headless Electron, native dialogs stubbed in main) -> 1 passed: 1,234 fixture docs exported as canonical JSON, imported through the panel into new collection orders_copy: count 1234 = 1234 and documents deep-equal; JSONL relaxed export of {group:1} imported into group1, counts match
 - [ ] Import into a read-only profile is not offered (test)
 
 ## Notes
