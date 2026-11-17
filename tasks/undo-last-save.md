@@ -16,3 +16,4 @@ Keep the pre-save version of the last save per document; 'Undo last save' writes
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-17 07:30+0100 by felix/agent-2): Undo last save is kept per document per collection tab (in DocumentActions, not persisted). One level only: after an undo it is no longer offered, and the undo itself is not undoable. Save, conflict Overwrite and Merge manually all count as saves; re-inserting a document deleted on the server does not. Delete drops it.
