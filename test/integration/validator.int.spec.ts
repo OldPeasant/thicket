@@ -148,7 +148,9 @@ for (const [label, uri] of [
         validationAction: 'warn',
       });
       // The server has it.
-      const [info] = await direct.db(DB).listCollections({ name: COLL }).toArray();
+      const [info] = (await direct.db(DB).listCollections({ name: COLL }).toArray()) as {
+        options?: unknown;
+      }[];
       expect(info?.options).toMatchObject({
         validator: SCHEMA,
         validationLevel: 'moderate',

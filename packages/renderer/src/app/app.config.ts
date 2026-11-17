@@ -10,6 +10,7 @@ import { routes } from './app.routes';
 import { CollectionView } from './collection';
 import { ShellConsole } from './console';
 import { IndexesView } from './indexes';
+import { ValidatorView } from './validator';
 import { provideTabView } from './layout';
 import { provideTheme } from './theme';
 
@@ -24,5 +25,6 @@ export const appConfig: ApplicationConfig = {
     provideTabView('aggregation', AggregationView),
     provideTabView('indexes', IndexesView),
     provideTabView('shell', ShellConsole),
+    provideTabView('validator', ValidatorView),
   ],
 };

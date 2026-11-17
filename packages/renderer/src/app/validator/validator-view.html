@@ -1,0 +1,128 @@
+<section class="validator" [attr.aria-label]="'Validator of ' + target().coll">
+  <header class="head">
+    <span class="code ns" [title]="target().db + '.' + target().coll"
+      >db.runCommand(&#123; collMod: "<span class="coll">{{ target().coll }}</span
+      >" &#125;)</span
+    >
+    @if (saved(); as s) {
+      <span class="count" data-testid="val-state">
+        {{ s.text === '' ? 'No validator' : 'Validator set' }}
+      </span>
+    }
+    <div class="actions">
+      <button
+        type="button"
+        class="btn quiet"
+        data-testid="val-refresh"
+        [disabled]="loading() || saving()"
+        (click)="reload()"
+      >
+        Refresh
+      </button>
+    </div>
+  </header>
+
+  <div class="body">
+    @if (loadError(); as e) {
+      <p class="message error" role="alert" data-testid="val-load-error">{{ e }}</p>
+    }
+
+    @if (saved() !== null) {
+      <form class="call" (submit)="$event.preventDefault(); save()" novalidate>
+        <div class="field">
+          <label class="code" for="val-text">validator:</label>
+          <textarea
+            id="val-text"
+            class="editor"
+            data-testid="val-text"
+            spellcheck="false"
+            autocomplete="off"
+            rows="16"
+            placeholder="{ $jsonSchema: { … } }   (empty: no validator)"
+            [value]="text()"
+            (input)="editText($event)"
+            (keydown.control.enter)="save()"
+            [attr.aria-invalid]="parseError() ? true : null"
+            [attr.aria-describedby]="parseError() ? 'val-parse-error' : null"
+          ></textarea>
+          @if (parseError(); as e) {
+            <p id="val-parse-error" class="message error" role="alert" data-testid="val-error">
+              {{ e }}
+            </p>
+          }
+          @if (text().trim() === '') {
+            <p class="note">
+              No validator: every document is accepted.
+              <button
+                type="button"
+                class="btn quiet small"
+                data-testid="val-template"
+                (click)="useTemplate()"
+              >
+                Start a $jsonSchema
+              </button>
+            </p>
+          }
+        </div>
+
+        <div class="options">
+          <label class="option">
+            <span class="code">validationLevel:</span>
+            <select data-testid="val-level" [value]="level()" (change)="editLevel($event)">
+              @for (l of levels; track l) {
+                <option [value]="l" [selected]="l === level()">{{ l }}</option>
+              }
+            </select>
+            <span class="hint">{{ levelHints[level()] }}</span>
+          </label>
+          <label class="option">
+            <span class="code">validationAction:</span>
+            <select data-testid="val-action" [value]="action()" (change)="editAction($event)">
+              @for (a of actions; track a) {
+                <option [value]="a" [selected]="a === action()">{{ a }}</option>
+              }
+            </select>
+            <span class="hint">{{ actionHints[action()] }}</span>
+          </label>
+        </div>
+
+        <div class="buttons">
+          @if (message(); as m) {
+            <p
+              class="message"
+              [class.error]="m.error"
+              [attr.role]="m.error ? 'alert' : 'status'"
+              data-testid="val-message"
+            >
+              {{ m.text }}
+            </p>
+          }
+          <button
+            type="button"
+            class="btn quiet"
+            data-testid="val-revert"
+            [disabled]="!dirty() || saving()"
+            (click)="revert()"
+          >
+            Revert
+          </button>
+          <button
+            type="submit"
+            class="btn primary"
+            data-testid="val-save"
+            [appWriteControl]="target().profileId"
+            [disabledWhen]="!dirty() || saving()"
+          >
+            {{ saving() ? 'Saving…' : 'Save validator' }}
+          </button>
+        </div>
+      </form>
+      <p class="note">
+        Documents that fail the validator are marked in the collection tab. Existing documents are
+        not changed; the server checks writes from now on.
+      </p>
+    } @else if (loading()) {
+      <p class="message" data-testid="val-loading">Loading the validator…</p>
+    }
+  </div>
+</section>
