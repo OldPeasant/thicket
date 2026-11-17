@@ -19,3 +19,4 @@ Sign the Windows release artefacts through the SignPath Foundation's free open s
 
 ## Notes
 See SPEC.md (Release) and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-17 06:27+0100 by dell26/agent-3): SignPath action inputs (signpath/github-action-submit-signing-request@v1: api-token, organization-id, project-slug, signing-policy-slug, artifact-configuration-slug, github-artifact-id, wait-for-completion, wait-for-completion-timeout-in-seconds, output-artifact-directory) and artifact-configuration XML written from knowledge: web fetch of the README/docs was denied in this environment; signpath-setup's test tag confirms them
