@@ -1,10 +1,11 @@
 ---
 title: M5: AWS IAM authentication
-status: todo
-owner:
+status: in_progress
+owner: felix/agent-2
 deps: [x509-proxy]
 touches: [packages/backend/src/auth/aws]
 prio: 3
+lease_until: 2026-11-17T02:26:26Z
 ---
 ## Goal
 MONGODB-AWS with explicit keys/session token or the default credential chain via @aws-sdk/credential-providers.
