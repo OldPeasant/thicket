@@ -4,7 +4,7 @@ import type { Request } from '@thicket/contract';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
-import { DocumentEdits } from '../document';
+import { DocumentActions, DocumentEdits } from '../document';
 import findIxscan from '../explain/fixtures/find-ixscan-8.2.json';
 import { WorkspaceService, type WorkspaceTab } from '../layout/workspace.service';
 import { ConfirmService } from '../safety/confirm.service';
@@ -1322,22 +1322,29 @@ describe('CollectionView', () => {
         expect(shownSkus().at(-1)).toBe(sku(49_999));
       });
 
-      it('Keep server version shows the conflict version, still cut, when the read-back fails', async () => {
-        // The conflict carries more items than were loaded; the array still spans the whole length.
+      it('Keep server version shows the conflict version whole when the read-back fails', async () => {
+        // The conflict carries the whole server document (300 items): it is not cut.
         await saveIntoConflict(300);
         fake.fail('docs.get', { code: 'INTERNAL', message: 'not readable (fictitious)' });
         click('conflict-keep-server');
         await settle();
         expect(fake.requestsFor('docs.get')).toHaveLength(1);
         expect(shownNames()).toContain('renamed elsewhere (fictitious)');
-        expect(pagerRange()).toContain('1–100 of 50,000');
+        // The pager spans the real array, not the length of the array when it was loaded.
+        expect(pagerRange()).toContain('1–100 of 300');
         const before = slices.length;
-        pagerButton('nested-pager-next')?.click();
+        pagerButton('nested-pager-last')?.click();
         await settle();
-        // Items 100-199 are among the shown version's items: nothing is read for them.
+        // Every item is in the shown version: nothing is read through docs.getSlice.
         expect(slices).toHaveLength(before);
-        expect(shownSkus()[0]).toBe(sku(100));
-        // The document is still partial for the next edit.
+        expect(pagerRange()).toContain('201–300 of 300');
+        // The array is editable like any whole one (inputs, not read-only text), and the document
+        // is no longer partial.
+        expect(shownSkus()).toEqual([]);
+        const item = [...el().querySelectorAll<HTMLInputElement>('input.val-input.str')].find(
+          (i) => i.value === sku(299),
+        );
+        if (!item) throw new Error('item of the kept document not editable');
         const name = [...el().querySelectorAll<HTMLInputElement>('input.val-input.str')].find(
           (i) => i.value === 'renamed elsewhere (fictitious)',
         );
@@ -1346,7 +1353,66 @@ describe('CollectionView', () => {
         name.dispatchEvent(new Event('blur'));
         await settle();
         const edits = fixture.debugElement.injector.get(DocumentEdits);
-        expect(edits.get('{"$numberInt":"1"}')?.partial).toBe(true);
+        expect(edits.get('{"$numberInt":"1"}')?.partial).toBe(false);
+      });
+
+      it('compares only the loaded items of the cut array, not the whole server array', async () => {
+        // The server version carries 300 items; 100 were loaded.
+        await saveIntoConflict(300);
+        const rows = [...el().querySelectorAll('[data-testid="conflict-row"]')];
+        const serverText = [...el().querySelectorAll('[data-testid="conflict-server"]')]
+          .map((c) => c.textContent ?? '')
+          .join('\n');
+        // Items 100-299 were never loaded: they are neither shown nor counted as differences.
+        expect(serverText).toContain(sku(99));
+        expect(serverText).not.toContain(sku(100));
+        expect(serverText).not.toContain(sku(299));
+        const differing = rows.filter((r) => r.getAttribute('data-kind') !== 'same');
+        expect(differing.map((r) => r.textContent)).toEqual([
+          expect.stringMatching(/renamed order[\s\S]*renamed elsewhere \(fictitious\)/),
+        ]);
+        expect(get('conflict-count').textContent).toContain('1 differing line');
+        expect(get('conflict-cut-note').textContent).toContain(
+          'items: read page by page, so only the first 100 items are compared (the server has 300 items).',
+        );
+      });
+
+      it('names the partial load, not a projection, in the note and the refusals', async () => {
+        await saveIntoConflict(300);
+        const note = get('conflict-note').textContent ?? '';
+        expect(note).toContain('loaded only partly');
+        expect(note).toContain('long arrays are read page by page');
+        expect(note).not.toContain('was loaded with a projection');
+        const actions = fixture.debugElement.injector.get(DocumentActions);
+        expect(actions.resolveBlocker('{"$numberInt":"1"}')).toBe('partial');
+        // Overwrite and Merge called directly (not offered in the view) are refused the same way.
+        expect(await actions.overwrite('{"$numberInt":"1"}')).toBe(false);
+        expect(actions.message()?.text).toContain('loaded only partly');
+        expect(actions.message()?.text).not.toContain('Clear the projection');
+        const edits = fixture.debugElement.injector.get(DocumentEdits);
+        const merged = edits.get('{"$numberInt":"1"}')?.current;
+        if (!merged) throw new Error('no local version');
+        actions.clearMessage();
+        expect(await actions.saveMerged('{"$numberInt":"1"}', merged)).toBe(false);
+        expect(actions.message()?.text).toContain('long arrays are read page by page');
+        expect(fake.requestsFor('docs.update')).toHaveLength(1);
+        expect(fake.requestsFor('docs.replace')).toHaveLength(0);
+      });
+
+      it('refuses to insert the cut document again when it was deleted, naming the partial load', async () => {
+        fake.fail('docs.update', {
+          code: 'CONFLICT',
+          message: 'deleted (fictitious)',
+          detail: { current: null },
+        });
+        await renameAndSave();
+        expect(get('conflict-title').textContent).toContain('Deleted on the server');
+        const actions = fixture.debugElement.injector.get(DocumentActions);
+        expect(await actions.overwrite('{"$numberInt":"1"}')).toBe(false);
+        expect(actions.message()?.text).toContain('Not inserted');
+        expect(actions.message()?.text).toContain('long arrays are read page by page');
+        expect(actions.message()?.text).not.toContain('with a projection active');
+        expect(fake.requestsFor('docs.insert')).toHaveLength(0);
       });
 
       it('an unknown server version: Keep server version leaves the cut document as loaded', async () => {

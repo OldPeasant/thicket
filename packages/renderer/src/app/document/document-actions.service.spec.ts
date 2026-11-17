@@ -1679,12 +1679,21 @@ describe('DocumentActions', () => {
       expect(changes).toEqual([[keyOf(1), bigText('shrunk elsewhere'), undefined]]);
     });
 
-    it('keepServer shows the conflict version with the cut flags when the read-back fails', async () => {
+    it('keepServer shows the conflict version whole (no cut flags) when the read-back fails', async () => {
+      // The conflict carries the whole server document, so it is not cut (review CR-8).
       await conflictWith({ current: bigText('renamed elsewhere') });
       fake.fail('docs.get', { code: 'SERVER_ERROR', message: 'connection reset' });
       await actions.keepServer(keyOf(1));
       expect(params('docs.get')[0]).toMatchObject({ sliceAbove: 100 });
-      expect(changes).toEqual([[keyOf(1), bigText('renamed elsewhere'), ITEMS]]);
+      expect(changes).toEqual([[keyOf(1), bigText('renamed elsewhere'), undefined]]);
+    });
+
+    it('the conflict remembers the cut arrays of the loaded document', async () => {
+      await conflictWith({ current: bigText('renamed elsewhere') });
+      // Later the document is no longer on the shown page: the conflict still knows it is cut.
+      cut = undefined;
+      expect(actions.conflicts().get(keyOf(1))?.cut).toEqual(ITEMS);
+      expect(actions.resolveBlocker(keyOf(1))).toBe('partial');
     });
 
     it('keepServer of an unknown server version shows nothing when the read-back fails too', async () => {
@@ -1712,17 +1721,35 @@ describe('DocumentActions', () => {
 
     it('Overwrite and Merge manually are refused for the partial document, nothing is written', async () => {
       await conflictWith({ current: bigText('renamed elsewhere') });
-      expect(actions.resolveBlocker(keyOf(1))).toBe('projection');
+      expect(actions.resolveBlocker(keyOf(1))).toBe('partial');
       expect(await actions.overwrite(keyOf(1))).toBe(false);
+      // No projection is active: the refusal names the partial load, as Save's does.
+      expect(actions.message()?.text).toContain('loaded only partly');
+      expect(actions.message()?.text).toContain('long arrays are read page by page');
+      expect(actions.message()?.text).not.toContain('Clear the projection');
+      actions.clearMessage();
       expect(await actions.saveMerged(keyOf(1), big('merged order'))).toBe(false);
+      expect(actions.message()?.text).toContain('long arrays are read page by page');
       expect(fake.requests).toHaveLength(0);
       expect(changes).toEqual([]);
       expect(edits.get(keyOf(1))?.current).toEqual(big('renamed order'));
     });
 
+    it('a cut document is blocked even under a top-level projection', async () => {
+      projection = '{"name":{"$numberInt":"1"},"items":{"$numberInt":"1"}}';
+      await conflictWith({ current: bigText('renamed elsewhere') });
+      expect(actions.resolveBlocker(keyOf(1))).toBe('partial');
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      expect(actions.message()?.text).toContain('long arrays are read page by page');
+      expect(fake.requests).toHaveLength(0);
+    });
+
     it('re-inserting a large document deleted on the server is refused (it is partial)', async () => {
       await conflictWith({ current: null });
       expect(await actions.overwrite(keyOf(1))).toBe(false);
+      expect(actions.message()?.text).toContain('Not inserted');
+      expect(actions.message()?.text).toContain('long arrays are read page by page');
+      expect(actions.message()?.text).not.toContain('with a projection active');
       expect(fake.requests).toHaveLength(0);
       expect(changes).toEqual([]);
     });

@@ -8,11 +8,16 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { type BsonDocument, parseEJson } from '@thicket/core/bson';
+import { type BsonDocument, type BsonValue, parseEJson } from '@thicket/core/bson';
 import { parseShellSyntaxDocument, printShellSyntax } from '@thicket/core/shellsyntax';
 
 import { WriteControl } from '../../safety/write-control.directive';
-import { DocumentActions, type SaveConflict, visibleFields } from '../document-actions.service';
+import {
+  DocumentActions,
+  type ResolveBlocker,
+  type SaveConflict,
+  visibleFields,
+} from '../document-actions.service';
 import { DocumentEdits } from '../edit-session';
 import { type DiffRow, diffLines } from './line-diff';
 
@@ -24,12 +29,25 @@ interface ConflictItem {
   readonly local: BsonDocument | null;
   /** The server version: changed, deleted, or changed but not readable. */
   readonly state: 'changed' | 'deleted' | 'unknown';
-  /** Overwrite and Merge manually can't respect the projection the document was loaded with. */
-  readonly blocked: boolean;
+  /**
+   * Why Overwrite and Merge manually are not offered: the projection the document was loaded with
+   * (`'projection'`), or it is a large document whose long arrays were cut (`'partial'`).
+   */
+  readonly blocked: 'projection' | 'partial' | null;
+  /** Arrays of a large document that were loaded only partly: only their loaded items are compared. */
+  readonly cut: readonly CutArray[];
   /** Only the fields loaded with the query's projection are compared. */
   readonly partial: boolean;
   readonly rows: readonly DiffRow[];
   readonly differences: number;
+}
+
+/** A cut array as compared: `loaded` items of the local version, `total` on the server now. */
+interface CutArray {
+  readonly path: string;
+  readonly loaded: number;
+  /** Length of the array in the server version (`null`: it has no array there). */
+  readonly total: number | null;
 }
 
 const INDENT = 2;
@@ -76,12 +94,27 @@ function lines(doc: BsonDocument | null): string[] {
           <p class="note" data-testid="conflict-note">
             Keep the server version to load it again, then edit again.
           </p>
-        } @else if (item.blocked) {
+        } @else if (item.blocked === 'projection') {
           <p class="note" data-testid="conflict-note">
             Overwrite and Merge manually are not available: the document was loaded with a
             projection that hides parts of fields or is no longer active, so they could change data
             you did not load. To use them, clear the projection, run the query again and edit again.
           </p>
+        } @else if (item.blocked === 'partial') {
+          <p class="note" data-testid="conflict-note">
+            Overwrite and Merge manually are not available: the document was loaded only partly
+            (with a projection, or a large document whose long arrays are read page by page), so
+            they could change data that was not loaded. Keep the server version, then edit single
+            values again.
+          </p>
+        }
+
+        @if (item.state === 'changed' && item.cut.length > 0) {
+          <ul class="note cut" data-testid="conflict-cut-note">
+            @for (array of item.cut; track array.path) {
+              <li>{{ cutText(array) }}</li>
+            }
+          </ul>
         } @else if (item.partial && item.local !== null) {
           <p class="note" data-testid="conflict-note">
             Only the fields loaded with the query's projection are compared; the others stay as they
@@ -171,7 +204,7 @@ function lines(doc: BsonDocument | null): string[] {
             >
               {{ item.state === 'deleted' ? 'Keep it deleted' : 'Keep server version' }}
             </button>
-            @if (item.state === 'changed' && item.local !== null && !item.blocked) {
+            @if (item.state === 'changed' && item.local !== null && item.blocked === null) {
               <button
                 type="button"
                 class="btn"
@@ -183,7 +216,7 @@ function lines(doc: BsonDocument | null): string[] {
                 Merge manually
               </button>
             }
-            @if (item.state !== 'unknown' && item.local !== null && !item.blocked) {
+            @if (item.state !== 'unknown' && item.local !== null && item.blocked === null) {
               <button
                 type="button"
                 class="btn danger"
@@ -242,6 +275,9 @@ function lines(doc: BsonDocument | null): string[] {
     .note {
       margin: 0.25rem 0 0;
       color: var(--text-muted);
+    }
+    .note.cut {
+      padding-left: 1.25rem;
     }
     .sides {
       margin-top: 0.5rem;
@@ -384,6 +420,12 @@ export class ConflictView {
     return n === 0 ? 'No differences' : `${n} differing ${n === 1 ? 'line' : 'lines'}`;
   }
 
+  protected cutText(array: CutArray): string {
+    const items = (n: number) => `${n.toLocaleString('en-US')} ${n === 1 ? 'item' : 'items'}`;
+    const head = `${array.path}: read page by page, so only the first ${items(array.loaded)} are compared`;
+    return array.total === null ? `${head}.` : `${head} (the server has ${items(array.total)}).`;
+  }
+
   /** What a screen reader says before a differing line of the local version (the `+` mark). */
   protected localLabel(row: DiffRow): string | null {
     if (row.kind === 'same' || row.left === null) return null;
@@ -447,6 +489,17 @@ export class ConflictView {
     if (server !== null && partial && entry !== undefined) {
       server = visibleFields(server, [entry.original, entry.current]);
     }
+    // A cut array of a large document: its never-loaded items are no difference, and the server's
+    // whole array (maybe many thousands of items) is not shown.
+    const cut: CutArray[] = [];
+    if (server !== null && conflict.cut !== undefined) {
+      for (const array of conflict.cut) {
+        const loaded = arrayAt(local, array.path)?.length ?? array.loaded;
+        const total = arrayAt(server, array.path)?.length ?? null;
+        cut.push({ path: array.path, loaded, total });
+        server = truncateArray(server, array.path.split('.'), loaded);
+      }
+    }
     const rows = conflict.current === undefined ? [] : diffLines(lines(local), lines(server));
     return {
       key: conflict.key,
@@ -458,12 +511,44 @@ export class ConflictView {
           : conflict.current === null
             ? 'deleted'
             : 'changed',
-      blocked: this.actions.resolveBlocker(conflict.key) === 'projection',
+      blocked: blockedBy(this.actions.resolveBlocker(conflict.key)),
+      cut,
       partial,
       rows,
       differences: rows.filter((r) => r.kind !== 'same').length,
     };
   }
+}
+
+function blockedBy(blocker: ResolveBlocker | null): ConflictItem['blocked'] {
+  return blocker === 'projection' || blocker === 'partial' ? blocker : null;
+}
+
+/** The items of the array at the dotted `path` of `doc` (document keys only), if there is one. */
+function arrayAt(doc: BsonDocument | null, path: string): readonly BsonValue[] | undefined {
+  let value: BsonValue | undefined = doc ?? undefined;
+  for (const key of path.split('.')) {
+    if (value?.type !== 'object') return undefined;
+    value = value.fields.find((f) => f.key === key)?.value;
+  }
+  return value?.type === 'array' ? value.items : undefined;
+}
+
+/** `value` with the array at `path` cut to its first `length` items (unchanged without one). */
+function truncateArray<T extends BsonValue>(value: T, path: readonly string[], length: number): T {
+  const [key, ...rest] = path;
+  if (key === undefined) {
+    return value.type === 'array' && value.items.length > length
+      ? { ...value, items: value.items.slice(0, length) }
+      : value;
+  }
+  if (value.type !== 'object') return value;
+  return {
+    ...value,
+    fields: value.fields.map((f) =>
+      f.key === key ? { ...f, value: truncateArray(f.value, rest, length) } : f,
+    ),
+  };
 }
 
 function isChanged(conflict: SaveConflict): boolean {

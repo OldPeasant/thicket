@@ -59,13 +59,19 @@ export interface SaveConflict {
    * unknown (the conflict did not carry a readable version and reading it again failed).
    */
   readonly current: BsonDocument | null | undefined;
+  /**
+   * The arrays the local version has only partly (a large document whose long arrays were cut when
+   * it was loaded, see `DocumentHost.slicedOf`); `undefined` when it was loaded whole.
+   */
+  readonly cut?: readonly SlicedArray[];
 }
 
 /**
- * Why Overwrite and Merge manually can't resolve a conflict: the server version is unknown, or the
- * document was loaded with a projection they can't respect (see `DocumentActions.resolveBlocker`).
+ * Why Overwrite and Merge manually can't resolve a conflict: the server version is unknown, the
+ * document was loaded with a projection they can't respect, or it is a large document whose long
+ * arrays were loaded only partly (see `DocumentActions.resolveBlocker`).
  */
-export type ResolveBlocker = 'server-unknown' | 'projection';
+export type ResolveBlocker = 'server-unknown' | 'projection' | 'partial';
 
 let nextDraftId = 0;
 
@@ -198,8 +204,10 @@ export class DocumentActions {
       kind: 'info',
       text: 'Kept the server version; your edits are discarded.',
     });
+    // The conflict's version is the whole server document (not cut), so a failed read-back shows
+    // it whole.
     if (conflict.current === null) this.requireHost().documentChanged(key, null);
-    else await this.readBack(key, key, conflict.current);
+    else await this.readBack(key, key, conflict.current, true);
   }
 
   /** The document under `key` may be partial: it was edited or is shown with a projection. */
@@ -214,12 +222,15 @@ export class DocumentActions {
    * document may be partial and the query's projection is not one of whole top-level fields (a
    * dotted path or an operator such as `$slice`), it was edited under such a projection (even if
    * a top-level one is active now), or it was edited under a projection that is no longer active;
-   * comparing top-level fields could then change data the user never loaded.
+   * comparing top-level fields could then change data the user never loaded. `'partial'`: a large
+   * document whose long arrays were cut when it was loaded (always blocked, with or without a
+   * projection: the loaded items are not the whole array).
    */
   resolveBlocker(key: string): ResolveBlocker | null {
     const conflict = this.conflictMap().get(key);
     if (conflict === undefined || conflict.current === null) return null;
     if (conflict.current === undefined) return 'server-unknown';
+    if (conflict.cut !== undefined) return 'partial';
     if (!this.isPartial(key)) return null;
     if (this.edits.get(key)?.hidesSubFields) return 'projection';
     const projection = this.requireHost().projection();
@@ -232,7 +243,12 @@ export class DocumentActions {
     if (blocker === null) return false;
     this.messageState.set({
       kind: 'error',
-      text: blocker === 'projection' ? PROJECTION_RESOLVE_REFUSED : SERVER_UNKNOWN_REFUSED,
+      text:
+        blocker === 'projection'
+          ? PROJECTION_RESOLVE_REFUSED
+          : blocker === 'partial'
+            ? PARTIAL_RESOLVE_REFUSED
+            : SERVER_UNKNOWN_REFUSED,
     });
     return true;
   }
@@ -249,8 +265,14 @@ export class DocumentActions {
     const host = this.requireHost();
     const partial = this.isPartial(key);
     if (conflict.current === null) {
-      if (partial) {
-        this.messageState.set({ kind: 'error', text: PROJECTION_REINSERT_REFUSED });
+      if (partial || conflict.cut !== undefined) {
+        this.messageState.set({
+          kind: 'error',
+          text:
+            conflict.cut === undefined && host.projection() !== undefined
+              ? PROJECTION_REINSERT_REFUSED
+              : PARTIAL_REINSERT_REFUSED,
+        });
         return false;
       }
       const params = { profileId: host.profileId, db: host.db, coll: host.coll };
@@ -444,11 +466,14 @@ export class DocumentActions {
     }
     if (apiError.code === 'CONFLICT') {
       const detail = conflictDetail.safeParse(apiError.detail);
+      const cut = this.requireHost().slicedOf?.(key)?.arrays;
       let current: BsonDocument | null | undefined;
       if (detail.success) current = parseServerDoc(detail.data);
       // No readable server version in the conflict: read it again (a missing one is no deletion).
       if (current === undefined) current = await this.serverVersion(key);
-      this.conflictMap.update((map) => new Map(map).set(key, { key, current }));
+      this.conflictMap.update((map) =>
+        new Map(map).set(key, cut === undefined ? { key, current } : { key, current, cut }),
+      );
       this.messageState.set({
         kind: 'error',
         text:
@@ -482,9 +507,15 @@ export class DocumentActions {
 
   /**
    * Reads a saved document back, so the page shows the server's version (MongoDB puts new fields
-   * last, for example). When it can't be read, the page shows `saved` (or stays as it is without).
+   * last, for example). When it can't be read, the page shows `saved` (or stays as it is without):
+   * with the cut flags of the loaded document, unless `savedWhole` says `saved` is complete.
    */
-  private async readBack(key: string, id: string, saved: BsonDocument | undefined): Promise<void> {
+  private async readBack(
+    key: string,
+    id: string,
+    saved: BsonDocument | undefined,
+    savedWhole = false,
+  ): Promise<void> {
     const host = this.requireHost();
     const projection = host.projection();
     // A large document is read back with its long arrays cut again, not sent whole.
@@ -501,7 +532,9 @@ export class DocumentActions {
       host.documentChanged(key, doc, sliced.length > 0 ? sliced : undefined);
     } catch {
       // Not readable now: show what was saved (its cut arrays are still only partly there).
-      if (saved !== undefined) host.documentChanged(key, stringifyEJson(saved), cut?.arrays);
+      if (saved !== undefined) {
+        host.documentChanged(key, stringifyEJson(saved), savedWhole ? undefined : cut?.arrays);
+      }
     }
   }
 
@@ -546,9 +579,21 @@ const SERVER_UNKNOWN_REFUSED =
   "Not saved: the server's current version of the document could not be read. Keep the server " +
   'version, then edit again.';
 
+/** The same refusal for a document loaded only partly without a projection active now. */
+const PARTIAL_RESOLVE_REFUSED =
+  'Not saved: this document was loaded only partly (with a projection, or a large document whose ' +
+  'long arrays are read page by page), so this could change data that was not loaded. Keep the ' +
+  'server version, then edit single values again.';
+
 const PROJECTION_REINSERT_REFUSED =
   'Not inserted: with a projection active only part of the document is loaded. ' +
   'Clear the projection and edit again.';
+
+/** The same refusal for a document loaded only partly without a projection active now. */
+const PARTIAL_REINSERT_REFUSED =
+  'Not inserted: this document was loaded only partly (with a projection, or a large document ' +
+  'whose long arrays are read page by page), so inserting it would lose the data that was not ' +
+  'loaded. Keep it deleted, or run the query without a projection and edit again.';
 
 /** `doc` with only the top-level fields that one of `shown` has (keeps `doc`'s field order). */
 export function visibleFields(doc: BsonDocument, shown: readonly BsonDocument[]): BsonDocument {
