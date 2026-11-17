@@ -426,7 +426,10 @@ describe('authCodeFlow', () => {
       // soon as the token arrived, which may be before or after this request (only the test was
       // wrong: on Windows and macOS the close usually wins, so the request finds no listener).
       answers.push(
-        await redirectBack(url, { code: 'late' }).catch(() => ({ status: 'closed' as const, text: '' })),
+        await redirectBack(url, { code: 'late' }).catch(() => ({
+          status: 'closed' as const,
+          text: '',
+        })),
       );
     });
     await expect(authCodeFlow(meta, opts)).resolves.toMatchObject({ accessToken: 'at-code' });
