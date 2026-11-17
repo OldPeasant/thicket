@@ -124,6 +124,12 @@
   vertical-align: top;
 }
 
+/* Numbers, ObjectIds, dates, UUIDs…: never broken mid-value. */
+.val.bson.scalar {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
 .val.bson.deprecated {
   font-style: italic;
 }

@@ -67,6 +67,27 @@ export class EditableValueComponent {
     return this.display.text(this.value);
   }
 
+  // Scalar BSON values (numbers, ObjectId, dates, UUID, Timestamp…) stay on
+  // one line, so a narrow table column grows (and the table scrolls) instead
+  // of breaking `10421` into "1042" / "1". Only types whose text can be long
+  // (binary data, regex, code, symbol) may wrap.
+  get scalar(): boolean {
+    const v = this.leaf;
+    if (!v) return true;
+    switch (v.type) {
+      case 'binary':
+        return this.badge.label === 'UUID';
+      case 'regex':
+      case 'javascript':
+      case 'javascriptWithScope':
+      case 'symbol':
+      case 'string':
+        return false;
+      default:
+        return true;
+    }
+  }
+
   // Read-only per the schema (or the `readOnly` input): shown as plain text even in edit mode.
   get locked(): boolean {
     return this.editMode.enabled() && (this.readOnly || this.schema.readOnlyFor(this.uid));

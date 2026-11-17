@@ -87,6 +87,7 @@
   @if (type === 'bson') {
     <span
       class="val bson"
+      [class.scalar]="scalar"
       [class.deprecated]="deprecated"
       [attr.data-bson-type]="badge.type"
       [style.--badge-color]="badgeColor"
