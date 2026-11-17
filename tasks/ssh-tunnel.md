@@ -17,3 +17,4 @@ ssh2-based tunnels with password, private key (+passphrase) or SSH agent; known_
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-17 02:03+0100 by felix/agent-1): Replica set members are tunnelled through a local SOCKS5 server (127.0.0.1, random port and credentials per tunnel) whose CONNECTs become ssh2 forwardOut channels: one forwarded channel per member socket, member names resolved by the SSH server. The driver has no host/port remapping, so literal per-member local ports could not work with discovered members.
