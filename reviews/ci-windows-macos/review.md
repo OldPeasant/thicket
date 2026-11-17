@@ -178,3 +178,59 @@ None.
 ## Review conclusion
 
 No material issues found.
+
+---
+
+# Round 5
+
+Date: 2026-11-17
+
+Task: ci-windows-macos - CI: unit tests pass on Windows and macOS again
+
+Scope: commit fbb9228d only (`git show HEAD`), as named by the parent. It changes one file, `apps/desktop/src/build/native-addons.spec.ts` (4 insertions, 2 deletions): `beforeEach` now wraps the `mkdtempSync` directory in `realpathSync`, imports `realpathSync`, and adds a two-line comment. Reason given by the parent: macOS CI run 44138150602 failed in 'fails the build for an unlisted addon given as an entry point' because esbuild reported `/private/var/folders/...` and the test expected `/var/folders/...`. Rounds 1-4 (above) are not re-reviewed.
+
+Requirements:
+- tasks/ci-windows-macos.md (criterion 1: green `check` on all three OSes; criterion 2: each fix says whether the product or only the test was wrong; the "extended" note that describes this exact fix)
+- AGENTS.md project notes (OS-neutral tests, build and compare paths with `path`, no `/tmp` assumptions)
+
+Git range:
+- Branch: main
+- HEAD: fbb9228dffbf859ecb5ac7cc3339762ce10c0385
+- Base/start: 67b4a757 (parent of fbb9228d)
+- Commits reviewed: 1 (fbb9228d); `git status --short` showed no uncommitted changes when I checked
+
+Summary: 0 P0, 0 P1, 0 P2, 0 P3
+
+## P0 Critical
+
+None.
+
+## P1 High
+
+None.
+
+## P2 Medium
+
+None.
+
+## P3 Low
+
+None.
+
+## Verification notes
+
+- Cause: on macOS, `os.tmpdir()` is `/var/folders/...` and `/var` is a symlink to `/private/var`. The failing test (`native-addons.spec.ts:248-265`) gives esbuild `absWorkingDir: join(dir, 'entry')`. An entry point has no importer, so the plugin reports `args.resolveDir` (`native-addons.ts:100`), and esbuild has already resolved the symlink in that directory. The expected string at line 263 used the unresolved `dir`, so the two did not match.
+- The fix on each OS:
+  - macOS: `fs.realpathSync` (the JS version) resolves `/var` to `/private/var`. So `dir`, every `join(dir, ...)` and every expected message use the same path that esbuild reports.
+  - Linux: `tmpdir()` (`/tmp`, or `$TMPDIR` on CI) normally has no symlinks, so nothing changes. If a symlink is there, the fix makes the test more robust.
+  - Windows: the JS `realpathSync` resolves only symlinks and junctions. It does not expand 8.3 short names (such as `RUNNER~1`) or change case. That is the job of `realpathSync.native`, which this fix does not use. So `dir` is the same string as before on the GitHub Windows runner, where this spec already passed (run 44138150602 was green on Windows). Choosing the JS version over `.native` is the safer option here.
+- Other assertions that use `dir`: line 215 expects `importer` from `put(join(dir, ...))`, line 236 uses a regex `.*own\.cjs`, line 241 builds an absolute addon path from `dir`, and `run()` creates a `require` at `join(dir, 'bundle.cjs')`. With a resolved `dir`, every path the test builds already equals what esbuild would get by resolving symlinks. So these assertions match on all three OSes, and line 215 no longer depends on whether esbuild resolves the importer's path. The package-relative messages (`SSHCRYPTO_MESSAGE` and others) do not contain `dir`. `afterEach` removes the resolved `dir`, which is the same directory.
+- Product: the plugin passes on the path esbuild gives it, and on macOS that path is the resolved one. That is correct and helps the user: it is the real location of the file. The mismatch came only from how the test built its expected string. So "test-only, product correct" is right. `native-addons.ts` is not changed.
+- Criterion 2: met for this fix. The commit subject says "test-only, product correct", and the comment at lines 29-30 says "Test-only; the product is correct there."
+- Scope: `apps/desktop` is outside the task's `touches` list. The failing test came to main through another task (release-native-modules). The change still serves criterion 1 (green `check` on all three OSes), and it is the exact fix described in the task's "extended" note. This is noted for the parent and is not a code finding.
+- Local run on Linux: `npx vitest run src/build/native-addons.spec.ts` in `apps/desktop` gave 1 file and 21 tests passed.
+- Criterion 1 is still open. Only a new `check` run of `wip/ci-windows-macos` (or main after done) that is green on ubuntu, macOS and Windows can show it. I did not run `gh`. The parent must record that run id, or mark the criterion skipped with a reason.
+
+## Review conclusion
+
+No material issues found.

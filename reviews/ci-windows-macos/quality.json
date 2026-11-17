@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "task": "ci-windows-macos",
-  "reviewed_revision": "9511c440fb4aa91c0c2115aef98a7a3d719b7344",
+  "reviewed_revision": "fbb9228dffbf859ecb5ac7cc3339762ce10c0385",
   "helpers": {
     "test-writer": { "status": "completed", "report": "reviews/ci-windows-macos/tests.md" },
     "code-reviewer": { "status": "completed", "report": "reviews/ci-windows-macos/review.md" },
@@ -42,6 +42,7 @@
     { "command": "cd packages/renderer && npx ng test --include src/app/console/shell-console.spec.ts", "result": "pass" },
     { "command": "cd packages/renderer && npx ng test --include src/app/raw-editor/no-eval.spec.ts", "result": "pass" },
     { "command": "cd packages/backend && npx vitest run src/ssh src/io/bson src/auth/oidc", "result": "pass" },
+    { "command": "cd apps/desktop && npx vitest run src/build/native-addons.spec.ts", "result": "pass" },
     { "command": "npm run check", "result": "pass" }
   ]
 }

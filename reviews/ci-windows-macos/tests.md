@@ -288,3 +288,93 @@ Round 4 only changes how a test spec formats file names for comparison. It chang
 ## Summary (round 4)
 
 Tests and task-scoped coverage are sufficient; no production defects found. The change is correct for Linux, macOS and Windows by reading. Line 105 normalizes only the platform separator, line 124 `join(ROOT, name)` accepts `/` names on Windows, and line 134 `includes('node_modules/ajv/')` now works on Windows, where it was always false before. On Linux at HEAD 9511c440, the no-eval spec (279 tests) and `npm run check` pass. AC1 still needs the Windows/macOS CI run.
+
+---
+
+# Round 5
+
+Date: 2026-11-17
+
+Task: ci-windows-macos - CI: unit tests pass on Windows and macOS again (round 5, native-addons spec tmpdir realpath)
+
+Scope: commit fbb9228dffbf859ecb5ac7cc3339762ce10c0385 only (given by the parent; task claimed at e290932e), measured at HEAD fbb9228d. `git diff --stat 67b4a757 fbb9228d` shows only `apps/desktop/src/build/native-addons.spec.ts` changed (4 insertions, 2 deletions). Working tree clean before this report was edited.
+
+Changed file: `apps/desktop/src/build/native-addons.spec.ts` (test only). No production file is changed. `apps/desktop/src/build/native-addons.ts` is not task-owned: its commits (141c8cad, cdc30968) belong to task `release-native-modules` and came in from main.
+
+Requirements:
+- `tasks/ci-windows-macos.md` (AC1: `check` green on all three OSes; AC2: each fix says whether the product or the test was wrong; AC3: `npm run check` passes locally)
+- AGENTS.md project notes (OS-neutral tests; macOS tmpdir is under `/private/var`)
+- Parent instructions (macOS CI run 44138150602 failed at native-addons.spec.ts:260: esbuild reported `/private/var/folders/...`, the test expected `/var/folders/...`)
+
+## Check of the change
+
+- Failure confirmed with `gh run view 44138150602 -R OldPeasant/thicket`: only `check (macos-latest)` failed, in `fails the build for an unlisted addon given as an entry point, naming the working directory`. The expected text used `join(dir, 'entry')` with `dir` under `/var/...`. esbuild's error named `/private/var/...`. ubuntu and windows passed in that run.
+- The fix `dir = realpathSync(mkdtempSync(...))` makes every path the test passes to esbuild (entry points, `absWorkingDir`, absolute addon paths) and every expected path come from the same resolved directory. So both sides agree whether or not esbuild resolves symlinks. On Linux `/tmp` is not a symlink, so nothing changes there.
+- The other path assertions in the file also use `dir`: line 215 `toContain(importer)`, line 236's regex (does not match on the directory), line 241 (absolute addon path). They now use the resolved path too. Before the fix they passed on macOS because those paths were never resolved. After the fix the input is already the real path, so there is nothing left to resolve and input and output are the same.
+- Windows and 8.3 short names (`C:\Users\RUNNER~1\...`): the change uses `fs.realpathSync`, the JS version, not `realpathSync.native`. On Windows the JS version checks each path part with lstat and follows only symlinks and junctions. It does not expand 8.3 short names; only `.native` (GetFinalPathNameByHandle) does. So `dir` stays the same as before, and Windows run 44138150602 passed this test with that unexpanded `dir`. That shows esbuild reports `absWorkingDir` as given and does not expand it. Even if the name were expanded, the expected messages would still match, because esbuild only sees paths built from the same `dir`. This is a conclusion from reading the code and CI, not a test on Windows (none available here).
+- The comment says the fix is test-only and the product is correct (AC2). That is right: the plugin reports `args.importer || args.resolveDir` as esbuild gives it, and on macOS the real path is the correct path.
+- Same approach already used elsewhere: `apps/desktop/test/secrets.electron.spec.ts:31` already wraps its mkdtemp dir in `realpath` (that spec is an Electron spec, not part of `check`).
+- Other specs that might hit the same tmpdir vs real path problem: I searched every spec, int and e2e file that uses `tmpdir()` (38 files) for esbuild, `realpath`, `require.resolve`, `process.cwd`/`chdir`, `import.meta.resolve` and path assertions. The remaining tmpdir path assertions (`packages/backend/src/gridfs/handlers.spec.ts:260`, `packages/backend/src/io/export.spec.ts:370-489`, `packages/backend/src/ssh/tunnel.spec.ts:309`) compare against messages our code builds from the path the test passed in, without resolving it. So both sides stay `/var/...`. They also passed on macOS in run 44138150602. `packages/backend/src/io/handlers.spec.ts:254-255` are `not.toContain` checks, which a different path prefix cannot make fail by mistake. I found no other spec with this problem.
+- I found no defect and edited no test in round 5.
+
+## Test files changed
+
+- None by the test-writer in round 5. The parent's change in fbb9228d was reviewed above.
+
+## Tests added or updated
+
+Count: 0 in round 5
+
+## Requirement coverage
+
+| Requirement | Tests | Command | Result |
+|---|---|---|---|
+| omitNativeAddons error and stub messages name the right paths on every OS (macOS tmpdir symlink) | `native-addons.spec.ts`, all 21 tests, including `fails the build for an unlisted addon given as an entry point, naming the working directory` and `fails the build for an addon of a package that is not allow-listed, naming the importer` | `npx vitest run src/build/native-addons.spec.ts` (working dir `apps/desktop`) | Pass on Linux: 1 file, 21 tests |
+| The same with a symlinked tmpdir (macOS case) | same | Simulating it locally with `TMPDIR` pointing to a symlink | Not run: creating the symlinked scratch directory was refused by the sandbox. The macOS CI `check` run of a revision that contains fbb9228d is the evidence. |
+| AC1: `check` run green on ubuntu, macOS and Windows | - | - | Not run: no Windows/macOS here. The latest run on `wip/ci-windows-macos` (44140018381, head 790078c9) does not contain fbb9228d. The parent must use a run that does. |
+| AC2: the fix says the test was wrong | comment on lines 29-30 | `git show fbb9228d` | Pass (by reading) |
+| AC3: `npm run check` passes locally | full suite | `npm --prefix /home/eric/work/mongo-db-client-agents/agent-2 run check` | Pass |
+
+## Focused test execution
+
+Command:
+
+`npx vitest run src/build/native-addons.spec.ts` (working directory `apps/desktop`)
+
+Result:
+
+Pass: 1 file, 21 tests, Vitest 5.1.0, started 18:44:41, duration 160 ms.
+
+## Full test execution
+
+Command:
+
+`npm --prefix /home/eric/work/mongo-db-client-agents/agent-2 run check`
+
+Result:
+
+Pass: eslint and prettier clean, typecheck clean for all workspaces, Vitest 100 files / 5240 tests (started 18:46:06), renderer 125 files / 4137 tests (started 18:46:51), exit 0.
+
+## .taskcheck
+
+Result:
+
+Not run separately: `.taskcheck` runs `npm run check`, which passed above at HEAD fbb9228d.
+
+## Bugs found
+
+None in round 5.
+
+## Coverage
+
+Status: not applicable for round 5. The round-2 coverage above remains valid.
+
+Round 5 changes only the temp directory setup in a test spec. It changes no production file. `git log e290932e..HEAD` on the task's production files (`packages/backend/src/ssh/socks.ts`, `tunnel.ts`) shows no commit after the TW-1 fix (3ff16a19, the rebased 4e199da9), so the round-2 numbers (aggregate statements 325/336, branches 130/143, functions 63/67, lines 299/303) still describe them. `native-addons.ts` is not in the task coverage scope (not task-owned, see Scope). I did not re-measure coverage. Changed-line coverage for round 5: N/A (no production lines changed).
+
+## Unable to test
+
+- macOS: whether the realpath'd dir makes the macOS run green. Windows: whether the expected messages still match there. Only the CI `check` run of `wip/ci-windows-macos` that contains fbb9228d can show this. I could not run a local symlinked-TMPDIR simulation because the sandbox refused to create the symlink.
+
+## Summary (round 5)
+
+Tests and task-scoped coverage are sufficient; no production defects found. The change is correct and OS-neutral by reading: on macOS it puts the expected and reported paths on the same `/private/var` real path. On Linux nothing changes. On Windows the JS `realpathSync` does not expand 8.3 names, and every path esbuild sees comes from `dir` anyway. No other spec compares a tmpdir path with a resolved path. On Linux at HEAD fbb9228d, the native-addons spec (21 tests) and `npm run check` pass. AC1 still needs a macOS/Windows CI run that contains fbb9228d.
