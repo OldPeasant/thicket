@@ -260,6 +260,159 @@ describe('UsersRolesView', () => {
     expect(texts(el(), '[data-testid="user-item"] .name')).toEqual(['alice']);
   });
 
+  it('shows a roles failure as an alert in roles mode, users still listed', async () => {
+    fake.fail('admin.roles', { code: 'SERVER_ERROR', message: 'not authorized to view roles' });
+    await create();
+    expect(texts(el(), '[data-testid="user-item"] .name')).toEqual(['alice', 'bob']);
+    get('mode-roles').click();
+    await settle();
+    expect(el().querySelector('[role="alert"]')?.textContent).toContain(
+      'not authorized to view roles',
+    );
+    expect(all('role-item')).toHaveLength(0);
+  });
+
+  it('Refresh after a failure ends the error and shows the list', async () => {
+    fake.fail('admin.users', { code: 'SERVER_ERROR', message: 'not authorized on shop' });
+    await create();
+    expect(el().querySelector('[role="alert"]')).not.toBeNull();
+    fake.respond('admin.users', { users: [BOB] });
+    get('refresh').click();
+    await settle();
+    expect(el().querySelector('[role="alert"]')).toBeNull();
+    expect(el().querySelector('[role="status"]')).toBeNull();
+    expect(texts(el(), '[data-testid="user-item"] .name')).toEqual(['bob']);
+  });
+
+  it('shows the number of authentication restrictions', async () => {
+    const restricted = JSON.stringify({
+      user: 'dave',
+      db: 'shop',
+      roles: [],
+      authenticationRestrictions: [{ clientSource: ['192.0.2.10'] }],
+    });
+    fake.respond('admin.users', { users: [restricted] });
+    await create();
+    const detail = get('user-detail');
+    expect(detail.textContent).toContain('1 authentication restriction');
+    expect(detail.textContent).not.toContain('Signs in with');
+    expect(detail.querySelector('pre')).toBeNull();
+  });
+
+  it('an older roles answer arriving last does not replace the newer one', async () => {
+    const pending: { builtin: boolean; resolve: (roles: string[]) => void }[] = [];
+    fake.handle(
+      'admin.roles',
+      (p) =>
+        new Promise((resolve) =>
+          pending.push({ builtin: p.builtin === true, resolve: (roles) => resolve({ roles }) }),
+        ),
+    );
+    await create();
+    get('mode-roles').click();
+    await settle();
+    const box = get<HTMLInputElement>('builtin');
+    box.checked = true;
+    box.dispatchEvent(new Event('change'));
+    await settle();
+    expect(pending.map((p) => p.builtin)).toEqual([false, true]);
+    // The newer (built-in) answer first, then the stale one.
+    pending[1]?.resolve([CLERK, READ, READER]);
+    await settle();
+    pending[0]?.resolve([CLERK]);
+    await settle();
+    expect(texts(el(), '[data-testid="role-item"] .name')).toEqual(['clerk', 'read', 'reader']);
+  });
+
+  it('an older failing answer arriving last shows no error', async () => {
+    let calls = 0;
+    let failFirst!: () => void;
+    fake.handle('admin.users', () => {
+      calls += 1;
+      if (calls === 1) {
+        return new Promise((resolve) => {
+          failFirst = () => resolve({ error: { code: 'SERVER_ERROR', message: 'stale failure' } });
+        });
+      }
+      return { users: [BOB] };
+    });
+    await create();
+    get('refresh').click();
+    await settle();
+    expect(texts(el(), '[data-testid="user-item"] .name')).toEqual(['bob']);
+    failFirst();
+    await settle();
+    expect(el().querySelector('[role="alert"]')).toBeNull();
+    expect(texts(el(), '[data-testid="user-item"] .name')).toEqual(['bob']);
+  });
+
+  it('turning the built-in toggle off again reloads without built-in roles; same value does nothing', async () => {
+    await create();
+    view.setBuiltin(false);
+    await settle();
+    expect(rolesParams()).toHaveLength(1);
+    view.setBuiltin(true);
+    await settle();
+    view.setBuiltin(false);
+    await settle();
+    expect(rolesParams().map((p) => p['builtin'])).toEqual([false, true, false]);
+    get('mode-roles').click();
+    await settle();
+    expect(texts(el(), '[data-testid="role-item"] .name')).toEqual(['clerk', 'reader']);
+  });
+
+  it('openRole ignores a role of another database', async () => {
+    await create();
+    await view.openRole({ role: 'read', db: 'reports' });
+    await settle();
+    expect(view.mode()).toBe('users');
+    expect(view.builtin()).toBe(false);
+    expect(rolesParams()).toHaveLength(1);
+  });
+
+  it('a link to a listed custom role does not reload the roles', async () => {
+    await create();
+    await view.openRole({ role: 'reader', db: 'shop' });
+    await settle();
+    expect(view.builtin()).toBe(false);
+    expect(rolesParams()).toHaveLength(1);
+    expect(get('role-detail').querySelector('.title')?.textContent).toContain('reader');
+  });
+
+  it('a selection that disappears after a refresh falls back to the first entry', async () => {
+    await create();
+    view.selectUser('bob');
+    await settle();
+    fake.respond('admin.users', { users: [ALICE] });
+    get('refresh').click();
+    await settle();
+    expect(get('user-detail').querySelector('.title')?.textContent).toContain('alice');
+  });
+
+  it('a tab pointing at another database loads it and resets the selection', async () => {
+    await create();
+    view.selectUser('bob');
+    await settle();
+    fixture.componentRef.setInput('tab', {
+      ...TAB,
+      id: usersTabId('p1', 'archive'),
+      data: { profileId: 'p1', db: 'archive' },
+    });
+    await settle();
+    expect(fake.requestsFor('admin.users').map((r) => r.params)).toEqual([
+      { profileId: 'p1', db: 'shop' },
+      { profileId: 'p1', db: 'archive' },
+    ]);
+    expect(get('user-detail').querySelector('.title')?.textContent).toContain('alice');
+  });
+
+  it('sends nothing for a tab without a profile or database', async () => {
+    await create({ ...TAB, data: { profileId: 'p1' } });
+    await create({ ...TAB, data: undefined });
+    expect(fake.requestsFor('admin.users')).toHaveLength(0);
+    expect(fake.requestsFor('admin.roles')).toHaveLength(0);
+  });
+
   it('cancels pending requests when the tab is destroyed', async () => {
     fake.handle('admin.users', () => new Promise(() => undefined));
     await create();

@@ -185,4 +185,20 @@ describe('admin.roles', () => {
     const error = await failure(call('admin.roles', { profileId: 'other', db: DB }));
     expect(error.code).toBe('NOT_CONNECTED');
   });
+
+  it('lists no custom roles of other databases', async () => {
+    await expect(call('admin.roles', { profileId: PROFILE.id, db: OTHER_DB })).resolves.toEqual({
+      roles: [],
+    });
+  });
+});
+
+describe('params', () => {
+  it.each(['admin.users', 'admin.roles'] as const)(
+    '%s refuses a request without a database (INVALID_PARAMS)',
+    async (method) => {
+      const error = await failure(call(method, { profileId: PROFILE.id }));
+      expect(error.code).toBe('INVALID_PARAMS');
+    },
+  );
 });

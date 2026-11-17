@@ -896,6 +896,31 @@ describe('SidebarTreeService', () => {
       expect(ws.active()).toMatchObject({ detail: 'gone / shop', production: false });
     });
 
+    it('openUsers opens the users and roles tab of a database with the production flag', () => {
+      tree.openUsers('prod', 'shop');
+      expect(ws.active()).toEqual({
+        id: 'users:prod:shop',
+        kind: 'users',
+        title: 'shop users',
+        detail: 'Profile prod / shop',
+        production: true,
+        data: { profileId: 'prod', db: 'shop' },
+      });
+    });
+
+    it('openUsers twice selects the existing tab; another database gets its own tab', () => {
+      tree.openUsers('p1', 'shop');
+      tree.openUsers('p1', 'other');
+      tree.openUsers('p1', 'shop');
+      expect(ws.tabs().map((t) => t.id)).toEqual(['users:p1:shop', 'users:p1:other']);
+      expect(ws.active()?.id).toBe('users:p1:shop');
+    });
+
+    it('openUsers of an unknown profile falls back to its id', () => {
+      tree.openUsers('gone', 'shop');
+      expect(ws.active()).toMatchObject({ detail: 'gone / shop', production: false });
+    });
+
     it('dropping a database closes the tabs of its collections only', async () => {
       openTabs();
       const done = tree.dropDatabase('p1', 'shop');

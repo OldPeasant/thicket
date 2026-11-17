@@ -496,6 +496,21 @@ describe('SidebarTree', () => {
       expect(byTestId('sidebar-notice')?.textContent).toContain('not authorized to drop');
     });
 
+    it('opens the users and roles tab of a database from its context menu', async () => {
+      await start();
+      await click(node('conn', 'Profile p1'));
+      await menu(node('db', 'shop'));
+      const item = must('menu-users') as HTMLButtonElement;
+      expect(item.textContent).toContain('Users and roles');
+      await click(item);
+      expect(byTestId('tree-menu')).toBeNull();
+      expect(TestBed.inject(WorkspaceService).active()).toMatchObject({
+        id: 'users:p1:shop',
+        kind: 'users',
+        data: { profileId: 'p1', db: 'shop' },
+      });
+    });
+
     it('disconnects from the context menu', async () => {
       await start();
       await click(node('conn', 'Profile p1'));
@@ -590,6 +605,8 @@ describe('SidebarTree', () => {
       expect((must('menu-drop-db') as HTMLButtonElement).disabled).toBe(true);
       expect((must('menu-refresh') as HTMLButtonElement).disabled).toBe(false);
       expect((must('menu-stats') as HTMLButtonElement).disabled).toBe(false);
+      // Viewing users and roles is a read: allowed on a read-only profile.
+      expect((must('menu-users') as HTMLButtonElement).disabled).toBe(false);
 
       await click(node('db', 'shop'));
       await menu(node('coll', 'orders'));
