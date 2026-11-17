@@ -16,3 +16,4 @@ Create/edit/drop users and roles, grant/revoke, through the guard.
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-17 07:56+0100 by dell26/agent-1): Contract: 8 write methods admin.createUser/updateUser/dropUser/createRole/updateRole/dropRole/grantRoles/revokeRoles; grant/revoke take kind 'user'|'role' + name; roles as {role,db} objects (roleRef is exempted from the EJSON-text doc-field rule in index.spec as names, not documents)
