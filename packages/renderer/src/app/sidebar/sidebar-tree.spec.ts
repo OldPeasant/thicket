@@ -750,6 +750,28 @@ describe('SidebarTree', () => {
       });
     });
 
+    it('offers both GridFS files and Watch changes on a database; each opens its own tab', async () => {
+      await start();
+      await click(node('conn', 'Profile p1'));
+      await menu(node('db', 'shop'));
+      const ids = [...must('tree-menu').querySelectorAll<HTMLElement>('[role="menuitem"]')].map(
+        (item) => item.dataset['testid'],
+      );
+      expect(ids.filter((id) => id === 'menu-gridfs')).toHaveLength(1);
+      expect(ids.filter((id) => id === 'menu-watch')).toHaveLength(1);
+      expect(ids.indexOf('menu-gridfs')).toBeLessThan(ids.indexOf('menu-watch'));
+
+      await click(must('menu-gridfs'));
+      await menu(node('db', 'shop'));
+      await click(must('menu-watch'));
+      const ws = TestBed.inject(WorkspaceService);
+      expect(ws.tabs().map((t) => [t.id, t.kind])).toEqual([
+        ['gridfs:p1:shop', 'gridfs'],
+        ['watch:p1:shop', 'watch'],
+      ]);
+      expect(ws.active()?.id).toBe('watch:p1:shop');
+    });
+
     it('opens the collection watch tab from the collection menu', async () => {
       await start();
       await openShop();
