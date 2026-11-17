@@ -14,6 +14,10 @@
     "coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@mongosh/browser-runtime-core": "5.11.9",
+    "@mongosh/service-provider-node-driver": "5.6.9",
+    "@mongosh/shell-api": "5.9.9",
+    "@mongosh/shell-evaluator": "5.9.9",
     "@thicket/contract": "0.0.0",
     "@thicket/core": "0.0.0",
     "mongodb": "^7.9.0",

@@ -15,7 +15,9 @@ const common = {
   format: 'cjs',
   target: 'node24',
   sourcemap: 'linked',
-  external: ['electron'],
+  // Native modules stay out of the bundles (optional driver dependencies, docs/mongosh.md
+  // "Packaging impact"): without them GSSAPI and client-side encryption are unavailable.
+  external: ['electron', 'kerberos', 'mongodb-client-encryption'],
   logLevel: 'info',
 };
 
@@ -31,6 +33,18 @@ const entries = [
   {
     entryPoints: [resolve(root, '../../packages/backend/src/server/entry.ts')],
     outfile: resolve(root, 'dist/backend.cjs'),
+  },
+  {
+    // One worker_thread per mongosh console, started by the backend (docs/mongosh.md).
+    entryPoints: [resolve(root, '../../packages/backend/src/shell/worker.ts')],
+    outfile: resolve(root, 'dist/shell-worker.cjs'),
+    external: [
+      ...common.external,
+      // Lazy optional requires esbuild can't resolve (docs/mongosh.md "Packaging impact"):
+      // TypeScript input in the async rewriter, PAC proxy support.
+      '@babel/preset-typescript/package.json',
+      'pac-proxy-agent',
+    ],
   },
 ];
 
