@@ -16,3 +16,4 @@ In the table view, select rows and set/unset one field for all; saved as one bat
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-17 06:44+0100 by dell26/agent-1): One batch = one WriteGuard.approveAll() confirm (always asked, also on non-production profiles, showing the document count and the first 10 updateOne operations) followed by one conflict-checked docs.update per document, sent sequentially; no new backend method (a conflict on one document must not block the others, and docs.update already does the per-document conflict filter).
