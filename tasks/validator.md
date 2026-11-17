@@ -17,3 +17,4 @@ View/edit `$jsonSchema` validator, validation level and action; mark documents i
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 04:35+0100 by dell26/agent-1): Added contract method coll.validator.check (ids + optional draft validator -> failing _ids) as the 'check method'; the server evaluates it with {_id:{$in}, $nor:[validator]}, not Ajv.
+- ASSUMPTION (2026-11-17 04:35+0100 by dell26/agent-1): Failing documents are marked in the Documents (list) view with a tag and red edge; the table view only shows a summary line with a link to the list view (explorer rows have no per-row marker hook).
