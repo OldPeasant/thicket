@@ -1,0 +1,7 @@
+// Fixture of test/e2e/shell.e2e.ts ("run a script file"): inserts 3 documents and prints progress.
+const scripted = db.getSiblingDB('shell_scripts_e2e').getCollection('scripted');
+for (let i = 1; i <= 3; i++) {
+  scripted.insertOne({ n: i, source: 'script' });
+  print(`inserted ${i}`);
+}
+print(`count: ${scripted.countDocuments()}`);

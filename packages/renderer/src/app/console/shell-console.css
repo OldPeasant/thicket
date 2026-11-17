@@ -163,6 +163,29 @@ pre {
   font-family: var(--font-ui);
 }
 
+/* Script runs: the file name stands in for the code. */
+.script {
+  color: var(--text);
+}
+
+.script-kind {
+  padding: 0 0.3rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  font-family: var(--font-ui);
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+
+.script-lines {
+  color: var(--text-faint);
+}
+
+/* The script chooser is opened by the "Run script…" button. */
+.file-input {
+  display: none;
+}
+
 /* Lost or failed session: between the transcript and the input, always in view. */
 .failed {
   display: flex;

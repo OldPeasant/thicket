@@ -26,6 +26,26 @@
           Plain text
         </button>
       </div>
+      <button
+        type="button"
+        class="btn"
+        data-testid="shell-run-script"
+        title="Run a .js or .mongodb file in this session"
+        [disabled]="!canRunScript()"
+        (click)="chooseScript()"
+      >
+        Run script…
+      </button>
+      <input
+        #scriptInput
+        type="file"
+        class="file-input"
+        tabindex="-1"
+        aria-hidden="true"
+        data-testid="shell-script-file"
+        [accept]="scriptAccept"
+        (change)="onScriptChosen($event)"
+      />
       <button type="button" class="btn quiet" data-testid="shell-clear" (click)="clear()">
         Clear
       </button>
@@ -48,7 +68,16 @@
       <article class="run" data-testid="shell-run" [attr.data-state]="run.state">
         <div class="line in">
           <span class="prompt">{{ run.prompt }}</span>
-          <pre class="code">{{ run.code }}</pre>
+          @if (run.script; as script) {
+            <span class="script" data-testid="shell-script-name">
+              <span class="script-kind">script</span> {{ script.name }}
+              <span class="script-lines"
+                >· {{ script.lines }} {{ script.lines === 1 ? 'line' : 'lines' }}</span
+              >
+            </span>
+          } @else {
+            <pre class="code">{{ run.code }}</pre>
+          }
         </div>
         @for (out of run.outputs; track $index) {
           @switch (out.kind) {
@@ -73,7 +102,14 @@
           }
         }
         @if (run.state === 'running') {
-          <p class="status" data-testid="shell-running">Running…</p>
+          <p class="status" data-testid="shell-running">
+            @if (run.script; as script) {
+              Running {{ script.name }}… {{ run.outputs.length }}
+              {{ run.outputs.length === 1 ? 'output' : 'outputs' }} so far
+            } @else {
+              Running…
+            }
+          </p>
         } @else if (run.state === 'stopped') {
           <p class="status" data-testid="shell-stopped">Stopped</p>
         }
@@ -81,6 +117,11 @@
     }
   </div>
 
+  @if (scriptProblem()) {
+    <div class="failed" role="alert" data-testid="shell-script-problem">
+      <span>{{ scriptProblem() }}</span>
+    </div>
+  }
   <!-- Outside the scrolling transcript, so the way back stays in view after a lost session. -->
   @if (failure(); as message) {
     <div class="failed" role="alert" data-testid="shell-failed">

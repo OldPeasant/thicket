@@ -28,6 +28,7 @@ import {
   onFirstLine,
   onLastLine,
 } from './console-input';
+import { readScriptFile, SCRIPT_ACCEPT } from './scripts/script-file';
 import { ShellResult } from './shell-result';
 
 /** `data` of a shell tab. */
@@ -62,6 +63,8 @@ export interface Run {
   readonly code: string;
   readonly outputs: readonly ShownOutput[];
   readonly state: 'running' | 'done' | 'stopped';
+  /** Set when the run is a script file: its name and length (`code` is the script's text). */
+  readonly script?: { readonly name: string; readonly lines: number };
 }
 
 type Session =
@@ -98,7 +101,8 @@ const ANNOUNCE_LIMIT = 200;
  * can be large document grids), plus the first error, which a user must not miss.
  */
 export function announce(run: Run): string {
-  if (run.state === 'stopped') return 'Run stopped';
+  if (run.state === 'stopped')
+    return run.script ? `Script ${run.script.name} stopped` : 'Run stopped';
   const error = run.outputs.find((o) => o.kind === 'error');
   if (error) {
     const text =
@@ -106,6 +110,7 @@ export function announce(run: Run): string {
     return `Run failed: ${text}`;
   }
   const result = run.outputs.find((o) => o.kind === 'result');
+  if (run.script) return `Script ${run.script.name} finished`;
   return result?.type ? `Run finished: ${result.type}` : 'Run finished';
 }
 
@@ -136,6 +141,11 @@ export class ShellConsole {
   private readonly destroyRef = inject(DestroyRef);
   private readonly inputEl = viewChild<ElementRef<HTMLTextAreaElement>>('input');
   private readonly transcriptEl = viewChild<ElementRef<HTMLElement>>('transcript');
+  private readonly scriptInputEl = viewChild<ElementRef<HTMLInputElement>>('scriptInput');
+
+  protected readonly scriptAccept = SCRIPT_ACCEPT;
+  /** Why the last chosen script file was not run (cleared by the next choice or run). */
+  readonly scriptProblem = signal('');
 
   protected readonly uid = `shell-console-${++nextUid}`;
 
@@ -172,6 +182,9 @@ export class ShellConsole {
   protected readonly prompt = computed(() => `${this.db() || '…'}>`);
   protected readonly canRun = computed(
     () => this.session().state === 'open' && !this.running() && this.code().trim() !== '',
+  );
+  protected readonly canRunScript = computed(
+    () => this.session().state === 'open' && !this.running(),
   );
 
   readonly history = new ConsoleHistory();
@@ -243,13 +256,57 @@ export class ShellConsole {
     this.closeCompletions();
     this.history.add(code);
     this.code.set('');
+    this.scriptProblem.set('');
+    this.evaluate(session.sessionId, code);
+  }
+
+  /** Opens the file chooser for a script file. */
+  chooseScript(): void {
+    if (!this.canRunScript()) return;
+    this.scriptInputEl()?.nativeElement.click();
+  }
+
+  protected onScriptChosen(event: Event): void {
+    const el = event.target as HTMLInputElement;
+    const file = el.files?.[0];
+    // The same file can be chosen again (and run again) next time.
+    el.value = '';
+    if (file) void this.runScript(file);
+  }
+
+  /**
+   * Runs a script file in the session, like typed input: in the current database, with the
+   * session's variables. The transcript shows the file's name and length instead of its text;
+   * its output streams in as it runs. Not added to the input history.
+   */
+  async runScript(file: { name: string; size: number; text(): Promise<string> }): Promise<void> {
+    this.scriptProblem.set('');
+    let script;
+    try {
+      script = await readScriptFile(file);
+    } catch (error) {
+      this.scriptProblem.set(error instanceof Error ? error.message : String(error));
+      return;
+    }
+    const session = this.session();
+    if (this.closed || session.state !== 'open' || this.running()) return;
+    this.closeCompletions();
+    this.evaluate(session.sessionId, script.code, { name: script.name, lines: script.lines });
+    this.focusInput();
+  }
+
+  private evaluate(sessionId: string, code: string, script?: Run['script']): void {
     const id = this.nextRunId++;
-    this.runs.update((runs) =>
-      [...runs, { id, prompt: this.prompt(), code, outputs: [], state: 'running' as const }].slice(
-        -TRANSCRIPT_LIMIT,
-      ),
-    );
-    this.evalSub = this.api.stream('shell.eval', { sessionId: session.sessionId, code }).subscribe({
+    const run: Run = {
+      id,
+      prompt: this.prompt(),
+      code,
+      outputs: [],
+      state: 'running',
+      ...(script ? { script } : {}),
+    };
+    this.runs.update((runs) => [...runs, run].slice(-TRANSCRIPT_LIMIT));
+    this.evalSub = this.api.stream('shell.eval', { sessionId, code }).subscribe({
       next: (output) => {
         if (output.kind === 'db') this.db.set(output.db);
         const shown = showOutput(output);

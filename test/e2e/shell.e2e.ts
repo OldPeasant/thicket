@@ -1,5 +1,6 @@
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Locator, Page } from '@playwright/test';
 import { MongoClient } from 'mongodb';
 
@@ -135,4 +136,56 @@ test('a read-only profile opens the shell with a warning', async ({ window, mong
   const console = await openShell(window, 'ReadOnly', 'db');
   await expect(console.getByTestId('shell-readonly-banner')).toContainText('Read-only connection');
   await expect(console).not.toHaveClass(/production/);
+});
+
+test('run a script file in the shell: its output shows and its documents are written', async ({
+  window,
+  mongo,
+}) => {
+  test.setTimeout(120_000);
+  const scriptDb = 'shell_scripts_e2e';
+  const client = new MongoClient(mongo.uri, { serverSelectionTimeoutMS: 10_000 });
+  try {
+    await client
+      .db(scriptDb)
+      .dropDatabase()
+      .catch(() => undefined);
+    await saveProfile(window, 'Scripts', mongo.uri, { readOnly: false, production: false });
+    const console = await openShell(window, 'Scripts', 'conn');
+
+    // "Run script…" opens the file chooser; the test picks the fixture file in it.
+    const chooser = window.waitForEvent('filechooser');
+    await console.getByTestId('shell-run-script').click();
+    await (
+      await chooser
+    ).setFiles(fileURLToPath(new URL('fixtures/insert-three.mongodb', import.meta.url)));
+
+    const run = console.getByTestId('shell-run').last();
+    await expect(run.getByTestId('shell-script-name')).toContainText('insert-three.mongodb');
+    await expect(run).toHaveAttribute('data-state', 'done', { timeout: 30_000 });
+    await expect(run.getByTestId('shell-print')).toHaveText([
+      'inserted 1',
+      'inserted 2',
+      'inserted 3',
+      'count: 3',
+    ]);
+    await expect(run.getByTestId('shell-error')).toHaveCount(0);
+    await expect(console.getByTestId('shell-announce')).toHaveText(
+      'Script insert-three.mongodb finished',
+    );
+
+    const docs = await client
+      .db(scriptDb)
+      .collection('scripted')
+      .find({}, { projection: { _id: 0 } })
+      .sort({ n: 1 })
+      .toArray();
+    expect(docs).toEqual([
+      { n: 1, source: 'script' },
+      { n: 2, source: 'script' },
+      { n: 3, source: 'script' },
+    ]);
+  } finally {
+    await client.close();
+  }
 });
