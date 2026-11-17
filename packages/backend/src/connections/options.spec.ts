@@ -325,6 +325,19 @@ describe('clientConfig', () => {
       ).toEqual(['*.corp.example']);
     });
 
+    it('a trusted mongodb+srv name is lower-cased like plain hosts', () => {
+      expect(
+        oidc('mongodb+srv://Cluster0.CORP.Example.test/', true).options.authMechanismProperties
+          ?.ALLOWED_HOSTS,
+      ).toEqual(['*.corp.example.test']);
+    });
+
+    it('an unparseable connection string keeps the driver default (the driver reports it)', () => {
+      const { options } = oidc('not a connection string', true);
+      expect(options.authMechanismProperties).not.toHaveProperty('ALLOWED_HOSTS');
+      expect(options.authMechanismProperties?.OIDC_HUMAN_CALLBACK).toBe(callback);
+    });
+
     it('the driver accepts the option', () => {
       const { uri, options } = oidc('mongodb://db.corp.example.test:27017', true);
       const client = new MongoClient(uri, options);

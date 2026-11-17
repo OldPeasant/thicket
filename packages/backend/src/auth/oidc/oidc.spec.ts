@@ -261,6 +261,20 @@ describe('OidcAuthenticator: interactive sign-in', () => {
     expect(h.env.saveTokens).not.toHaveBeenCalled();
   });
 
+  it('a cancel that races another failure answers CANCELLED, not the failure', async () => {
+    const h = harness();
+    const abort = new AbortController();
+    // The user cancels while main is still trying to open the browser, which then fails.
+    h.env.openBrowser.mockImplementation(() => {
+      abort.abort();
+      return Promise.reject(new Error('no display'));
+    });
+    const error = await rejection(signIn(h, target({ signal: abort.signal, flow: 'authCode' })));
+    expect(error.code).toBe('CANCELLED');
+    expect(h.prompts.at(-1)).toMatchObject({ kind: 'finished', ok: false });
+    expect(idp.to('/token')).toEqual([]);
+  });
+
   it("the driver's timeout also ends a waiting sign-in as CANCELLED", async () => {
     const h = harness('waits');
     const timeout = new AbortController();
@@ -477,6 +491,45 @@ describe('OidcAuthenticator: token cache', () => {
     await signIn(h, draft);
     await expect(h.auth.refused(draft)).resolves.toBe(false);
     expect(h.env.saveTokens).not.toHaveBeenCalled();
+  });
+
+  it('tokens from an interactive sign-in the server refused are forgotten too, once per connect', async () => {
+    const h = harness();
+    const first = target();
+    await signIn(h, first);
+    expect(h.env.openBrowser).toHaveBeenCalledTimes(1);
+    await expect(h.auth.refused(first)).resolves.toBe(true);
+    // The same failed connect reported twice forgets only once.
+    await expect(h.auth.refused(first)).resolves.toBe(false);
+    expect(h.env.saveTokens.mock.calls.filter(([, tokens]) => tokens === null)).toEqual([
+      ['p1', null],
+    ]);
+    // Without forgetting, the next connect would refresh rt-browser; it opens the browser instead.
+    await signIn(h, target());
+    expect(h.env.openBrowser).toHaveBeenCalledTimes(2);
+    expect(grants()).toEqual(['authorization_code', 'authorization_code']);
+    await Promise.all(h.browsing);
+  });
+
+  it("a refusal forgets only that profile's tokens", async () => {
+    const h = harness();
+    const one = target();
+    await signIn(h, one);
+    await signIn(h, target({ profileId: 'p2' }));
+    await h.auth.refused(one);
+    expect(h.env.saveTokens).toHaveBeenLastCalledWith('p1', null);
+    // p2 still refreshes silently; p1 signs in in the browser again.
+    await signIn(h, target({ profileId: 'p2' }));
+    expect(h.env.openBrowser).toHaveBeenCalledTimes(2);
+    await signIn(h, one);
+    expect(h.env.openBrowser).toHaveBeenCalledTimes(3);
+    expect(grants()).toEqual([
+      'authorization_code',
+      'authorization_code',
+      'refresh_token',
+      'authorization_code',
+    ]);
+    await Promise.all(h.browsing);
   });
 
   it('log lines never contain tokens', async () => {

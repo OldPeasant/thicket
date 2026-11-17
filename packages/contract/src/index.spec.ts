@@ -813,6 +813,24 @@ describe('profile connection options (task x509-proxy)', () => {
     expect(ok({ tls: { ...tls, keyFile: '' } })).toBe(false);
   });
 
+  it('MONGODB-OIDC options: oidcFlow is auto/authCode/deviceCode, oidcTrustedEndpoint a boolean (task oidc-auth)', () => {
+    const auth = { mechanism: 'MONGODB-OIDC', secretMode: 'none' };
+    expect(ok({ auth })).toBe(true);
+    for (const oidcFlow of ['auto', 'authCode', 'deviceCode']) {
+      expect(ok({ auth: { ...auth, oidcFlow } })).toBe(true);
+    }
+    for (const oidcFlow of ['', 'device', 'implicit', 1, null]) {
+      expect(ok({ auth: { ...auth, oidcFlow } })).toBe(false);
+    }
+    expect(ok({ auth: { ...auth, oidcTrustedEndpoint: true } })).toBe(true);
+    expect(ok({ auth: { ...auth, oidcTrustedEndpoint: false, oidcFlow: 'authCode' } })).toBe(true);
+    for (const oidcTrustedEndpoint of ['true', 1, null]) {
+      expect(ok({ auth: { ...auth, oidcTrustedEndpoint } })).toBe(false);
+    }
+    // The auth object stays strict: no token or IdP secret fields in the profile.
+    expect(ok({ auth: { ...auth, accessToken: 'fictitious-at' } })).toBe(false);
+  });
+
   it('a MONGODB-X509 profile with a client certificate validates', () => {
     expect(
       ok({
