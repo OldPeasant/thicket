@@ -16,7 +16,8 @@ partial only because of a projection still offers the button, and clicking it is
 ## Acceptance criteria
 - [x] The view and `DocumentActions` use one rule for whether a deleted document can be inserted again (e.g. `canReinsert(key)` or a `resolveBlocker` result for deleted documents); the rule lives in the service only
   - verified (2026-11-17 06:27+0100 by dell26/agent-2): Code review of git diff 2e1f1933..fe0d5bc4: DocumentActions.reinsertBlocker(key) is the only rule for re-inserting a deleted document; both resolveWith (refusal) and ConflictView.item() (blocked for deleted docs) call it, and the view's own cut check was removed. Unit tests: (cd packages/renderer && npx ng test --include src/app/document/document-actions.service.spec.ts --include src/app/document/conflict/conflict-view.spec.ts) -> 162 passed
-- [ ] A document deleted on the server that was loaded with a projection (active or since cleared) does not offer "Insert your version again" and shows a note saying why (component test)
+- [x] A document deleted on the server that was loaded with a projection (active or since cleared) does not offer "Insert your version again" and shows a note saying why (component test)
+  - verified (2026-11-17 06:27+0100 by dell26/agent-2): Component tests in conflict-view.spec.ts. Deleted doc with projection active, and with projection cleared since: no conflict-overwrite button, one conflict-note 'Inserting your version again is not available...', overwrite refused with no docs.insert. Whole doc without projection: still offers the button. (cd packages/renderer && npx ng test --include src/app/document --include src/app/collection) -> 14 files, 551 passed
 
 ## Notes
 See conflict-partial-docs, SPEC.md "Conflict detection".
