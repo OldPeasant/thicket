@@ -1,11 +1,11 @@
 ---
 title: M1 (Should): Undo last save
-status: in_progress
+status: done
 owner: felix/agent-2
 deps: [doc-edit-save]
 touches: [packages/renderer/src/app/document/history]
 prio: 3
-lease_until: 2026-11-17T08:06:50Z
+lease_until: 
 extended: felix/agent-2
 ---
 ## Goal
@@ -29,3 +29,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 08:22+0100 by felix/agent-2): Table multi-edit saves (multi-edit.service) are not tracked by Undo last save and do not drop an earlier single-document undo entry; undoing it afterwards writes only the earlier save's fields with their conflict check, so nothing of the multi-edit is lost (review CR-1, P3). Wiring multi-edit into SaveHistory would touch the collection/multi-edit code outside this task's scope.
 - ASSUMPTION (2026-11-17 08:37+0100 by felix/agent-2): Undo of a document with repeated top-level field names, when it would have to be a whole-document replace, is refused ('Not undone: ... repeated field names ...'), because the whole-document conflict check can't express repeated keys; a minimal update undo is still sent (round-3 TW-1).
 - ASSUMPTION (2026-11-17 08:43+0100 by felix/agent-2): Correction to the repeated-keys assumption: core's diff always produces a replace for a document with repeated top-level keys, so every undo of such a document is refused; the 'minimal update undo is still sent' branch is unreachable (round-4 review CR-1, P3, comment left as is).
+- done by felix/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 105s on e3fc9089c; criteria verified 2/2
