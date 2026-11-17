@@ -5,7 +5,7 @@ owner: dell26/agent-1
 deps: [io-basic-backend,collection-view,safety-ui]
 touches: [packages/renderer/src/app/io]
 prio: 2
-lease_until: 2026-11-17T01:18:30Z
+lease_until: 2026-11-17T01:23:29Z
 ---
 ## Goal
 Export current query results (JSON/JSONL, relaxed/canonical) and import a JSON/JSONL file with preview, options and progress.
