@@ -124,8 +124,11 @@
   vertical-align: top;
 }
 
-/* Numbers, ObjectIds, dates, UUIDs…: never broken mid-value. */
+/* Numbers, ObjectIds, dates, UUIDs…: never broken mid-value. No 60ch cap
+   either, so a long one (a DBPointer with a long namespace) widens its column
+   instead of spilling into the next cell. */
 .val.bson.scalar {
+  max-width: none;
   white-space: nowrap;
   overflow-wrap: normal;
 }

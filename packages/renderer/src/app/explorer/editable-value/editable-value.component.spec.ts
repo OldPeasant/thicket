@@ -232,6 +232,16 @@ describe('EditableValueComponent scalar values never wrap mid-value', () => {
     const style = getComputedStyle(val as HTMLElement);
     expect(style.whiteSpace).toBe('nowrap');
     expect(style.overflowWrap).toBe('normal');
+    // No 60ch cap: a value that cannot wrap must widen its box, not overflow it.
+    expect(style.maxWidth).toBe('none');
+  });
+
+  it('a DBPointer with a long namespace has no max-width, so it cannot overflow its box', async () => {
+    const ref = 'very_long_database_name.a_really_long_collection_name_here';
+    const { val } = await render(new BsonLeaf({ type: 'dbPointer', ref, hex: 'a'.repeat(24) }));
+    expect(val?.textContent?.length).toBeGreaterThan(60);
+    expect(val?.classList.contains('scalar')).toBe(true);
+    expect(getComputedStyle(val as HTMLElement).maxWidth).toBe('none');
   });
 
   it.each(wrapping)('%s is not scalar and may still wrap', async (_name, bson) => {
@@ -242,6 +252,9 @@ describe('EditableValueComponent scalar values never wrap mid-value', () => {
     const style = getComputedStyle(val as HTMLElement);
     expect(style.whiteSpace).toBe('pre-wrap');
     expect(style.overflowWrap).toBe('anywhere');
+    // Values that may wrap keep the 60ch cap (computed in px by the browser).
+    expect(style.maxWidth).not.toBe('none');
+    expect(parseFloat(style.maxWidth)).toBeGreaterThan(0);
   });
 
   it('binary is scalar exactly when its badge says UUID', async () => {
