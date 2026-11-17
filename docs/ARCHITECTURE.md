@@ -272,10 +272,17 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   (+ `proxyUsername` and the `proxyPassword` secret; a user without a stored password is
   `AUTH_FAILED`) through the `socks` package (a backend dependency the driver loads lazily).
   `readPreferenceTags` (contract: tag sets as `{ name, value }` pairs, no free-form records) and
-  `writeConcern` (`w`, `journal`, `wtimeoutMS`) become the client's defaults: driver helpers
-  (`find`, `insertOne`, ...) and commands given `client.readPreference` follow them, but raw
-  `db.command()`s (docs/browse `Operation`s) still run on the primary without the write concern
-  (task `raw-cmd-read-pref`).
+  `writeConcern` (`w`, `journal`, `wtimeoutMS`) become the client's defaults. Raw `db.command()`s
+  ignore those defaults, so the backend applies them itself (task `raw-cmd-read-pref`,
+  `browse.ts`): reads pass `db.readPreference` (`readOptions`); cursor commands (docs/agg/io
+  `Operation.open`, browse `runCursor`) run as driver cursors (`ReadCursor`,
+  `db.runCursorCommand`, `raw: true`) so `getMore`/`killCursors` go to the server that opened
+  the cursor; a cancel's `currentOp`/`killOp` use the same read preference. Document writes
+  (`Operation.write`: docs.insert/update/delete, io.import) run on the primary with the write
+  concern as the command's `writeConcern` field (`withWriteConcern`); a write concern error
+  answers `SERVER_ERROR` "applied but not acknowledged". Reads that belong to a write (preview,
+  expected count, conflict detail) use the primary. Schema, index and user/role commands stay on
+  the primary without the write concern.
   `toConnectError()` classifies driver errors by walking `cause`, `errors` and the server
   selection `reason`: `AUTH_FAILED` > `TLS_ERROR` > `DNS_ERROR` > `NETWORK_ERROR` > `TIMEOUT` >
   `SERVER_ERROR` (`ERR_OSSL_*`, e.g. a wrong key passphrase, is TLS; the server's `UserNotFound`
