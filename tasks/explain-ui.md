@@ -1,11 +1,11 @@
 ---
 title: M3: Explain plan viewer
-status: in_progress
+status: done
 owner: felix/agent-2
 deps: [agg-ui]
 touches: [packages/renderer/src/app/explain,packages/renderer/src/app/collection/explain-button,packages/renderer/src/app/aggregation/explain-button]
 prio: 2
-lease_until: 2026-11-17T03:59:30Z
+lease_until: 
 ---
 ## Goal
 Explain button on the query bar and the pipeline builder; tree of stages with keys/docs examined, time, index used; raw explain output in the document viewer.
@@ -22,3 +22,4 @@ Explain button on the query bar and the pipeline builder; tree of stages with ke
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 04:07+0100 by felix/agent-2): e2e demo step 9 creates the index through the backend's idx.create over the bridge, not through the Indexes tab UI: that tab is task index-ui (not done yet); the Explain part of step 9 runs through the real UI
 - ASSUMPTION (2026-11-17 04:18+0100 by felix/agent-2): Query-bar Explain explains the query as typed (filter, projection, sort, collation, limit), not the paged read Run sends (extra _id tie-break sort, page-size limit): the user asks how their query runs, and the paging details would change the plan shown for a sort
+- done by felix/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 83s on b739b5e39; criteria verified 2/2
