@@ -76,14 +76,15 @@ export async function startLocalSocks(
     close() {
       // Resolve only once the server and every accepted socket have emitted `close`. The server's
       // own close callback can run before the sockets' `close` events (it does on Windows and
-      // macOS), which left them counted in `openSockets()` after `close()` had resolved.
+      // macOS), which left them counted in `openSockets()` after `close()` had resolved. A socket
+      // still in the set has not emitted `close` yet (`socket.closed` turns true earlier, when
+      // destroy() runs), so always wait for the event.
       closing ??= Promise.all([
         new Promise<void>((resolve) => server.close(() => resolve())),
         ...[...sockets].map(
           (socket) =>
             new Promise<void>((resolve) => {
-              if (socket.closed) resolve();
-              else socket.once('close', () => resolve());
+              socket.once('close', () => resolve());
               socket.destroy();
             }),
         ),
