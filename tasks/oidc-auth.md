@@ -11,7 +11,8 @@ lease_until: 2026-11-17T03:50:04Z
 MONGODB-OIDC with authorization code flow in the system browser (main opens the URL, loopback redirect) and device flow fallback; tokens cached in the keychain and refreshed.
 
 ## Acceptance criteria
-- [ ] Integration test with MongoDB Enterprise + Keycloak: automated code flow (headless browser drives Keycloak login) authenticates
+- [x] Integration test with MongoDB Enterprise + Keycloak: automated code flow (headless browser drives Keycloak login) authenticates
+  - verified (2026-11-17 04:31+0100 by felix/agent-1): npm run test:int -- oidc (Podman: MongoDB Enterprise + Keycloak fixture, headless Chromium) on c88f053 merged with main (de208f5) -> 6/6 passed, incl. 'authorization code flow: the browser signs in on Keycloak and the connect succeeds'
 - [ ] Token reuse: second connect does not open the browser (test)
 - [ ] Device flow works (int test)
 
