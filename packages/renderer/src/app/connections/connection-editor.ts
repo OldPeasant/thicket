@@ -340,6 +340,12 @@ export class ConnectionEditor {
     });
   }
 
+  /** The test's latency in whole milliseconds ("< 1" below half a millisecond). */
+  protected latency(ms: number): string {
+    const rounded = Math.round(ms);
+    return rounded < 1 ? '< 1' : String(rounded);
+  }
+
   protected value(event: Event): string {
     return (event.target as HTMLInputElement).value;
   }

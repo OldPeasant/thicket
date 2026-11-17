@@ -1,6 +1,6 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 
-import { StatusService } from './status.service';
+import { StatusService, type StatusConnection } from './status.service';
 
 const STATE_TEXT = {
   connecting: 'Connecting…',
@@ -9,17 +9,21 @@ const STATE_TEXT = {
   error: 'Connection failed',
 } as const;
 
-/** Bottom bar: connection of the active view on the left, running operations on the right. */
+/**
+ * Bottom bar: connection of the active view on the left, running operations on the right. The
+ * shell passes the active tab's connection as `connection`; without one (start page, a tab without
+ * a profile) the bar shows `StatusService.connection()`.
+ */
 @Component({
   selector: 'app-status-bar',
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
-    '[class.production]': 'status.connection()?.production === true',
-    '[class.readonly]': 'status.connection()?.readonly === true',
+    '[class.production]': 'shown()?.production === true',
+    '[class.readonly]': 'shown()?.readonly === true',
   },
   template: `
     <div class="connection" data-testid="status-connection">
-      @if (status.connection(); as conn) {
+      @if (shown(); as conn) {
         <span class="dot" [attr.data-state]="conn.state" aria-hidden="true"></span>
         <span class="name">{{ conn.name }}</span>
         <span class="state">{{ stateText() }}</span>
@@ -166,8 +170,12 @@ const STATE_TEXT = {
 })
 export class StatusBar {
   protected readonly status = inject(StatusService);
+  /** Connection of the active tab; `undefined` falls back to `StatusService.connection()`. */
+  readonly connection = input<StatusConnection | undefined>(undefined);
+  /** The connection the bar shows. */
+  protected readonly shown = computed(() => this.connection() ?? this.status.connection());
   protected readonly stateText = computed(() => {
-    const conn = this.status.connection();
+    const conn = this.shown();
     return conn ? STATE_TEXT[conn.state] : '';
   });
   protected readonly more = computed(() => this.status.operations().length - 1);

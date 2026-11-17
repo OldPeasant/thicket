@@ -322,6 +322,24 @@ describe('ConnectionEditor', () => {
       expect(params.profile.id).toBe('p1');
     });
 
+    it('Test connection shows the latency rounded to whole milliseconds', async () => {
+      fake.respond('conn.test', {
+        latencyMS: 2.1195470000000114,
+        server: { version: '8.2.1', topology: 'standalone', enterprise: false, raw: '{}' },
+      });
+      await start('p1');
+      await click('test-connection');
+      expect(text('test-ok')).toContain('Connected in 2 ms to MongoDB');
+      expect(text('test-ok')).not.toContain('2.11');
+
+      fake.respond('conn.test', {
+        latencyMS: 0.31,
+        server: { version: '8.2.1', topology: 'standalone', enterprise: false, raw: '{}' },
+      });
+      await click('test-connection');
+      expect(text('test-ok')).toContain('Connected in < 1 ms');
+    });
+
     it('a failed test shows the error code, its explanation and the message', async () => {
       fake.fail('conn.test', {
         code: 'AUTH_FAILED',

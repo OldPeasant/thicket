@@ -27,7 +27,7 @@ import { SidebarTreeService } from '../sidebar/sidebar-tree.service';
 import { ConfirmService } from '../safety/confirm.service';
 import { SidebarWidthService } from './sidebar-width.service';
 import { StatusBar } from './status-bar';
-import { StatusService } from './status.service';
+import { StatusService, type StatusConnection } from './status.service';
 import { START_PANEL_DOM_ID, START_TAB_DOM_ID, TabBar, tabDomId, tabPanelDomId } from './tab-bar';
 import { TAB_VIEWS } from './tab-views';
 import { TabPlaceholder } from './tab-placeholder';
@@ -119,7 +119,11 @@ export const SIDEBAR_KEY_STEP = 16;
         }
       </main>
     </div>
-    <app-status-bar class="status" [attr.inert]="modal() ? '' : null" />
+    <app-status-bar
+      class="status"
+      [connection]="tabConnection()"
+      [attr.inert]="modal() ? '' : null"
+    />
     <app-confirm-dialog />
     <app-host-key-dialog />
     <app-oidc-sign-in [attr.inert]="modal() ? '' : null" />
@@ -159,6 +163,25 @@ export class AppShell {
   protected readonly production = computed(() => {
     const tab = this.workspace.active();
     return tab ? tab.production === true : this.status.connection()?.production === true;
+  });
+
+  /**
+   * Connection of the active tab when it belongs to a known profile (`data.profileId`): its name,
+   * live state and flags, shown in the status bar. `undefined` otherwise (start page, tabs without
+   * a profile), so the status bar shows `StatusService.connection()`.
+   */
+  protected readonly tabConnection = computed((): StatusConnection | undefined => {
+    const tab = this.workspace.active();
+    const profileId = tab?.data?.['profileId'];
+    if (!tab || typeof profileId !== 'string') return undefined;
+    const profile = this.sidebarTree.profile(profileId);
+    if (!profile) return undefined;
+    return {
+      name: profile.name,
+      state: this.sidebarTree.conn(profileId).state,
+      production: tab.production ?? profile.production,
+      readonly: profile.readOnly,
+    };
   });
 
   private drag: { pointerId: number; startX: number; startWidth: number } | null = null;

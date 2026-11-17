@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter, withHashLocation } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
-import { BROADCAST_STREAMS, type Settings } from '@thicket/contract';
+import { BROADCAST_STREAMS, type Profile, type Settings } from '@thicket/contract';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
@@ -1025,6 +1025,58 @@ describe('AppShell', () => {
       first.done();
       await settle();
       expect(ops().trim()).toBe('');
+    });
+
+    it("shows the active collection tab's connection and follows its state", async () => {
+      const shop: Profile = {
+        id: 'p1',
+        name: 'Shop',
+        connectionString: 'mongodb://localhost:27017',
+        readOnly: true,
+        production: true,
+      };
+      fake.respond('profiles.list', { profiles: [shop] });
+      fake.respond('conn.status', { connections: [{ profileId: 'p1', state: 'connected' }] });
+      await start();
+      await settle();
+      const conn = () => el.querySelector('[data-testid="status-connection"]')?.textContent ?? '';
+      const bar = () => must(el.querySelector<HTMLElement>('app-status-bar'));
+      expect(conn()).toContain('No connection');
+
+      ws.open(
+        tab('collection:p1:shop.orders', {
+          production: true,
+          data: { profileId: 'p1', db: 'shop', coll: 'orders', type: 'collection' },
+        }),
+      );
+      await settle();
+      expect(conn()).toContain('Shop');
+      expect(conn()).toContain('Connected');
+      expect(conn()).toContain('Production');
+      expect(conn()).toContain('Read-only');
+      expect(conn()).not.toContain('No connection');
+      expect(bar().classList).toContain('production');
+
+      fake.emit({
+        stream: BROADCAST_STREAMS.connStatus,
+        kind: 'data',
+        payload: { profileId: 'p1', state: 'disconnected' },
+      });
+      await settle();
+      expect(conn()).toContain('Shop');
+      expect(conn()).toContain('Disconnected');
+
+      // A tab without a known profile and the start page show the status service's connection.
+      ws.open(tab('plain'));
+      await settle();
+      expect(conn()).toContain('No connection');
+      ws.activate('collection:p1:shop.orders');
+      await settle();
+      expect(conn()).toContain('Shop');
+      ws.showHome();
+      await settle();
+      expect(conn()).toContain('No connection');
+      expect(bar().classList).not.toContain('production');
     });
   });
 

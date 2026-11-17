@@ -106,7 +106,7 @@
             @if (test(); as t) {
               @if (t.status === 'ok') {
                 <p class="result ok" data-testid="test-ok">
-                  Connected in {{ t.result.latencyMS }} ms to MongoDB
+                  Connected in {{ latency(t.result.latencyMS) }} ms to MongoDB
                   {{ t.result.server.version }} ({{ t.result.server.topology }}).
                 </p>
               }
