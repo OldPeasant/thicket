@@ -1,10 +1,11 @@
 ---
 title: M4: mongosh host in the backend
-status: todo
-owner:
+status: in_progress
+owner: dell26/agent-1
 deps: [mongosh-spike,conn-manager]
 touches: [packages/backend/src/shell]
 prio: 2
+lease_until: 2026-11-17T01:59:05Z
 ---
 ## Goal
 shell.open/eval/complete/close per connection following docs/mongosh.md; output streamed as typed events (documents as EJSON, text, errors); interrupt; one runtime per shell tab.
