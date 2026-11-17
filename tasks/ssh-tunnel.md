@@ -5,7 +5,7 @@ owner: dell26/agent-2
 deps: [conn-manager]
 touches: [packages/backend/src/ssh,test/integration/fixtures/ssh]
 prio: 2
-lease_until: 2026-11-17T02:20:48Z
+lease_until: 2026-11-17T02:22:44Z
 extended: 
 releases: 1
 ---
