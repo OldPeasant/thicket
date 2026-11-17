@@ -672,9 +672,16 @@ test('release demo, steps 2–11, against the AppImage', async ({
     await input.fill(`use ${DB}`);
     await input.press('Enter');
     await expect(console.getByTestId('shell-prompt')).toHaveText(`${DB}>`, { timeout: 30_000 });
+    const runs = console.getByTestId('shell-run');
+    await expect(runs).toHaveCount(1);
+    await expect(runs.first()).toHaveAttribute('data-state', /^(?!running$)/);
+    await expect(runs.first()).toContainText(`switched to db ${DB}`);
+    // The console ignores Enter while the previous input still runs: wait until it is idle.
+    await expect(console.getByTestId('shell-running')).toHaveCount(0);
     await input.fill('db.orders.countDocuments()');
     await input.press('Enter');
-    const run = console.getByTestId('shell-run').last();
+    await expect(runs).toHaveCount(2);
+    const run = runs.last();
     await expect(run.getByTestId('shell-result')).toHaveText(String(expected), {
       timeout: 30_000,
     });
