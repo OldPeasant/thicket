@@ -4,22 +4,33 @@ Date: 2026-11-17
 
 Task: auth-ui-m5 - M5: Connection editor for LDAP, OIDC and AWS
 
-Scope: `git diff 384a448fa59547d3354caf30d43b3d18da210f3f 23bcfe6 -- packages test` (task code commits b5b55b2, 043e9e6, 23bcfe6; the other commits in the range only touch `tasks/`). `reviews/auth-ui-m5/tests.md` read for context only.
+Scope: second pass, final revision. `git diff 8b692e3ce07275fb58c834d4aefdf019131495fa..4ab26fd -- packages test`: task commits 26237a8, 7c1b2b3, 3a9057b, 9012d45, 4799427 and 4ab26fd. I looked closely at the fixer commit 4799427 (CR-1..CR-3) and the test-writer commit 4ab26fd. `reviews/auth-ui-m5/fixes.md` and `tests.md` were read for context only.
 
 Requirements:
-- `tasks/auth-ui-m5.md` acceptance criteria and the three recorded ASSUMPTION notes
-- `SPEC.md` M5 section and section 6 (Security requirements)
-- `docs/ARCHITECTURE.md`, `AGENTS.md`
-- Contract: `packages/contract/src/profiles.ts` (auth schema, `OIDC_FLOWS`, `SECRET_KINDS`, `profiles.setSecret` / `profiles.clearSecret`), `packages/contract/src/conn.ts` (`oidcPrompt`)
-- Backend semantics: `packages/backend/src/auth/aws/aws.ts`, `packages/backend/src/auth/ldap/ldap.ts`, `packages/backend/src/connections/options.ts` (MONGODB-OIDC branch), `packages/backend/src/connections/manager.ts` (`test`, `secretsFor`, `matchesSaved`)
+- `tasks/auth-ui-m5.md` acceptance criteria and its three recorded ASSUMPTION notes
+- `SPEC.md` (M5, security requirements), `docs/ARCHITECTURE.md`, `AGENTS.md`
+- Findings CR-1..CR-3 of the first review pass
+- The backend behavior the fix relies on: a stored `awsSessionToken` is sent with any access key ID (`packages/backend/src/auth/aws/aws.ts`)
 
 Git range:
 - Branch: main
-- HEAD: 23bcfe6
-- Base/start: 384a448fa59547d3354caf30d43b3d18da210f3f
-- Commits reviewed: 7 (3 touching code/tests, 4 touching only `tasks/`)
+- HEAD: 4ab26fd98360785d0caa32e116c769a7dd74f90f
+- Base/start: 8b692e3ce07275fb58c834d4aefdf019131495fa
+- Commits reviewed: 6 (working tree clean)
 
-Summary: 0 P0, 0 P1, 1 P2, 2 P3
+Summary: 0 P0, 0 P1, 0 P2, 2 P3
+
+## Earlier findings: status
+
+- CR-1 (a stored AWS session token could not be removed): **fixed**.
+    - `toggleRemoveSecret` and `setSecret` mark the token for removal and cancel the mark (`connection-editor.ts:540-573`).
+    - `secretsToRemove` runs before `profiles.save` and covers both an explicit mark and a changed key ID (`connection-editor.ts:913-934`).
+    - `storeSecrets` calls `profiles.clearSecret` first. A failure is reported and the mark is kept for a retry (`pending.removedSecrets`, `connection-editor.ts:849-854, 951-960`).
+    - A profile switch during the removal is guarded (`current()`).
+    - The retry path works after a failed password `setSecret` or `clearSecret`: `state.base` is then the saved profile, so the explicit `removedSecrets` from `pending` carries the removal.
+    - Comparing the key IDs is consistent with the draft: both sides are trimmed (`connection-form.model.ts:589-591`).
+- CR-2 ("1 seconds"): **fixed** at `oidc-sign-in.ts:142`, and the spec asserts the singular.
+- CR-3 (ask hint said "password" for AWS): **fixed** at `connection-editor.html:684-691` (`passwordNoun()`, plus the AWS session-token sentence).
 
 ## P0 Critical
 
@@ -31,35 +42,32 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | A stored AWS session token can never be removed, and the backend keeps sending it with new long-term keys**
-    - File: `packages/renderer/src/app/connections/connection-editor.ts:888` (`storeSecrets`), `packages/renderer/src/app/connections/connection-form.model.ts:91` (`usedSecretKinds`)
-    - Category: Correctness
-    - Problem: `storeSecrets` skips empty values (`if (value === undefined || value === '') continue;`), and the renderer never calls `profiles.clearSecret`. So once an `awsSessionToken` has been saved, clearing the session token field and saving leaves the old token in the keychain. Its doc comment says secrets the settings no longer use are left alone because "the backend ignores them". That is not true for this secret: `awsAuthOptions` (`packages/backend/src/auth/aws/aws.ts`) adds a stored `awsSessionToken` to the credentials whenever an access key ID is set, and `secretsFor` loads it for both saved and matching-draft connects. A user who moves a profile from temporary credentials (key ID, secret and token) to an IAM user's long-term keys, or just replaces an expired set, keeps signing with the stale token, and AWS refuses that. The editor gives no way to fix it short of deleting the profile.
-    - Why it matters: The SPEC M5 "Must" for AWS IAM covers access key, secret and session token. A common credential rotation leaves the profile unable to authenticate, and the cause can't be seen in the UI.
-    - Suggested fix: Give the session token field a way to remove the stored value, for example a "Remove saved token" action or "an emptied field means delete" on save, and call `profiles.clearSecret({ profileId, kind: 'awsSessionToken' })`. It may also make sense to clear it when the access key ID changes. Add a component test for it.
+None.
 
 ## P3 Low
 
-- [ ] **CR-2 | Device-code countdown says "1 seconds"**
-    - File: `packages/renderer/src/app/connections/oidc-sign-in.ts:142`
+- [ ] **CR-4 | A token removed because the key ID changed gets no notice before save**
+    - File: `packages/renderer/src/app/connections/connection-editor.ts:920-932` (auto-removal), `packages/renderer/src/app/connections/connection-editor.html:25-31, 645-649` (placeholder / `aws-token-removed` hint)
     - Category: Quality
-    - Problem: `The code expires in ${String(seconds)} seconds.` is also used when `seconds === 1`, so the panel shows "The code expires in 1 seconds." for the last second before the panel disappears. The test-writer saw the same thing.
-    - Why it matters: A small grammar slip in user-facing text.
-    - Suggested fix: Use the singular form for 1 (`second`/`seconds`) and add a spec assertion.
+    - Problem: `secretsToRemove` adds `awsSessionToken` whenever the access key ID differs from the saved one. In the UI, though, `secretRemoved()` only reads `state.removedSecrets`. So after editing the key ID, the token field still shows "Saved; type to replace it" and no "removed on save" hint appears. Then save deletes the stored token without warning. One example: a user corrects a typo in the key ID of a profile whose token is correct. The token is deleted, and the next Test fails for lack of a token. The only sign is that the placeholder changes to "none" after save. The spec test "a changed access key ID removes the stored token on save" (`connection-editor.spec.ts:1749`) asserts the clearSecret call but no UI signal.
+    - Why it matters: A stored credential is deleted for good without the user seeing it coming. The cost is small, because the user can paste the token again.
+    - Suggested fix: Derive one computed "token removed on save" signal from the same rule as `secretsToRemove` (explicit mark, or a changed key ID with no typed token). Use it for the placeholder and the `aws-token-removed` hint, possibly with wording such as "The saved session token belongs to the old access key and is removed on save". Add an assertion to the existing key-change test.
 
-- [ ] **CR-3 | "Ask" hint still says "password" for the AWS secret access key**
-    - File: `packages/renderer/src/app/connections/connection-editor.html:657`
+- [ ] **CR-5 | The "removed on save" hint and placeholder stay after the removal when the user edited during the save**
+    - File: `packages/renderer/src/app/connections/connection-editor.ts:556-558, 891-893`
     - Category: Quality
-    - Problem: The storage legend now uses `passwordLabel()` ("Secret access key storage"), but the `ask-hint` below it still says "The password above is used for Test connection only and is not stored." For MONGODB-AWS there is no field called password: the field above is "Secret access key", and the session token right next to it *is* stored on save.
-    - Why it matters: The wording is inconsistent, and it could suggest that nothing typed in this group is stored.
-    - Suggested fix: Build the hint from `passwordLabel()`, as the legend does, for example "The secret access key above is used for Test connection only and is not stored."
+    - Problem: `pending` carries `removedSecrets`. If the user edits the form while the save is running, `this.state() === pending` is false, so the state keeps `removedSecrets: ['awsSessionToken']`, even though `storeSecrets` already removed the token from `storedSecrets`. `secretRemoved()` then stays true while `secretSaved()` is false. The remove button disappears, but the hint "The saved session token is removed on save." and the placeholder "Removed on save; type to replace it" still show for a token that no longer exists. The next save makes no extra call, because `secretsToRemove` filters by `stored`, so the problem is only the misleading text.
+    - Why it matters: The UI briefly says something false about a credential. This needs a rare edit during the save.
+    - Suggested fix: Make `secretRemoved(kind)` also require `secretSaved(kind)`, or drop removed kinds from `state.removedSecrets` once `clearSecret` succeeds.
 
 ## Notes (not findings)
 
-- I checked the backend semantics against the UI and they match: LDAP, OIDC and AWS drop `authSource` (the backend forces `$external`). The AWS key ID is kept out of the connection string, because the driver refuses it. The AWS secret is saved as the `password` kind, which `aws.ts` prefers. OIDC saves no secret mode and only non-default `oidcFlow` / `oidcTrustedEndpoint`. The `oidc.prompt` payload is handled for all three kinds.
-- Component tests cover every mechanism's fields and URI sync: the editor spec's "M5" block, the model spec's M5 block, `oidc-sign-in.spec.ts` and the app-shell test. `test/e2e/ldap.e2e.ts` drives the real editor against the LDAP fixture: wrong password gives AUTH_FAILED, then Test ok, save, the stored profile has no password, and the sidebar connects.
-- When this review ran, `python tasks.py verify auth-ui-m5` showed both criteria as unverified. The parent worker still has to record the evidence. `tests.md` reports `npm run test:e2e -- ldap.e2e.ts` passed on Podman (1 passed).
+- I ran `cd packages/renderer && npx ng test --include src/app/connections --include src/app/layout`: 13 files, 466 tests passed on HEAD 4ab26fd.
+- AC1 (component tests for each mechanism's fields and URI sync) is covered by the editor spec's M5 block, the model spec, `oidc-sign-in.spec.ts` and the app-shell test. AC2 (LDAP e2e) is `test/e2e/ldap.e2e.ts`. `tests.md` says it passed against the Podman LDAP fixture. I did not re-run it in this pass.
+- The commit hashes in `tests.md` and `fixes.md` do not match the current history (`git log` shows 4799427 / 4ab26fd). This fits commits rewritten by `tasks.py`; the parent should set `reviewed_revision` to the final hash.
+- I did not inspect evidence recorded with `tasks.py verify`, because the parent asked me not to run `tasks.py`.
+- No secrets in fixtures: the AWS keys and tokens in the specs are fictitious placeholders.
 
 ## Review conclusion
 
-Material issues found; fix before completing the task. CR-1 is a medium-severity correctness gap in AWS session-token handling. CR-2 and CR-3 are small wording fixes.
+No material issues found. CR-1..CR-3 are fixed. The two remaining findings are low-priority UI wording issues and are optional before completing the task.
