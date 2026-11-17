@@ -17,3 +17,4 @@ Explain button on the query bar and the pipeline builder; tree of stages with ke
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 04:07+0100 by felix/agent-2): e2e demo step 9 creates the index through the backend's idx.create over the bridge, not through the Indexes tab UI: that tab is task index-ui (not done yet); the Explain part of step 9 runs through the real UI
+- ASSUMPTION (2026-11-17 04:18+0100 by felix/agent-2): Query-bar Explain explains the query as typed (filter, projection, sort, collation, limit), not the paged read Run sends (extra _id tie-break sort, page-size limit): the user asks how their query runs, and the paging details would change the plan shown for a sort
