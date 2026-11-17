@@ -508,6 +508,275 @@ describe('ImportPanel', () => {
     });
   });
 
+  describe('CSV mapping', () => {
+    const CSV_PREVIEW: ImportPreview = {
+      fileToken: 'tok-csv',
+      fileName: 'stock-sample.csv',
+      sizeBytes: 64,
+      sample: ['{"sku":"A-1","qty":{"$numberInt":"3"}}'],
+      csvColumns: ['sku', 'qty', '', 'sku', 'city'],
+      csvRows: [
+        ['A-1', '3', 'x', 'B-1', 'Springfield'],
+        ['A-2', '5', 'y', 'B-2', 'Shelbyville'],
+      ],
+    };
+    const rows = () => [
+      ...el().querySelectorAll<HTMLTableRowElement>('[data-testid="import-mapping"] tbody tr'),
+    ];
+    const cell = <T extends HTMLElement>(index: number, id: string): T => {
+      const found = rows()[index]?.querySelector<T>(`[data-testid="${id}"]`);
+      if (!found) throw new Error(`no ${id} in row ${String(index)}`);
+      return found;
+    };
+    const setPath = async (index: number, value: string) => {
+      const input = cell<HTMLInputElement>(index, 'import-column-path');
+      input.value = value;
+      input.dispatchEvent(new Event('input'));
+      await settle();
+    };
+    const setType = async (index: number, value: string) => {
+      const select = cell<HTMLSelectElement>(index, 'import-column-type');
+      select.value = value;
+      select.dispatchEvent(new Event('change'));
+      await settle();
+    };
+    const toggle = async (index: number) => {
+      cell<HTMLInputElement>(index, 'import-column-include').click();
+      await settle();
+    };
+    const startButton = () => get<HTMLButtonElement>('import-start');
+
+    const chooseCsv = async () => {
+      fake.respond('io.previewImport', CSV_PREVIEW);
+      get<HTMLInputElement>('import-format-csv').click();
+      await settle();
+      await choose();
+    };
+
+    it('asks for a CSV preview and shows one mapping row per column instead of documents', async () => {
+      await chooseCsv();
+      expect(fake.requestsFor('io.previewImport')[0]?.params).toMatchObject({ format: 'csv' });
+      expect(q('import-preview')).toBeNull();
+      expect(q('import-mapping')?.textContent).toContain('stock-sample.csv');
+      expect(rows()).toHaveLength(5);
+      expect(rows()[2]?.textContent).toContain('(no name)');
+      expect(rows().map((r) => r.querySelector('.example')?.textContent)).toEqual([
+        'A-1',
+        '3',
+        'x',
+        'B-1',
+        'Springfield',
+      ]);
+      // Unnamed and repeated columns start excluded, the rest under their own names as Auto.
+      expect(
+        rows().map((_, i) => cell<HTMLInputElement>(i, 'import-column-include').checked),
+      ).toEqual([true, true, false, false, true]);
+      expect(cell<HTMLInputElement>(1, 'import-column-path').value).toBe('qty');
+      expect(cell<HTMLSelectElement>(1, 'import-column-type').value).toBe('auto');
+      expect(cell<HTMLInputElement>(2, 'import-column-path').disabled).toBe(true);
+      expect(cell<HTMLSelectElement>(2, 'import-column-type').disabled).toBe(true);
+      expect(q('import-mapping-error')).toBeNull();
+      expect(startButton().disabled).toBe(false);
+    });
+
+    it('offers every CSV type in the type select', async () => {
+      await chooseCsv();
+      const options = [...cell<HTMLSelectElement>(0, 'import-column-type').options].map(
+        (o) => o.value,
+      );
+      expect(options).toEqual([
+        'auto',
+        'string',
+        'int',
+        'long',
+        'double',
+        'decimal',
+        'bool',
+        'date',
+        'objectId',
+        'json',
+      ]);
+    });
+
+    it('sends the default mapping of the included columns', async () => {
+      await chooseCsv();
+      click('import-start');
+      await settle();
+      expect(imports()[0]?.params).toMatchObject({
+        fileToken: 'tok-csv',
+        csvMapping: [
+          { column: 'sku', path: 'sku', bsonType: 'auto' },
+          { column: 'qty', path: 'qty', bsonType: 'auto' },
+          { column: 'city', path: 'city', bsonType: 'auto' },
+        ],
+      });
+    });
+
+    it('sends the edited paths, types and included columns', async () => {
+      await chooseCsv();
+      await setPath(0, ' _id ');
+      await setType(0, 'string');
+      await setType(1, 'int');
+      await setPath(1, 'stock.qty');
+      await toggle(4);
+      await toggle(2);
+      await setPath(2, 'note');
+      await setType(2, 'json');
+      click('import-start');
+      await settle();
+      expect(imports()[0]?.params).toMatchObject({
+        csvMapping: [
+          { column: 'sku', path: '_id', bsonType: 'string' },
+          { column: 'qty', path: 'stock.qty', bsonType: 'int' },
+          { column: '', path: 'note', bsonType: 'json' },
+        ],
+      });
+      expect(rows()).toHaveLength(0); // the mapping table is hidden while importing
+    });
+
+    it.each([
+      ['an empty path', async () => setPath(0, '  '), 'Column "sku" needs a field path'],
+      ['a path used twice', async () => setPath(1, 'sku'), 'Field "sku" is used by two columns.'],
+      [
+        'overlapping paths',
+        async () => {
+          await setPath(0, 'address');
+          await setPath(4, 'address.city');
+        },
+        'Fields "address" and "address.city" overlap',
+      ],
+      [
+        'no included column',
+        async () => {
+          await toggle(0);
+          await toggle(1);
+          await toggle(4);
+        },
+        'Choose at least one column to import.',
+      ],
+    ])('%s blocks Import and says why', async (_what, edit, message) => {
+      await chooseCsv();
+      await edit();
+      expect(q('import-mapping-error')?.textContent).toContain(message);
+      expect(q('import-mapping-error')?.getAttribute('role')).toBe('alert');
+      expect(startButton().disabled).toBe(true);
+      // start() itself refuses too.
+      await fixture.componentInstance.start();
+      await settle();
+      expect(imports()).toHaveLength(0);
+    });
+
+    it('fixing the mapping enables Import again', async () => {
+      await chooseCsv();
+      await setPath(1, 'sku');
+      expect(startButton().disabled).toBe(true);
+      await setPath(1, 'qty');
+      expect(q('import-mapping-error')).toBeNull();
+      expect(startButton().disabled).toBe(false);
+    });
+
+    it('an excluded column with a bad path does not block Import', async () => {
+      await chooseCsv();
+      await setPath(1, '');
+      expect(startButton().disabled).toBe(true);
+      await toggle(1);
+      expect(startButton().disabled).toBe(false);
+    });
+
+    it('choosing another file starts from its default mapping', async () => {
+      await chooseCsv();
+      await setPath(0, '_id');
+      fake.respond('io.previewImport', {
+        ...CSV_PREVIEW,
+        fileToken: 'tok-csv-2',
+        csvColumns: ['name'],
+        csvRows: [['Widget']],
+      });
+      await choose();
+      expect(rows()).toHaveLength(1);
+      expect(cell<HTMLInputElement>(0, 'import-column-path').value).toBe('name');
+      click('import-start');
+      await settle();
+      expect(imports()[0]?.params).toMatchObject({
+        fileToken: 'tok-csv-2',
+        csvMapping: [{ column: 'name', path: 'name', bsonType: 'auto' }],
+      });
+    });
+
+    it('a header-only CSV file still shows its mapping', async () => {
+      fake.respond('io.previewImport', { ...CSV_PREVIEW, csvRows: [], sample: [] });
+      get<HTMLInputElement>('import-format-csv').click();
+      await settle();
+      await choose();
+      expect(rows()).toHaveLength(5);
+      expect(rows()[0]?.querySelector('.example')?.textContent).toBe('');
+    });
+  });
+
+  describe('BSON dump', () => {
+    const BSON_PREVIEW: ImportPreview = {
+      fileToken: 'tok-bson',
+      fileName: 'orders.bson',
+      sizeBytes: 2048,
+      sample: docs(3),
+      metadataFile: 'orders.metadata.json',
+    };
+
+    const chooseBson = async (preview: ImportPreview = BSON_PREVIEW) => {
+      fake.respond('io.previewImport', preview);
+      get<HTMLInputElement>('import-format-bson').click();
+      await settle();
+      expect(get('import-status').textContent).toContain('mongodump');
+      await choose();
+    };
+
+    it('shows the documents and the metadata file that will be applied, and sends no csvMapping', async () => {
+      await chooseBson();
+      expect(fake.requestsFor('io.previewImport')[0]?.params).toMatchObject({ format: 'bson' });
+      expect(q('import-mapping')).toBeNull();
+      expect(q('import-metadata')?.textContent).toContain('orders.metadata.json');
+      expect(el().querySelectorAll('[data-testid="import-sample"]')).toHaveLength(3);
+      click('import-start');
+      await settle();
+      expect(imports()[0]?.params).toEqual({
+        profileId: 'p1',
+        db: 'shop',
+        coll: 'orders',
+        fileToken: 'tok-bson',
+        ordered: true,
+        stopOnError: true,
+      });
+    });
+
+    it('says nothing about metadata without a metadata file', async () => {
+      const plain: ImportPreview = { ...BSON_PREVIEW };
+      delete plain.metadataFile;
+      await chooseBson(plain);
+      expect(q('import-metadata')).toBeNull();
+    });
+
+    it('names failures by document number, not line', async () => {
+      await chooseBson();
+      get<HTMLInputElement>('import-stop-on-error').click();
+      await settle();
+      click('import-start');
+      await settle();
+      fake.data('io.import', 'i1', {
+        processed: 3,
+        failed: 1,
+        errors: [
+          {
+            index: 2,
+            error: { code: 'INVALID_PARAMS', message: 'Document 2: not valid BSON (fictitious)' },
+          },
+        ],
+      });
+      await settle();
+      expect(q('import-failures')?.textContent).toContain('Document 2');
+      expect(q('import-failures')?.textContent).not.toContain('Line 2');
+    });
+  });
+
   describe('read-only profiles', () => {
     it('a read-only profile gets no panel and closes it at once', async () => {
       fixture.destroy();

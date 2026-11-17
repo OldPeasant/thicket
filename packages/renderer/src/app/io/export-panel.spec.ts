@@ -266,4 +266,165 @@ describe('ExportPanel', () => {
     expect(fake.cancels).toEqual(['x1']);
     expect(fake.listenerCount).toBe(0);
   });
+
+  describe('CSV and BSON', () => {
+    /** Fictitious documents of the page shown, as canonical EJSON. */
+    const SAMPLE = [
+      '{"_id":{"$oid":"64b7f0c2a1b2c3d4e5f60718"},"name":"Widget","address":{"city":"Springfield"}}',
+      '{"_id":{"$numberInt":"2"},"tags":["a"],"address":{"zip":"01234"}}',
+    ];
+    const field = (path: string) => get<HTMLInputElement>(`export-field-${path}`);
+    const fieldPaths = () =>
+      [...el().querySelectorAll<HTMLInputElement>('[data-testid^="export-field-"]')]
+        .map((i) => i.getAttribute('data-testid') ?? '')
+        .filter((id) => id !== 'export-field-new' && id !== 'export-field-add')
+        .map((id) => id.slice('export-field-'.length));
+    const toggle = async (path: string) => {
+      field(path).click();
+      await settle();
+    };
+    const addField = async (path: string) => {
+      const input = get<HTMLInputElement>('export-field-new');
+      input.value = path;
+      input.dispatchEvent(new Event('input'));
+      await settle();
+      click('export-field-add');
+      await settle();
+    };
+    const chooseCsv = async () => {
+      get<HTMLInputElement>('export-format-csv').click();
+      await settle();
+    };
+
+    beforeEach(async () => {
+      fixture.componentRef.setInput('sampleDocs', SAMPLE);
+      await settle();
+    });
+
+    it('offers all four formats', () => {
+      for (const format of ['json', 'jsonl', 'csv', 'bson']) {
+        expect(q(`export-format-${format}`)).not.toBeNull();
+      }
+      expect(q('export-fields')).toBeNull();
+    });
+
+    it('CSV offers the flattened fields of the page shown, all checked', async () => {
+      await chooseCsv();
+      expect(q('export-fields')).not.toBeNull();
+      expect(fieldPaths()).toEqual(['_id', 'name', 'address.city', 'tags', 'address.zip']);
+      expect(fieldPaths().every((p) => field(p).checked)).toBe(true);
+      // Nested values: the EJSON mode choice stays, under a CSV label.
+      expect(
+        q('export-mode-relaxed')?.closest('fieldset')?.querySelector('legend')?.textContent,
+      ).toBe('Nested values as');
+    });
+
+    it('sends the checked fields as csvFields, in the order shown', async () => {
+      await chooseCsv();
+      await toggle('name');
+      await toggle('tags');
+      click('export-start');
+      await settle();
+      expect(exports()[0]?.params).toMatchObject({
+        format: 'csv',
+        ejsonMode: 'relaxed',
+        csvFields: ['_id', 'address.city', 'address.zip'],
+      });
+    });
+
+    it('Add field appends a checked column, trimmed, and clears the input', async () => {
+      await chooseCsv();
+      await addField('  stock.qty ');
+      expect(fieldPaths().at(-1)).toBe('stock.qty');
+      expect(field('stock.qty').checked).toBe(true);
+      expect(get<HTMLInputElement>('export-field-new').value).toBe('');
+      click('export-start');
+      await settle();
+      expect(exports()[0]?.params).toMatchObject({
+        csvFields: ['_id', 'name', 'address.city', 'tags', 'address.zip', 'stock.qty'],
+      });
+    });
+
+    it('adding a listed field checks it again instead of listing it twice', async () => {
+      await chooseCsv();
+      await toggle('name');
+      expect(field('name').checked).toBe(false);
+      await addField('name');
+      expect(fieldPaths().filter((p) => p === 'name')).toHaveLength(1);
+      expect(field('name').checked).toBe(true);
+    });
+
+    it.each(['', '   ', 'a.', '.a', 'a..b'])('Add field ignores the path %j', async (path) => {
+      await chooseCsv();
+      await addField(path);
+      expect(fieldPaths()).toEqual(['_id', 'name', 'address.city', 'tags', 'address.zip']);
+    });
+
+    it('no checked field disables the export and says why', async () => {
+      await chooseCsv();
+      for (const path of fieldPaths()) await toggle(path);
+      expect(get<HTMLButtonElement>('export-start').disabled).toBe(true);
+      expect(get('export-fields').parentElement?.textContent).toContain(
+        'Check at least one column to export.',
+      );
+      // start() itself refuses too (e.g. a keyboard shortcut).
+      (fixture.componentInstance as unknown as { start(): void }).start();
+      await settle();
+      expect(exports()).toHaveLength(0);
+      await toggle('name');
+      expect(get<HTMLButtonElement>('export-start').disabled).toBe(false);
+    });
+
+    it('without documents shown, CSV sends no csvFields (the backend takes them from the data)', async () => {
+      fixture.componentRef.setInput('sampleDocs', []);
+      await settle();
+      await chooseCsv();
+      expect(fieldPaths()).toEqual([]);
+      expect(get('export-fields').textContent).toContain('first 1,000 exported documents');
+      expect(get<HTMLButtonElement>('export-start').disabled).toBe(false);
+      click('export-start');
+      await settle();
+      expect(exports()[0]?.params).not.toHaveProperty('csvFields');
+      expect(exports()[0]?.params).toMatchObject({ format: 'csv' });
+    });
+
+    it('keeps the column choice when switching formats back and forth', async () => {
+      await chooseCsv();
+      await toggle('tags');
+      get<HTMLInputElement>('export-format-json').click();
+      await settle();
+      expect(q('export-fields')).toBeNull();
+      await chooseCsv();
+      expect(field('tags').checked).toBe(false);
+    });
+
+    it('JSON never sends csvFields, even after columns were chosen', async () => {
+      await chooseCsv();
+      await toggle('tags');
+      get<HTMLInputElement>('export-format-json').click();
+      await settle();
+      click('export-start');
+      await settle();
+      expect(exports()[0]?.params).not.toHaveProperty('csvFields');
+    });
+
+    it('BSON hides the EJSON choice and columns, explains the metadata file and sends bson', async () => {
+      get<HTMLInputElement>('export-format-bson').click();
+      await settle();
+      expect(q('export-mode-relaxed')).toBeNull();
+      expect(q('export-fields')).toBeNull();
+      expect(el().textContent).toContain('.metadata.json');
+      click('export-start');
+      await settle();
+      expect(exports()[0]?.params).toMatchObject({ format: 'bson' });
+      expect(exports()[0]?.params).not.toHaveProperty('csvFields');
+    });
+
+    it('locks the columns while running', async () => {
+      await chooseCsv();
+      click('export-start');
+      await settle();
+      expect(get<HTMLFieldSetElement>('export-fields').disabled).toBe(true);
+    });
+  });
 });

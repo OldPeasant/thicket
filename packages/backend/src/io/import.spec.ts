@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ClientLike } from '../connections/manager';
 import { RpcError } from '../server/rpc';
 import {
+  CSV_PREVIEW_ROWS,
   DEFAULT_SAMPLE_SIZE,
   IMPORT_BATCH_BYTES,
   IMPORT_BATCH_DOCS,
@@ -27,6 +28,7 @@ import {
   parseImportedDocument,
   previewFile,
   scanFile,
+  type ImportFormat,
   type ImportOptions,
 } from './import';
 import { MAX_VALUE_CHARS, type ScannedValue } from './scanner';
@@ -792,5 +794,431 @@ describe('importFile', () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]?.command['writeConcern']).toEqual({ w: 'majority' });
     expect(sent[0]?.readPreference).toBeUndefined();
+  });
+});
+
+/**
+ * A server for CSV and BSON imports: inserts answer `n`, listCollections answers `collections`,
+ * `fail` may refuse any command. Records every command in order.
+ */
+function dumpServer(
+  collections: Document[] = [],
+  fail?: (cmd: Document) => Error | Document | undefined,
+) {
+  const sent: Document[] = [];
+  const client: ClientLike = {
+    connect: () => Promise.resolve(),
+    close: () => Promise.resolve(),
+    db: () => ({
+      command: (cmd) => {
+        sent.push(cmd);
+        const custom = fail?.(cmd);
+        if (custom instanceof Error) return Promise.reject(custom);
+        if (custom) return Promise.resolve(custom);
+        if ('listCollections' in cmd) {
+          return Promise.resolve({
+            cursor: { id: 0, ns: 'shop.$cmd.listCollections', firstBatch: collections },
+            ok: 1,
+          });
+        }
+        if ('insert' in cmd) {
+          return Promise.resolve({ n: (cmd['documents'] as unknown[]).length, ok: 1 });
+        }
+        return Promise.resolve({ ok: 1 });
+      },
+    }),
+  };
+  const names = () => sent.map((c) => Object.keys(c)[0]);
+  const inserted = () =>
+    sent.filter((c) => 'insert' in c).flatMap((c) => texts(c['documents'] as Document[]));
+  return { client, sent, names, inserted };
+}
+
+async function importAs(
+  client: ClientLike,
+  file: string,
+  format: ImportFormat,
+  options: Partial<ImportOptions> = {},
+) {
+  const progress: IoProgress[] = [];
+  const result = await importFile(client, file, format, {
+    db: 'shop',
+    coll: 'orders',
+    progress: (p) => progress.push(p),
+    ...options,
+  }).catch((error: unknown) => error);
+  return { result, progress };
+}
+
+describe('CSV import', () => {
+  const CSV =
+    'sku,name,qty,price,city,added\n' +
+    'A-1,"Widget, large",3,9.5,Springfield,2024-02-03T00:00:00Z\n' +
+    'A-2,"Gadget ""mini""",,10,"Shelby-\nville",\n';
+
+  describe('previewFile', () => {
+    it('gives the header, the cells of the first rows and a sample with the default mapping', async () => {
+      const file = await fileWith('p.csv', CSV);
+      expect(await previewFile(file, 'csv', 5)).toEqual({
+        sizeBytes: Buffer.byteLength(CSV),
+        csvColumns: ['sku', 'name', 'qty', 'price', 'city', 'added'],
+        csvRows: [
+          ['A-1', 'Widget, large', '3', '9.5', 'Springfield', '2024-02-03T00:00:00Z'],
+          ['A-2', 'Gadget "mini"', '', '10', 'Shelby-\nville', ''],
+        ],
+        sample: [
+          '{"sku":"A-1","name":"Widget, large","qty":{"$numberInt":"3"},' +
+            '"price":{"$numberDouble":"9.5"},"city":"Springfield","added":"2024-02-03T00:00:00Z"}',
+          '{"sku":"A-2","name":"Gadget \\"mini\\"","price":{"$numberInt":"10"},' +
+            '"city":"Shelby-\\nville"}',
+        ],
+      });
+    });
+
+    it(`shows at most ${String(CSV_PREVIEW_ROWS)} rows and sampleSize documents`, async () => {
+      const rows = Array.from({ length: CSV_PREVIEW_ROWS + 10 }, (_, i) => `${String(i)}\n`);
+      const file = await fileWith('many.csv', `n\n${rows.join('')}`);
+      const preview = await previewFile(file, 'csv', 3);
+      expect(preview.csvRows).toHaveLength(CSV_PREVIEW_ROWS);
+      expect(preview.csvRows?.at(-1)).toEqual([String(CSV_PREVIEW_ROWS - 1)]);
+      expect(preview.sample).toEqual([
+        '{"n":{"$numberInt":"0"}}',
+        '{"n":{"$numberInt":"1"}}',
+        '{"n":{"$numberInt":"2"}}',
+      ]);
+    });
+
+    it('keeps the cells of a row that does not parse but leaves it out of the sample', async () => {
+      const file = await fileWith('long.csv', 'a,b\n1,2,3\n4,5\n');
+      const preview = await previewFile(file, 'csv');
+      expect(preview.csvRows).toEqual([
+        ['1', '2', '3'],
+        ['4', '5'],
+      ]);
+      expect(preview.sample).toEqual(['{"a":{"$numberInt":"4"},"b":{"$numberInt":"5"}}']);
+    });
+
+    it('an empty file has no columns, rows or sample', async () => {
+      const file = await fileWith('empty.csv', '');
+      expect(await previewFile(file, 'csv')).toEqual({
+        sizeBytes: 0,
+        csvColumns: [],
+        csvRows: [],
+        sample: [],
+      });
+    });
+
+    it('a header-only file has its columns and no rows', async () => {
+      const file = await fileWith('header.csv', '﻿a,b\r\n');
+      expect(await previewFile(file, 'csv')).toMatchObject({
+        csvColumns: ['a', 'b'],
+        csvRows: [],
+        sample: [],
+      });
+    });
+
+    it('answers INVALID_PARAMS for a broken file before any row', async () => {
+      const file = await fileWith('broken.csv', 'a,b\n"open,1\n');
+      await expect(previewFile(file, 'csv')).rejects.toMatchObject({
+        code: 'INVALID_PARAMS',
+        message: 'Line 2: the file ends inside a quoted cell',
+      });
+    });
+
+    it('answers NOT_FOUND for a file that no longer exists', async () => {
+      await expect(previewFile(path.join(dir, 'gone.csv'), 'csv')).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+    });
+
+    // The column mapping is chosen after the preview, so the preview must not refuse a header
+    // whose names are no valid default mapping: repeated names, a name ending in a dot, or names
+    // where one is the prefix path of another.
+    it.each([
+      ['a repeated column name', 'name,qty,name\nWidget,3,Gadget\n', ['name', 'qty', 'name']],
+      ['a column name ending in a dot', 'No.,name\n1,Widget\n', ['No.', 'name']],
+      ['overlapping column names', 'address,address.city\nX,Y\n', ['address', 'address.city']],
+    ])('previews a file with %s (the mapping is chosen later)', async (_what, text, columns) => {
+      const file = await fileWith('header-names.csv', text);
+      const preview = await previewFile(file, 'csv');
+      expect(preview.csvColumns).toEqual(columns);
+      expect(preview.csvRows).toHaveLength(1);
+    });
+  });
+
+  describe('importFile', () => {
+    it('imports every named column as auto without a mapping', async () => {
+      const file = await fileWith('auto.csv', 'sku,,qty\nA-1,skipped,3\n');
+      const server = dumpServer();
+      const { result, progress } = await importAs(server.client, file, 'csv');
+      expect(result).toEqual({ processed: 1, failed: 0, errors: [], inserted: 1 });
+      expect(server.inserted()).toEqual(['{"sku":"A-1","qty":{"$numberInt":"3"}}']);
+      expect(progress.at(-1)).toEqual({ processed: 1, failed: 0, errors: [] });
+    });
+
+    it('imports the mapped columns under their paths with their types, others left out', async () => {
+      const file = await fileWith('typed.csv', CSV);
+      const server = dumpServer();
+      const { result } = await importAs(server.client, file, 'csv', {
+        csvMapping: [
+          { column: 'sku', path: '_id', bsonType: 'string' },
+          { column: 'qty', path: 'stock.qty', bsonType: 'long' },
+          { column: 'price', path: 'price', bsonType: 'decimal' },
+          { column: 'city', path: 'stock.city', bsonType: 'string' },
+          { column: 'added', path: 'added', bsonType: 'date' },
+        ],
+      });
+      expect(result).toEqual({ processed: 2, failed: 0, errors: [], inserted: 2 });
+      expect(server.inserted()).toEqual([
+        '{"_id":"A-1","stock":{"qty":{"$numberLong":"3"},"city":"Springfield"},' +
+          '"price":{"$numberDecimal":"9.5"},"added":{"$date":{"$numberLong":"1706918400000"}}}',
+        // qty is blank: stock is first made for city, after price.
+        '{"_id":"A-2","price":{"$numberDecimal":"10"},"stock":{"city":"Shelby-\\nville"}}',
+      ]);
+      // No metadata or collection commands for CSV.
+      expect(server.names()).toEqual(['insert']);
+    });
+
+    it('refuses a mapping naming a column the file lacks before inserting anything', async () => {
+      const file = await fileWith('m.csv', 'a,b\n1,2\n');
+      const server = dumpServer();
+      const { result } = await importAs(server.client, file, 'csv', {
+        csvMapping: [{ column: 'c', path: 'c', bsonType: 'auto' }],
+      });
+      expect(result).toBeInstanceOf(RpcError);
+      expect(result).toMatchObject({
+        code: 'INVALID_PARAMS',
+        message: 'The file has no column "c"',
+      });
+      expect(server.names()).toEqual([]);
+    });
+
+    it('stop mode: inserts the rows before a bad cell, then rejects naming line and column', async () => {
+      // The quoted line break makes the bad row start on line 4.
+      const file = await fileWith('stop.csv', 'n,note\n1,"two\nlines"\nx,ok\n3,ok\n');
+      const server = dumpServer();
+      const { result, progress } = await importAs(server.client, file, 'csv', {
+        csvMapping: [{ column: 'n', path: 'n', bsonType: 'int' }],
+      });
+      expect(result).toBeInstanceOf(RpcError);
+      expect((result as Error).message).toBe(
+        'Import stopped: Line 4: column "n": "x" is not a 32-bit integer',
+      );
+      expect(server.inserted()).toEqual(['{"n":{"$numberInt":"1"}}']);
+      expect(progress.at(-1)).toMatchObject({ processed: 2, failed: 1, errors: [{ index: 4 }] });
+    });
+
+    it('continue mode: skips bad rows (bad cells, too many cells) and reports their lines', async () => {
+      const file = await fileWith('go-on.csv', 'n\n1\nx\n2,extra\n3\n');
+      const server = dumpServer();
+      const { result } = await importAs(server.client, file, 'csv', {
+        stopOnError: false,
+        csvMapping: [{ column: 'n', path: 'n', bsonType: 'int' }],
+      });
+      expect(result).toMatchObject({ processed: 4, failed: 2, inserted: 2 });
+      expect((result as { errors: { index: number }[] }).errors.map((e) => e.index)).toEqual([
+        3, 4,
+      ]);
+      expect(server.inserted()).toEqual(['{"n":{"$numberInt":"1"}}', '{"n":{"$numberInt":"3"}}']);
+    });
+
+    it('a broken structure inserts the rows before it and rejects with INVALID_PARAMS', async () => {
+      const file = await fileWith('broken.csv', 'a\n1\n2\n"3"x\n4\n');
+      const server = dumpServer();
+      const { result } = await importAs(server.client, file, 'csv', { stopOnError: false });
+      expect(result).toMatchObject({
+        code: 'INVALID_PARAMS',
+        message: 'Line 4: text after a closing quote',
+      });
+      expect(server.inserted()).toEqual(['{"a":{"$numberInt":"1"}}', '{"a":{"$numberInt":"2"}}']);
+    });
+
+    it('an empty CSV file imports nothing, also with a mapping', async () => {
+      const file = await fileWith('empty.csv', '');
+      const server = dumpServer();
+      const { result } = await importAs(server.client, file, 'csv', {
+        csvMapping: [{ column: 'a', path: 'a', bsonType: 'auto' }],
+      });
+      expect(result).toEqual({ processed: 0, failed: 0, errors: [], inserted: 0 });
+      expect(server.names()).toEqual([]);
+    });
+  });
+});
+
+describe('BSON import', () => {
+  const DOCS = [
+    { _id: new Int32(1), sku: 'A-1', n: Long.fromNumber(3) },
+    { _id: new Int32(2), at: new Date(Date.UTC(2024, 0, 1)), price: Decimal128.fromString('1.10') },
+    { _id: new ObjectId('64b7f0c2a1b2c3d4e5f60718') },
+  ];
+  const dumpBytes = (docs: Document[] = DOCS) => Buffer.concat(docs.map((d) => BSON.serialize(d)));
+  const METADATA =
+    '{"options":{"capped":true,"size":{"$numberInt":"4096"},"uuid":"ignored"},' +
+    '"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},' +
+    '{"v":{"$numberInt":"2"},"key":{"sku":{"$numberInt":"1"}},"name":"sku_1","unique":true}],' +
+    '"uuid":"0123456789abcdef0123456789abcdef","collectionName":"orders","type":"collection"}\n';
+
+  async function dump(name: string, bytes: Buffer, metadata?: string): Promise<string> {
+    const file = path.join(dir, name);
+    await writeFile(file, bytes);
+    if (metadata !== undefined) {
+      await writeFile(path.join(dir, `${name.replace(/\.bson$/i, '')}.metadata.json`), metadata);
+    }
+    return file;
+  }
+
+  describe('previewFile', () => {
+    it('gives the first documents with exact types and the metadata file name', async () => {
+      const bytes = dumpBytes();
+      const file = await dump('orders.bson', bytes, METADATA);
+      expect(await previewFile(file, 'bson', 2)).toEqual({
+        sizeBytes: bytes.length,
+        sample: DOCS.slice(0, 2).map((d) => BSON.EJSON.stringify(d, { relaxed: false })),
+        metadataFile: 'orders.metadata.json',
+      });
+    });
+
+    it('has no metadataFile without a metadata file next to it', async () => {
+      const file = await dump('orders.bson', dumpBytes());
+      const preview = await previewFile(file, 'bson');
+      expect(preview).not.toHaveProperty('metadataFile');
+      expect(preview.sample).toHaveLength(3);
+    });
+
+    it('answers INVALID_PARAMS for an invalid metadata file', async () => {
+      const file = await dump('orders.bson', dumpBytes(), '{"options":');
+      await expect(previewFile(file, 'bson')).rejects.toMatchObject({
+        code: 'INVALID_PARAMS',
+        message: 'orders.metadata.json is not a valid metadata file',
+      });
+    });
+
+    it('answers INVALID_PARAMS for a file that is no BSON dump', async () => {
+      const file = await dump('text.bson', Buffer.from('{"a":1}\n'));
+      await expect(previewFile(file, 'bson')).rejects.toMatchObject({
+        code: 'INVALID_PARAMS',
+        message: expect.stringMatching(/^Line 1: document 1 has an invalid length/) as string,
+      });
+    });
+
+    it('skips a document whose bytes are no valid BSON', async () => {
+      const bad = BSON.serialize({ s: 'x' });
+      bad[bad.length - 1] = 9;
+      const file = await dump('bad.bson', Buffer.concat([bad, BSON.serialize({ ok: true })]));
+      expect((await previewFile(file, 'bson')).sample).toEqual(['{"ok":true}']);
+    });
+  });
+
+  describe('importFile', () => {
+    it('without metadata inserts the documents exactly as dumped and nothing else', async () => {
+      const file = await dump('orders.bson', dumpBytes());
+      const server = dumpServer();
+      const { result } = await importAs(server.client, file, 'bson');
+      expect(result).toEqual({ processed: 3, failed: 0, errors: [], inserted: 3 });
+      expect(server.names()).toEqual(['insert']);
+      expect(server.inserted()).toEqual(
+        DOCS.map((d) => BSON.EJSON.stringify(d, { relaxed: false })),
+      );
+    });
+
+    it('with metadata creates a new collection with its options, then the documents, then the indexes', async () => {
+      const file = await dump('orders.bson', dumpBytes(), METADATA);
+      const server = dumpServer([]);
+      const { result } = await importAs(server.client, file, 'bson');
+      expect(result).toMatchObject({ inserted: 3, failed: 0 });
+      expect(server.names()).toEqual(['listCollections', 'create', 'insert', 'createIndexes']);
+      const create = server.sent[1] ?? {};
+      expect(create).toMatchObject({ create: 'orders', capped: true, size: new Int32(4096) });
+      expect(create).not.toHaveProperty('uuid');
+      expect(server.sent[3]).toMatchObject({
+        createIndexes: 'orders',
+        indexes: [{ key: { sku: new Int32(1) }, name: 'sku_1', unique: true }],
+      });
+    });
+
+    it('an existing collection keeps its options; the indexes are still created', async () => {
+      const file = await dump('orders.bson', dumpBytes(), METADATA);
+      const server = dumpServer([{ name: 'orders', type: 'collection' }]);
+      await importAs(server.client, file, 'bson');
+      expect(server.names()).toEqual(['listCollections', 'insert', 'createIndexes']);
+    });
+
+    it('continue mode: reports a failed document by its number, then creates the indexes', async () => {
+      const bad = BSON.serialize({ s: 'x' });
+      bad[bad.length - 1] = 9;
+      const bytes = Buffer.concat([BSON.serialize({ _id: 1 }), bad, BSON.serialize({ _id: 3 })]);
+      const file = await dump('orders.bson', bytes, METADATA);
+      const server = dumpServer([{ name: 'orders' }]);
+      const { result } = await importAs(server.client, file, 'bson', { stopOnError: false });
+      expect(result).toMatchObject({ processed: 3, failed: 1, inserted: 2 });
+      const errors = (result as { errors: { index: number; error: { message: string } }[] }).errors;
+      expect(errors).toHaveLength(1);
+      expect(errors[0]?.index).toBe(2);
+      expect(errors[0]?.error.message).toMatch(/^Document 2: not valid BSON/);
+      expect(server.names().at(-1)).toBe('createIndexes');
+    });
+
+    it('stop mode: a failed document stops the import and no indexes are created', async () => {
+      const file = await dump('orders.bson', dumpBytes(), METADATA);
+      const server = dumpServer([{ name: 'orders' }], (cmd) =>
+        'insert' in cmd
+          ? {
+              n: 1,
+              writeErrors: [{ index: 1, code: 11000, errmsg: 'E11000 duplicate key error' }],
+              ok: 1,
+            }
+          : undefined,
+      );
+      const { result } = await importAs(server.client, file, 'bson');
+      expect(result).toBeInstanceOf(RpcError);
+      expect((result as Error).message).toMatch(/^Import stopped: Line 2: E11000/);
+      expect(server.names()).not.toContain('createIndexes');
+    });
+
+    it('a cut-off dump inserts the documents before the cut, rejects, and creates no indexes', async () => {
+      const bytes = dumpBytes();
+      const file = await dump('orders.bson', bytes.subarray(0, bytes.length - 3), METADATA);
+      const server = dumpServer([{ name: 'orders' }]);
+      const { result } = await importAs(server.client, file, 'bson', { stopOnError: false });
+      expect(result).toMatchObject({
+        code: 'INVALID_PARAMS',
+        message: 'Line 3: the file ends inside a document (was it cut off?)',
+      });
+      expect(server.inserted()).toHaveLength(2);
+      expect(server.names()).not.toContain('createIndexes');
+    });
+
+    it('an invalid metadata file is refused before anything is written', async () => {
+      const file = await dump('orders.bson', dumpBytes(), '[]');
+      const server = dumpServer();
+      const { result } = await importAs(server.client, file, 'bson');
+      expect(result).toMatchObject({
+        code: 'INVALID_PARAMS',
+        message: 'orders.metadata.json is not a valid metadata file',
+      });
+      expect(server.sent).toEqual([]);
+    });
+
+    it('a failed create stops before any document is inserted', async () => {
+      const file = await dump('orders.bson', dumpBytes(), METADATA);
+      const server = dumpServer([], (cmd) =>
+        'create' in cmd ? new Error('not authorized to create') : undefined,
+      );
+      const { result } = await importAs(server.client, file, 'bson');
+      expect(result).toMatchObject({ code: 'SERVER_ERROR' });
+      expect((result as Error).message).toMatch(/^Could not create orders with the dump's options/);
+      expect(server.names()).not.toContain('insert');
+    });
+
+    it('a failed index build is a SERVER_ERROR after the documents were inserted', async () => {
+      const file = await dump('orders.bson', dumpBytes(), METADATA);
+      const server = dumpServer([{ name: 'orders' }], (cmd) =>
+        'createIndexes' in cmd ? new Error('E11000 duplicate key on sku') : undefined,
+      );
+      const { result } = await importAs(server.client, file, 'bson');
+      expect(result).toMatchObject({ code: 'SERVER_ERROR' });
+      expect((result as Error).message).toMatch(/^The documents were imported, but/);
+      expect(server.inserted()).toHaveLength(3);
+    });
   });
 });

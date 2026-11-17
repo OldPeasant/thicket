@@ -489,3 +489,248 @@ describe('exportToFile', () => {
     },
   );
 });
+
+describe('exportToFile as CSV', () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'thicket-export-csv-'));
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const csv = (p: Partial<ExportParams> = {}) => params({ format: 'csv', ...p });
+
+  it('without fields writes the flattened paths of the documents as the header', async () => {
+    const server = fakeServer([
+      [
+        {
+          _id: new ObjectId('64b7f0c2a1b2c3d4e5f60718'),
+          name: 'Widget, large',
+          address: { city: 'Springfield', zip: '01234' },
+          qty: new Int32(3),
+        },
+        { _id: new Int32(2), name: 'Gadget "mini"', extra: true, tags: ['a', new Int32(1)] },
+      ],
+    ]);
+    const file = path.join(dir, 'out.csv');
+    expect(await exportToFile(server.client, csv(), file)).toBe(2);
+    expect(await readFile(file, 'utf8')).toBe(
+      '_id,name,address.city,address.zip,qty,extra,tags\n' +
+        '64b7f0c2a1b2c3d4e5f60718,"Widget, large",Springfield,01234,3,,\n' +
+        '2,"Gadget ""mini""",,,,true,"[""a"",1]"\n',
+    );
+  });
+
+  it('takes the columns from the first batch only (later new fields are not written)', async () => {
+    const server = fakeServer([[{ a: new Int32(1) }], [{ a: new Int32(2), late: 'x' }]]);
+    const file = path.join(dir, 'first.csv');
+    expect(await exportToFile(server.client, csv(), file)).toBe(2);
+    expect(await readFile(file, 'utf8')).toBe('a\n1\n2\n');
+  });
+
+  it('with csvFields writes exactly those columns, in order, also missing and nested ones', async () => {
+    const server = fakeServer([
+      [
+        { _id: new Int32(1), address: { city: 'X' }, tags: ['t0', 't1'] },
+        { _id: new Int32(2), address: 'not a document' },
+      ],
+    ]);
+    const file = path.join(dir, 'fields.csv');
+    await exportToFile(
+      server.client,
+      csv({ csvFields: ['address.city', 'tags.1', 'missing', '_id'] }),
+      file,
+    );
+    expect(await readFile(file, 'utf8')).toBe('address.city,tags.1,missing,_id\nX,t1,,1\n,,,2\n');
+  });
+
+  it('writes nested values in canonical Extended JSON when asked', async () => {
+    const server = fakeServer([[{ tags: [new Int32(1)], n: Long.fromNumber(5) }]]);
+    const file = path.join(dir, 'canonical.csv');
+    await exportToFile(server.client, csv({ ejsonMode: 'canonical' }), file);
+    // Numbers stay plain decimal cells; only the array is Extended JSON.
+    expect(await readFile(file, 'utf8')).toBe('tags,n\n"[{""$numberInt"":""1""}]",5\n');
+  });
+
+  it('an empty result without fields writes an empty file, with fields only the header', async () => {
+    const plain = path.join(dir, 'empty.csv');
+    const withFields = path.join(dir, 'header.csv');
+    expect(await exportToFile(fakeServer([[]]).client, csv(), plain)).toBe(0);
+    expect(
+      await exportToFile(fakeServer([[]]).client, csv({ csvFields: ['a', 'b'] }), withFields),
+    ).toBe(0);
+    expect(await readFile(plain, 'utf8')).toBe('');
+    expect(await readFile(withFields, 'utf8')).toBe('a,b\n');
+  });
+
+  it('writes no metadata file for CSV', async () => {
+    const file = path.join(dir, 'orders.csv');
+    await exportToFile(fakeServer([[{ a: new Int32(1) }]]).client, csv(), file);
+    expect(await readdir(dir)).toEqual(['orders.csv']);
+  });
+});
+
+describe('exportToFile as BSON', () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'thicket-export-bson-'));
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const bson = (p: Partial<ExportParams> = {}) => params({ format: 'bson', ...p });
+  const UUID_HEX = 'fedcba9876543210fedcba9876543210';
+  const cursor = (batch: Document[]) =>
+    Promise.resolve({ cursor: { id: new Long(0), ns: 'shop.$cmd', firstBatch: batch }, ok: 1 });
+  /** Answers listCollections and listIndexes like a server holding shop.orders. */
+  const metadataHook = (cmd: Document): Promise<Document> | undefined => {
+    if ('listCollections' in cmd) {
+      return cursor([
+        {
+          name: 'orders',
+          type: 'collection',
+          options: { capped: true, size: new Int32(4096) },
+          info: { uuid: new BSON.Binary(Buffer.from(UUID_HEX, 'hex'), 4) },
+        },
+      ]);
+    }
+    if ('listIndexes' in cmd) {
+      return cursor([
+        { v: new Int32(2), key: { _id: new Int32(1) }, name: '_id_' },
+        { v: new Int32(2), key: { sku: new Int32(1) }, name: 'sku_1', ns: 'shop.orders' },
+      ]);
+    }
+    return undefined;
+  };
+
+  /** The documents of a .bson file, in canonical EJSON. */
+  async function dumped(file: string): Promise<string[]> {
+    const bytes = await readFile(file);
+    const out: string[] = [];
+    let at = 0;
+    while (at < bytes.length) {
+      const size = bytes.readInt32LE(at);
+      out.push(
+        BSON.EJSON.stringify(
+          BSON.deserialize(bytes.subarray(at, at + size), { promoteValues: false }),
+          { relaxed: false },
+        ),
+      );
+      at += size;
+    }
+    return out;
+  }
+
+  it('writes every batch as BSON documents and the metadata next to the file', async () => {
+    const first = [{ _id: new Int32(1), at: new Date(Date.UTC(2024, 0, 1)) }];
+    const second = [{ _id: Long.fromNumber(2), n: BSON.Decimal128.fromString('1.10') }];
+    const server = fakeServer([first, second], metadataHook);
+    const progress: IoProgress[] = [];
+    const file = path.join(dir, 'orders.bson');
+    expect(
+      await exportToFile(server.client, bson(), file, { progress: (p) => progress.push(p) }),
+    ).toBe(2);
+    expect(await dumped(file)).toEqual(
+      [...first, ...second].map((d) => BSON.EJSON.stringify(d, { relaxed: false })),
+    );
+    expect((await readdir(dir)).sort()).toEqual(['orders.bson', 'orders.metadata.json']);
+    const metadata = await readFile(path.join(dir, 'orders.metadata.json'), 'utf8');
+    expect(metadata.endsWith('}\n')).toBe(true);
+    expect(JSON.parse(metadata)).toEqual({
+      options: { capped: true, size: { $numberInt: '4096' } },
+      indexes: [
+        { v: { $numberInt: '2' }, key: { _id: { $numberInt: '1' } }, name: '_id_' },
+        { v: { $numberInt: '2' }, key: { sku: { $numberInt: '1' } }, name: 'sku_1' },
+      ],
+      uuid: UUID_HEX,
+      collectionName: 'orders',
+      type: 'collection',
+    });
+    // The metadata is asked for after the documents.
+    const order = server.sent.map((c) => Object.keys(c)[0]);
+    expect(order.indexOf('listCollections')).toBeGreaterThan(order.indexOf('getMore'));
+    expect(progress.at(-1)).toEqual({ processed: 2, failed: 0, errors: [] });
+  });
+
+  it('an empty collection gives an empty .bson file and its metadata', async () => {
+    const server = fakeServer([[]], metadataHook);
+    const file = path.join(dir, 'orders.bson');
+    expect(await exportToFile(server.client, bson(), file)).toBe(0);
+    expect((await readFile(file)).length).toBe(0);
+    expect(existsSync(path.join(dir, 'orders.metadata.json'))).toBe(true);
+  });
+
+  it('an aggregation export writes metadata without options and indexes', async () => {
+    const server = fakeServer([[{ _id: 'k', total: new Int32(3) }]], metadataHook);
+    const file = path.join(dir, 'totals.bson');
+    await exportToFile(
+      server.client,
+      bson({ source: { kind: 'aggregate', pipeline: '[{"$group":{"_id":"$k"}}]' } }),
+      file,
+    );
+    expect(JSON.parse(await readFile(path.join(dir, 'totals.metadata.json'), 'utf8'))).toEqual({
+      options: {},
+      indexes: [],
+      collectionName: 'orders',
+      type: 'collection',
+    });
+    expect(server.sent.some((c) => 'listCollections' in c || 'listIndexes' in c)).toBe(false);
+  });
+
+  it('names the metadata after a file chosen without the .bson extension', async () => {
+    const server = fakeServer([[{ _id: new Int32(1) }]], metadataHook);
+    await exportToFile(server.client, bson(), path.join(dir, 'dump'));
+    expect((await readdir(dir)).sort()).toEqual(['dump', 'dump.metadata.json']);
+  });
+
+  it('removes the .bson file and writes no metadata when reading the metadata fails', async () => {
+    const server = fakeServer([[{ _id: new Int32(1) }]], (cmd) =>
+      'listIndexes' in cmd
+        ? Promise.reject(Object.assign(new Error('not authorized on shop'), { code: 13 }))
+        : metadataHook(cmd),
+    );
+    const progress: IoProgress[] = [];
+    const error = await exportToFile(server.client, bson(), path.join(dir, 'orders.bson'), {
+      progress: (p) => progress.push(p),
+    }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RpcError);
+    expect((error as Error).message).toMatch(/not authorized/);
+    expect(await readdir(dir)).toEqual([]);
+    expect(progress).toEqual([]);
+  });
+
+  it('a cancel while the metadata is read removes both files', async () => {
+    const controller = new AbortController();
+    const server = fakeServer([[{ _id: new Int32(1) }]], (cmd) => {
+      if ('listIndexes' in cmd) controller.abort();
+      return metadataHook(cmd);
+    });
+    const error = await exportToFile(server.client, bson(), path.join(dir, 'orders.bson'), {
+      signal: controller.signal,
+    }).catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: 'CANCELLED' });
+    expect(await readdir(dir)).toEqual([]);
+  });
+
+  it.skipIf(!existsSync('/dev/full'))(
+    'removes both files and rejects INTERNAL when the metadata cannot be written (disk full)',
+    { timeout: 3000 },
+    async () => {
+      await symlink('/dev/full', path.join(dir, 'orders.metadata.json'));
+      const server = fakeServer([[{ _id: new Int32(1) }]], metadataHook);
+      const file = path.join(dir, 'orders.bson');
+      const outcome = await Promise.race([
+        exportToFile(server.client, bson(), file).then(
+          () => 'resolved',
+          (e: unknown) => e,
+        ),
+        new Promise((resolve) => setTimeout(() => resolve('still running after 2 s'), 2000)),
+      ]);
+      expect(outcome).toMatchObject({ code: 'INTERNAL' });
+      expect((outcome as Error).message).toMatch(/ENOSPC/);
+      expect(await readdir(dir)).toEqual([]);
+    },
+  );
+});

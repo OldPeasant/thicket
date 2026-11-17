@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { parseResult, type Profile } from '@thicket/contract';
-import type { Document } from 'mongodb';
+import { BSON, type Document } from 'mongodb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ConnectionManager, type ClientLike } from '../connections/manager';
@@ -159,6 +159,40 @@ describe('ioHandlers', () => {
       });
     });
 
+    it.each([
+      ['csv', 'orders.csv', { name: 'CSV', extensions: ['csv'] }],
+      ['bson', 'orders.bson', { name: 'BSON dump', extensions: ['bson'] }],
+    ])('offers %s files named after the collection', async (format, defaultName, filter) => {
+      const { call, dialogs } = await setup();
+      await call('io.export', exportParams({ format }));
+      expect(dialogs.saveFile.mock.calls[0]?.[0]).toMatchObject({
+        defaultName,
+        filters: [filter, { name: 'All files', extensions: ['*'] }],
+      });
+    });
+
+    it('streams a CSV export with the chosen csvFields', async () => {
+      const { call, answers, producers } = await setup();
+      const file = path.join(dir, 'orders.csv');
+      answers.push(file);
+      await call('io.export', exportParams({ format: 'csv', csvFields: ['_id', 'missing'] }));
+      await expect(producers[0]?.(sink())).resolves.toBe(2);
+      expect(await readFile(file, 'utf8')).toBe('_id,missing\n1,\n2,\n');
+    });
+
+    it('streams a BSON export and its metadata file', async () => {
+      const { call, answers, producers } = await setup();
+      const file = path.join(dir, 'orders.bson');
+      answers.push(file);
+      await call(
+        'io.export',
+        exportParams({ format: 'bson', source: { kind: 'aggregate', pipeline: '[]' } }),
+      );
+      await expect(producers[0]?.(sink())).resolves.toBe(2);
+      expect((await readFile(file)).length).toBe(2 * BSON.serialize({ _id: 1 }).length);
+      expect(existsSync(path.join(dir, 'orders.metadata.json'))).toBe(true);
+    });
+
     it('a cancelled save dialog answers streamId null and starts nothing', async () => {
       const { call, producers, sent } = await setup();
       const result = await call('io.export', exportParams());
@@ -310,6 +344,97 @@ describe('ioHandlers', () => {
         message: 'csvMapping is only for CSV files',
       });
       expect(producers).toEqual([]);
+    });
+
+    it('previews a CSV file with its columns and rows, offering CSV files', async () => {
+      const text = 'sku,qty\nA-1,3\n';
+      const { preview, dialogs } = await choose('stock.csv', text, 'csv');
+      expect(preview).toEqual({
+        fileToken: expect.stringMatching(/^file-/) as string,
+        fileName: 'stock.csv',
+        sizeBytes: Buffer.byteLength(text),
+        sample: ['{"sku":"A-1","qty":{"$numberInt":"3"}}'],
+        csvColumns: ['sku', 'qty'],
+        csvRows: [['A-1', '3']],
+      });
+      expect(parseResult('io.previewImport', preview).ok).toBe(true);
+      expect(dialogs.openFile.mock.calls[0]?.[0].filters).toEqual([
+        { name: 'CSV', extensions: ['csv'] },
+        { name: 'All files', extensions: ['*'] },
+      ]);
+    });
+
+    it('imports a CSV file with its csvMapping', async () => {
+      const { preview, call, producers, sent } = await choose(
+        'stock.csv',
+        'sku,qty\nA-1,3\n',
+        'csv',
+      );
+      await call('io.import', {
+        ...target,
+        fileToken: preview?.fileToken,
+        csvMapping: [{ column: 'qty', path: 'stock.qty', bsonType: 'long' }],
+      });
+      await expect(producers[0]?.(sink())).resolves.toBe(1);
+      const insert = sent.find((c) => 'insert' in c);
+      expect(BSON.EJSON.stringify(insert?.['documents'], { relaxed: false })).toBe(
+        '[{"stock":{"qty":{"$numberLong":"3"}}}]',
+      );
+    });
+
+    async function chooseDump(withMetadata: boolean) {
+      const s = await setup();
+      const file = path.join(dir, 'orders.bson');
+      await writeFile(file, BSON.serialize({ _id: 1, sku: 'A-1' }));
+      if (withMetadata) {
+        await writeFile(
+          path.join(dir, 'orders.metadata.json'),
+          '{"options":{},"indexes":[],"collectionName":"orders","type":"collection"}',
+        );
+      }
+      s.answers.push(file);
+      const preview = (await s.call('io.previewImport', { format: 'bson' })) as {
+        fileToken: string;
+      } | null;
+      return { ...s, preview };
+    }
+
+    it('previews a BSON dump with the name of its metadata file, offering .bson files', async () => {
+      const { preview, dialogs } = await chooseDump(true);
+      expect(preview).toMatchObject({
+        fileName: 'orders.bson',
+        sample: ['{"_id":{"$numberInt":"1"},"sku":"A-1"}'],
+        metadataFile: 'orders.metadata.json',
+      });
+      expect(parseResult('io.previewImport', preview).ok).toBe(true);
+      expect(dialogs.openFile.mock.calls[0]?.[0].filters?.[0]).toEqual({
+        name: 'BSON dump',
+        extensions: ['bson'],
+      });
+    });
+
+    it('previews a BSON dump without metadata without a metadataFile', async () => {
+      const { preview } = await chooseDump(false);
+      expect(preview).not.toHaveProperty('metadataFile');
+      expect(preview).not.toHaveProperty('csvColumns');
+    });
+
+    it('imports a BSON dump and refuses a csvMapping for it', async () => {
+      const { preview, call, producers, sent } = await chooseDump(false);
+      await expect(
+        call('io.import', {
+          ...target,
+          fileToken: preview?.fileToken,
+          csvMapping: [{ column: 'a', path: 'a', bsonType: 'int' }],
+        }),
+      ).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
+      expect(producers).toEqual([]);
+      await call('io.import', { ...target, fileToken: preview?.fileToken });
+      await expect(producers[0]?.(sink())).resolves.toBe(1);
+      expect(sent.find((c) => 'insert' in c)).toMatchObject({
+        insert: 'orders',
+        documents: [{ sku: 'A-1' }],
+      });
     });
 
     it('answers NOT_CONNECTED for a profile without an open connection', async () => {
