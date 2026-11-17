@@ -2,6 +2,7 @@ import { join } from 'node:path';
 
 import { BROADCAST_STREAMS, methods, type Event, type Profile } from '@thicket/contract';
 
+import { aggHandlers } from '../agg';
 import { browseHandlers } from '../browse';
 import { ConnectionManager, connHandlers } from '../connections';
 import { docsQueryHandlers } from '../docs/query';
@@ -87,6 +88,7 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
       ...browseHandlers(connections),
       ...docsQueryHandlers(connections),
       ...docsWriteHandlers(connections),
+      ...aggHandlers(connections),
       // File dialogs can stay open as long as the user likes: no timeout.
       ...ioHandlers(
         connections,

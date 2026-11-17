@@ -1,6 +1,6 @@
 import type { ParsedParamsOf, ResultOf } from '@thicket/contract';
 
-import { abortable, type ConnectionManager } from '../../connections/manager';
+import { abortable, isOpenClient, type ConnectionManager } from '../../connections/manager';
 import { RpcError, type Handler, type HandlerContext } from '../../server/rpc';
 import {
   buildFind,
@@ -10,15 +10,6 @@ import {
   getSlice,
   streamFind,
 } from './query';
-
-/** True while `client` is still the open connection of the profile (not closed or replaced). */
-function isOpenClient(manager: ConnectionManager, profileId: string, client: unknown): boolean {
-  try {
-    return manager.client(profileId) === client;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Handlers of `docs.find` (streamed), `docs.count`, `docs.estimatedCount`, `docs.get` and

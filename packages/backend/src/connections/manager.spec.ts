@@ -6,6 +6,7 @@ import { RpcError } from '../server/rpc';
 import { KnownHosts, type SshTunnel } from '../ssh';
 import {
   ConnectionManager,
+  isOpenClient,
   readServerInfo,
   topologyOf,
   type ClientLike,
@@ -1349,5 +1350,35 @@ describe('ConnectionManager SSH tunnels', () => {
     await manager.open('plain', undefined);
     expect(open.mock.calls[0]?.[3]).toMatchObject({ readyTimeoutMS: 7_500 });
     expect(open.mock.calls[1]?.[3]).not.toHaveProperty('readyTimeoutMS');
+  });
+});
+
+describe('isOpenClient', () => {
+  it('is true only for the client of the open connection of that profile', async () => {
+    const { manager, created } = setup();
+    await manager.open('p1', undefined);
+    const client = created[0]?.client;
+    expect(isOpenClient(manager, 'p1', client)).toBe(true);
+    expect(isOpenClient(manager, 'p1', fakeClient())).toBe(false);
+    expect(isOpenClient(manager, 'p2', client)).toBe(false);
+    await manager.close('p1');
+  });
+
+  it('is false (does not throw) for a profile that was never opened', () => {
+    const { manager } = setup();
+    expect(isOpenClient(manager, 'p1', fakeClient())).toBe(false);
+    expect(isOpenClient(manager, 'unknown', undefined)).toBe(false);
+  });
+
+  it('is false for a client after its connection was closed, and after a reopen', async () => {
+    const { manager, created } = setup();
+    await manager.open('p1', undefined);
+    const first = created[0]?.client;
+    await manager.close('p1');
+    expect(isOpenClient(manager, 'p1', first)).toBe(false);
+    await manager.open('p1', undefined);
+    expect(isOpenClient(manager, 'p1', first)).toBe(false);
+    expect(isOpenClient(manager, 'p1', created[1]?.client)).toBe(true);
+    await manager.close('p1');
   });
 });

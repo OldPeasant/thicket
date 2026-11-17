@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "task": "agg-backend",
+  "reviewed_revision": "0221c41a2f690b01ba1f90422c0d0f9c5bfda017",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/agg-backend/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/agg-backend/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/agg-backend/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "preview sample $limit now goes after a leading $match with top-level $text"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "WRITING_STAGES owned by guard.ts, imported by agg.ts"},
+    {"id": "CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "import path ../browse/browse"},
+    {"id": "CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "isOpenClient shared from connections/manager.ts"},
+    {"id": "CR-1 (second review)", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "$text nested in $and/$or of a leading $match still gets the sample $limit first; rare, preview then shows a server error while agg.run works"},
+    {"id": "TW-1", "source": "test-writer", "severity": "Low", "disposition": "accepted",
+     "note": "cancelling agg.createView answers CANCELLED but the create command is not killed on the server; same as other single-command writes, no requirement covers it"}
+  ],
+  "validation": [
+    {"command": "npm run check", "result": "pass"},
+    {"command": "npx vitest run --config test/integration/vitest.config.ts agg.int docs-query.int", "result": "pass"}
+  ]
+}

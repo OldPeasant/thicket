@@ -1,6 +1,7 @@
 /** Name of this workspace. */
 export const WORKSPACE = '@thicket/backend';
 
+export * from './agg';
 export * from './browse';
 export * from './connections';
 export * from './docs/query';
