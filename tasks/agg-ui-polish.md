@@ -5,7 +5,7 @@ owner: felix/agent-2
 deps: [agg-ui]
 touches: [packages/renderer/src/app/aggregation]
 prio: 2
-lease_until: 2026-11-17T04:04:31Z
+lease_until: 2026-11-17T04:09:35Z
 ---
 ## Goal
 Follow-ups from the agg-ui review (reviews/agg-ui/review.md CR-8, CR-9).
