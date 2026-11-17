@@ -13,7 +13,7 @@
     {"id": "TW-1", "source": "test-writer", "severity": "Low", "disposition": "accepted", "note": "closeAll at shutdown does not cancel pending opens; outside the criteria, the process exit ends the workers; recorded with tasks.py assume"}
   ],
   "validation": [
-    {"command": "cd packages/backend && npx vitest run src/shell/host.spec.ts src/server/backend.spec.ts", "result": "pass (2 files, 117 tests)"},
+    {"command": "cd packages/backend && npx vitest run src/shell/host.spec.ts src/server/backend.spec.ts", "result": "pass"},
     {"command": "npm run check", "result": "pass"}
   ]
 }
