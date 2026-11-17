@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 // `ng test` runs from the workspace folder (packages/renderer).
@@ -101,7 +101,8 @@ function moduleGraph(entry: string): { files: Set<string>; unresolved: string[] 
 // library, CodeMirror and Lezer) and fails on anything that runs text as code.
 describe('raw editor bundle path', () => {
   const graph = moduleGraph(ENTRY);
-  const names = [...graph.files].map((path) => relative(ROOT, path));
+  // Test-only fix (the product was right): `relative` gives `\` on Windows, so compare with `/`.
+  const names = [...graph.files].map((path) => relative(ROOT, path).split(sep).join('/'));
 
   it('resolves every import of the editor', () => {
     expect(graph.unresolved).toEqual([]);
