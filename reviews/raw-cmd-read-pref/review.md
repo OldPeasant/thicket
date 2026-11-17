@@ -4,55 +4,59 @@ Date: 2026-11-17
 
 Task: raw-cmd-read-pref - M2: Raw-command reads follow the profile read preference, writes its write concern
 
-Scope: `git diff 87a98f10..83dd7248` (committed changes only; later test-writer commits excluded)
+Scope: `git diff 277e22ae..e19cc6a2` (the whole task diff up to the final code revision). This is a re-review after fixes. HEAD cc5e0b32 adds only `reviews/` on top of e19cc6a2. There are no uncommitted changes.
 
 Requirements:
-- tasks/raw-cmd-read-pref.md acceptance criteria and recorded assumptions #1-#4
+- tasks/raw-cmd-read-pref.md: acceptance criteria and the five recorded assumptions
 - SPEC.md M2 "Read preference and write concern per profile"
-- docs/ARCHITECTURE.md "Connections"
-- AGENTS.md (Evidence, quality gate), docs/QUALITY.md
-- mongodb driver 7.9.0 source (node_modules/mongodb/src: cursor/abstract_cursor.ts, cursor/run_command_cursor.ts, sdam/server.ts, write_concern.ts, error.ts, db.ts) to check cursor and write-concern semantics
+- docs/ARCHITECTURE.md "Connections" (updated by this task)
+- AGENTS.md (Evidence, quality gate)
+- Previous review (83dd7248), reviews/raw-cmd-read-pref/fixes.md and tests.md
 
 Git range:
 - Branch: main
-- HEAD: 83dd7248
-- Base/start: 87a98f10781c7633bad5346c9cc76e76ceb8bb68
-- Commits reviewed: 4 (4fa0d8dc, 93dcba8b, e2e70cf4, 83dd7248)
+- HEAD: cc5e0b325a045dfbe4bcafe2dd6971a2e18bbbed (final code revision e19cc6a2284d5295270c3dfeb648d8dcc22e05fc)
+- Base/start: 277e22aee71aac1d9ff5d214ba4be544ed50782c
+- Commits reviewed: 8 (74254089, 34048f9c, dcac112a, 13d39f13, ba871169, 8a4e44f0, e19cc6a2, cc5e0b32)
 
-Summary: 0 P0, 0 P1, 1 P2, 3 P3
+Summary: 0 P0, 0 P1, 0 P2, 1 P3
+
+## Status of earlier findings
+
+- **CR-1 (P2, missing tests for Operation's driver cursor, write and cancel paths): resolved.**
+  `packages/backend/src/docs/query/read-preference.spec.ts` now covers these cases:
+  - `run()` vs `write()` options and body;
+  - primary reads;
+  - one driver cursor across open/more;
+  - cancel during the first batch and during a getMore;
+  - `close()` called at once while the batch is still pending, with the cursor closed only after it settles (`it.each` at line 350);
+  - a failing getMore after a cancel;
+  - `killOperations` with the read preference;
+  - `MongoWriteConcernError` turned into its reply.
+
+  `packages/backend/src/docs/write/read-preference.spec.ts` covers the following:
+  - writes carry `writeConcern` and no read preference;
+  - preview, expectedCount and conflict reads go to the primary;
+  - a write concern error becomes `SERVER_ERROR`.
+
+  The int test now has a cancel that lands while a getMore is running on rs-b (`$where` sleep). It asserts that every command reached rs-b and that no cursor is left open there.
+- **CR-2 (P3, `$out` / `$merge` without the write concern): accepted as an assumption.** The task records it as an assumption (2026-11-17 05:50), and `packages/backend/src/agg` is outside the task's `touches`. A human decides.
+- **CR-3 (P3, `ReadPreferenceLike` silently ignored by the driver cursor): resolved.** `ReadCursor`, `Operation`, `command()`, `killOperations()` and `killCursorId()` now take `ReadPreference`. `primary: true` uses `ReadPreference.primary`. `ReadPreferenceLike` no longer appears in `packages/backend/src`.
+- **CR-4 (P3, duplicated option merging and open-cursor check): resolved.** `rawOptions()` and `isOpenCursor()` are exported once from browse.ts (lines 146 and 170) and used in query.ts. No other copy remains.
 
 ## Verified behaviour (no finding)
 
-- Driver cursor usage: `db.runCursorCommand(cmd, { raw: true, readPreference })` selects the server
-  once (`RunCommandCursor._initialize` records `operation.server`), and `getMore` / `killCursors`
-  go to that `selectedServer`. With `raw: true`, `CursorResponse.shift` returns document bytes,
-  which `decodeBatch` decodes losslessly. `setComment` / `setBatchSize` feed `getMoreOptions`;
-  they are not the `batchSize()` / `maxTimeMS()` overrides that throw `MongoCursorInUseError`.
-- Batch semantics: `hasNext()` initializes the cursor or runs one `getMore`, looping only while
-  a batch is empty and the cursor is open. `readBufferedDocuments()` then drains exactly that
-  batch. `cursor.id` becomes `Long.ZERO` when the cursor is exhausted or cleaned up, so
-  `ReadCursor.hasMore` is correct.
-- close() race: closing a driver cursor while `cursorInit` is in flight would leak it on the
-  server. `cleanup` ends the session before the id is known, and the later `isDead` cleanup
-  skips the kill because `session.hasEnded` (abstract_cursor.ts:850, 936-943). The
-  implementation avoids this. `Operation.fetch` clears `this.cursor` on cancel
-  (query.ts:304), and the cursor is closed only from `guard`'s `onSettled`, after `hasNext()`
-  settled (query.ts:301). `runCursor` checks the signal only between batches.
-- Read/write routing: `Operation.write` sends no read preference (primary) and the command's
-  `writeConcern` field. Reads that belong to a write use `primary: true`, and schema, index
-  and user commands keep using `runCommand` (primary, no write concern), as assumption #2
-  says.
-- Write concern mapping: `w`, `journal` and `wtimeoutMS` map to `w`, `j` and `wtimeout`. This
-  matches `WriteConcern.apply` in the driver. `Db.writeConcern` / `Db.readPreference` inherit
-  the client options (db.ts:166-173, 205-219).
-- MongoWriteConcernError: `Server.command` throws it only for `ok: 1` replies, because
-  `ok: 0` throws `MongoServerError` first. `error.result` is the full reply, so
-  `checkReply` / import's check report `SERVER_ERROR` "applied but not acknowledged" with the
-  server code. The int test for `w: 3` checks this end to end.
-- AC1-AC3 have matching tests: int tests use `commandStarted` addresses and
-  `serverStatus.metrics.cursor.open.total` on rs-b, and unit tests in `read-preference.spec.ts`
-  cover listDatabases, dbStats, listCollections and $collStats. No criterion is claimed yet
-  (`tasks.py verify` lists all three as open), so there is no unsupported evidence to report.
+- **AC1, read preference and cursor pinning.** `Operation.open` and `more` use one `ReadCursor`. On real clients that is `db.runCursorCommand(cmd, { raw: true, readPreference })`, so `getMore` and `killCursors` go to the server that opened the cursor. The int tests check the address of each command:
+  - `find` and every `getMore` reach `rs-b:27017`;
+  - a cancel after the first batch, and a cancel during a getMore, kill the cursor there;
+  - rs-b's `metrics.cursor.open.total` goes back to its earlier value.
+- **AC2, write concern.** `Operation.write` sends no read preference (primary) and adds the profile write concern via `withWriteConcern`, mapping `w`, `journal` and `wtimeoutMS` to `w`, `j` and `wtimeout`. `command()` returns the reply of a `MongoWriteConcernError`, and `checkReply` and import report it as `SERVER_ERROR` "applied but not acknowledged". The int test checks `w: 3` end to end (`UnsatisfiableWriteConcern`, the document applied on the primary). It also checks `w: 2` with a `secondary` read.
+- **AC3, browse reads.** These reads follow the read preference: `listDatabases`, `dbStats` (`read()`), and `listCollections` and `$collStats` (`runCursor`, which builds a `ReadCursor`). `browse/read-preference.spec.ts` unit-tests them. Commands that change something (`create`, `drop`, `renameCollection`, `collMod`, index commands, `usersInfo`, `connectionStatus`) still use `run` / `runCommand` on the primary, as assumption #2 says.
+- **Cancel race.** `Operation.fetch` drops `this.cursor` on cancel, so `close()` never closes a driver cursor while its `hasNext()` is still running. The `guard` `onSettled` callback closes it once the batch has settled. This avoids the driver's session-ended leak. In `browse.runCursor`, the signal is checked only between batches, and `finally` closes an idle cursor.
+- **Cancel targeting.** A cancelled read sends `currentOp` / `killOp` with the same read preference, and a cancelled write sends them to the primary. Assumption #1 records the limit when several secondaries are eligible.
+- **Other callers.** `agg.ts`, `io/export.ts`, `indexes.ts` (`$indexStats`, shards) and `validator.ts` (`listCollections` entry, the `checkValidator` find) are reads, so following the read preference fits assumption #3. `setValidator` stays on the primary through `runCommand`.
+- **Validation run by this review.** `npx vitest run` on the three `read-preference.spec.ts` files and `io/import.spec.ts` gave 4 files, 103 tests passed. The int tests were not re-run here.
+- **Evidence.** `tasks.py verify raw-cmd-read-pref` still lists all three criteria as open. No criterion is claimed without evidence. The parent must record the int-test and unit-test runs before `done`.
 
 ## P0 Critical
 
@@ -64,80 +68,17 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | Operation's driver-cursor and write paths have no unit tests; the cancel-in-flight path is untested anywhere**
-    - File: `packages/backend/src/docs/query/query.ts:299`
-    - Category: Tests
-    - Problem: `read-preference.spec.ts` only tests `ReadCursor` and browse functions. No
-      test, unit or int, at 83dd7248 covers `Operation` with a client that has
-      `runCursorCommand`, which is how every real `MongoClient` runs. The untested behaviour
-      includes the following:
-      - A cancel while the `find` or `getMore` is in flight. `fetch` clears `this.cursor`,
-        and `cleanUp` must call `cursor.close()` only after `hasNext()` settled.
-      - `Operation.write` adding `writeConcern` and sending no read preference.
-      - `primary: true` reads in write.ts going to the primary.
-      - `command()` turning `MongoWriteConcernError` into its reply. Only the int `w: 3`
-        insert covers this.
-
-      The int cancel test (`test/integration/raw-cmd-read-pref.int.spec.ts:155`) aborts
-      inside the `send` callback. `more()` therefore throws before any `getMore` is sent, and
-      `op.close()` kills an idle cursor. It does not exercise the background-cleanup path.
-    - Why it matters: this is the path that is sensitive to races. If a later change closes
-      the driver cursor directly on cancel, for example from `Operation.close()`, while
-      `cursorInit` is in flight, the server cursor leaks silently: the driver ends the session
-      first and then skips `killCursors` (abstract_cursor.ts:850, 936-943). No test would
-      notice.
-    - Suggested fix: add unit tests with a fake `DbLike` that has `runCursorCommand` and a
-      `hasNext()` you control: abort during the first `hasNext()` and during a `getMore`, then
-      assert that `close` comes only after it settles. Also assert the `write()` command
-      options and body (no `readPreference`, `writeConcern` field), that the `PRIMARY` reads
-      use `'primary'`, and that a thrown `MongoWriteConcernError` becomes the reply that
-      `checkReply` turns into `SERVER_ERROR`.
+None.
 
 ## P3 Low
 
-- [ ] **CR-2 | `$out` / `$merge` aggregations write without the profile write concern**
-    - File: `packages/backend/src/agg/agg.ts:136`
-    - Category: Correctness
-    - Problem: `streamAggregate` runs every pipeline through `Operation.open`. That includes
-      pipelines where `writesTo()` is true. These pipelines get the profile's read preference,
-      but the command never gets `withWriteConcern`, so `$out` / `$merge` writes skip the
-      profile's `writeConcern`. Assumption #2 lists only docs.* and io.import as document
-      writes. Assumption #3 covers the read preference of `$out` / `$merge` but does not
-      mention the write concern.
-    - Why it matters: SPEC M2 asks for a write concern per profile, and `$merge` writes
-      documents. A `w: "majority"` profile would get acknowledgements at the server default.
-    - Suggested fix: if `writesTo(pipeline)`, add the profile write concern, for example
-      `withWriteConcern(client.db(p.db), built)` or an `Operation` option. Otherwise record
-      the exclusion as an explicit assumption so a human can decide.
-
-- [ ] **CR-3 | `ReadCursor` accepts any `ReadPreferenceLike`, but the driver cursor honours only `ReadPreference` instances**
-    - File: `packages/backend/src/browse/browse.ts:185`
-    - Category: Quality
-    - Problem: `AbstractCursor`'s constructor uses `options.readPreference` only when it is
-      `instanceof ReadPreference`. Anything else silently becomes primary
-      (abstract_cursor.ts:229-232). `Operation` passes the string `'primary'` for
-      `primary: true` (query.ts:190). That works only because the fallback is also primary. A
-      future caller passing `'secondary'` would silently read from the primary on the
-      driver path, while the plain-command path would honour it.
-    - Why it matters: the two paths can disagree silently, and unit tests run on the plain
-      path.
-    - Suggested fix: type the parameter as `ReadPreference` and pass `ReadPreference.primary`,
-      or normalise it with `ReadPreference.fromOptions({ readPreference })` before calling
-      `runCursorCommand`.
-
-- [ ] **CR-4 | Read-option merging and the open-cursor check are duplicated**
-    - File: `packages/backend/src/docs/query/query.ts:97`
-    - Category: Quality
-    - Problem: `readPreference === undefined ? RAW : { ...RAW, readPreference }` appears three
-      times: `readOptions` (browse.ts:146), `ReadCursor.command` (browse.ts:244) and query.ts
-      `command()` (query.ts:97). `isOpen` (query.ts:157) duplicates `isOpenCursor`
-      (browse.ts:164).
-    - Why it matters: the read-routing rule then lives in several places, and a later change,
-      for example to read concern, has to be made in each copy.
-    - Suggested fix: export one helper from browse.ts that takes an explicit read preference,
-      for example `readOptions(db, override?)`, plus one open-cursor predicate, and use them
-      in both modules.
+- [ ] **CR-5 | The `w: 2` int test does not show that the insert carried the write concern**
+    - File: `test/integration/raw-cmd-read-pref.int.spec.ts:256`
+    - Category: Tests
+    - Problem: the test inserts with a `w: 2` profile and then reads from the secondary. On a two-member local replica set, replication usually finishes before the follow-up find. The secondary read would then also see the document if `Operation.write` sent no `writeConcern` at all, so the test cannot tell the difference. The writer's `take` is never checked, unlike the `w: 3` test, whose error message proves the concern was applied.
+    - Why it matters: AC2 says "with `w: 2` a secondary read sees the document". The unit tests check the field, but the end-to-end check for `w: 2` is weaker than it looks.
+    - Suggested fix: keep the `commandStarted` events from the writer client and assert that the `insert` went to `PRIMARY_HOST` with `command.writeConcern` matching `{ w: 2, wtimeout: 20000 }`. This needs `take` to expose the command, or a separate filter on the recorded events.
 
 ## Review conclusion
 
-No material issues found. Nothing blocks completion. CR-1 is a test gap the parent should close, or accept, before `done`. CR-2 needs a fix or an explicit assumption. CR-3 and CR-4 are optional cleanups.
+No material issues found. All earlier findings are resolved, except CR-2, which is recorded as an assumption for a human to decide. CR-5 is an optional test hardening.
