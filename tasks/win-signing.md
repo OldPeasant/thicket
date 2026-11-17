@@ -2,7 +2,7 @@
 title: Release: sign Windows builds with SignPath
 status: todo
 owner:
-deps: [release-ci]
+deps: [release-ci,installer-smoke,packaged-hardening]
 touches: [.github/workflows/release.yml,apps/desktop/electron-builder.yml,apps/desktop/scripts,README.md,docs/CODE_SIGNING.md]
 prio: 3
 ---
