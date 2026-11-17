@@ -550,6 +550,24 @@ describe('AggregationView', () => {
       expect(previews()).toHaveLength(before + 1);
       expect(previews().at(-1)?.['pipeline']).toBe('[{"$match":{"a":{"$numberInt":"123"}}}]');
     });
+
+    it('a preview still waiting for the pause is dropped on entering full-text mode (agg-ui-polish)', async () => {
+      const before = previews().length;
+      await typeBody('{ a: 1 }');
+      await tick(PREVIEW_DEBOUNCE_MS - 100);
+      get('agg-mode-text').click();
+      await tick(PREVIEW_DEBOUNCE_MS * 3);
+      expect(view.mode()).toBe('text');
+      expect(previews()).toHaveLength(before);
+
+      // Back in the stage list, the edited stage is read after the pause.
+      get('agg-mode-stages').click();
+      await tick(PREVIEW_DEBOUNCE_MS - 1);
+      expect(previews()).toHaveLength(before);
+      await tick(1);
+      expect(previews()).toHaveLength(before + 1);
+      expect(previews().at(-1)?.['pipeline']).toBe('[{"$match":{"a":{"$numberInt":"1"}}}]');
+    });
   });
 
   it('a failed preview stops loading and is asked again when the stage is re-enabled', async () => {
@@ -1245,7 +1263,7 @@ describe('AggregationView', () => {
     expect(preview.hasAttribute('aria-live')).toBe(false);
     expect(live.getAttribute('aria-live')).toBe('polite');
     expect(preview.querySelectorAll('[aria-live]')).toHaveLength(1);
-    expect(live.textContent?.trim()).toBe('1 document from a sample');
+    expect(live.textContent?.trim()).toBe('Stage 1: 1 document from a sample');
     // The documents and the visible count are not in the live region.
     expect(live.querySelector('pre')).toBeNull();
     expect(inStage(0, 'agg-preview-count').hasAttribute('aria-live')).toBe(false);
@@ -1258,34 +1276,40 @@ describe('AggregationView', () => {
     );
     await setBody(0, '{ a: 1 }');
     expect(inStage(0, 'agg-preview-live')).toBe(live);
-    expect(live.textContent?.trim()).toBe('Loading preview…');
+    // Loading is not announced (the visible note says it); only the result is.
+    expect(inStage(0, 'agg-stage-preview').textContent).toContain('Loading preview');
+    expect(live.textContent?.trim()).toBe('');
     answer({ docs: [] });
     await settle();
     expect(inStage(0, 'agg-preview-live')).toBe(live);
-    expect(live.textContent?.trim()).toBe('No documents from a sample');
+    expect(live.textContent?.trim()).toBe('Stage 1: No documents from a sample');
 
     fake.fail('agg.previewStage', { code: 'SERVER_ERROR', message: 'preview broke' });
     await setBody(0, '{ a: 2 }');
     expect(inStage(0, 'agg-preview-live')).toBe(live);
-    expect(live.textContent?.trim()).toMatch(/^Preview failed: [\s\S]*preview broke$/);
+    expect(live.textContent?.trim()).toMatch(/^Stage 1: preview failed: [\s\S]*preview broke$/);
   });
 
   it('the live region counts every previewed stage and is empty for stages without a preview', async () => {
     await buildDemo();
     // The fake answers one document per stage of the previewed pipeline.
-    expect(inStage(2, 'agg-preview-live').textContent?.trim()).toBe('3 documents from a sample');
+    expect(inStage(2, 'agg-preview-live').textContent?.trim()).toBe(
+      'Stage 3: 3 documents from a sample',
+    );
     const live = inStage(1, 'agg-preview-live');
-    expect(live.textContent?.trim()).toBe('2 documents from a sample');
+    expect(live.textContent?.trim()).toBe('Stage 2: 2 documents from a sample');
 
     // Disabled: nothing to announce, and the region stays in place.
     await click(inStage(1, 'agg-stage-enabled'));
     expect(inStage(1, 'agg-preview-live')).toBe(live);
     expect(live.textContent?.trim()).toBe('');
-    expect(inStage(2, 'agg-preview-live').textContent?.trim()).toBe('2 documents from a sample');
+    expect(inStage(2, 'agg-preview-live').textContent?.trim()).toBe(
+      'Stage 3: 2 documents from a sample',
+    );
     // Enabled again: the count comes back in the same region.
     await click(inStage(1, 'agg-stage-enabled'));
     expect(inStage(1, 'agg-preview-live')).toBe(live);
-    expect(live.textContent?.trim()).toBe('2 documents from a sample');
+    expect(live.textContent?.trim()).toBe('Stage 2: 2 documents from a sample');
 
     // A syntax error: nothing to announce (the error is under the textarea).
     await setBody(1, '{ _id: ');
@@ -1302,6 +1326,254 @@ describe('AggregationView', () => {
     for (let i = 0; i < 4; i++) {
       expect(inStage(i, 'agg-stage-preview').querySelectorAll('[aria-live]')).toHaveLength(1);
     }
+  });
+
+  it('names its stage in each announcement after one edit reloads several stages', async () => {
+    await buildDemo();
+    await setBody(0, '{ status: "closed" }');
+    expect([0, 1, 2].map((i) => inStage(i, 'agg-preview-live').textContent?.trim())).toEqual([
+      'Stage 1: 1 document from a sample',
+      'Stage 2: 2 documents from a sample',
+      'Stage 3: 3 documents from a sample',
+    ]);
+    // Moving a stage renames its announcement after its new place.
+    await click(inStage(2, 'agg-stage-up'));
+    expect(inStage(1, 'agg-preview-live').textContent?.trim()).toMatch(/^Stage 2: /);
+    expect(inStage(2, 'agg-preview-live').textContent?.trim()).toMatch(/^Stage 3: /);
+  });
+
+  it('sends no previews in full-text mode and re-previews only changed stages on return', async () => {
+    await buildDemo();
+    const before = previews().length;
+
+    await click(get('agg-mode-text'));
+    expect(view.mode()).toBe('text');
+    // Run and Create view apply the text to the stage list, but read no previews.
+    await click(get('agg-run'));
+    expect(runs()).toHaveLength(1);
+    await click(get('agg-create-view'));
+    const name = get<HTMLInputElement>('agg-view-name');
+    name.value = 'open_orders';
+    name.dispatchEvent(new Event('input'));
+    await click(get('agg-view-submit'));
+    expect(fake.requestsFor('agg.createView')).toHaveLength(1);
+    expect(previews()).toHaveLength(before);
+
+    // Back with the same text: every preview is still current, nothing is read again.
+    await click(get('agg-mode-stages'));
+    expect(view.mode()).toBe('stages');
+    expect(previews()).toHaveLength(before);
+    expect(inStage(2, 'agg-preview-live').textContent?.trim()).toBe(
+      'Stage 3: 3 documents from a sample',
+    );
+
+    // Back after editing the second stage: only the stages from it on are read again.
+    await click(get('agg-mode-text'));
+    const area = get<HTMLTextAreaElement>('agg-text');
+    area.value = area.value.replace('$customer', '$region');
+    area.dispatchEvent(new Event('input'));
+    await click(get('agg-run'));
+    expect(previews()).toHaveLength(before);
+    await click(get('agg-mode-stages'));
+    const sent = previews()
+      .slice(before)
+      .map((p) => operators(p['pipeline']).join(' '));
+    expect(sent.sort()).toEqual(['$match $group', '$match $group $sort']);
+    expect(previews().at(-1)?.['pipeline']).toContain('$region');
+  });
+
+  it('entering full-text mode stops a loading preview and asks again on return', async () => {
+    let answer: (value: { docs: string[] }) => void = () => undefined;
+    fake.handle(
+      'agg.previewStage',
+      () => new Promise<{ docs: string[] }>((resolve) => (answer = resolve)),
+    );
+    await setBody(0, '{ a: 1 }');
+    const before = previews().length;
+    await click(get('agg-mode-text'));
+    answer({ docs: docs(1, 5) });
+    await settle();
+    fake.handle('agg.previewStage', () => ({ docs: docs(1, 2) }));
+    await click(get('agg-mode-stages'));
+    expect(previews()).toHaveLength(before + 1);
+    expect(inStage(0, 'agg-preview-live').textContent?.trim()).toBe(
+      'Stage 1: 2 documents from a sample',
+    );
+  });
+
+  describe('previews around full-text mode (agg-ui-polish)', () => {
+    const DEMO =
+      '[{ $match: { status: "open" } }, ' +
+      '{ $group: { _id: "$customer", total: { $sum: "$total" } } }, ' +
+      '{ $sort: { total: -1 } }]';
+    const setText = async (value: string) => {
+      const area = get<HTMLTextAreaElement>('agg-text');
+      area.value = value;
+      area.dispatchEvent(new Event('input'));
+      await settle();
+    };
+    const sentSince = (before: number) =>
+      previews()
+        .slice(before)
+        .map((p) => operators(p['pipeline']).join(' '));
+    const liveTexts = () => all('agg-preview-live').map((l) => l.textContent?.trim());
+
+    it('keeps the previews of the stages before one removed at the end in the text', async () => {
+      await buildDemo();
+      const before = previews().length;
+      await click(get('agg-mode-text'));
+      await setText(DEMO.replace(', { $sort: { total: -1 } }]', ']'));
+      await click(get('agg-mode-stages'));
+      expect(all('agg-stage')).toHaveLength(2);
+      expect(previews()).toHaveLength(before);
+      expect(liveTexts()).toEqual([
+        'Stage 1: 1 document from a sample',
+        'Stage 2: 2 documents from a sample',
+      ]);
+    });
+
+    it('reads only a stage appended in the text', async () => {
+      await buildDemo();
+      const before = previews().length;
+      await click(get('agg-mode-text'));
+      await setText(DEMO.replace(/]$/, ', { $limit: 5 }]'));
+      // Applied by Run, still in text mode: nothing is read.
+      await click(get('agg-run'));
+      expect(previews()).toHaveLength(before);
+      await click(get('agg-mode-stages'));
+      expect(sentSince(before)).toEqual(['$match $group $sort $limit']);
+      expect(liveTexts()).toEqual([
+        'Stage 1: 1 document from a sample',
+        'Stage 2: 2 documents from a sample',
+        'Stage 3: 3 documents from a sample',
+        'Stage 4: 4 documents from a sample',
+      ]);
+    });
+
+    it('reads every remaining stage again when the first one is removed in the text', async () => {
+      await buildDemo();
+      const before = previews().length;
+      await click(get('agg-mode-text'));
+      await setText(DEMO.replace('{ $match: { status: "open" } }, ', ''));
+      await click(get('agg-mode-stages'));
+      expect(sentSince(before).sort()).toEqual(['$group', '$group $sort']);
+      expect(liveTexts()).toEqual([
+        'Stage 1: 1 document from a sample',
+        'Stage 2: 2 documents from a sample',
+      ]);
+    });
+
+    it('a stage inserted in the middle of the text reads it and the stages after it', async () => {
+      await buildDemo();
+      const before = previews().length;
+      await click(get('agg-mode-text'));
+      await setText(DEMO.replace('{ $sort:', '{ $limit: 5 }, { $sort:'));
+      await click(get('agg-mode-stages'));
+      expect(sentSince(before).sort()).toEqual([
+        '$match $group $limit',
+        '$match $group $limit $sort',
+      ]);
+    });
+
+    it('Explain in full-text mode applies the text but reads no previews', async () => {
+      fake.respond('agg.explain', { explain: JSON.stringify(aggGroup) });
+      await buildDemo();
+      const before = previews().length;
+      await click(get('agg-mode-text'));
+      await setText(DEMO.replace('-1', '1'));
+      await click(get('agg-explain'));
+      expect(fake.requestsFor('agg.explain')).toHaveLength(1);
+      expect(previews()).toHaveLength(before);
+      await click(get('agg-mode-stages'));
+      // Only the edited last stage is read again.
+      expect(sentSince(before)).toEqual(['$match $group $sort']);
+    });
+
+    it('a Run refused for a text parse error reads no previews either', async () => {
+      await buildDemo();
+      const before = previews().length;
+      await click(get('agg-mode-text'));
+      await setText('[{ $match: ');
+      await click(get('agg-run'));
+      expect(q('agg-text-error')).not.toBeNull();
+      expect(previews()).toHaveLength(before);
+    });
+
+    it('switching back and forth without edits reads nothing again', async () => {
+      await buildDemo();
+      const before = previews().length;
+      for (let i = 0; i < 3; i++) {
+        await click(get('agg-mode-text'));
+        await click(get('agg-mode-stages'));
+      }
+      expect(previews()).toHaveLength(before);
+    });
+
+    it('a failed preview is not asked again in text mode, and the good ones are kept on return', async () => {
+      await buildDemo();
+      fake.fail('agg.previewStage', { code: 'SERVER_ERROR', message: 'sample broke' });
+      await setBody(2, '{ total: 1 }');
+      expect(inStage(2, 'agg-preview-live').textContent?.trim()).toMatch(
+        /^Stage 3: preview failed: [\s\S]*sample broke$/,
+      );
+      const before = previews().length;
+      fake.handle('agg.previewStage', (params) => ({
+        docs: docs(1, operators(params.pipeline).length),
+      }));
+      await click(get('agg-mode-text'));
+      await click(get('agg-run'));
+      expect(previews()).toHaveLength(before);
+      await click(get('agg-mode-stages'));
+      // Only the failed stage is read again; the stages whose previews succeeded are kept.
+      expect(sentSince(before)).toEqual(['$match $group $sort']);
+      expect(inStage(2, 'agg-preview-live').textContent?.trim()).toBe(
+        'Stage 3: 3 documents from a sample',
+      );
+    });
+
+    it('a collection change in text mode reads nothing until the stage list is back', async () => {
+      await buildDemo();
+      const before = previews().length;
+      await click(get('agg-mode-text'));
+      fixture.componentRef.setInput('tab', {
+        ...TAB,
+        data: { profileId: 'p1', db: 'shop', coll: 'invoices', type: 'collection' },
+      });
+      await settle();
+      expect(view.mode()).toBe('text');
+      expect(previews()).toHaveLength(before);
+      await click(get('agg-mode-stages'));
+      expect(previews()).toHaveLength(before + 3);
+      expect(
+        previews()
+          .slice(before)
+          .every((p) => p['coll'] === 'invoices'),
+      ).toBe(true);
+    });
+
+    it('stays silent in every reloading stage until its result names it', async () => {
+      await buildDemo();
+      const pending: ((value: { docs: string[] }) => void)[] = [];
+      fake.handle(
+        'agg.previewStage',
+        () => new Promise<{ docs: string[] }>((resolve) => pending.push(resolve)),
+      );
+      await setBody(0, '{ status: "closed" }');
+      expect(pending).toHaveLength(3);
+      expect(liveTexts()).toEqual(['', '', '']);
+      // Answer out of order: each region names its own stage.
+      pending[2]?.({ docs: docs(1, 4) });
+      await settle();
+      expect(liveTexts()).toEqual(['', '', 'Stage 3: 4 documents from a sample']);
+      pending[0]?.({ docs: [] });
+      pending[1]?.({ docs: docs(1, 1) });
+      await settle();
+      expect(liveTexts()).toEqual([
+        'Stage 1: No documents from a sample',
+        'Stage 2: 1 document from a sample',
+        'Stage 3: 4 documents from a sample',
+      ]);
+    });
   });
 
   it('a Run refused for a full-text parse error sends nothing and keeps the text and stages', async () => {

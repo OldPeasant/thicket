@@ -260,7 +260,9 @@ export class AggregationView {
     effect(() => {
       const plans = this.previewPlans();
       const target = this.target();
-      untracked(() => this.schedulePreviews(plans, target));
+      // The full-text mode shows no previews: none are read until the stage list is back.
+      if (this.mode() === 'text') untracked(() => this.pausePreviews());
+      else untracked(() => this.schedulePreviews(plans, target));
     });
     // A plan explains one collection: pointing the tab elsewhere closes it.
     effect(() => {
@@ -355,7 +357,10 @@ export class AggregationView {
       return false;
     }
     this.textError.set(null);
-    this.stages.set(parsed.stages.map((s) => ({ ...s, id: this.nextId++ })));
+    // A stage keeps the id of the stage at its place, so a stage whose pipeline prefix did not
+    // change keeps its preview (it is not read again).
+    const ids = this.stages().map((s) => s.id);
+    this.stages.set(parsed.stages.map((s, index) => ({ ...s, id: ids[index] ?? this.nextId++ })));
     return true;
   }
 
@@ -382,6 +387,20 @@ export class AggregationView {
         this.startPreview(id, key, plan.pipeline, target);
       }
     }, this.debounceMs);
+  }
+
+  /**
+   * Stops the pending scheduling pass and the previews still loading (their results would not be
+   * shown). Finished previews stay: back in the stage list, a stage whose pipeline prefix did
+   * not change shows its preview without reading it again.
+   */
+  private pausePreviews(): void {
+    clearTimeout(this.previewTimer);
+    for (const [id, run] of this.previewRuns) {
+      if (this.previews().get(id)?.state === 'ok') continue;
+      run.abort.abort();
+      this.previewRuns.delete(id);
+    }
   }
 
   private startPreview(
@@ -444,15 +463,19 @@ export class AggregationView {
   }
 
   /**
-   * What the persistent live region of a stage's preview announces: the count, the loading note
-   * or the preview error. Empty for stages without a preview. The documents are never announced.
+   * What the persistent live region of stage `position` (1-based) announces: the count or the
+   * preview error, named by its stage ("Stage 2: 5 documents from a sample"), since one edit
+   * reloads the previews of all later stages at once. Empty while loading (only results are
+   * announced) and for stages without a preview. The documents are never announced.
    */
-  protected previewStatus(id: number): string {
+  protected previewStatus(id: number, position: number): string {
     if (!this.previewPlans().has(id)) return '';
     const preview = this.previews().get(id);
-    if (preview?.state === 'ok') return `${this.countText(preview.docs)} from a sample`;
-    if (preview?.state === 'error') return `Preview failed: ${preview.message}`;
-    return 'Loading preview…';
+    if (preview?.state === 'ok') {
+      return `Stage ${position}: ${this.countText(preview.docs)} from a sample`;
+    }
+    if (preview?.state === 'error') return `Stage ${position}: preview failed: ${preview.message}`;
+    return '';
   }
 
   protected skippedText(id: number): string | null {

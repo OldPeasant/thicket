@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "task": "agg-ui-polish",
+  "reviewed_revision": "dfde04459839d061aec3d8771dc2a721b2c8fe45",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/agg-ui-polish/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/agg-ui-polish/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/agg-ui-polish/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "A stage whose position changes without a prefix change re-announces its unchanged count under its new number; rare (removing a disabled/invalid earlier stage), and the new number is accurate information."},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "ARCHITECTURE.md names the failed-preview retry on return; assumption recorded."},
+    {"id": "CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "Failed-preview text-mode test asserts exactly the re-read pipeline and the announcement."}
+  ],
+  "validation": [
+    {"command": "cd packages/renderer && npx ng test --include src/app/aggregation/aggregation-view.spec.ts", "result": "pass"},
+    {"command": "mutation: text-mode guard in the preview effect disabled -> 7 tests fail; restored -> 104 passed", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}

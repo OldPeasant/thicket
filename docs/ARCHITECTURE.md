@@ -594,7 +594,10 @@ Contract layout (`packages/contract/src/`):
 - Previews: each enabled, valid stage gets `agg.previewStage` with the enabled, valid stages up
   to it (debounced 400 ms, only when its prefix changed, older requests aborted). A stage with an
   error blocks only its own preview; later stages are previewed without it and say so.
-  `$out`/`$merge` stages are not previewed.
+  `$out`/`$merge` stages are not previewed. No previews are read in full-text mode (loading ones
+  are aborted); applying the text keeps each stage's id by position, so back in the stage list
+  only stages whose prefix changed, or whose preview failed, are read again. Each stage's polite
+  live region announces "Stage N: <count> from a sample" or the error, and is empty while loading.
 - Run: `agg.run` with `$skip`/`$limit` appended (20 per page + 1 to know whether there is a next
   page); a pipeline with `$out`/`$merge` runs unpaged through `WriteGuard.approve` with
   `alwaysConfirm`. Export: core's `generateCode` (`@thicket/core/codegen`) for shell, Node,
@@ -639,6 +642,24 @@ Contract layout (`packages/contract/src/`):
   services). Fixtures captured from mongo 8.2 with `explain/fixtures/capture.mjs`. e2e:
   `test/e2e/explain.e2e.ts` (demo step 9; the test creates the index with `idx.create` over the
   bridge, not through the Indexes tab).
+
+## Validator tab (`packages/renderer/src/app/validator`)
+- Backend: `packages/backend/src/browse/validator` (`validatorHandlers`): `coll.validator.get`
+  (`listCollections` options; level/action default `strict`/`error`, `{}` counts as none),
+  `coll.validator.set` (`collMod`; `null` sends `validator: {}`), `coll.validator.check` (the
+  `_id`s among at most `MAX_VALIDATOR_CHECK_IDS` given ones whose documents fail: a
+  `{ _id: { $in }, $nor: [validator] }` find, so the server evaluates `$jsonSchema`; an optional
+  draft `validator` instead of the stored one). Int tests `test/integration/validator.int.spec.ts`.
+- `ValidatorView` is the `validator` tab view (id `validatorTabId(profileId, db, coll)`), opened with
+  "Validator…" (`open-validator`) on the collection tab; closed with the collection like the
+  indexes tab. The validator is edited as shell syntax (`validator.model.ts`, core's parser; empty
+  text or `{}` removes it), level and action as selects; Save goes through `WriteGuard` and then
+  bumps `ValidatorChanges` for that collection.
+- Markers: each collection tab has its own `ValidatorMarks`; whenever its page changes (a saved
+  document included) or `ValidatorChanges` bumps, it sends the page's `_id`s to
+  `coll.validator.check`. The document list marks failing documents (`data-invalid`,
+  `doc-invalid` tag, red edge); every view shows a summary line (`validator-summary`). Marks are
+  about the stored documents, not unsaved edits. e2e: `test/e2e/validator.e2e.ts`.
 
 ## Write safety in the renderer (`packages/renderer/src/app/safety`)
 - Every write UI sends writes through `WriteGuard.run(method, params, options)` (or `approve()`,

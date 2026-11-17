@@ -167,7 +167,7 @@
             </div>
             <div class="preview" data-testid="agg-stage-preview">
               <p class="sr-only" data-testid="agg-preview-live" aria-live="polite">
-                {{ previewStatus(stage.id) }}
+                {{ previewStatus(stage.id, i + 1) }}
               </p>
               @if (!stage.enabled) {
                 <p class="note">Disabled: the pipeline skips this stage.</p>
