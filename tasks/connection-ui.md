@@ -15,7 +15,8 @@ Profile list (folders, colors), editor with form and connection-string tabs kept
   - verified (2026-11-17 01:28+0100 by felix/agent-2): cd packages/renderer && npx ng test --watch=false --include='src/app/connections/**/*.spec.ts' at 0414a53 -> 3 files, 127 passed (editor spec: form edits update URI and URI paste updates form; password field masked and URI shows **** / secret URI options stripped and masked)
 - [x] e2e: create a profile for the int-harness fixture, Test connection succeeds; wrong password shows AUTH_FAILED text
   - verified (2026-11-17 01:28+0100 by felix/agent-2): npm run test:e2e -- test/e2e/connections.e2e.ts (Electron app built from 0414a53, int-harness mongo fixture container) -> 'create a profile for the fixture: Test connection succeeds, a wrong password is AUTH_FAILED' passed
-- [ ] Ask-each-time prompts for the password on connect and does not store it (e2e checks secrets.bin unchanged)
+- [x] Ask-each-time prompts for the password on connect and does not store it (e2e checks secrets.bin unchanged)
+  - verified (2026-11-17 01:29+0100 by felix/agent-2): npm run test:e2e -- test/e2e/connections.e2e.ts (same run) -> 'ask each time: connecting prompts for the password and stores nothing' passed; it first saves a saved-mode control profile showing secrets.bin changes, then asserts secrets.bin unchanged after the ask-mode connect
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
