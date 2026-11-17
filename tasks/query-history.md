@@ -13,7 +13,8 @@ Per-collection history of recent queries and named favorites, stored in main (hi
 ## Acceptance criteria
 - [x] Unit tests for the store (limit, dedupe, per collection)
   - verified (2026-11-17 05:46+0100 by dell26/agent-3): npx vitest run apps/desktop/src/history -> 40 passed (store.spec.ts: 50-entry default + custom limit, dedupe moves equal query to top, per collection/profile history and favorites, corrupt/unreadable files)
-- [ ] Component test: run → appears in history; save favorite; re-run fills the query bar
+- [x] Component test: run → appears in history; save favorite; re-run fills the query bar
+  - verified (2026-11-17 05:46+0100 by dell26/agent-3): cd packages/renderer && npx ng test --watch=false --include src/app/collection/history -> 31 passed (query-history.spec.ts on the real CollectionView with faked history.*: run -> appears in History; save favorite; picking entry/favorite fills the query bar and re-runs); npm run check -> pass
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
