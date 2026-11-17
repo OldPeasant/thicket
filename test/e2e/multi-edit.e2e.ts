@@ -195,3 +195,46 @@ test('one document changed on the server: it is reported, the others are saved',
   await expect(raw).toContainText('status: "held"');
   await expect(raw).toContainText('status: "shipped"');
 });
+
+test('one document deleted on the server: the report stays, the others are saved', async ({
+  window,
+  mongo,
+}) => {
+  test.setTimeout(90_000);
+  const coll = 'orders_deleted';
+  await seed(mongo.uri, coll);
+  await window.setViewportSize({ width: 1400, height: 900 });
+  await saveProfile(window, 'Local', mongo.uri);
+  await openTable(window, 'Local', coll);
+
+  await selectThreeAndSet(window, '"shipped"');
+  // Someone else deletes document 1 (the first selected row) after it was loaded.
+  await withClient(mongo.uri, (client) =>
+    client.db(DB).collection<Order>(coll).deleteOne({ _id: 1 }),
+  );
+  await window.getByTestId('multi-edit-save').click();
+  await expect(window.getByTestId('confirm-detail')).toContainText('Updates 3 documents');
+  await window.getByTestId('confirm-ok').click();
+
+  // The batch report is still shown after the deleted row left the page.
+  await expect(window.getByTestId('multi-edit-summary')).toHaveText(
+    'Saved 2 documents. 1 not saved: deleted on the server since they were loaded (removed from the page).',
+  );
+  await expect(window.getByTestId('multi-edit-conflict')).toHaveCount(1);
+  await expect(window.getByTestId('multi-edit-conflict')).toContainText(
+    'deleted on the server since it was loaded',
+  );
+  const docs = await storedAll(mongo.uri, coll);
+  expect(docs.map((d) => [Number(d._id), d.status])).toEqual([
+    [2, 'shipped'],
+    [3, 'shipped'],
+    [4, 'open'],
+  ]);
+  // Rows 2 and 3 moved up and stay selected; row 4 is not selected.
+  const boxes = window.getByTestId('row-select');
+  await expect(boxes).toHaveCount(3);
+  await expect(boxes.nth(0)).toBeChecked();
+  await expect(boxes.nth(1)).toBeChecked();
+  await expect(boxes.nth(2)).not.toBeChecked();
+  await expect(window.getByTestId('multi-edit-count')).toHaveText('2 rows selected');
+});

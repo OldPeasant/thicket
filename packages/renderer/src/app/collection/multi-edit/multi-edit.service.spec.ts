@@ -303,6 +303,37 @@ describe('MultiEdit', () => {
     await expect(multi.save(selected, SHIPPED)).resolves.toMatchObject({ saved: 1 });
   });
 
+  it('a cut array below the top-level field is refused; a field that only starts alike is not', async () => {
+    multi.setHost({
+      ...host(),
+      slicedOf: () => ({ above: 50, arrays: [{ path: 'meta.items', total: 120, loaded: 50 }] }),
+    });
+    const selected = [
+      {
+        doc: parseEJsonDocument('{"_id":{"$numberInt":"1"},"meta":{"items":[]},"me":"x"}'),
+        partial: true,
+      },
+    ];
+    await expect(multi.save(selected, { action: 'unset', path: 'meta' })).rejects.toThrow(
+      '1 was loaded only partly: meta was loaded cut (a long array), open the document to change it.',
+    );
+    expect(fake.requests).toHaveLength(0);
+    // "me" and "met" are not "meta": no refusal.
+    await expect(multi.save(selected, { action: 'unset', path: 'me' })).resolves.toMatchObject({
+      saved: 1,
+    });
+    const met: FieldEdit = { action: 'set', path: 'met', value: { type: 'string', value: 'y' } };
+    await expect(multi.save(selected, met)).resolves.toMatchObject({ saved: 1 });
+  });
+
+  it('a batch refused before sending clears the report of the previous batch', async () => {
+    await multi.save(rows(1), SHIPPED);
+    expect(multi.result()).not.toBeNull();
+    edits.edit(order(2), order(2, 'edited'));
+    await expect(multi.save(rows(2), SHIPPED)).rejects.toThrow(/unsaved edits/);
+    expect(multi.result()).toBeNull();
+  });
+
   it('keeps the last result until clearResult or the next batch', async () => {
     expect(multi.result()).toBeNull();
     const result = await multi.save(rows(1), SHIPPED);

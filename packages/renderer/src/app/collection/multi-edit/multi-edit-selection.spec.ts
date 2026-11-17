@@ -313,6 +313,108 @@ describe('Edit a field across selected rows (collection view)', () => {
     expect(q('multi-edit')).toBeNull();
   });
 
+  it('a deleted row above a selected row: the selection stays on the same document', async () => {
+    // Rows 1 and 3 selected; document 1 was deleted on the server, so row 3 moves up to index 1.
+    fake.handle('docs.update', (p) => {
+      if (p.id === keyOf(1)) {
+        throw new ApiError({ code: 'CONFLICT', message: 'gone', detail: { current: null } });
+      }
+      return { modified: true };
+    });
+    await enterEditMode();
+    await check(rowBoxes()[0]);
+    await check(rowBoxes()[2]);
+    await type('multi-edit-field', 'status');
+    await type('multi-edit-value', '"shipped"');
+    await save();
+    expect(updates().map((p) => p['id'])).toEqual([keyOf(1), keyOf(3)]);
+    expect(rowBoxes()).toHaveLength(2);
+    // Document 2 (now the first row) is not selected, document 3 (now the second row) is.
+    expect(rowBoxes().map((b) => b.checked)).toEqual([false, true]);
+    expect(text(get('multi-edit-count'))).toBe('1 row selected');
+    // The next batch goes to document 3 only, not to document 2 that took its old index.
+    await type('multi-edit-value', '"packed"');
+    await save();
+    expect(updates().map((p) => p['id'])).toEqual([keyOf(1), keyOf(3), keyOf(3)]);
+    expect(text(get('multi-edit-summary'))).toBe('Saved 1 document.');
+  });
+
+  it('Enter in the panel with no row left selected sends nothing', async () => {
+    fake.fail('docs.update', { code: 'CONFLICT', message: 'gone', detail: { current: null } });
+    await enterEditMode();
+    await check(rowBoxes()[0]);
+    await type('multi-edit-field', 'status');
+    await type('multi-edit-value', '"shipped"');
+    await save();
+    expect(text(get('multi-edit-count'))).toBe('No rows selected');
+    get<HTMLInputElement>('multi-edit-field').closest('form')?.dispatchEvent(new Event('submit'));
+    await settle();
+    expect(confirms).toHaveLength(1);
+    expect(updates()).toHaveLength(1);
+    // The report of the last batch is still there.
+    expect(text(get('multi-edit-summary'))).toContain('Saved 0 documents.');
+  });
+
+  it('leaving edit mode while the batch is sent keeps its report until Close', async () => {
+    let finish!: () => void;
+    fake.handle(
+      'docs.update',
+      () =>
+        new Promise<{ modified: boolean }>(
+          (resolve) => (finish = () => resolve({ modified: true })),
+        ),
+    );
+    await enterEditMode();
+    await check(rowBoxes()[0]);
+    await type('multi-edit-field', 'status');
+    await type('multi-edit-value', '"shipped"');
+    await save();
+    expect(get('multi-edit').getAttribute('aria-busy')).toBe('true');
+    editMode().toggle();
+    await settle();
+    // Still sending: the panel stays (busy), the checkboxes are gone.
+    expect(rowBoxes()).toHaveLength(0);
+    expect(q('multi-edit')).not.toBeNull();
+    finish();
+    await settle();
+    expect(updates()).toHaveLength(1);
+    expect(text(get('multi-edit-summary'))).toBe('Saved 1 document.');
+    expect(text(get('multi-edit-count'))).toBe('No rows selected');
+    get('multi-edit-clear').click();
+    await settle();
+    expect(q('multi-edit')).toBeNull();
+  });
+
+  it('a new page while the batch is sent ends the selection; the report still arrives', async () => {
+    let finish!: () => void;
+    fake.handle(
+      'docs.update',
+      () =>
+        new Promise<{ modified: boolean }>(
+          (resolve) => (finish = () => resolve({ modified: true })),
+        ),
+    );
+    await enterEditMode();
+    await check(rowBoxes()[0]);
+    await type('multi-edit-field', 'status');
+    await type('multi-edit-value', '"shipped"');
+    await save();
+    page = [4, 5, 6];
+    get('query-run').click();
+    await settle();
+    expect(rowBoxes()).toHaveLength(3);
+    expect(rowBoxes().some((b) => b.checked)).toBe(false);
+    finish();
+    await settle();
+    expect(text(get('multi-edit-summary'))).toBe('Saved 1 document.');
+    // The read-back of document 1 does not touch the new page.
+    const strings = [...el().querySelectorAll<HTMLInputElement>('input.val-input.str')].map(
+      (i) => i.value,
+    );
+    expect(strings.filter((s) => s === 'server')).toHaveLength(0);
+    expect(strings.filter((s) => s === 'open')).toHaveLength(3);
+  });
+
   it('the result live region is in the DOM before there is a result', async () => {
     await enterEditMode();
     await check(rowBoxes()[0]);
