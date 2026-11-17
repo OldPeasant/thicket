@@ -2,6 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { describe, expect, it } from 'vitest';
 
+import { CurrentOpView } from './admin/currentop';
 import { UsersRolesView } from './admin/users';
 import { App } from './app';
 import { appConfig } from './app.config';
@@ -53,6 +54,13 @@ describe('App', () => {
     expect(views.find((view) => view.kind === 'indexes')?.component).toBe(IndexesView);
     expect(views.find((view) => view.kind === 'users')?.component).toBe(UsersRolesView);
     expect(views.find((view) => view.kind === 'shell')?.component).toBe(ShellConsole);
+  });
+
+  it('registers the current operations view for the currentop tab kind', () => {
+    TestBed.configureTestingModule({ providers: appConfig.providers });
+    const views = TestBed.inject(TAB_VIEWS);
+
+    expect(views.find((view) => view.kind === 'currentop')?.component).toBe(CurrentOpView);
   });
 
   it('runs zoneless: zone.js is not loaded', () => {

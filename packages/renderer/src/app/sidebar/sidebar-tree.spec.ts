@@ -656,6 +656,40 @@ describe('SidebarTree', () => {
     });
   });
 
+  describe('current operations', () => {
+    it('is offered on a connection only while it is connected', async () => {
+      await start();
+      await menu(node('conn', 'Profile p1'));
+      const item = must('menu-current-ops') as HTMLButtonElement;
+      expect(item.textContent?.trim()).toBe('Current operations');
+      expect(item.disabled).toBe(true);
+      await click(item);
+      expect(TestBed.inject(WorkspaceService).tabs()).toHaveLength(0);
+    });
+
+    it('opens the current operations tab from the connection menu', async () => {
+      await start();
+      await click(node('conn', 'Profile p1'));
+      await menu(node('conn', 'Profile p1'));
+      await click(must('menu-current-ops'));
+      expect(TestBed.inject(WorkspaceService).active()).toMatchObject({
+        id: 'currentop:p1',
+        kind: 'currentop',
+        title: 'Current operations',
+        detail: 'Profile p1',
+        data: { profileId: 'p1' },
+      });
+      expect(byTestId('tree-menu')).toBeNull();
+    });
+
+    it('stays available on read-only profiles (listing is a read)', async () => {
+      await start();
+      await click(node('conn', 'Reader'));
+      await menu(node('conn', 'Reader'));
+      expect((must('menu-current-ops') as HTMLButtonElement).disabled).toBe(false);
+    });
+  });
+
   describe('read-only profiles', () => {
     it('disables every write action and shows the badge', async () => {
       await start();

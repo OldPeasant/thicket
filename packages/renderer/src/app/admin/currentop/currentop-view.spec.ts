@@ -6,6 +6,7 @@ import { FakeThicketBridge, provideFakeThicket } from '../../api/testing';
 import type { WorkspaceTab } from '../../layout/workspace.service';
 import { ConfirmService } from '../../safety/confirm.service';
 import { ProfileSafetyService } from '../../safety/profile-safety.service';
+import type { OpEntry } from './currentop.model';
 import { CurrentOpView, currentOpTabId } from './currentop-view';
 
 const TAB: WorkspaceTab = {
@@ -210,5 +211,246 @@ describe('CurrentOpView', () => {
     view.setRefresh('0');
     await vi.advanceTimersByTimeAsync(20_000);
     expect(sent('admin.currentOp')).toHaveLength(3);
+  });
+
+  /** The listed operation with the label `opid`. */
+  const loadedOp = (opid: string): OpEntry => {
+    const state = view.ops();
+    const found =
+      state.state === 'loaded' ? state.items.find((op) => op.opIdLabel === opid) : undefined;
+    if (!found) throw new Error(`no operation ${opid}`);
+    return found;
+  };
+
+  /** Answers of `admin.currentOp` the test settles itself, in the order it chooses. */
+  const deferReads = () => {
+    const pending: {
+      params: Record<string, unknown>;
+      resolve: (outcome: { ops: string[] } | { error: { code: string; message: string } }) => void;
+    }[] = [];
+    fake.handle(
+      'admin.currentOp',
+      (params) =>
+        new Promise((resolve) => {
+          pending.push({ params: params as Record<string, unknown>, resolve: resolve as never });
+        }),
+    );
+    return pending;
+  };
+
+  it('shows the default interval of 5 s and offers never, 2, 5 and 10 s', async () => {
+    await create();
+    const select = get<HTMLSelectElement>('currentop-interval');
+    expect(select.value).toBe('5');
+    expect([...select.options].map((o) => text(o))).toEqual(['never', '2 s', '5 s', '10 s']);
+  });
+
+  it('reads again when Refresh is clicked', async () => {
+    await create();
+    ops = [FAST];
+    get<HTMLButtonElement>('currentop-refresh').click();
+    await settle();
+    expect(sent('admin.currentOp')).toHaveLength(2);
+    expect(all('currentop-row').map((r) => r.dataset['opid'])).toEqual(['43']);
+  });
+
+  it('shows the loading state until the first answer', async () => {
+    const pending = deferReads();
+    await create();
+    expect(get('currentop-loading')).toBeTruthy();
+    expect(all('currentop-row')).toHaveLength(0);
+    pending[0]?.resolve({ ops: [SLOW] });
+    await settle();
+    expect(el().querySelector('[data-testid="currentop-loading"]')).toBeNull();
+    expect(all('currentop-row')).toHaveLength(1);
+  });
+
+  it('reads nothing for a tab without a profile', async () => {
+    fixture = TestBed.createComponent(CurrentOpView);
+    fixture.componentRef.setInput('tab', { ...TAB, data: undefined });
+    await settle();
+    expect(sent('admin.currentOp')).toEqual([]);
+    expect(get('currentop-loading')).toBeTruthy();
+  });
+
+  it('recovers from a failed read: Refresh shows the list again', async () => {
+    fake.fail('admin.currentOp', { code: 'SERVER_ERROR', message: 'connection reset' });
+    await create();
+    expect(text(get('currentop-error'))).toContain('connection reset');
+    expect(el().querySelector('[data-testid="currentop-loading"]')).toBeNull();
+    fake.handle('admin.currentOp', () => ({ ops: [SLOW] }));
+    get<HTMLButtonElement>('currentop-refresh').click();
+    await settle();
+    expect(el().querySelector('[data-testid="currentop-error"]')).toBeNull();
+    expect(all('currentop-row').map((r) => r.dataset['opid'])).toEqual(['42']);
+  });
+
+  it('keeps refreshing automatically after a failed read', async () => {
+    vi.useFakeTimers();
+    fake.fail('admin.currentOp', { code: 'SERVER_ERROR', message: 'connection reset' });
+    fixture = TestBed.createComponent(CurrentOpView);
+    fixture.componentRef.setInput('tab', TAB);
+    fixture.detectChanges();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(sent('admin.currentOp')).toHaveLength(1);
+    fake.handle('admin.currentOp', () => ({ ops: [SLOW] }));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(sent('admin.currentOp')).toHaveLength(2);
+    fixture.detectChanges();
+    expect(all('currentop-row').map((r) => r.dataset['opid'])).toEqual(['42']);
+  });
+
+  it('schedules the next automatic read only after the previous answer', async () => {
+    vi.useFakeTimers();
+    const pending = deferReads();
+    fixture = TestBed.createComponent(CurrentOpView);
+    fixture.componentRef.setInput('tab', TAB);
+    fixture.detectChanges();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(pending).toHaveLength(1);
+    pending[0]?.resolve({ ops: [SLOW] });
+    await vi.advanceTimersByTimeAsync(4_900);
+    expect(pending).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(pending).toHaveLength(2);
+  });
+
+  it('ignores an older answer that arrives after the answer for newer filters', async () => {
+    const pending = deferReads();
+    await create();
+    view.setNamespace('billing');
+    await settle();
+    expect(pending.map((p) => p.params['ns'])).toEqual([undefined, 'billing']);
+    // The first read was given up when the filter changed.
+    expect(fake.cancels).toContain(fake.requestsFor('admin.currentOp')[0]?.id);
+
+    pending[1]?.resolve({ ops: [FAST] });
+    await settle();
+    pending[0]?.resolve({ ops: [SLOW] });
+    await settle();
+    expect(all('currentop-row').map((r) => r.dataset['opid'])).toEqual(['43']);
+  });
+
+  it('ignores a late failure of an older read', async () => {
+    const pending = deferReads();
+    await create();
+    view.setFilter({ opType: 'insert' });
+    await settle();
+    pending[1]?.resolve({ ops: [FAST] });
+    await settle();
+    pending[0]?.resolve({ error: { code: 'SERVER_ERROR', message: 'stale failure' } });
+    await settle();
+    expect(el().querySelector('[data-testid="currentop-error"]')).toBeNull();
+    expect(all('currentop-row').map((r) => r.dataset['opid'])).toEqual(['43']);
+  });
+
+  it('does not read again when a filter is set to the value it already has', async () => {
+    await create();
+    view.setNamespace('  ');
+    view.setMinSecs('-4');
+    view.setMinSecs('abc');
+    view.setFilter({ opType: '', all: false });
+    await settle();
+    expect(sent('admin.currentOp')).toHaveLength(1);
+  });
+
+  it('shows a failed kill as an error notice and keeps the list', async () => {
+    fake.fail('admin.killOp', { code: 'SERVER_ERROR', message: 'not authorized on admin' });
+    await create();
+    get<HTMLButtonElement>('currentop-kill', row('42')).click();
+    await settle();
+    confirm.answer(true);
+    await settle();
+    expect(sent('admin.killOp')).toHaveLength(1);
+    const notice = get('currentop-notice');
+    expect(text(notice)).toContain('not authorized on admin');
+    expect(notice.getAttribute('role')).toBe('alert');
+    expect(all('currentop-row').map((r) => r.dataset['opid'])).toEqual(['42', '43']);
+    expect(view.killing()).toBeNull();
+    expect(get<HTMLButtonElement>('currentop-kill', row('42')).disabled).toBe(false);
+  });
+
+  it('asks only once while a kill waits for confirmation and disables the other kills', async () => {
+    await create();
+    get<HTMLButtonElement>('currentop-kill', row('42')).click();
+    await settle();
+    expect(view.killing()).toBe('{"$numberInt":"42"}');
+    expect(get<HTMLButtonElement>('currentop-kill', row('43')).disabled).toBe(true);
+    await view.kill(loadedOp('43'));
+    expect(confirm.current()?.title).toBe('Kill operation 42');
+    confirm.answer(true);
+    await settle();
+    expect(sent('admin.killOp').map((p) => p['opId'])).toEqual(['{"$numberInt":"42"}']);
+  });
+
+  it('describes the operation in the confirm dialog', async () => {
+    await create();
+    get<HTMLButtonElement>('currentop-kill', row('42')).click();
+    await settle();
+    expect(confirm.current()?.title).toBe('Kill operation 42');
+    expect(confirm.current()?.detail).toBe('query on shop.orders, running 1 min 15 s.');
+    confirm.answer(false);
+    await settle();
+  });
+
+  it('describes an operation without type or namespace generically in the confirm dialog', async () => {
+    ops = [
+      JSON.stringify({
+        opid: { $numberInt: '88' },
+        active: true,
+        microsecs_running: { $numberLong: '850000' },
+      }),
+    ];
+    await create();
+    get<HTMLButtonElement>('currentop-kill', row('88')).click();
+    await settle();
+    expect(confirm.current()?.detail).toBe('Operation, running 850 ms.');
+    confirm.answer(false);
+    await settle();
+  });
+
+  it('kills a mongos shard:opid operation with its string id', async () => {
+    ops = [
+      JSON.stringify({
+        opid: 'shard01:77',
+        op: 'command',
+        ns: 'shop.$cmd',
+        active: true,
+        microsecs_running: { $numberLong: '3000000' },
+      }),
+    ];
+    await create();
+    get<HTMLButtonElement>('currentop-kill', row('shard01:77')).click();
+    await settle();
+    confirm.answer(true);
+    await settle();
+    expect(sent('admin.killOp')).toEqual([
+      { profileId: 'p1', opId: '"shard01:77"', confirmed: true },
+    ]);
+  });
+
+  it('refuses a kill on a read-only profile even when called directly', async () => {
+    setProfile(true);
+    await create();
+    await view.kill(loadedOp('42'));
+    await settle();
+    expect(confirm.current()).toBeNull();
+    expect(sent('admin.killOp')).toEqual([]);
+    expect(get('currentop-notice').getAttribute('role')).toBe('alert');
+  });
+
+  it('gives up the pending read and stops refreshing when the tab closes', async () => {
+    vi.useFakeTimers();
+    const pending = deferReads();
+    fixture = TestBed.createComponent(CurrentOpView);
+    fixture.componentRef.setInput('tab', TAB);
+    fixture.detectChanges();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(pending).toHaveLength(1);
+    fixture.destroy();
+    expect(fake.cancels).toContain(fake.requestsFor('admin.currentOp')[0]?.id);
+    pending[0]?.resolve({ ops: [SLOW] });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(pending).toHaveLength(1);
   });
 });

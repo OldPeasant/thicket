@@ -921,6 +921,35 @@ describe('SidebarTreeService', () => {
       expect(ws.active()).toMatchObject({ detail: 'gone / shop', production: false });
     });
 
+    it('openCurrentOps opens the current operations tab of a connection with the production flag', () => {
+      tree.openCurrentOps('prod');
+      expect(ws.active()).toEqual({
+        id: 'currentop:prod',
+        kind: 'currentop',
+        title: 'Current operations',
+        detail: 'Profile prod',
+        production: true,
+        data: { profileId: 'prod' },
+      });
+    });
+
+    it('openCurrentOps twice selects the existing tab; another connection gets its own tab', () => {
+      tree.openCurrentOps('p1');
+      tree.openCurrentOps('p2');
+      tree.openCurrentOps('p1');
+      expect(ws.tabs().map((t) => t.id)).toEqual(['currentop:p1', 'currentop:p2']);
+      expect(ws.active()?.id).toBe('currentop:p1');
+    });
+
+    it('openCurrentOps of an unknown profile falls back to its id', () => {
+      tree.openCurrentOps('gone');
+      expect(ws.active()).toMatchObject({
+        id: 'currentop:gone',
+        detail: 'gone',
+        production: false,
+      });
+    });
+
     it('dropping a database closes the tabs of its collections only', async () => {
       openTabs();
       const done = tree.dropDatabase('p1', 'shop');

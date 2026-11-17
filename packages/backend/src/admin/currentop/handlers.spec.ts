@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ConnectionManager, type ClientLike } from '../../connections/manager';
 import { RpcError, type Handler } from '../../server/rpc';
-import { currentOpCommand, parseOpId } from './currentop';
+import { currentOpCommand, escapeRegExp, parseOpId } from './currentop';
 import { currentOpHandlers } from './handlers';
 
 const profile: Profile = {
@@ -100,6 +100,18 @@ describe('currentOpCommand', () => {
   });
 });
 
+describe('escapeRegExp', () => {
+  it('makes every regex metacharacter literal', () => {
+    const text = 'a.b*c+d?e^f$g{h}i(j)k|l[m]n\\o';
+    expect(new RegExp(`^${escapeRegExp(text)}$`).test(text)).toBe(true);
+    expect(escapeRegExp('shop.orders')).toBe('shop\\.orders');
+  });
+
+  it('ignores a negative minimum running time and a blank namespace', () => {
+    expect(currentOpCommand({ ns: '   ', minSecsRunning: -3 })).toEqual({ currentOp: 1 });
+  });
+});
+
 describe('parseOpId', () => {
   it('accepts numbers and shard:opid strings', () => {
     expect(parseOpId('{"$numberInt":"12"}')).toEqual(new BSON.Int32(12));
@@ -173,6 +185,115 @@ describe('currentOpHandlers', () => {
       call('admin.killOp', { profileId: 'p1', opId: '{"$numberInt":"42"}' }),
     ).resolves.toEqual({});
     expect(sent).toEqual([{ db: 'admin', command: { killOp: 1, op: new BSON.Int32(42) } }]);
+  });
+
+  it('drops an aggregate $currentOp probe too and sorts operations without a running time last', async () => {
+    const { call } = await setup((db, command) => {
+      if ('currentOp' in command) {
+        return {
+          ok: 1,
+          inprog: [
+            { opid: 1, op: 'none', active: false },
+            {
+              opid: 2,
+              op: 'command',
+              active: true,
+              command: { aggregate: 1, pipeline: [{ $currentOp: {} }] },
+              microsecs_running: 5,
+            },
+            { opid: 3, op: 'query', active: true, microsecs_running: 10 },
+            {
+              opid: 4,
+              op: 'command',
+              active: true,
+              command: { aggregate: 'orders', pipeline: [{ $match: {} }] },
+              microsecs_running: 1_000,
+            },
+            { opid: 5, op: 'command', active: true, command: null, microsecs_running: 1 },
+          ],
+        };
+      }
+      return defaultAnswer(db, command);
+    });
+    const { ops } = (await call('admin.currentOp', { profileId: 'p1' })) as { ops: string[] };
+    expect(ops.map(parse).map((op) => Number(op['opid']))).toEqual([4, 3, 5, 1]);
+  });
+
+  it('answers an empty list when the reply has no inprog array', async () => {
+    const { call } = await setup((db, command) =>
+      'currentOp' in command ? { ok: 1 } : defaultAnswer(db, command),
+    );
+    await expect(call('admin.currentOp', { profileId: 'p1' })).resolves.toEqual({ ops: [] });
+  });
+
+  it('returns each operation as canonical EJSON (Int64 running times keep their type)', async () => {
+    const { call } = await setup();
+    const { ops } = (await call('admin.currentOp', { profileId: 'p1' })) as { ops: string[] };
+    expect(JSON.parse(ops[0] as string)).toMatchObject({
+      opid: { $numberInt: '4' },
+      microsecs_running: { $numberLong: '9000000' },
+    });
+  });
+
+  it('recognises Unauthorized by its code name alone and keeps the filters for $ownOps', async () => {
+    const { call, sent } = await setup((db, command) => {
+      if ('currentOp' in command && !('$ownOps' in command)) {
+        throw new MongoServerError({ ok: 0, codeName: 'Unauthorized', errmsg: 'no' });
+      }
+      return defaultAnswer(db, command);
+    });
+    await call('admin.currentOp', { profileId: 'p1', opType: 'query', minSecsRunning: 2 });
+    expect(sent.map((s) => s.command)).toEqual([
+      { currentOp: 1, secs_running: { $gte: 2 }, op: 'query' },
+      { currentOp: 1, $ownOps: true, secs_running: { $gte: 2 }, op: 'query' },
+    ]);
+  });
+
+  it('passes the error of the $ownOps retry on', async () => {
+    const { call, sent } = await setup(() => {
+      throw new MongoServerError({ ok: 0, code: 13, codeName: 'Unauthorized', errmsg: 'none' });
+    });
+    await expect(call('admin.currentOp', { profileId: 'p1' })).rejects.toMatchObject({
+      code: 'SERVER_ERROR',
+    });
+    expect(sent).toHaveLength(2);
+  });
+
+  it('answers CANCELLED when the request is aborted while the server is still answering', async () => {
+    let release: () => void = () => undefined;
+    const { call } = await setup(
+      (db, command) =>
+        new Promise((resolve) => {
+          release = () => resolve(defaultAnswer(db, command));
+        }),
+    );
+    const controller = new AbortController();
+    const result = call('admin.currentOp', { profileId: 'p1' }, controller.signal);
+    controller.abort();
+    await expect(result).rejects.toMatchObject({ code: 'CANCELLED' });
+    release();
+  });
+
+  it('kills a mongos shard:opid and an Int64 opid as they were listed', async () => {
+    const { call, sent } = await setup();
+    await call('admin.killOp', { profileId: 'p1', opId: '"shard01:77"' });
+    await call('admin.killOp', { profileId: 'p1', opId: '{"$numberLong":"9007199254740993"}' });
+    expect(sent.map((s) => s.command)).toEqual([
+      { killOp: 1, op: 'shard01:77' },
+      { killOp: 1, op: BSON.Long.fromString('9007199254740993') },
+    ]);
+  });
+
+  it('passes a server error of killOp on as SERVER_ERROR', async () => {
+    const { call } = await setup((db, command) => {
+      if ('killOp' in command) {
+        throw new MongoServerError({ ok: 0, code: 13, codeName: 'Unauthorized', errmsg: 'no' });
+      }
+      return defaultAnswer(db, command);
+    });
+    await expect(
+      call('admin.killOp', { profileId: 'p1', opId: '{"$numberInt":"5"}' }),
+    ).rejects.toMatchObject({ code: 'SERVER_ERROR' });
   });
 
   it('refuses an opId that is not an operation id without sending anything', async () => {
