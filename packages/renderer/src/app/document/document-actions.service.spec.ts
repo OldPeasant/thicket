@@ -1084,6 +1084,53 @@ describe('DocumentActions', () => {
       },
     );
 
+    // TW-2 fix: the edit remembers that its projection hid parts of fields.
+    it('keeps Overwrite and Merge blocked for an edit made under a dotted projection', async () => {
+      projection = '{"addr.city":{"$numberInt":"1"}}';
+      fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: addrServer } });
+      edits.edit(addrLoaded, addrEdited, true, true);
+      expect(await actions.save(keyOf(1))).toBe(false);
+      fake.respond('docs.update', { modified: true });
+      fake.requests.length = 0;
+      projection = '{"addr":{"$numberInt":"1"}}';
+      expect(actions.resolveBlocker(keyOf(1))).toBe('projection');
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      expect(await actions.saveMerged(keyOf(1), addrEdited)).toBe(false);
+      expect(fake.requests).toHaveLength(0);
+      expect(actions.message()?.text).toMatch(/hides parts of fields/);
+      expect(edits.get(keyOf(1))?.current).toBe(addrEdited);
+    });
+
+    // TW-2 defense in depth: without that flag, the write still never unsets an unloaded path.
+    it('refuses an overwrite of a partial document that would unset a sub-field it never loaded', async () => {
+      projection = '{"addr":{"$numberInt":"1"}}';
+      fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: addrServer } });
+      edits.edit(addrLoaded, addrEdited, true);
+      expect(await actions.save(keyOf(1))).toBe(false);
+      expect(actions.resolveBlocker(keyOf(1))).toBeNull();
+      fake.respond('docs.update', { modified: true });
+      fake.requests.length = 0;
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      expect(fake.requests).toHaveLength(0);
+      expect(actions.message()?.text).toMatch(/^Not saved: with a projection active/);
+      expect(edits.get(keyOf(1))?.current).toBe(addrEdited);
+    });
+
+    it('still unsets a loaded sub-field the user removed, under a top-level projection', async () => {
+      projection = '{"addr":{"$numberInt":"1"}}';
+      const loaded = parseEJsonDocument(
+        '{"_id":{"$numberInt":"1"},"addr":{"city":"Bonn","street":"Hauptstr. 1"}}',
+      );
+      fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: addrServer } });
+      edits.edit(loaded, addrEdited, true);
+      expect(await actions.save(keyOf(1))).toBe(false);
+      fake.respond('docs.update', { modified: true });
+      fake.requests.length = 0;
+      expect(await actions.overwrite(keyOf(1))).toBe(true);
+      const [update] = params('docs.update');
+      expect(String(update?.['update'])).toContain('"$unset":{"addr.street":""}');
+    });
+
     it('reads the server version as unknown when the reread returns text that is not EJSON', async () => {
       fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: 42 } });
       fake.respond('docs.get', { doc: '{not ejson', sliced: [] });

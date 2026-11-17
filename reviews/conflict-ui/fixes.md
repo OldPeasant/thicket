@@ -216,3 +216,100 @@ Notes for the parent worker:
 ## Final status
 
 All validated findings fixed and validation passed.
+
+# Fix Report (round 2)
+
+Date: 2026-11-17
+
+Task: conflict-ui - M1: Conflict resolution view
+
+Scope: current task. Finding TW-2 from the round-2 section of `reviews/conflict-ui/tests.md`, with the direction
+approved by the parent worker (primary: remember the projection kind on the edit entry; defense in depth: refuse
+unsetting unloaded paths). Round 1 above is unchanged.
+
+## Fixed findings
+
+### TW-2 — Overwrite / Merge unset a hidden sub-field after a dotted projection was replaced by a top-level one
+
+Files changed:
+- `packages/renderer/src/app/document/edit-session.ts`
+- `packages/renderer/src/app/document/document-actions.service.ts`
+- `packages/renderer/src/app/collection/collection-view.ts`
+- `packages/renderer/src/app/collection/collection-view.html`
+- `packages/renderer/src/app/raw-editor/raw-editor.ts`
+- `packages/renderer/src/app/document/edit-session.spec.ts` (new tests; `pendingSave` helper gets the new field)
+- `packages/renderer/src/app/document/document-actions.service.spec.ts` (new tests)
+- `packages/renderer/src/app/document/document-editing.spec.ts` (new UI test)
+
+Problem:
+`resolveBlocker` checked only the projection active now. A document edited under `{total:1,"addr.city":1}` (so
+`addr` was loaded as `{city}`) and still unsaved after a `{total:1, addr:1}` query was offered Overwrite / Merge,
+which then sent `$unset: {"addr.street": ""}` for a sub-field the user never loaded.
+
+Fix:
+- Primary: `EditedDocument` (and the undo/redo `Step`) carry a new `hidesSubFields` flag: the document was edited
+  while loaded with a projection that is not top-level-only. `DocumentEdits.edit` takes it as a 4th parameter; like
+  `partial` it sticks to the entry through later edits, undo, redo and rebase, goes away on discard, and implies
+  `partial`. `CollectionView` computes it as `projection !== undefined && !isTopLevelProjection(projection)`
+  (`subFieldDocs`) for explorer edits and passes it to the raw editor (new `hidesSubFields` input).
+  `resolveBlocker` returns `'projection'` for such an entry regardless of the projection active now, so the
+  conflict view hides Overwrite / Merge manually (as for CR-1) and the service refuses them.
+- Defense in depth: `send` gets the document as the user loaded it (`entry.original` for Overwrite / Merge, the
+  baseline itself for Save); for a partial document it refuses (`PROJECTION_REFUSED`) a diff that `$unset`s a path
+  the loaded document does not have (`unsetsUnloaded`). This also covers edits recorded without the new flag. A
+  loaded sub-field the user removed is still unset.
+- `pendingSave` now takes only `original` and `current` (the only fields it reads), so `send` no longer builds a
+  full `EditedDocument`.
+
+Validation:
+- The 3 TW-2 tests (service "overwrite / merge never unsets a sub-field hidden by a dotted projection after a
+  top-level one is run", UI "never unsets a sub-field hidden when the document was edited, after a top-level
+  projection is run") — Pass, unchanged. The service ones pass through the defense-in-depth refusal (they record
+  the edit with `partial` only); the UI one passes through the primary fix (Overwrite is not offered).
+- New tests — Pass:
+  - `edit-session.spec.ts` "hidesSubFields ...": false by default and for a top-level projection; implies partial
+    and sticks once set; kept by undo, redo and rebase, gone after revert.
+  - `document-actions.service.spec.ts`: "keeps Overwrite and Merge blocked for an edit made under a dotted
+    projection" (top-level projection active now, nothing sent, edit kept); "refuses an overwrite of a partial
+    document that would unset a sub-field it never loaded"; "still unsets a loaded sub-field the user removed,
+    under a top-level projection".
+  - `document-editing.spec.ts` "hides Overwrite and Merge for a document edited under a dotted projection, after
+    a top-level one is run" (real `CollectionView`; Keep server version still shown).
+- `cd packages/renderer && npx ng test --include='src/app/document/**/*.spec.ts' --include='src/app/collection/**/*.spec.ts'`
+  — Pass: 9 files, 334 tests.
+
+## Not fixed
+
+None.
+
+## Validation summary
+
+Focused tests:
+- `cd packages/renderer && npx ng test --include='src/app/document/**/*.spec.ts' --include='src/app/collection/**/*.spec.ts'`
+  — Pass: 9 files, 334 tests (was 327 with 3 failing).
+
+Full test suite:
+- `npm run check` (repo root) — Pass: eslint, prettier `--check`, typecheck of all workspaces (incl. renderer
+  specs), root vitest 53 files / 3160 tests, renderer `ng test` 72 files / 2126 tests.
+
+Lint/type-check/build:
+- Included in `npm run check` above — Pass. `prettier --write` was run on all changed files.
+
+`.taskcheck`:
+- Pass by equivalence: it runs `npm run check`, the same run as above (not invoked separately).
+
+E2E:
+- Not re-run by the fixer (`test/e2e/conflict.e2e.ts` uses no projection; the change only adds refusals for
+  projected documents).
+
+Remaining unresolved findings:
+0
+
+Notes for the parent worker:
+- The round-1 note about this edge case ("`resolveBlocker` checks the projection active now ...") is resolved by
+  this round.
+- Production code changed after review: test-writer and code-reviewer must run again on the final code.
+
+## Final status
+
+All validated findings fixed and validation passed.

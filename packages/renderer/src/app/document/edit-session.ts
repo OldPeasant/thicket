@@ -13,6 +13,12 @@ export interface EditedDocument {
    * hides (see `DocumentActions.save`).
    */
   readonly partial: boolean;
+  /**
+   * Loaded with a projection that may hide parts of fields (a dotted path or an operator such as
+   * `$slice`, see `isTopLevelProjection`): a loaded field may lack sub-fields, so Overwrite and
+   * Merge manually stay refused even when a top-level projection is active later.
+   */
+  readonly hidesSubFields: boolean;
 }
 
 /** What Save would send for one document, or why it can't be saved. */
@@ -31,6 +37,7 @@ interface Step {
   readonly before: BsonDocument;
   readonly after: BsonDocument;
   readonly partial: boolean;
+  readonly hidesSubFields: boolean;
 }
 
 /** Most edits kept for undo (per collection tab). */
@@ -98,18 +105,27 @@ export class DocumentEdits {
    * `edited`. Returns false when nothing changed or the document has no `_id`. Editing a
    * document back to its loaded version clears its modified state (the edit can still be undone).
    * `partial`: the document was loaded with a projection (sticks to the document until saved).
+   * `hidesSubFields`: that projection may hide parts of fields (sticks the same way).
    */
-  edit(original: BsonDocument, edited: BsonDocument, partial = false): boolean {
+  edit(
+    original: BsonDocument,
+    edited: BsonDocument,
+    partial = false,
+    hidesSubFields = false,
+  ): boolean {
     const key = documentKey(original);
     if (key === null) return false;
     const entry = this.entries().get(key);
     const base = entry?.original ?? original;
     const before = entry?.current ?? original;
     if (bsonEquals(before, edited)) return false;
-    const isPartial = (entry?.partial ?? false) || partial;
-    this.apply(key, base, edited, isPartial);
+    const flags = {
+      partial: (entry?.partial ?? false) || partial || hidesSubFields,
+      hidesSubFields: (entry?.hidesSubFields ?? false) || hidesSubFields,
+    };
+    this.apply(key, base, edited, flags);
     this.undoStack.update((s) =>
-      [...s, { key, original: base, before, after: edited, partial: isPartial }].slice(-UNDO_LIMIT),
+      [...s, { key, original: base, before, after: edited, ...flags }].slice(-UNDO_LIMIT),
     );
     this.redoStack.set([]);
     return true;
@@ -121,7 +137,7 @@ export class DocumentEdits {
     const step = stack.at(-1);
     if (step === undefined) return;
     this.undoStack.set(stack.slice(0, -1));
-    this.apply(step.key, step.original, step.before, step.partial);
+    this.apply(step.key, step.original, step.before, step);
     this.redoStack.update((s) => [...s, step]);
   }
 
@@ -131,7 +147,7 @@ export class DocumentEdits {
     const step = stack.at(-1);
     if (step === undefined) return;
     this.redoStack.set(stack.slice(0, -1));
-    this.apply(step.key, step.original, step.after, step.partial);
+    this.apply(step.key, step.original, step.after, step);
     this.undoStack.update((s) => [...s, step]);
   }
 
@@ -158,7 +174,7 @@ export class DocumentEdits {
   rebase(key: string, saved: BsonDocument): void {
     const entry = this.entries().get(key);
     if (entry === undefined) return;
-    this.apply(key, saved, entry.current, entry.partial);
+    this.apply(key, saved, entry.current, entry);
     this.undoStack.update((s) => s.filter((step) => step.key !== key));
     this.redoStack.update((s) => s.filter((step) => step.key !== key));
   }
@@ -174,19 +190,19 @@ export class DocumentEdits {
     key: string,
     original: BsonDocument,
     current: BsonDocument,
-    partial: boolean,
+    { partial, hidesSubFields }: Pick<EditedDocument, 'partial' | 'hidesSubFields'>,
   ): void {
     this.entries.update((map) => {
       const next = new Map(map);
       if (bsonEquals(original, current)) next.delete(key);
-      else next.set(key, { key, original, current, partial });
+      else next.set(key, { key, original, current, partial, hidesSubFields });
       return next;
     });
   }
 }
 
 /** The update Save sends for `entry`, with its number of changes. */
-export function pendingSave(entry: EditedDocument): PendingSave {
+export function pendingSave(entry: Pick<EditedDocument, 'original' | 'current'>): PendingSave {
   let diff: DocumentDiff;
   try {
     diff = diffDocuments(entry.original, entry.current);

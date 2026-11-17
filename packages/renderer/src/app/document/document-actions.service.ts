@@ -200,14 +200,16 @@ export class DocumentActions {
    * there is no such conflict; a document deleted on the server is never blocked here).
    * `'server-unknown'`: the server's current version could not be read. `'projection'`: the
    * document may be partial and the query's projection is not one of whole top-level fields (a
-   * dotted path or an operator such as `$slice`), or it was edited under a projection that is no
-   * longer active; comparing top-level fields could then change data the user never loaded.
+   * dotted path or an operator such as `$slice`), it was edited under such a projection (even if
+   * a top-level one is active now), or it was edited under a projection that is no longer active;
+   * comparing top-level fields could then change data the user never loaded.
    */
   resolveBlocker(key: string): ResolveBlocker | null {
     const conflict = this.conflictMap().get(key);
     if (conflict === undefined || conflict.current === null) return null;
     if (conflict.current === undefined) return 'server-unknown';
     if (!this.isPartial(key)) return null;
+    if (this.edits.get(key)?.hidesSubFields) return 'projection';
     const projection = this.requireHost().projection();
     return projection !== undefined && isTopLevelProjection(projection) ? null : 'projection';
   }
@@ -261,13 +263,14 @@ export class DocumentActions {
       await this.keepServer(key);
       return true;
     }
-    return this.send(key, base, local, partial, saved);
+    return this.send(key, base, local, partial, saved, entry?.original ?? base);
   }
 
   /**
    * Saves `current` as the minimal diff from `original`, with `original`'s values as the conflict
    * check (`docs.update`, or `docs.replace` when the diff needs it), then reads it back and calls
-   * `saved`. Nothing in the edit session changes before the write succeeded.
+   * `saved`. Nothing in the edit session changes before the write succeeded. `loaded`: the
+   * document as the user loaded it (for a partial document, nothing it lacks is unset).
    */
   private async send(
     key: string,
@@ -275,9 +278,10 @@ export class DocumentActions {
     current: BsonDocument,
     partial: boolean,
     saved: () => void,
+    loaded: BsonDocument = original,
   ): Promise<boolean> {
     const host = this.requireHost();
-    const pending = pendingSave({ key, original, current, partial });
+    const pending = pendingSave({ original, current });
     if (!pending.ok) {
       this.messageState.set({ kind: 'error', text: `Not saved: ${pending.error}` });
       return false;
@@ -291,7 +295,7 @@ export class DocumentActions {
       id: stringifyEJson(id),
     };
     const diff = pending.diff;
-    if (partial && overwritesHiddenData(diff, original)) {
+    if (partial && (overwritesHiddenData(diff, original) || unsetsUnloaded(diff, loaded))) {
       this.messageState.set({ kind: 'error', text: PROJECTION_REFUSED });
       return false;
     }
@@ -529,6 +533,16 @@ function overwritesHiddenData(diff: DocumentDiff, original: BsonDocument): boole
       op.op === 'set' &&
       (op.value.type === 'object' || op.value.type === 'array') &&
       hasPath(original, op.path),
+  );
+}
+
+/**
+ * Whether `diff` unsets a path that `loaded` (the document as the user loaded it) does not have:
+ * the user never saw that (sub-)field, so a partial document must not remove it.
+ */
+function unsetsUnloaded(diff: DocumentDiff, loaded: BsonDocument): boolean {
+  return (
+    diff.kind === 'update' && diff.ops.some((op) => op.op === 'unset' && !hasPath(loaded, op.path))
   );
 }
 

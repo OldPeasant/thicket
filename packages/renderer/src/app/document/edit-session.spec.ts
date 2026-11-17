@@ -281,6 +281,38 @@ describe('DocumentEdits', () => {
     });
   });
 
+  describe('hidesSubFields (edited under a projection that may hide parts of fields)', () => {
+    const key = '{"$numberInt":"1"}';
+
+    it('is false by default and for a top-level projection', () => {
+      edits.edit(order(1), order(1, 15), true);
+      expect(edits.get(key)?.hidesSubFields).toBe(false);
+    });
+
+    it('implies partial and sticks once set, also when a later edit is under a top-level projection', () => {
+      const loaded = order(1);
+      edits.edit(loaded, order(1, 15), true, true);
+      expect(edits.get(key)?.partial).toBe(true);
+      edits.edit(loaded, order(1, 15, 4), true, false);
+      expect(edits.get(key)?.hidesSubFields).toBe(true);
+    });
+
+    it('is kept by undo, redo and rebase, and goes with the entry on revert', () => {
+      const loaded = order(1);
+      edits.edit(loaded, order(1, 15), true, true);
+      edits.edit(loaded, order(1, 15, 4), true);
+      edits.undo();
+      expect(edits.get(key)?.hidesSubFields).toBe(true);
+      edits.redo();
+      expect(edits.get(key)?.hidesSubFields).toBe(true);
+      edits.rebase(key, order(1, 15));
+      expect(edits.get(key)?.hidesSubFields).toBe(true);
+      edits.discard(key);
+      edits.edit(loaded, order(1, 16), true);
+      expect(edits.get(key)?.hidesSubFields).toBe(false);
+    });
+  });
+
   it('reports a document whose _id was edited as not savable', () => {
     edits.edit(order(1), order(7, 10, 1));
     const pending = edits.pending().get('{"$numberInt":"1"}');
@@ -296,6 +328,7 @@ describe('pendingSave', () => {
     original,
     current,
     partial: false,
+    hidesSubFields: false,
   });
 
   it('counts the update operations of an update', () => {

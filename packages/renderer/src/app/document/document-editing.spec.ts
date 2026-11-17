@@ -666,6 +666,41 @@ describe('Editing documents in a collection tab', () => {
       }
     });
 
+    // TW-2 fix: the edit remembers that its projection hid parts of fields.
+    it('hides Overwrite and Merge for a document edited under a dotted projection, after a top-level one is run', async () => {
+      const withAddr = (total: number, addr: string) =>
+        `{"_id":{"$numberInt":"1"},"total":{"$numberInt":"${total}"},"addr":${addr}}`;
+      let page = withAddr(10, '{"city":"Bonn"}');
+      let streams = 200;
+      fake.handle('docs.find', () => {
+        const id = `s${++streams}`;
+        setTimeout(() => {
+          fake.data('docs.find', id, { docs: [page] });
+          fake.end(id, { delivered: 1 });
+        });
+        return { streamId: id };
+      });
+      const projection = get<HTMLInputElement>('query-projection');
+      projection.value = '{ total: 1, "addr.city": 1 }';
+      projection.dispatchEvent(new Event('input'));
+      await click('query-run');
+      await typeInto(0, 'total', '15');
+      page = withAddr(10, '{"city":"Bonn","street":"Hauptstr. 1"}');
+      projection.value = '{ total: 1, addr: 1 }';
+      projection.dispatchEvent(new Event('input'));
+      await click('query-run');
+      fake.fail('docs.update', {
+        code: 'CONFLICT',
+        message: 'x',
+        detail: { current: withAddr(99, '{"city":"Bonn","street":"Hauptstr. 1"}') },
+      });
+      await click('edit-save');
+      expect(text('conflict-title')).toBe('Changed on the server since you loaded it');
+      expect(q('conflict-overwrite')).toBeNull();
+      expect(q('conflict-merge')).toBeNull();
+      expect(q('conflict-keep-server')).not.toBeNull();
+    });
+
     it('with a projection shows the whole server version once every edit was undone', async () => {
       const projection = get<HTMLInputElement>('query-projection');
       projection.value = '{ total: 1, qty: 1 }';

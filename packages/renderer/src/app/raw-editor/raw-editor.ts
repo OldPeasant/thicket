@@ -122,6 +122,8 @@ export class RawEditor {
   readonly doc = input.required<BsonDocument>();
   /** The document was loaded with a projection (see `DocumentEdits.edit`). */
   readonly partial = input(false);
+  /** That projection may hide parts of fields (see `DocumentEdits.edit`). */
+  readonly hidesSubFields = input(false);
   /** The text can be read and converted, but not changed or applied. */
   readonly readOnly = input(false);
   /** The text was applied as this document. */
@@ -279,7 +281,7 @@ export class RawEditor {
       );
       return false;
     }
-    this.edits.edit(original, doc, this.partial());
+    this.edits.edit(original, doc, this.partial(), this.hidesSubFields());
     const next = printRaw(this.shown(), this.format());
     this.baseline.set(next);
     this.setText(next);

@@ -357,6 +357,7 @@
                         <app-raw-editor
                           [doc]="loaded"
                           [partial]="partialDocs()"
+                          [hidesSubFields]="subFieldDocs()"
                           [readOnly]="readOnly()"
                         />
                       } @loading {
