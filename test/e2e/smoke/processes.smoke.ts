@@ -257,7 +257,7 @@ test.describe('endProcessTree on any OS', () => {
   });
 
   test('ends a running child that was not detached', async () => {
-    // processes.ts falls back to signalling the child alone when it leads no process group.
+    // processes.ts signals the child alone when it leads no process group.
     const child = spawnNode('setInterval(() => undefined, 1000)', [], { detached: false });
     await spawned(child);
 

@@ -50,11 +50,12 @@ function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
 }
 
 /**
- * Waits until `child` and, on POSIX, every process of its process group have exited. The child must
- * have been spawned with `detached: true` there (its own group; Playwright's `_electron.launch`
- * does this too). Members still running after `graceMs` (or with `terminate`, signalled with
- * SIGTERM first) get SIGKILL. Windows has no process groups: `terminate` ends the tree with
- * `taskkill /T /F`.
+ * Waits until `child` and, on POSIX, every process of its process group have exited. To cover its
+ * descendants the child must have been spawned with `detached: true` there (its own group;
+ * Playwright's `_electron.launch` does this too). Members still running after `graceMs` (or with
+ * `terminate`, signalled with SIGTERM first) get SIGKILL. A POSIX child that leads no group (not
+ * detached) is handled alone, with the same SIGTERM/SIGKILL rule; its descendants are not waited
+ * for. Windows has no process groups: `terminate` ends the tree with `taskkill /T /F`.
  */
 export async function endProcessTree(
   child: ChildProcess,
@@ -74,7 +75,18 @@ export async function endProcessTree(
     await waitForExit(child, 5_000);
     return;
   }
-  if (terminate && processGroupAlive(pid)) signalGroup(pid, child, 'SIGTERM');
+  if (!processGroupAlive(pid)) {
+    // Not a group leader (not detached), or the group is gone already. Node records the exit as
+    // soon as it reaps the child, so a child not marked exited here is still running on its own.
+    if (exited(child)) return;
+    if (terminate) child.kill('SIGTERM');
+    if (!(await waitForExit(child, graceMs))) {
+      child.kill('SIGKILL');
+      await waitForExit(child, 5_000);
+    }
+    return;
+  }
+  if (terminate) signalGroup(pid, child, 'SIGTERM');
   if (!(await waitForProcessGroupExit(pid, graceMs))) {
     signalGroup(pid, child, 'SIGKILL');
     await waitForProcessGroupExit(pid, 5_000);
@@ -86,7 +98,7 @@ function signalGroup(pgid: number, child: ChildProcess, signal: NodeJS.Signals):
   try {
     process.kill(-pgid, signal);
   } catch {
-    // Not a group leader (not detached) or already gone: signal the child alone.
+    // The group emptied since it was checked: signal the child alone if it still runs.
     if (!exited(child)) child.kill(signal);
   }
 }
