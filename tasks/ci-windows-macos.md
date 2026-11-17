@@ -5,7 +5,7 @@ owner: dell26/agent-2
 deps: []
 touches: [packages/backend/src/ssh,packages/backend/src/io/bson,packages/backend/src/auth/oidc]
 prio: 1
-lease_until: 2026-11-17T17:22:20Z
+lease_until: 2026-11-17T17:27:21Z
 ---
 ## Goal
 The `check` workflow has been red on Windows and macOS since 2026-11-17 ~03:00 (last green run: 43992628723 at 5f7e0f7b; all three OSes passed). Linux passes. Failing in run 44117990016 (main at 83a1d6e6):
