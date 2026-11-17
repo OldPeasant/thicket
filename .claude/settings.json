@@ -8,6 +8,7 @@
       "Bash(rm:*)", "Bash(sed:*)", "Bash(printf:*)", "Bash(date:*)", "Bash(cd:*)",
       "Bash(python3:*)", "Bash(timeout:*)", "Bash(xvfb-run:*)",
       "Bash(docker:*)", "Bash(podman:*)",
+      "Bash(gh run list:*)", "Bash(gh run view:*)",
       "Agent", "Task", "Skill"
     ],
     "deny": ["Bash(git push:*)", "ScheduleWakeup"]
