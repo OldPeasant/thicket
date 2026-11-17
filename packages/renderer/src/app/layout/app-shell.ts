@@ -64,6 +64,13 @@ export const SIDEBAR_KEY_STEP = 16;
     '[class.production]': 'production()',
     '[attr.data-production]': 'production() ? "" : null',
     '(document:keydown)': 'onKeydown($event)',
+    // Drag moves and the release are taken from the document, not the splitter: the splitter is a
+    // few pixels wide and follows the pointer, so without pointer capture (which the window does
+    // not always get, seen in e2e runs) the pointer leaves it after a few pixels and the drag
+    // would stop half-way, never saved.
+    '(document:pointermove)': 'dragMove($event)',
+    '(document:pointerup)': 'dragEnd($event, true)',
+    '(document:pointercancel)': 'dragEnd($event, false)',
   },
   template: `
     <aside
@@ -86,9 +93,6 @@ export const SIDEBAR_KEY_STEP = 16;
       [attr.aria-valuemin]="min"
       [attr.aria-valuemax]="max"
       (pointerdown)="dragStart($event)"
-      (pointermove)="dragMove($event)"
-      (pointerup)="dragEnd($event)"
-      (pointercancel)="dragEnd($event)"
       (dblclick)="saveWidth(defaultWidth)"
       (keydown)="splitterKey($event)"
     ></div>
@@ -253,8 +257,10 @@ export class AppShell {
     this.sidebar.preview(this.drag.startWidth + event.clientX - this.drag.startX);
   }
 
-  protected dragEnd(event: PointerEvent): void {
+  /** Ends the drag; a release (`atPointer`) takes the width at the release position. */
+  protected dragEnd(event: PointerEvent, atPointer: boolean): void {
     if (!this.drag || event.pointerId !== this.drag.pointerId) return;
+    if (atPointer) this.dragMove(event);
     this.drag = null;
     this.saveWidth(this.sidebar.width());
   }

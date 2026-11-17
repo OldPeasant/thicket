@@ -829,6 +829,44 @@ describe('AppShell', () => {
       expect(stored.sidebarWidth).toBe(250);
     });
 
+    it('follows the pointer after it left the splitter (no pointer capture)', async () => {
+      await start();
+      await settle();
+      pointer('pointerdown', 500);
+      // Moves and the release land on another element, as when capture is not in effect.
+      const other = must(el.querySelector<HTMLElement>('[data-testid="workspace"]'));
+      const at = (type: string, clientX: number) => {
+        const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX });
+        Object.defineProperty(event, 'pointerId', { value: 1 });
+        other.dispatchEvent(event);
+      };
+      at('pointermove', 540);
+      await settle();
+      expect(width()).toBe('340px');
+      at('pointermove', 580);
+      at('pointerup', 580);
+      await settle();
+      expect(width()).toBe('380px');
+      expect(stored.sidebarWidth).toBe(380);
+      // The drag is over: later moves change nothing.
+      at('pointermove', 700);
+      await settle();
+      expect(width()).toBe('380px');
+    });
+
+    it('a release takes the width at the release position, also without moves', async () => {
+      await start();
+      await settle();
+      pointer('pointerdown', 500);
+      pointer('pointermove', 510);
+      pointer('pointerup', 582);
+      await settle();
+      expect(width()).toBe('382px');
+      expect(fake.requestsFor('app.settings.set').map((r) => r.params)).toEqual([
+        { settings: { sidebarWidth: 382 } },
+      ]);
+    });
+
     it('a click on the splitter without moving saves nothing', async () => {
       await start();
       pointer('pointerdown', 500);
