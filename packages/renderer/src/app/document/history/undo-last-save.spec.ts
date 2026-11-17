@@ -962,5 +962,55 @@ describe('Undo last save', () => {
       expect(stringifyEJson(server.stored as BsonDocument)).toBe(changedOnServer);
       expect(replaces()).toHaveLength(1);
     });
+
+    // The saved version has unique keys (the save removed the repeated one), so the whole-document
+    // check can be built: the undo is not refused but replaces under that check.
+    describe('when the save removed the repeated key', () => {
+      const DEDUPED =
+        '{"_id":{"$numberInt":"1"},"status":"open","tag":"a","total":{"$numberInt":"10"}}';
+
+      async function saveDeduped(): Promise<void> {
+        server.stored = doc(REPEATED);
+        edits.edit(doc(REPEATED), doc(DEDUPED));
+        expect(await actions.save(ID)).toBe(true);
+        expect(stringifyEJson(server.stored as BsonDocument)).toBe(DEDUPED);
+      }
+
+      it('save, undo last save: the server document equals the original with both keys again', async () => {
+        await saveDeduped();
+
+        expect(await actions.undoSave(ID)).toBe(true);
+
+        expect(stringifyEJson(server.stored as BsonDocument)).toBe(REPEATED);
+        const undo = replaces()[1];
+        expect(undo?.['doc']).toBe(REPEATED);
+        expect(JSON.parse(undo?.['expected'] as string)).toEqual(
+          wholeCheck(
+            [
+              fieldEq('status', 'open'),
+              fieldEq('tag', 'a'),
+              fieldEq('total', { $numberInt: '10' }),
+            ],
+            4,
+          ),
+        );
+        expect(actions.canUndoSave(ID)).toBe(false);
+      });
+
+      it('reports a conflict and overwrites nothing when another field changed on the server', async () => {
+        await saveDeduped();
+        server.set('status', { type: 'string', value: 'shipped' });
+        const changedOnServer = stringifyEJson(server.stored as BsonDocument);
+
+        expect(await actions.undoSave(ID)).toBe(false);
+
+        expect(stringifyEJson(server.stored as BsonDocument)).toBe(changedOnServer);
+        expect(actions.message()?.text).toMatch(
+          /^Not undone: the document was changed on the server/,
+        );
+        expect(actions.conflicts().size).toBe(0);
+        expect(actions.canUndoSave(ID)).toBe(false);
+      });
+    });
   });
 });

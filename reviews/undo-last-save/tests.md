@@ -2,47 +2,53 @@
 
 Date: 2026-11-17
 
-Task: undo-last-save - M1 (Should): Undo last save (round 3, final code after the round-2 fixes)
+Task: undo-last-save - M1 (Should): Undo last save (round 4, final code after the round-3 fix for TW-1)
 
-Scope: the six task commits `undo-last-save: ...` on `main`, measured at HEAD `f62928b3` (parent `0a11b2cc` holds the round-2 production fixes). The parent gave base `63dd0bfd` and hashes `70e7ffdc..5ac15bcc`. While this run was in progress, the parent rebased the task twice (onto `verify:` commits). The task's commits are now `2045cc16, 464b3b84, 241878b7, 3dce6315, 0a11b2cc, f62928b3`, and the merge base with `origin/main` is `59e93d84`. Task ownership was taken from the commit subjects (all `undo-last-save:`) and the parent's file list. `git diff --stat` of the task range lists the same 12 files and line counts as the parent's `git diff 63dd0bfd..HEAD -- packages test`. Because the commit hashes kept moving, the measured state is pinned by blob hashes (see Coverage). The only uncommitted change is this test-writer's addition to `undo-last-save.spec.ts` (+118 lines, blob `450f2b24` after edits). Production code was not modified.
+Scope: the eight task commits `undo-last-save: ...` on `main`. The parent gave base `679b60f7` and HEAD `30768702` (the round-3 fix). While this run was in progress, the parent rebased the task at 08:38:41 +0100. The merge base with `origin/main` is now `a387e2e9`, and HEAD is `699b9c17`, which is the rebased `30768702`. Task ownership was taken from the commit subjects (all `undo-last-save:`, 8 commits in `git log a387e2e9..HEAD`) and the parent's file list. `git diff --stat a387e2e9..HEAD -- packages test` lists the same 12 files and line counts as before the rebase. The production blobs are listed under Coverage. The rebase did not change them. This run made one uncommitted change, round-4 tests added to `undo-last-save.spec.ts`. The working tree also shows `reviews/undo-last-save/review.md` as modified, which is the parallel code-reviewer's work and not part of this report. Production code was not modified.
 
 Requirements:
-- `tasks/undo-last-save.md`: acceptance criteria 1-2 and the 4 recorded assumptions (one level per document per tab; Save/Overwrite/Merge count, re-insert does not, Delete drops; refused while there are unsaved edits; a conflicting undo writes nothing, says "Not undone: ...", opens no conflict view and drops the undo; order-restoring replace for a whole document)
+- `tasks/undo-last-save.md`: acceptance criteria 1-2 and the recorded assumptions (one level per document per tab; Save/Overwrite/Merge count, re-insert does not, Delete drops; refused while there are unsaved edits; a conflicting undo writes nothing, says "Not undone: ...", opens no conflict view and drops the undo; order-restoring replace with a whole-document check)
 - SPEC.md "Undo last save" (keep the pre-save version, write it back with the same conflict check)
-- `reviews/undo-last-save/review.md` (round 3), `fixes.md` (round 2), the round-2 `tests.md`
+- `reviews/undo-last-save/fixes.md` (round 3: TW-1 fixed by refusing the undo, CR-2 comment), the round-3 `tests.md`
 - docs/ARCHITECTURE.md "Coverage", docs/QUALITY.md
-- Existing conventions: `history/undo-last-save.spec.ts` (one-document fake server with a strict `$expr` evaluator), `document-header.spec.ts`
 
 ## Test files changed
 
-- `packages/renderer/src/app/document/history/undo-last-save.spec.ts` (round-3 tests added at the end; nothing existing changed)
+- `packages/renderer/src/app/document/history/undo-last-save.spec.ts` (a nested `describe('when the save removed the repeated key')` was added inside `a document with repeated top-level keys`; no existing test was changed)
 
-The round-3 tests already committed in `f62928b3` (`apply-update.spec.ts` name-order edge cases; `undo-last-save.spec.ts` "saved version: read-back or model") were reviewed and kept as they are. They are not duplicated here.
+## Fix check (TW-1)
+
+The fix is correct. `keepingOrder` returns `null` when `wholeDocumentCheck` cannot be built and the diff is a `replace`. `send` then refuses before any write with "Not undone: this document has repeated field names, so the old version can not be written back safely." The three repeated-key tests from the fixer's update all pass:
+- a plain undo is refused;
+- the undo is refused when the saved field changed on the server since;
+- the TW-1 scenario (`status` changed on the server) is refused, and the server keeps `status: "shipped"`.
+
+In every case nothing is written and the undo stays offered. The fixer changed the TW-1 test's message expectation from the conflict text to the refusal text. That is consistent with the fix: the requirement assertion (the server document is unchanged and nothing is written) is unchanged, so the test was not weakened.
+
+The `update` arm of `diff.kind === 'update' ? diff : null` (service line 727) cannot be reached. `wholeDocumentCheck` returns `null` only for repeated top-level keys. In that case core's diff always returns `replace` (`diff.ts:143`, `hasRepeatedKeys(o) || hasRepeatedKeys(e)`).
 
 ## Tests added or updated
 
-Count: 6 (all in `undo-last-save.spec.ts`; 1 of them fails on purpose, TW-1)
+Count: 2 (both pass)
 
-- `a conflicting undo of a document deleted on the server opens no conflict view and drops the undo` (assumption 3, deleted case: exact message, no conflict entry, undo no longer offered, nothing inserted)
-- `is not offered after inserting a document deleted on the server again (not a save)` (assumption 1: re-inserting is not a save)
-- `refuses with its own text an undo that would replace a whole field loaded under a projection` (the undo's own partial refusal text, nothing sent; no unit test reached it before)
-- `a document with repeated top-level keys` > `save, undo last save: the server document equals the original again` (AC1 on the fallback path where `wholeDocumentCheck` returns null)
-- `a document with repeated top-level keys` > `reports a conflict when the field the save changed was changed on the server since` (AC2 on the fallback path)
-- `a document with repeated top-level keys` > `reports a conflict instead of replacing over a server change to a field the save did not touch` (AC2 on the fallback path; **fails: TW-1**)
+The round-3 fix covers a saved version that has repeated keys. It did not cover the reverse case, where the version before the save had repeated keys and the save removed one. The saved version then has unique keys, so the undo is not refused. It replaces under a whole-document check and writes the repeated keys back. Neither the success path nor the conflict path of that case had a test.
+
+- `... when the save removed the repeated key` > `save, undo last save: the server document equals the original with both keys again` (AC1: the server document equals `{_id, status, tag: "a", tag: "b", total}` again; the undo is a replace with the whole-document check of the 4-field saved version; the undo is no longer offered)
+- `... when the save removed the repeated key` > `reports a conflict and overwrites nothing when another field changed on the server` (AC2 and assumption 3 on this path: another client sets `status`; the undo returns false with "Not undone: the document was changed on the server ..."; the server is unchanged; no conflict view opens; the undo is dropped)
 
 ## Requirement coverage
 
 | Requirement | Tests | Command | Result |
 |---|---|---|---|
-| AC1: save, undo last save -> server doc equals original (minimal update, order-restoring replace, typed values, nested, two trailing fields, read-back vs model) | unit `save, undo last save: the server document equals the original again`, `restores ...` (4), `checks Date, ObjectId, Decimal128, ...`, `saved version: read-back or model` (6), repeated keys `save, undo last save: ...` (new); header `a click undoes the last save; the button then goes away` | `cd packages/renderer && npx ng test --include='src/app/document/**/*.spec.ts'` | Pass |
-| AC1 against real MongoDB (component/e2e) | `test/e2e/undo-last-save.e2e.ts` | `npm run test:e2e -- test/e2e/undo-last-save.e2e.ts` | Not run: the parent worker runs the e2e suite in parallel; this test-writer did not edit or run the e2e file |
-| AC2: server change since the save -> conflict, nothing overwritten (minimal-update path, replace path: value, nested, order, Date, ObjectId, array item, removed field, added field, array containing the value, newer change between write and read-back, deleted) | unit `reports a conflict ...` (12 incl. `it.each` rows), `does not take a read-back with other values ...`, `a conflicting undo of a document deleted on the server ...` (new), repeated keys `... the field the save changed ...` (new) | same unit command | Pass |
-| AC2 on the repeated-key fallback: a change to a field the save did not touch | repeated keys `reports a conflict instead of replacing over a server change to a field the save did not touch` (new) | same unit command | **Fail: TW-1** |
-| AC2 against real MongoDB | `test/e2e/undo-last-save.e2e.ts` | parent's e2e run | Not run: run by the parent worker |
-| Assumption 1: one level; Save, Overwrite, Merge count; re-insert does not; Delete drops | `undoes only the last save of the document`, `is offered after a conflict Overwrite ...`, `is offered after Merge manually ...`, `is not offered after inserting a document deleted on the server again` (new), `is no longer offered once the document is deleted`; `SaveHistory` spec (4) | same unit command | Pass |
+| AC1: save, undo last save -> server doc equals original (minimal update, order-restoring replace, typed values, nested, read-back vs model, original with repeated keys) | unit `save, undo last save: the server document equals the original again`, `restores ...`, `checks Date, ObjectId, Decimal128, ...`, `saved version: read-back or model`, `... the original with both keys again` (new); header `a click undoes the last save; the button then goes away` | `cd packages/renderer && npx ng test --include='src/app/document/**/*.spec.ts'` | Pass |
+| AC1 against real MongoDB (e2e) | `test/e2e/undo-last-save.e2e.ts` | parent's e2e run | Not run: the parent runs e2e. As instructed, it was not edited or run here |
+| AC2: server change since the save -> conflict, nothing overwritten (minimal-update and replace paths, typed values, array, removed/added field, deleted, newer change before read-back, repeated-key original) | unit `reports a conflict ...` (incl. `it.each` rows), `does not take a read-back with other values ...`, `a conflicting undo of a document deleted on the server ...`, `... when another field changed on the server` (new) | same unit command | Pass |
+| AC2 when the saved version has repeated keys (TW-1): refused, nothing written | `save, undo last save: refused, ...`, `refuses and writes nothing when the field the save changed ...`, `does not replace over a server change to a field the save did not touch` | same unit command | Pass |
+| AC2 against real MongoDB (e2e) | `test/e2e/undo-last-save.e2e.ts` | parent's e2e run | Not run: the parent runs e2e |
+| Assumption 1: one level; Save/Overwrite/Merge count; re-insert does not; Delete drops | `undoes only the last save of the document`, `is offered after a conflict Overwrite ...`, `is offered after Merge manually ...`, `is not offered after inserting a document deleted on the server again`, `is no longer offered once the document is deleted`; `SaveHistory` spec | same unit command | Pass |
 | Assumption 2: refused while modified (service and button) | `refuses while the document has unsaved edits, and keeps them`; header `is disabled with a hint while the document has unsaved edits` | same unit command | Pass |
-| Assumption 3: conflicting undo writes nothing, "Not undone: ...", no conflict view, undo dropped | `reports a conflict and overwrites nothing ...`, `a conflicting undo of a document deleted on the server opens no conflict view ...` (new) | same unit command | Pass |
-| Assumption 4: order-restoring replace with a whole-document check; projected/partial stays minimal with Save's rules | replace-path tests above, `keeps the projection rules ...`, `undoes a save made under a projection that hides sub-fields ...`, `refuses with its own text an undo that would replace a whole field ...` (new); `applyUpdate` spec (24) | same unit command | Pass |
+| Assumption 3: conflicting undo writes nothing, "Not undone: ...", no conflict view, undo dropped | `reports a conflict and overwrites nothing ...`, `a conflicting undo of a document deleted ...`, `... when another field changed on the server` (new) | same unit command | Pass |
+| Assumption 4: order-restoring replace with a whole-document check; projected/partial stays minimal with Save's rules; refused when the check can't be built | replace-path tests, `keeps the projection rules ...`, `refuses with its own text an undo that would replace a whole field ...`, the repeated-key tests; `applyUpdate` spec | same unit command | Pass |
 | Write guard, busy guard, cancel, failed write | `goes through the write guard ...`, `runs one undo at a time ...`, `a cancelled production confirm ...`, `a failed write (not a conflict) ...`; header `is disabled on a read-only profile ...`, `is disabled while the undo is running` | same unit command | Pass |
 
 ## Focused test execution
@@ -53,110 +59,84 @@ Command:
 
 Result:
 
-Fail: 11 files, 364 passed, 1 failed (365). The one failure is TW-1, a legitimate requirement failure. Before the round-3 additions (committed tests only) the same files passed in the coverage baseline run below.
+Pass: 11 files, 367 passed (365 before plus the 2 new tests). The last run started at 08:42:04 +0100, after the parent's rebase.
 
 ## Full test execution
 
 Command:
 
-`npm run check` (eslint `--max-warnings 0`, Prettier, type check, root Vitest, renderer `ng test`; this is what `.taskcheck` runs)
+`npm run check` (eslint `--max-warnings 0`, Prettier, type check, root Vitest, renderer `ng test`; this is what `.taskcheck` runs), run from the repository root.
 
 Result:
 
-Fail: eslint, Prettier (after `npx prettier --write` on the changed spec) and the type check pass. Root Vitest: 95 files, 4972 passed. Renderer: 120 files, 3957 passed, 1 failed (TW-1). E2E is not part of `npm run check`. The parent worker runs it separately.
+Pass. eslint, Prettier and the type checks passed. Root Vitest: 97 files, 5156 passed. Renderer: 123 files, 4086 passed. Both counts are higher than in round 3 because the rebase brought in newer main. E2E is not part of `npm run check`. The parent worker runs it.
 
 ## .taskcheck
 
 Result:
 
-Fail (TW-1). `.taskcheck` runs `npm run check`, which was run directly as above. It passes again once TW-1 is fixed in production code.
+Pass. `.taskcheck` runs `npm run check`, which this run executed directly (see above).
 
 ## Bugs found
 
-### Undo of a document with repeated top-level keys overwrites a server change to a field the save did not touch
-
-Finding ID:
-
-`TW-1`
-
-Test:
-
-`packages/renderer/src/app/document/history/undo-last-save.spec.ts` > `Undo last save` > `a document with repeated top-level keys` > `reports a conflict instead of replacing over a server change to a field the save did not touch` (line 949)
-
-Production source:
-
-`packages/renderer/src/app/document/document-actions.service.ts:719-721` (`keepingOrder`: `if (expected === null) return diff;`) and `:753-755` (`wholeDocumentCheck` returns `null` for repeated keys)
-
-Requirement:
-
-AC2: "If the document changed on the server since, undo reports a conflict instead of overwriting". Also assumption 4: the undo of a whole document sent as a replace is checked against the whole saved version.
-
-Expected behavior:
-
-Seed `{_id: 1, status: "open", tag: "a", tag: "b", total: 10}` (repeated top-level key `tag`; the EJSON parser keeps repeated keys). Save `total: 15`. Another client then sets `status: "shipped"`. Undo last save must report "Not undone: the document was changed on the server since the save ..." and leave the server document unchanged.
-
-Actual behavior:
-
-The undo succeeds and the server document becomes `{_id: 1, status: "open", tag: "a", tag: "b", total: 10}`, so the other client's `status: "shipped"` is silently lost. The cause: repeated keys make core's diff a `replace` (diff.ts:143), so `keepingOrder` takes the whole-document path. `wholeDocumentCheck` returns `null` for repeated keys, and `keepingOrder` then returns the diff unchanged. That diff is a replace of every field whose `expected` checks only the changed field (`{"total":{"$eq":15}}`). The doc comment ("the update stays the minimal one") only covers the update case. For a replace, this fallback is exactly the TW-1 gap of round 1 that the whole-document check was added to close. A real MongoDB `replaceOne` with that filter behaves the same way. Save has the same changed-field check for such documents, but AC2 is specific to the undo, and the undo writes the pre-save version, which the user did not edit.
-
-Severity:
-
-Medium for impact (silent overwrite of another client's data, which AC2 forbids). Reachability is low: only documents with repeated top-level field names, which normal drivers and the shell don't create.
-
-Fix required:
-
-`Yes — production code must be fixed by the parent worker / fixer.`
+None in round 4. TW-1 (round 3) is fixed and verified (see "Fix check").
 
 ## Coverage
 
-Status: partial. A verified measurement exists for the committed code with the committed tests (baseline run, exit 0). The final run after the round-3 additions exited 1 because of TW-1 and wrote no coverage report: Vitest cleans `coverage/` and does not report on a failed run. No partial output exists. The task must be measured again after the TW-1 fix.
+Status: verified. The run is fresh, came after the round-4 test additions and the TW-1 fix, and passed. Coverage was not measured in round 3 because of the failing TW-1 test.
 
-Metric: whole-file coverage of task-changed production files (includes old code in `document-actions.service.ts` and `document-header.ts`, and hits from every renderer spec).
-Changed-line coverage: not measured (the configured tooling has no changed-line report).
+Metric: whole-file coverage of task-changed production files. The files include old code in `document-actions.service.ts` and `document-header.ts`, and the counts include hits from every renderer spec.
+Changed-line coverage: not measured. The configured tooling has no changed-line report.
 
 Evidence:
-- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: `undo-last-save`. The parent supplied base `63dd0bfd`. After the parent's rebases, the merge base with `origin/main` is `59e93d84` and HEAD is `f62928b3`. The task-owned commits are the six `undo-last-save:` commits. The file scope is the parent's list, confirmed by `git diff --stat` of the task range.
-- Source/test snapshot identifier (including uncommitted inputs): production blobs `document-actions.service.ts` c1b07a46, `document-header.ts` 6d1ee357, `history/apply-update.ts` 695afbed, `history/save-history.ts` df91cbff, `history/index.ts` 1725211d, `core/src/diff/diff.ts` 51f52645. They were identical at the start and at the end of this session. Baseline test blobs: `undo-last-save.spec.ts` ca7a824f (committed), `apply-update.spec.ts` f320d266, `save-history.spec.ts` fa47a539, `document-header.spec.ts` 55c795f7. The final run used `undo-last-save.spec.ts` 450f2b24 (uncommitted round-3 additions).
-- Exact included files; renamed/deleted/excluded files and reasons: included `packages/renderer/src/app/document/document-actions.service.ts`, `document-header.ts`, `history/apply-update.ts`, `history/save-history.ts`, `history/index.ts` (re-export only, 0 executable statements, so N/A). `packages/renderer/src/app/document/index.ts` is excluded: a one-line re-export. `packages/core/src/diff/diff.ts` is excluded: the only change is the `export` keyword and a doc comment on `exprFieldCheck` (no behavior change; core's own suite covers it). Test files and `test/e2e/undo-last-save.e2e.ts` are excluded as tests. No renamed or deleted files.
-- Provider/version, command, working directory, and test selection: Vitest 5.1.0 with `@vitest/coverage-v8` (v8), through `ng test`. Working directory `packages/renderer`. All renderer specs. Command: `npx ng test --coverage --coverage-include='src/app/document/document-actions.service.ts' --coverage-include='src/app/document/history/apply-update.ts' --coverage-include='src/app/document/history/save-history.ts' --coverage-include='src/app/document/history/index.ts' --coverage-include='src/app/document/document-header.ts' --coverage-reporters=text --coverage-reporters=json-summary --coverage-reporters=json`
-- Run start/completion time and exit status: baseline started 2026-11-17 08:23:41 +0100, report written 08:24:26, exit 0 (120 files, 3952 passed). Final run started 08:30:36, exit 1 (3957 passed, 1 failed: TW-1), no report.
-- Generated report paths and report hashes/run identifier: baseline `packages/renderer/coverage/renderer/coverage-summary.json` (2030 bytes) and `coverage-final.json` (130827 bytes), both written 08:24:26.9. The final run then deleted that directory. I could not compute a file hash because writing a helper script outside the repo was denied in this session. The run is identified by its timestamps and the counters below, copied from `coverage-summary.json`.
-- Evidence outputs are fresh and inputs stayed unchanged: yes for the baseline. The directory was created by that run (08:23:41), and the production blobs were the same before and after.
-- Final run after latest test additions and production fixes: no. The final run failed because of TW-1 and produced no report. The numbers below are for the committed tests on the unchanged production code. The round-3 additions cover additional branches (the repeated-key fallback at service lines 721/755).
+- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: `undo-last-save`. The parent supplied base `679b60f7` and HEAD `30768702`. The parent rebased at 08:38:41, before the coverage run. Measured state: merge base `a387e2e9` and HEAD `699b9c17` (= the rebased `30768702`, same production post-image). The task-owned commits are the 8 `undo-last-save:` commits. The file scope is the parent's list, confirmed by `git diff --stat a387e2e9..HEAD -- packages test` (12 files, same line counts as before the rebase).
+- Source/test snapshot identifier (including uncommitted inputs), as git blob ids. They were taken after the coverage and check runs, and HEAD did not move after 08:38:41.
+  - Production: `document-actions.service.ts` cf615bd1, `document-header.ts` 6d1ee357, `history/apply-update.ts` 695afbed, `history/save-history.ts` 8112037d, `history/index.ts` 1725211d, `core/src/diff/diff.ts` 51f52645.
+  - Tests: `undo-last-save.spec.ts` 8eb09402, which is uncommitted and includes the round-4 additions after Prettier. The other task specs are as committed.
+- Exact included files; renamed/deleted/excluded files and reasons:
+  - Included: `packages/renderer/src/app/document/document-actions.service.ts`, `document-header.ts`, `history/apply-update.ts`, `history/save-history.ts`, `history/index.ts`. `index.ts` is a re-export only with 0 executable statements, so N/A.
+  - Excluded: `packages/renderer/src/app/document/index.ts`, a one-line re-export.
+  - Excluded: `packages/core/src/diff/diff.ts`. The task only adds an `export` and a doc comment to `exprFieldCheck`, with no behavior change, and core's own suite covers the file.
+  - Tests and `test/e2e/undo-last-save.e2e.ts` are excluded as tests.
+  - No renamed or deleted files.
+- Provider/version, command, working directory, and test selection: Vitest 5.1.0 with `@vitest/coverage-v8` (v8), through `ng test`, run in `packages/renderer` on all renderer specs. Command: `npx ng test --coverage --coverage-include='src/app/document/document-actions.service.ts' --coverage-include='src/app/document/history/apply-update.ts' --coverage-include='src/app/document/history/save-history.ts' --coverage-include='src/app/document/history/index.ts' --coverage-include='src/app/document/document-header.ts' --coverage-reporters=text --coverage-reporters=json-summary --coverage-reporters=json`
+- Run start/completion time and exit status: started 08:39:13 +0100, report written 08:39:55 +0100. 123 files and 4086 tests passed, with no failures. The exit status was not captured directly, because the command was piped through `tail`. A passing run is shown by the 0 failures and by the report being written, since Vitest does not write a report on a failed run.
+- Generated report paths and report hashes/run identifier: `packages/renderer/coverage/renderer/coverage-summary.json` (2029 bytes, sha256 `31cbdbb189c82b4928e6c514b5eafea658ca7a8ded889ae02f974699d9fda226`) and `coverage-final.json` (131865 bytes, sha256 `ed7392c28010d99cd22dbcf5ee57fbdc53cb692b627efc7855d302e314513b4b`). Both were written at 08:39:55.78.
+- Evidence outputs are fresh and inputs stayed unchanged: yes. The coverage directory was created by this run (08:39:13). The rebase finished at 08:38:41, before the run, and the production blobs match the committed post-image of the TW-1 fix.
+- Final run after latest test additions and production fixes: yes.
 
-Values below use covered/total (percentage) from the baseline run; zero-denominator metrics are N/A.
+Values below use covered/total (percentage) from `coverage-summary.json`; zero-denominator metrics are N/A.
 
 | Changed file | Statements | Branches | Functions | Lines |
 |---|---:|---:|---:|---:|
-| `packages/renderer/src/app/document/document-actions.service.ts` | 341/346 (98.55%) | 229/238 (96.21%) | 85/85 (100%) | 290/290 (100%) |
+| `packages/renderer/src/app/document/document-actions.service.ts` | 347/350 (99.14%) | 235/242 (97.10%) | 85/85 (100%) | 294/294 (100%) |
 | `packages/renderer/src/app/document/document-header.ts` | 97/101 (96.03%) | 47/54 (87.03%) | 20/20 (100%) | 74/75 (98.66%) |
 | `packages/renderer/src/app/document/history/apply-update.ts` | 49/51 (96.07%) | 36/41 (87.80%) | 9/9 (100%) | 38/39 (97.43%) |
 | `packages/renderer/src/app/document/history/save-history.ts` | 12/12 (100%) | 2/2 (100%) | 6/6 (100%) | 10/10 (100%) |
 | `packages/renderer/src/app/document/history/index.ts` | N/A (0/0) | N/A (0/0) | N/A (0/0) | N/A (0/0) |
-| Aggregate (summed counters, the 5 files above) | 499/510 (97.84%) | 314/335 (93.73%) | 120/120 (100%) | 412/414 (99.51%) |
+| Aggregate (summed counters, the 5 files above) | 505/514 (98.24%) | 320/339 (94.39%) | 120/120 (100%) | 416/418 (99.52%) |
 
 The aggregate excludes `packages/renderer/src/app/document/index.ts` and `packages/core/src/diff/diff.ts` (reasons above). No scoped file is missing from the report.
 
+The uncovered locations below are read from `coverage-final.json` (`s`/`b` counters equal to 0).
+
 | File and uncovered lines/branch locations | Required behavior or risk | Action/test added or reason left uncovered |
 |---|---|---|
-| `document-actions.service.ts:721` (`if (expected === null) return diff`), `:755` (`return null` for repeated keys) | Undo of a document with repeated top-level keys: AC1/AC2 on the fallback path | Tests added (repeated keys, 3). One of them fails: TW-1 |
-| `document-actions.service.ts:725` (filter without `_id`, `id ? [id] : []` false) | Defensive: the diff's filter always holds `_id` | Not reachable through `diffDocuments`; no test |
-| `document-actions.service.ts:773` (sort comparator returning 0 in `unordered`) | Equal keys happen only with repeated keys | Exercised through the repeated-key tests once they run under coverage; trivial |
-| `document-actions.service.ts:438` (`idOf(original) === null`) | Defensive: `pendingSave` has already rejected a document without `_id` | Not reachable; pre-existing line (doc-edit-save) |
-| `document-actions.service.ts:267`, `:409`, `:852`, `:876` | Merge with an unknown server version; resolve under a hides-sub-fields projection; `kind: 'none'`; `hasPath` through a scalar | Not changed by this task (`git blame`: doc-edit-save and earlier); out of scope |
-| `document-header.ts:29`, `:142`, `:145`, `:177` and template `@if` branches | Diff-bar error text, change count, clone toggling edit mode | Not changed by this task (doc-edit-save); out of scope. The task's button, `canUndoSave` and `undoSave` are covered |
-| `apply-update.ts:28` (`a.length - b.length` for one path a prefix of another) | Two ops on a path and its parent, which MongoDB rejects as a path conflict and `diffDocuments` never produces | Non-material; no test |
-| `apply-update.ts:37`, `:38`, `:40` (`?? 0`), `:50` (`key === undefined`) | Fallbacks for undefined array items / an empty path that `split` never yields | Not reachable; no test |
+| `document-actions.service.ts:727` (the `update` arm of `diff.kind === 'update' ? diff : null`) | Fallback when the whole-document check can't be built for an update | Not reachable: `wholeDocumentCheck` returns null only for repeated top-level keys, and core then always returns `replace` (`diff.ts:143`). The `null` arm is covered by the 3 repeated-key refusal tests |
+| `document-actions.service.ts:731` (`id ? [id] : []`, false) | Defensive: the diff's filter always holds `_id` | Not reachable through `diffDocuments`; no test |
+| `document-actions.service.ts:439` (`idOf(original) === null`) | Defensive: `pendingSave` has already rejected a document without `_id` | Not reachable; pre-existing line (doc-edit-save) |
+| `document-actions.service.ts:268`, `:410`, `:863`, `:887` | Merge with an unknown server version; resolve under a projection that hides sub-fields; `kind: 'none'` in `overwritesHiddenData`; `hasPath` through a scalar | Not changed by this task (doc-edit-save and earlier); out of scope |
+| `document-header.ts:28-29`, `:142`, `:145`, `:162`, `:167`, `:172`, `:177` | Diff-bar error text, change count, clone toggling edit mode, other header guards | Not changed by this task (doc-edit-save); out of scope. The task's button, `canUndoSave` and `undoSave` are covered |
+| `apply-update.ts:28` (`a.length - b.length` when one path is a prefix of another) | Two ops on a path and its parent, which MongoDB rejects and `diffDocuments` never produces | Non-material; no test |
+| `apply-update.ts:37`, `:38`, `:40` (`?? 0` fallbacks), `:50` (`key === undefined`) | Fallbacks for undefined array items / an empty path that `split` never yields | Not reachable; no test |
 
 ## Unable to test
 
-- E2E (`test/e2e/undo-last-save.e2e.ts`, Electron + MongoDB container): not edited and not run here, as instructed. The parent worker runs it in parallel and records it for AC1/AC2.
-- TW-1 against real MongoDB: the unit fake server applies the same `replaceOne` filter semantics (`$eq` on the changed field only). A real-server reproduction needs a document with repeated top-level keys inserted as raw BSON. This was not attempted (no container in this session). Follow-up: optional, after the fix.
-- Final coverage including the round-3 additions: not available until TW-1 is fixed (see Coverage).
-- The round-3 review's CR-1 (multi-edit saves leave the earlier undo offered): this is a scope and disposition decision for the parent. No test was added because no requirement says multi-edit counts as a save.
+- E2E (`test/e2e/undo-last-save.e2e.ts`, Electron + MongoDB container) was not edited and not run here, as instructed. The parent worker runs it and records it for AC1/AC2.
+- The repeated-key behavior was not tested against real MongoDB. That needs a document with repeated top-level keys inserted as raw BSON, and no container was available in this session. The unit fake server applies the same filter semantics. Follow-up: optional.
 
 ## Summary
 
-Tests added; production defects were discovered and must be passed to the `fixer` before task completion.
+Tests and task-scoped coverage are sufficient; no production defects found.
 
-TW-1 (Medium impact, low reachability): on a document with repeated top-level field names, the undo's replace falls back to a changed-field-only check and silently overwrites another client's change, which violates AC2. Every other acceptance criterion and recorded assumption is covered by passing unit tests. The e2e suite is run by the parent worker. Coverage of the task files is verified for the committed tests (aggregate 97.84% statements, 93.73% branches). It must be measured again after the TW-1 fix, because the final run produced no report.
+The TW-1 fix is verified: an undo whose replace cannot be checked as a whole document is refused, and nothing is written. Two tests were added for the reverse repeated-key case (the save removed the duplicate key). The undo restores the original under the whole-document check and reports a conflict when the document changed on the server. Both pass. The focused suite passes (367 tests) and `npm run check` passes. Fresh task-scoped coverage, aggregated over the 5 included files: statements 505/514 (98.24%), branches 320/339 (94.39%), functions 120/120 (100%), lines 416/418 (99.52%). Every uncovered location is unreachable, defensive, or outside this task's changes. E2E is run by the parent.
