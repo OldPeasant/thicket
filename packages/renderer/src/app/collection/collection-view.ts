@@ -35,6 +35,12 @@ import {
 import { fromExplorerValue, toExplorerValue } from '../explorer/bson-value.util';
 import { ExplainPanel, type ExplainParams } from '../explain';
 import { ExportPanel } from '../io/export-panel';
+import {
+  SchemaPanel,
+  withFilterField,
+  type SchemaFilterPick,
+  type SchemaParams,
+} from '../schema-analysis';
 import { BulkPanel } from './bulk/bulk-panel';
 import { QueryHistory, QueryHistoryMenu } from './history';
 import { ImportPanel } from '../io/import-panel';
@@ -112,6 +118,7 @@ const numberFormat = new Intl.NumberFormat();
     ExportPanel,
     ImportPanel,
     ExplainPanel,
+    SchemaPanel,
     BulkPanel,
     QueryHistoryMenu,
   ],
@@ -183,6 +190,8 @@ export class CollectionView {
   protected readonly rawFormat = signal<RawFormat>('shell');
   /** What the explain panel explains (the query bar at the last Explain); `null`: closed. */
   protected readonly explainParams = signal<ExplainParams | null>(null);
+  /** What the schema panel analyzes (the filter at the last Analyze); `null`: closed. */
+  protected readonly schemaParams = signal<SchemaParams | null>(null);
   /** The open import, export or bulk update/delete panel. */
   protected readonly ioPanel = signal<'export' | 'import' | 'bulk' | null>(null);
   /** The bulk panel sent a confirmed write that has not answered yet. */
@@ -333,6 +342,7 @@ export class CollectionView {
 
   private readonly jumpInput = viewChild<ElementRef<HTMLInputElement>>('jumpInput');
   private readonly sizeSelect = viewChild<ElementRef<HTMLSelectElement>>('sizeSelect');
+  private readonly filterInput = viewChild<ElementRef<HTMLInputElement>>('filterInput');
   private readonly runButton = viewChild<ElementRef<HTMLButtonElement>>('runButton');
 
   constructor() {
@@ -356,6 +366,7 @@ export class CollectionView {
       untracked(() => {
         this.results.setTarget(target);
         this.explainParams.set(null);
+        this.schemaParams.set(null);
         this.actions.setHost({
           ...target,
           projection: () => this.results.query().projection,
@@ -456,6 +467,33 @@ export class CollectionView {
       ...this.target(),
       target: { kind: 'find', filter, projection, sort, collation, limit },
     });
+  }
+
+  /** Analyzes the schema of a sample of the documents the query bar's filter matches. */
+  protected analyzeSchema(): void {
+    const parsed = parseQuery(this.text());
+    if (!parsed.ok) {
+      this.errors.set(parsed.errors);
+      // An earlier analysis would pass for the edited filter's.
+      this.schemaParams.set(null);
+      return;
+    }
+    this.errors.set({});
+    const { filter, emptyFilter } = parsed.query;
+    this.schemaParams.set({ ...this.target(), ...(emptyFilter ? {} : { filter }) });
+  }
+
+  /** A type or value picked in the schema analysis goes into the filter (not run yet). */
+  protected pickFilter(pick: SchemaFilterPick): void {
+    const filter = withFilterField(this.text().filter, pick.key, pick.condition);
+    this.text.update((t) => ({ ...t, filter }));
+    if (this.errors().filter !== undefined) {
+      this.errors.update(
+        (e) =>
+          Object.fromEntries(Object.entries(e).filter(([key]) => key !== 'filter')) as QueryErrors,
+      );
+    }
+    this.filterInput()?.nativeElement.focus();
   }
 
   protected reset(): void {

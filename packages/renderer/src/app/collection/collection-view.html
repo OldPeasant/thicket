@@ -11,6 +11,7 @@
         >.find(</span
       >
       <input
+        #filterInput
         class="arg filter"
         data-testid="query-filter"
         [attr.aria-label]="labels.filter"
@@ -98,6 +99,16 @@
         >
           Explain
         </button>
+        <button
+          type="button"
+          class="btn quiet"
+          data-testid="query-schema"
+          title="Analyze field types on a sample of the documents the filter matches"
+          [attr.aria-pressed]="schemaParams() !== null"
+          (click)="analyzeSchema()"
+        >
+          Schema
+        </button>
         <button #runButton type="submit" class="btn run" data-testid="query-run">Run</button>
       </span>
     </div>
@@ -114,6 +125,14 @@
 
   @if (explainParams(); as params) {
     <app-explain-panel [params]="params" (closed)="explainParams.set(null)" />
+  }
+
+  @if (schemaParams(); as params) {
+    <app-schema-panel
+      [params]="params"
+      (closed)="schemaParams.set(null)"
+      (pick)="pickFilter($event)"
+    />
   }
 
   <div class="bar">
