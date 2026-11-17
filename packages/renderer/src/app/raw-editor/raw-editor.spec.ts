@@ -387,6 +387,33 @@ describe('RawEditor', () => {
       expect(q('raw-dirty')).toBeNull();
     });
 
+    it('shows another document instead of keeping unapplied text of the previous one', async () => {
+      await type('{ _id: ObjectId("000000000000000000000000"), mine: 1 }');
+      await click('raw-apply');
+      expect(q('raw-error')?.textContent).toContain('cannot be changed');
+      expect(q('raw-dirty')).not.toBeNull();
+      // The same instance gets a different document (a list reusing it after paging).
+      const other = parseEJsonDocument('{"_id":{"$oid":"65a1b2c3d4e5f60718293a4c"},"name":"Lin"}');
+      host.doc.set(other);
+      await fixture.whenStable();
+      expect(editor().value).toBe(
+        '{\n  _id: ObjectId("65a1b2c3d4e5f60718293a4c"),\n  name: "Lin"\n}',
+      );
+      expect(editor().dirty()).toBe(false);
+      expect(q('raw-dirty')).toBeNull();
+      expect(editor().error()).toBeNull();
+      expect(q('raw-error')).toBeNull();
+      expect(diagnostics()).toHaveLength(0);
+      expect(button('raw-apply').disabled).toBe(true);
+      // A new object for the same _id (a re-query) keeps the unapplied text.
+      await type('{ _id: ObjectId("65a1b2c3d4e5f60718293a4c"), name: "Kay" }');
+      host.doc.set(parseEJsonDocument('{"_id":{"$oid":"65a1b2c3d4e5f60718293a4c"},"name":"Lin"}'));
+      await fixture.whenStable();
+      expect(editor().value).toContain('name: "Kay"');
+      expect(q('raw-dirty')).not.toBeNull();
+      expect(edits.modified()).toBe(false);
+    });
+
     it('reset discards unapplied changes', async () => {
       const before = editor().value;
       await type('{ broken');

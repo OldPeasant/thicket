@@ -182,11 +182,24 @@ export class RawEditor {
     inject(DestroyRef).onDestroy(() => this.view.destroy());
 
     // Follow the document's edits (undo, an edit in the explorer, a save) while the text has no
-    // unapplied changes; with unapplied changes the text stays and shows as not applied.
+    // unapplied changes; with unapplied changes the text stays and shows as not applied. When the
+    // input becomes another document (a reused instance, e.g. in a list after paging), the text,
+    // its unapplied changes and its error belong to the old one: show the new document instead.
+    let owner: unknown;
     effect(() => {
       const shown = this.shown();
+      const doc = this.doc();
       untracked(() => {
+        const identity = documentKey(doc) ?? doc;
+        const otherDocument = owner !== undefined && identity !== owner;
+        owner = identity;
         const next = printRaw(shown, this.format());
+        if (otherDocument) {
+          this.baseline.set(next);
+          this.setText(next);
+          this.showError(null);
+          return;
+        }
         if (next === this.baseline()) return;
         const wasDirty = this.dirty();
         this.baseline.set(next);
