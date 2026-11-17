@@ -13,7 +13,8 @@ List buckets and files, download, upload with progress, delete with confirm.
 ## Acceptance criteria
 - [x] Integration test: upload 20 MB file, download identical (hash)
   - verified (2026-11-17 08:14+0100 by dell26/agent-3): npm run test:int -- gridfs (MongoDB 8 container) -> 18 passed incl. 20 MB upload + download identical by SHA-256
-- [ ] e2e: upload and delete from the UI
+- [x] e2e: upload and delete from the UI
+  - verified (2026-11-17 08:14+0100 by dell26/agent-3): npm run test:e2e -- gridfs (built Electron app, Playwright) -> 1 passed: upload, download, delete with confirm from the UI
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
