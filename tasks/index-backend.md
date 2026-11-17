@@ -16,3 +16,4 @@ idx.list with size and `$indexStats` usage, create (compound, unique, sparse, pa
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-17 03:11+0100 by dell26/agent-3): idx.drop refuses name '*' (INVALID_PARAMS): the contract drops one index by name and '*' would drop every index
