@@ -820,4 +820,81 @@ describe('clientConfig MONGODB-AWS (task aws-auth)', () => {
     // The driver keeps the provider, not the secret, in its credentials.
     expect(JSON.stringify(client.options.credentials)).not.toContain(AWS_SECRET);
   });
+
+  describe('through an SSH tunnel (after task ssh-tunnel)', () => {
+    const ssh = {
+      host: 'bastion.example.test',
+      port: 22,
+      username: 'ops',
+      method: 'agent' as const,
+    };
+    const tunnel = {
+      proxyHost: '127.0.0.1',
+      proxyPort: 40555,
+      proxyUsername: 'tunnel-user',
+      proxyPassword: 'fictitious-tunnel-Pw7',
+    };
+
+    it('combines the tunnel proxy with the AWS options; the driver accepts both', async () => {
+      const { uri, options } = clientConfig(
+        draft({
+          connectionString: 'mongodb+srv://cluster0.example.test/?retryWrites=true',
+          auth: { mechanism: 'MONGODB-AWS', username: KEY_ID, secretMode: 'saved' },
+          ssh,
+        }),
+        { awsSecretAccessKey: AWS_SECRET, awsSessionToken: AWS_TOKEN },
+        tunnel,
+      );
+      expect(uri).toBe('mongodb+srv://cluster0.example.test/?retryWrites=true');
+      expect(options).toMatchObject({
+        ...tunnel,
+        authMechanism: 'MONGODB-AWS',
+        authSource: '$external',
+      });
+      expect(options.auth).toBeUndefined();
+      // The tunnel's proxy password is not mistaken for, nor overwritten by, the AWS secret.
+      expect(await options.authMechanismProperties?.AWS_CREDENTIAL_PROVIDER?.()).toEqual({
+        accessKeyId: KEY_ID,
+        secretAccessKey: AWS_SECRET,
+        sessionToken: AWS_TOKEN,
+      });
+      const client = new MongoClient(uri, options);
+      expect(client.options).toMatchObject({ proxyHost: '127.0.0.1', proxyPort: 40555 });
+      expect(client.options.credentials).toMatchObject({
+        mechanism: 'MONGODB-AWS',
+        source: '$external',
+      });
+    });
+
+    it('default chain through a tunnel: proxy options only, no credential provider', () => {
+      const { options } = clientConfig(
+        draft({ auth: { mechanism: 'MONGODB-AWS', secretMode: 'none' }, ssh }),
+        {},
+        tunnel,
+      );
+      expect(options).toMatchObject({ ...tunnel, authMechanism: 'MONGODB-AWS' });
+      expect(options.authMechanismProperties).toBeUndefined();
+    });
+
+    it('needs the open tunnel before any AWS check', () => {
+      const error = errorOf(() =>
+        clientConfig(
+          draft({ auth: { mechanism: 'MONGODB-AWS', username: KEY_ID, secretMode: 'saved' }, ssh }),
+          {},
+        ),
+      );
+      expect(error?.code).toBe('INTERNAL');
+    });
+
+    it('a missing AWS secret is still AUTH_FAILED with a tunnel', () => {
+      const error = errorOf(() =>
+        clientConfig(
+          draft({ auth: { mechanism: 'MONGODB-AWS', username: KEY_ID, secretMode: 'saved' }, ssh }),
+          {},
+          tunnel,
+        ),
+      );
+      expect(error?.code).toBe('AUTH_FAILED');
+    });
+  });
 });

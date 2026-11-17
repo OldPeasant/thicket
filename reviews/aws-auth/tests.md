@@ -2,102 +2,100 @@
 
 Date: 2026-11-17
 
-Task: aws-auth - M5: AWS IAM authentication
+Task: aws-auth - M5: AWS IAM authentication (round 2, final revision)
 
-Scope: task commits on `main`, base `f6c3558cfc957963775e8799e1dc79f5c118716a`, measured HEAD
-`a53e280717bede8a7501290892c56be39584d886` (`git diff f6c3558..a53e280`). The parent named the task
-commit `5cb24af8a5660d172d196a5de5308d2b18f2a59e`; `a53e280` is its rebased copy with the identical
-`git patch-id` (`cec01833c1c9b31d6d7f4ce72fbf57b88df7c570` for both). The other two commits in the range
-(`42c134d`, `00b7787`) only touch `tasks/aws-auth.md`. Production changes: new
-`packages/backend/src/auth/aws/{aws.ts,index.ts}`, modified `packages/backend/src/connections/options.ts`
-and `packages/backend/src/connections/errors.ts`, plus the `@aws-sdk/credential-providers` dependency
-(`packages/backend/package.json`, `package-lock.json`) and a `docs/ARCHITECTURE.md` note.
-Uncommitted inputs at measurement: only the three test files below (no production edits).
+Scope: final revision `ec1217934ed12fab2d28ad49f9fde716c80714fd` ("Merge origin/main (ssh-tunnel) into
+aws-auth"). Task base `f6c3558cfc957963775e8799e1dc79f5c118716a` (round 1). Because the merge
+brought in the whole ssh-tunnel task, the task's own changes were isolated as
+`git diff ec12179^2 ec12179` (merged main side to final): production changes are exactly
+`packages/backend/src/auth/aws/{aws.ts,index.ts}`, `packages/backend/src/connections/options.ts`
+(import, `MONGODB-AWS` in `SUPPORTED_MECHANISMS`, the `awsAuthOptions` branch) and
+`packages/backend/src/connections/errors.ts` (`MongoAWSError` in `AUTH_NAMES`), plus the
+`@aws-sdk/credential-providers` dependency and `docs/ARCHITECTURE.md`. Since round 1
+(`a53e280`), the task commits `3eaa142` (round-1 tests and reports) and `e8d2b94` (CR-2: comment-only
+change in `aws.ts` and `docs/ARCHITECTURE.md`, fixer report) were added; the merge made `clientConfig`
+take a `tunnel` argument (ssh-tunnel) and `ConnectionManager` open a tunnel before calling it.
+Uncommitted inputs at measurement: only the two test files below (no production edits).
 
 Requirements:
 - `tasks/aws-auth.md` acceptance criteria (unit tests: option mapping for explicit keys and default
   chain; real Atlas verification is the human task `aws-verify`) and its two recorded assumptions
 - `SPEC.md` M5 "AWS IAM (MONGODB-AWS): access key / secret / session token, or the default AWS
-  credential chain"; "AWS IAM needs Atlas or a real AWS setup: a human-verified task"
-- `docs/ARCHITECTURE.md` MONGODB-AWS paragraph (AUTH_FAILED rules, `$external`, secret masking) and
-  "Coverage" section
-- Parent instructions: cover `MongoAWSError` classification incl. nested cause, and the
-  manager-level flow (stored `awsSecretAccessKey`/`awsSessionToken` reach the provider and are masked
-  in logs)
+  credential chain"
+- `docs/ARCHITECTURE.md` MONGODB-AWS paragraph (AUTH_FAILED rules, `$external`, secret masking),
+  SSH tunnel notes and "Coverage" section
+- Parent instructions (round 2): re-run focused tests, `npm run check` and task-scoped coverage on
+  the final code; add tests only for gaps left by the merge (e.g. MONGODB-AWS with an SSH tunnel)
 
 ## Test files changed
 
-- `packages/backend/src/connections/errors.spec.ts`
-- `packages/backend/src/connections/manager.spec.ts`
+Round 2 (uncommitted):
 - `packages/backend/src/connections/options.spec.ts`
+- `packages/backend/src/connections/manager.spec.ts`
 
-The task's own `packages/backend/src/auth/aws/aws.spec.ts` and its changes to `options.spec.ts` were
-reviewed and left unchanged.
+Round 1 (committed in `3eaa142`, unchanged in round 2): `errors.spec.ts`, `manager.spec.ts`,
+`options.spec.ts`; the task's own `packages/backend/src/auth/aws/aws.spec.ts` is unchanged.
 
 ## Tests added or updated
 
-Count: 15 new test definitions (17 executed cases), 0 existing tests changed.
+Count: round 2 adds 8 tests (0 existing tests changed); round 1 added 15 test definitions
+(17 executed cases), still present and passing.
 
-- `errors.spec.ts`, `describe('MongoAWSError (task aws-auth)')` (uses the real driver class
-  `MongoAWSError` from `mongodb` 7.9.0, built with a `cause` like `aws_temporary_credentials.js` does):
-  - `the real driver class is AUTH_FAILED, with and without connecting`
-  - `is found as the cause of a wrapping driver error` (one and two wrapper levels)
-  - `is found in the servers of a server selection failure (outranks its TIMEOUT)`
-  - `outranks a network cause inside it: %s` (ECONNREFUSED, ETIMEDOUT, ENOTFOUND; 3 cases)
-  - `toConnectError answers AUTH_FAILED with its prefix and removes secret values`
-- `manager.spec.ts`, `describe('ConnectionManager MONGODB-AWS (task aws-auth)')`:
-  - `open: the stored secret access key and session token reach the credential provider`
-  - `open: the stored secret and token never reach log lines, the error or the status`
-  - `test: a typed secret is used and masked in the logs, and wins over the stored one`
-  - `secretMode 'ask': the stored secret access key is not used; the typed one is`
-  - `a saved access key ID without a stored secret answers AUTH_FAILED before creating a client`
-  - `default chain: no provider and no secrets are passed; a chain failure is AUTH_FAILED`
-  - `a draft with an id and the same AWS auth gets the stored secret; another key ID gets none`
-- `options.spec.ts`, `describe('clientConfig MONGODB-AWS (task aws-auth)')`:
-  - `answers AUTH_FAILED for a user name in the connection string, before the driver sees it`
-  - `replaces another authSource, also one in the connection string, with $external` (real
-    `MongoClient` constructor checks `credentials.source`)
-  - `keeps appName, TLS and proxy options next to the AWS options` (real `MongoClient` accepts them;
-    the secret is not in the driver's serialized credentials)
+Round 2, the merge interaction of MONGODB-AWS with the SSH tunnel (all values fictitious):
+- `options.spec.ts`, `describe('clientConfig MONGODB-AWS (task aws-auth)') > describe('through an SSH tunnel (after task ssh-tunnel)')`:
+  - `combines the tunnel proxy with the AWS options; the driver accepts both` (the tunnel's
+    `proxyPassword` does not clash with the AWS credential provider; real `MongoClient` constructor
+    keeps proxy options and `MONGODB-AWS`/`$external` credentials)
+  - `default chain through a tunnel: proxy options only, no credential provider`
+  - `needs the open tunnel before any AWS check` (`INTERNAL`, not `AUTH_FAILED`)
+  - `a missing AWS secret is still AUTH_FAILED with a tunnel`
+- `manager.spec.ts`, `describe('ConnectionManager MONGODB-AWS through an SSH tunnel (task aws-auth, after ssh-tunnel)')`:
+  - `open: the driver gets the tunnel proxy and the AWS credential provider together` (tunnel closed
+    once with the connection)
+  - `open: a missing AWS secret after the tunnel opened is AUTH_FAILED and closes the tunnel` (no
+    client created, status `error`/`AUTH_FAILED`)
+  - `test: a user name in the connection string is AUTH_FAILED and closes the tunnel`
+  - `test: a MongoAWSError through the tunnel is AUTH_FAILED, masked, and the tunnel is closed`
 
-All values are fictitious (`AKIAFICTITIOUS...`, `fictitious/aws+Secret+...`).
+Round 1 tests are listed in the round-1 report (commit `3eaa142`): `MongoAWSError` classification
+(7 cases), manager MONGODB-AWS flow (7), `clientConfig` MONGODB-AWS edge cases (3).
 
 ## Requirement coverage
 
+Command for all rows marked Pass:
+`cd packages/backend && npx vitest run src/auth/aws src/connections/options.spec.ts src/connections/manager.spec.ts src/connections/errors.spec.ts`
+
 | Requirement | Tests | Command | Result |
 |---|---|---|---|
-| AC1: option mapping for explicit keys (key ID = user name, secret typed or saved, optional saved session token, `$external`, provider not `auth`) | `aws.spec.ts` "explicit keys" (7, task's own); `options.spec.ts` "maps MONGODB-AWS explicit keys ..." (task's own), "replaces another authSource ...", "keeps appName, TLS and proxy ..."; `manager.spec.ts` "open: the stored secret access key and session token ...", "test: a typed secret ...", "secretMode 'ask' ...", "a saved access key ID without a stored secret ...", "a draft with an id and the same AWS auth ..." | `cd packages/backend && npx vitest run src/connections/errors.spec.ts src/connections/manager.spec.ts src/connections/options.spec.ts src/auth/aws` | Pass |
-| AC1: option mapping for the default chain (no user name: mechanism + `$external` only, no provider, no secrets; driver can load `@aws-sdk/credential-providers`) | `aws.spec.ts` "default credential chain" (2, task's own); `options.spec.ts` "maps MONGODB-AWS without an access key ID ..." (task's own); `manager.spec.ts` "default chain: no provider and no secrets are passed; ..." | same command | Pass |
-| A user name in the connection string is AUTH_FAILED (ARCHITECTURE) | `aws.spec.ts` "answers AUTH_FAILED for a user name in the connection string"; `options.spec.ts` "answers AUTH_FAILED for a user name in the connection string, before the driver sees it" | same command | Pass |
-| A chain without credentials (`MongoAWSError`) is AUTH_FAILED, also nested (ARCHITECTURE, errors.ts change) | `errors.spec.ts` "MongoAWSError (task aws-auth)" (7 cases); `manager.spec.ts` "default chain: ... a chain failure is AUTH_FAILED" | same command | Pass |
-| Stored/typed AWS secrets never reach logs, error messages or status (AGENTS/ARCHITECTURE secret rules) | `manager.spec.ts` "open: the stored secret and token never reach ...", "test: a typed secret is used and masked ..."; `errors.spec.ts` "toConnectError answers AUTH_FAILED ... removes secret values" | same command | Pass |
+| AC1: option mapping for explicit keys (key ID = user name, secret typed or saved, optional saved session token, `$external`, provider not `auth`) | `aws.spec.ts` "explicit keys" (task's own); `options.spec.ts` "maps MONGODB-AWS explicit keys ...", "replaces another authSource ...", "keeps appName, TLS and proxy ...", "combines the tunnel proxy with the AWS options ..."; `manager.spec.ts` round-1 MONGODB-AWS block, "open: the driver gets the tunnel proxy and the AWS credential provider together" | focused command above | Pass |
+| AC1: option mapping for the default chain (mechanism + `$external`, no provider, no secrets) | `aws.spec.ts` "default credential chain"; `options.spec.ts` "maps MONGODB-AWS without an access key ID ...", "default chain through a tunnel ..."; `manager.spec.ts` "default chain: no provider and no secrets are passed; ..." | focused command above | Pass |
+| A user name in the connection string / a missing secret is AUTH_FAILED before the driver (ARCHITECTURE), also with an SSH tunnel, and the tunnel is not leaked | `aws.spec.ts`, `options.spec.ts` "answers AUTH_FAILED for a user name ...", "a missing AWS secret is still AUTH_FAILED with a tunnel", "needs the open tunnel before any AWS check"; `manager.spec.ts` "open: a missing AWS secret after the tunnel opened ...", "test: a user name in the connection string ... closes the tunnel" | focused command above | Pass |
+| `MongoAWSError` (also nested) is AUTH_FAILED (errors.ts change) | `errors.spec.ts` "MongoAWSError (task aws-auth)" (7 cases); `manager.spec.ts` "default chain: ... a chain failure is AUTH_FAILED", "test: a MongoAWSError through the tunnel ..." | focused command above | Pass |
+| AWS secrets never reach logs, error messages or status | `manager.spec.ts` "open: the stored secret and token never reach ...", "test: a typed secret is used and masked ...", "test: a MongoAWSError through the tunnel is AUTH_FAILED, masked ..."; `errors.spec.ts` "toConnectError ... removes secret values" | focused command above | Pass |
 | AC2: real Atlas verification | none (human task `aws-verify`) | not run | Not testable: needs Atlas / a real AWS IAM setup, which the task assigns to humans |
 
 ## Focused test execution
 
 Command:
 
-`cd packages/backend && npx vitest run src/connections/errors.spec.ts src/connections/manager.spec.ts src/connections/options.spec.ts src/auth/aws`
+`cd packages/backend && npx vitest run src/auth/aws src/connections/options.spec.ts src/connections/manager.spec.ts src/connections/errors.spec.ts`
 
 Result:
 
-Pass (4 files, 229 tests; run before the final formatting pass). The final coverage run below
-re-executed all of these files on the final test snapshot: 21 files, 960 tests, all passed.
+Pass: 4 files, 252 tests (2026-11-17 03:20 +0100, on the final test snapshot).
 
 ## Full test execution
 
 Command:
 
-`npm run check` (repository root; lint + Prettier, type check of all workspaces, root Vitest
-projects and renderer `ng test`)
+`npm run check` (repository root: `npm run lint && npm run typecheck && npm run test`)
 
 Result:
 
-Pass, final run at 2026-11-17 03:15 +0100 on the final snapshot: ESLint and Prettier clean, all
-workspace type checks passed, Vitest 56 files / 3292 tests passed, renderer 72 files / 2154 tests
-passed, followed by the success marker. An earlier run in this session failed on my own test code
-(Prettier formatting of two new test blocks, then TS2322 for an `unknown` `cause` parameter in
-`errors.spec.ts`); both were fixed in the tests before the final run.
+Pass (2026-11-17 03:20-03:21 +0100, final snapshot): the `&&` chain reached its last stage, so
+ESLint/Prettier and all workspace type checks passed; root Vitest 61 files / 3424 tests passed;
+renderer `ng test` 72 files / 2154 tests passed; no npm error output. `npm run lint` was also run
+on its own afterwards: ESLint clean, "All matched files use Prettier code style!".
 
 Integration tests (`npm run test:int`) were not run: the acceptance criteria are unit tests only,
 and there is no MONGODB-AWS container fixture (real AWS is the human task `aws-verify`).
@@ -106,63 +104,65 @@ and there is no MONGODB-AWS container fixture (real AWS is the human task `aws-v
 
 Result:
 
-Pass. `.taskcheck` is `if [ -f package.json ]; then npm run check; ...`, so the final
-`npm run check` run above is its command.
+Pass. `.taskcheck` runs `npm run check`, which passed on the final snapshot above.
 
 ## Bugs found
 
-None. No test failed against the production code.
+None. No test failed against the final production code. The merge composes correctly: tunnel
+proxy options and AWS options coexist in the driver options, and an AUTH_FAILED raised by
+`awsAuthOptions` after the tunnel is open closes the tunnel in both `open` and `test`.
 
-Observation, not a defect against any stated requirement: in `awsAuthOptions` a typed `password` of
-`''` wins over a saved `awsSecretAccessKey` (`??` keeps empty strings), and the driver then refuses
-with `MongoMissingCredentialsError`, which is classified `AUTH_FAILED`. This matches how the
-SCRAM path treats a typed empty password, so no test was written to change it.
+Observation carried over from round 1 (not a defect against any stated requirement): a typed
+`password` of `''` wins over a saved `awsSecretAccessKey` (`??` keeps empty strings); the driver
+then refuses with `MongoMissingCredentialsError` (AUTH_FAILED), as on the SCRAM path.
 
 ## Coverage
 
-Status: verified (fresh run on the final source/test snapshot, exit 0).
+Status: verified (fresh run on the final source/test snapshot, exit 0, all tests passed).
 
 Metric: whole-file coverage of task-changed production files.
-Changed-line coverage: measured separately by intersecting the provider's `lcov.info` `DA` records
-with the added/modified lines of `git diff -U0 f6c3558 a53e280`: 17/17 executable changed lines hit
-(100%): `aws.ts` 12/12 (new file), `options.ts` lines 23, 50, 51, 52 = 4/4, `errors.ts` line 53 = 1/1;
-the `import` line and comments are not executable. Changed-branch coverage was not computed; for
-information, both arms of the provider branch records on the changed `options.ts` lines 50 and 52 were hit.
+Changed-line coverage: measured by intersecting `lcov.info` `DA` records with the added/modified
+lines of `git diff -U0 ec12179^2 ec12179` (task changes relative to the merged main): 17/17
+executable changed lines hit (100%): `aws.ts` 12/12 (new file), `options.ts` lines 24, 62, 63, 64 =
+4/4, `errors.ts` line 53 = 1/1 (import line, the remaining lines of the `SUPPORTED_MECHANISMS`
+literal and comments carry no `DA` record). Changed-branch coverage was not computed.
 
 Evidence:
-- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: `aws-auth`; base
-  `f6c3558cfc957963775e8799e1dc79f5c118716a` (from the parent); measured HEAD
-  `a53e280717bede8a7501290892c56be39584d886`; task code commit `a53e280` (= `5cb24af` named by the
-  parent, same patch-id); file scope from `git diff --stat f6c3558..HEAD`, which matches the parent's
-  list.
-- Source/test snapshot identifier (including uncommitted inputs): HEAD `a53e280` plus uncommitted test
-  files, sha256: `aws.ts` d0f7d310cc60...4e1d, `index.ts` cc9b2a397109...a6dd, `options.ts`
-  f54f3bfad451...4022, `errors.ts` 4d2b910e231b...f895, `aws.spec.ts` 04a7b08a365b...7238,
-  `options.spec.ts` 6eac308d8264...1f09, `errors.spec.ts` 4a153c7409e4...19ae, `manager.spec.ts`
-  3e85ee46ab34...b802 (taken at 03:16:04, rechecked unchanged at 03:16:21).
+- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: `aws-auth`;
+  base `f6c3558cfc957963775e8799e1dc79f5c118716a`; measured HEAD
+  `ec1217934ed12fab2d28ad49f9fde716c80714fd`; task-owned changes isolated with
+  `git diff ec12179^2 ec12179` (the merge's main parent is `5ae4d00`), which lists the same four
+  production files as round 1 plus dependency manifests, docs, tests and reviews.
+- Source/test snapshot identifier (including uncommitted inputs): HEAD `ec12179` plus uncommitted
+  `options.spec.ts` and `manager.spec.ts`; sha256: `aws.ts` b360cae168ba...eea6c, `index.ts`
+  cc9b2a397109...a6dd, `options.ts` 11e999ce1f28...0a00, `errors.ts` 4d2b910e231b...f895,
+  `aws.spec.ts` 04a7b08a365b...7238, `options.spec.ts` 87bb45db4305...3874, `errors.spec.ts`
+  4a153c7409e4...19ae, `manager.spec.ts` 5cb2d9486401...f96f (taken 03:20:11, rechecked identical
+  after the coverage run).
 - Exact included files; renamed/deleted/excluded files and reasons: included
   `packages/backend/src/auth/aws/aws.ts`, `packages/backend/src/auth/aws/index.ts`,
-  `packages/backend/src/connections/options.ts`, `packages/backend/src/connections/errors.ts`. Excluded:
-  `*.spec.ts` (tests), `docs/ARCHITECTURE.md` (documentation), `packages/backend/package.json` and
-  `package-lock.json` (dependency manifests, no executable code). No renames or deletions.
+  `packages/backend/src/connections/options.ts`, `packages/backend/src/connections/errors.ts`.
+  Excluded: `*.spec.ts` (tests), `docs/ARCHITECTURE.md` (documentation), `packages/backend/package.json`
+  and `package-lock.json` (manifests), `reviews/` (reports). Files changed by the merged ssh-tunnel
+  task (`manager.ts`, `ssh/*`, `server/*`, contract) are not task-owned and are excluded. No renames
+  or deletions.
 - Provider/version, command, working directory, and test selection: Vitest 5.1.0 with
-  `@vitest/coverage-v8` 5.1.0; `npx vitest run --coverage --coverage.include='src/auth/aws/aws.ts'
+  `@vitest/coverage-v8`; `npx vitest run --coverage --coverage.include='src/auth/aws/aws.ts'
   --coverage.include='src/auth/aws/index.ts' --coverage.include='src/connections/options.ts'
-  --coverage.include='src/connections/errors.ts'` in `packages/backend` (the form from
-  `docs/ARCHITECTURE.md` "Coverage"); test selection: the whole backend workspace (21 files, 960 tests).
-- Run start/completion time and exit status: start 2026-11-17 03:16:06 +0100, reports written
-  03:16:17 +0100; exit 0 (all tests passed).
+  --coverage.include='src/connections/errors.ts'` in `packages/backend`; test selection: the whole
+  backend workspace (26 files, 1084 tests).
+- Run start/completion time and exit status: start 2026-11-17 03:22:08 +0100, completed 03:22:34
+  +0100; all 1084 tests passed, coverage summary printed (exit 0).
 - Generated report paths and report hashes/run identifier: `packages/backend/coverage/coverage-summary.json`
-  sha256 e6974d935622c17c7f032dd9c9233641dbcb4f249592b8cf7c240d1b93b3691a;
+  sha256 3f2d7efa5bb0b9e1cf89fc5717028be0af83db3f94692f7eb645df2cace37766;
   `packages/backend/coverage/lcov.info` sha256
-  8ce77a2dedb83a390378ddfab414095f074492123a058b80bb2221000396d298; `packages/backend/coverage/lcov-report/`
+  8573c8a0847c69ab5d6a7b45583700828f720c3be53fe8d79db1d509c83d6a74; `packages/backend/coverage/lcov-report/`
   (all Git-ignored).
-- Evidence outputs are fresh and inputs stayed unchanged: yes. Vitest cleaned the directory (an older
-  `doc-paging/` subfolder from another run disappeared), every report file has an mtime after the run
-  start, and the snapshot hashes were identical before and after. A first coverage run at 03:11
-  (before the formatting/type fix of the tests) produced byte-identical reports.
-- Final run after latest test additions and production fixes: yes (no production fixes were made;
-  the run is after the last test edit).
+- Evidence outputs are fresh and inputs stayed unchanged: yes. All report files have mtime 03:22:34,
+  after the run start; their hashes differ from the round-1 reports; the summary contains exactly the
+  four scoped files; the snapshot hashes were identical before and after.
+- Final run after latest test additions and production fixes: yes (run after the last test edit; no
+  production changes were made in round 2).
 
 Values below use covered/total (percentage); zero-denominator or unsupported metrics are N/A.
 
@@ -170,24 +170,23 @@ Values below use covered/total (percentage); zero-denominator or unsupported met
 |---|---:|---:|---:|---:|
 | `packages/backend/src/auth/aws/aws.ts` | 14/14 (100%) | 14/14 (100%) | 2/2 (100%) | 12/12 (100%) |
 | `packages/backend/src/auth/aws/index.ts` | N/A (0/0, re-export only) | N/A | N/A | N/A |
-| `packages/backend/src/connections/options.ts` | 82/82 (100%) | 86/87 (98.85%) | 5/5 (100%) | 74/74 (100%) |
-| `packages/backend/src/connections/errors.ts` | 91/91 (100%) | 83/84 (98.8%) | 13/13 (100%) | 67/67 (100%) |
-| Aggregate (summed counters, all 4 scoped files measured, none missing) | 187/187 (100%) | 183/185 (98.91%) | 20/20 (100%) | 153/153 (100%) |
+| `packages/backend/src/connections/options.ts` | 86/86 (100%) | 96/97 (98.97%) | 5/5 (100%) | 78/78 (100%) |
+| `packages/backend/src/connections/errors.ts` | 91/91 (100%) | 83/84 (98.81%) | 13/13 (100%) | 67/67 (100%) |
+| Aggregate (summed counters, all 4 scoped files measured, none missing) | 191/191 (100%) | 193/195 (98.97%) | 20/20 (100%) | 157/157 (100%) |
 
 | File and uncovered lines/branch locations | Required behavior or risk | Action/test added or reason left uncovered |
 |---|---|---|
-| `packages/backend/src/connections/errors.ts:182` (`PREFIX[code] ?? 'Connection failed'`, fallback arm) | Defensive fallback; every code `classifyCode` can return has a prefix | Not changed by this task; unreachable without a new error code. No test added |
-| `packages/backend/src/connections/options.ts:169` (`readPem`: `?? String(error)` for an error without `code`) | TLS file read error without a Node error code (task x509-proxy) | Not changed by this task; no AWS behavior. No test added |
+| `packages/backend/src/connections/errors.ts:182` (`PREFIX[code] ?? 'Connection failed'`, fallback arm) | Defensive fallback; every code `classifyCode` returns has a prefix | Not changed by this task; unreachable without a new error code. No test added |
+| `packages/backend/src/connections/options.ts:187` (`readPem`: `?? String(error)` for an error without `code`; line 169 in round 1, moved by the merge) | TLS file read error without a Node error code (task x509-proxy) | Not changed by this task; no AWS behavior. No test added |
 
 ## Unable to test
 
 - Real MONGODB-AWS authentication against Atlas or AWS STS (explicit keys, session token, default
-  chain sources such as environment, SSO, profile and instance role): needs real AWS/Atlas, which is
-  out of reach here and assigned to the human task `aws-verify`. Follow-up: that task.
+  chain sources), also through a real SSH tunnel: needs real AWS/Atlas, assigned to the human task
+  `aws-verify`. Follow-up: that task.
 - The driver's own default chain failing at run time (it would reach the EC2 instance metadata
-  endpoint over the network) was not run, to keep the tests deterministic and offline. The wrapping
-  the driver applies (`MongoAWSError` with the SDK error as `cause`) is reproduced with the real
-  driver class instead.
+  endpoint) was not run, to keep tests offline and deterministic; the wrapping is reproduced with
+  the real driver class `MongoAWSError` (round 1).
 
 ## Summary
 
