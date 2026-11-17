@@ -347,6 +347,13 @@ async function serverOps(coll: string): Promise<Document[]> {
     .toArray();
 }
 
+/** How many `killOp` commands the server has run so far. */
+async function killOpCount(): Promise<number> {
+  const status = await direct.db('admin').command({ serverStatus: 1 });
+  const metrics = status['metrics'] as Document;
+  return Number((metrics['commands'] as Document)['killOp']?.['total'] ?? 0);
+}
+
 async function waitFor<T>(probe: () => Promise<T>, done: (value: T) => boolean): Promise<T> {
   const deadline = Date.now() + 10_000;
   for (;;) {
@@ -465,12 +472,16 @@ describe('cancel', () => {
       () => serverOps(CLOSING),
       (ops) => ops.length > 0,
     );
+    const kills = await killOpCount();
     try {
       await backend.call('conn.close', { profileId: PROFILE.id });
       const outcome = await backend.finished(streamId);
       expect(outcome.error).toEqual({ code: 'CANCELLED', message: 'The connection was closed' });
       // conn.close cancelled the stream before closing the client: its operation is gone.
       expect(await serverOps(CLOSING)).toEqual([]);
+      // ...killed by the stream's cleanup (killOp), not left to the server noticing the closed
+      // sockets (mongod 8 interrupts it then, but not every deployment or path does).
+      expect(await killOpCount()).toBeGreaterThan(kills);
     } finally {
       await backend.manager.open(PROFILE.id, undefined);
     }
