@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "task": "conflict-partial-docs",
+  "reviewed_revision": "86989ae135724df5f455533f0c89018aeafdc0a1",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/conflict-partial-docs/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/conflict-partial-docs/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/conflict-partial-docs/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P1", "disposition": "fixed",
+     "note": "deleted cut document showed projection note and offered insert-again; now partial note, no insert button"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "note chain split by the template edit; projection compare note is again an else-if, cut note separate"},
+    {"id": "CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "re-insert refusal no longer suggests running the query without a projection"},
+    {"id": "CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "deferred",
+     "note": "pre-existing: projection-only partial deleted doc still offers insert-again (always refused); follow-up task conflict-reinsert-rule"},
+    {"id": "TW-1", "source": "test-writer", "severity": "Low", "disposition": "fixed",
+     "note": "server array cut to the local length instead of array.loaded; now cut to array.loaded"},
+    {"id": "O-1", "source": "test-writer", "severity": "Low", "disposition": "fixed",
+     "note": "locally removed loaded items hidden from the diff; resolved by the TW-1 fix"}
+  ],
+  "validation": [
+    {"command": "cd packages/renderer && npx ng test --include src/app/document/conflict/conflict-view.spec.ts --include src/app/collection/collection-view.spec.ts --include src/app/document/document-actions.service.spec.ts --include src/app/document/document-editing.spec.ts", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}
