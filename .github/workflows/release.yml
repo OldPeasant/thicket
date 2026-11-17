@@ -1,7 +1,10 @@
 name: release
 
-# On a `v*` tag: build unsigned installers on each OS (electron-builder, apps/desktop/electron-builder.yml)
+# On a `v*` tag: build installers on each OS (electron-builder, apps/desktop/electron-builder.yml)
 # and upload them with SHA-256 checksums to a draft GitHub release. A human reviews and publishes it.
+# Windows is signed through SignPath when the SIGNPATH_API_TOKEN secret and the
+# SIGNPATH_ORGANIZATION_ID variable exist (docs/CODE_SIGNING.md), unsigned otherwise.
+# The other builds are unsigned (macOS: ad-hoc).
 #   Linux x64 + arm64: AppImage, deb, rpm
 #   macOS:             dmg (arm64 + x64, both built on one Apple Silicon runner)
 #   Windows x64:       NSIS installer + portable zip
@@ -37,8 +40,10 @@ jobs:
           - name: win-x64
             os: windows-latest
             args: --win --x64
+            # Signing waits for up to two manual SignPath approvals (app, then installer).
+            timeout: 150
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: ${{ matrix.timeout || 45 }}
     defaults:
       run:
         shell: bash
@@ -63,18 +68,116 @@ jobs:
       - name: Install
         run: npm ci
 
+      # Windows signing (docs/CODE_SIGNING.md) runs only when the SignPath secret and variable
+      # exist; otherwise this logs a notice and Windows builds unsigned exactly as before.
+      - name: Check Windows signing setup
+        id: signing
+        if: runner.os == 'Windows'
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+        run: node apps/desktop/scripts/signpath-enabled.mjs
+
       # The version comes from the tag (v1.2.3 -> 1.2.3), the package.json files stay at 0.0.0.
       # --publish never: electron-builder must not publish on its own; the release job does.
+      # With signing, Windows first builds only the unpacked app (--dir, release/win-unpacked);
+      # the installer and zip are made from the signed folder below.
       - name: Build installers
         env:
           TAG: ${{ github.ref_name }}
           ARGS: ${{ matrix.args }}
-          # No code signing yet (SPEC: unsigned); keep electron-builder from looking for certificates.
+          SIGN: ${{ steps.signing.outputs.enabled }}
+          # electron-builder never signs itself (macOS: ad-hoc, electron-builder.yml; Windows:
+          # SignPath below); keep it from looking for certificates.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          version="${TAG#v}"
+          dir=()
+          if [ "$SIGN" = true ]; then dir=(--dir); fi
+          # shellcheck disable=SC2086 # ARGS holds several flags
+          npm run dist -w apps/desktop -- $ARGS "${dir[@]}" "-c.extraMetadata.version=$version"
+
+      # SignPath signs Thicket.exe in the uploaded folder (artifact configuration `win-app`) and
+      # returns the folder; origin verification ties the request to this workflow run.
+      - name: Upload unsigned app for signing
+        id: unsigned-app
+        if: steps.signing.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-app-${{ matrix.name }}
+          path: apps/desktop/release/win-unpacked
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Sign app (SignPath)
+        if: steps.signing.outputs.enabled == 'true'
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: thicket
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: win-app
+          github-artifact-id: ${{ steps.unsigned-app.outputs.artifact-id }}
+          wait-for-completion: true
+          # Release signing needs a manual approval in SignPath (docs/CODE_SIGNING.md).
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: apps/desktop/release/win-signed
+
+      # --prepackaged: package the signed folder as is (no repacking, no fuse or resource edits),
+      # so the zip and the app inside the installer hold the signed Thicket.exe. Same file names.
+      - name: Build installer and zip from the signed app
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          TAG: ${{ github.ref_name }}
+          ARGS: ${{ matrix.args }}
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: |
           version="${TAG#v}"
           # shellcheck disable=SC2086 # ARGS holds several flags
-          npm run dist -w apps/desktop -- $ARGS "-c.extraMetadata.version=$version"
+          npm run dist -w apps/desktop -- $ARGS --prepackaged release/win-signed "-c.extraMetadata.version=$version"
+
+      - name: Upload unsigned installer for signing
+        id: unsigned-installer
+        if: steps.signing.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installer-${{ matrix.name }}
+          path: apps/desktop/release/*.exe
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Sign installer (SignPath)
+        if: steps.signing.outputs.enabled == 'true'
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: thicket
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: win-installer
+          github-artifact-id: ${{ steps.unsigned-installer.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: apps/desktop/release/installer-signed
+
+      # Replace the unsigned installer by the signed one (same name); the checksums in the
+      # release job are computed from these files, so after signing.
+      - name: Use signed installer
+        if: steps.signing.outputs.enabled == 'true'
+        run: |
+          shopt -s nullglob
+          signed=(apps/desktop/release/installer-signed/*.exe)
+          if [ "${#signed[@]}" -ne 1 ]; then
+            echo "expected one signed installer, found: ${signed[*]}" >&2
+            exit 1
+          fi
+          name="$(basename "${signed[0]}")"
+          if [ ! -f "apps/desktop/release/$name" ]; then
+            echo "signed installer $name does not replace an unsigned one" >&2
+            exit 1
+          fi
+          cp -- "${signed[0]}" "apps/desktop/release/$name"
 
       - name: Collect installers
         run: |
@@ -155,6 +258,7 @@ jobs:
           path: out
           merge-multiple: true
 
+      # After signing: the Windows files in the artifacts are the signed ones.
       - name: Checksums
         working-directory: out
         run: |
