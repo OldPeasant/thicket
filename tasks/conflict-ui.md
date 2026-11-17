@@ -13,7 +13,8 @@ On CONFLICT show local vs server side by side with differences highlighted; acti
 ## Acceptance criteria
 - [x] e2e reproduces demo step 7: external change between load and save → conflict view appears
   - verified (2026-11-17 02:58+0100 by dell26/agent-2): npm run test:e2e -- test/e2e/conflict.e2e.ts (Electron app + MongoDB container, HEAD fda519b) -> 2 passed: external change between load and save shows the conflict view; Overwrite writes the local version / Keep server + Merge manually
-- [ ] Overwrite writes the local version; keep-server discards local edits; manual merge saves the merged doc (tests)
+- [x] Overwrite writes the local version; keep-server discards local edits; manual merge saves the merged doc (tests)
+  - verified (2026-11-17 02:58+0100 by dell26/agent-2): cd packages/renderer && npx ng test --include=document/collection/raw-editor specs -> 13 files, 693 passed (service + component tests for overwrite, keep-server, manual merge, projection safety); e2e test/e2e/conflict.e2e.ts -> 2 passed; npm run check -> pass (3264 root + 2154 renderer tests)
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
