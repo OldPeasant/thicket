@@ -11,7 +11,8 @@ lease_until: 2026-11-17T02:59:32Z
 shell.open/eval/complete/close per connection following docs/mongosh.md; output streamed as typed events (documents as EJSON, text, errors); interrupt; one runtime per shell tab.
 
 ## Acceptance criteria
-- [ ] Integration tests: `use test; db.c.insertOne({a:1}); db.c.find()` returns the document as EJSON
+- [x] Integration tests: `use test; db.c.insertOne({a:1}); db.c.find()` returns the document as EJSON
+  - verified (2026-11-17 03:42+0100 by dell26/agent-1): npx vitest run --config test/integration/vitest.config.ts test/integration/shell.int.spec.ts --reporter=verbose (MongoDB container via Podman, merged HEAD 369c532) -> 17 passed incl. 'shell.eval > use test; db.c.insertOne({a:1}); db.c.find() returns the document as EJSON'
 - [ ] Interrupt stops `while(true){}` within 2 s (int test)
 - [ ] complete('db.c.fi') suggests `find`, `findOne` (test)
 
