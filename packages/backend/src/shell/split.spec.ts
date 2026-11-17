@@ -142,6 +142,14 @@ describe('splitShellInput', () => {
     // still recognised.
     ['/* first */ use test // then\nx', ['/* first */', 'use test', '\nx']],
     ['// note\nuse test\nx', ['// note\n', 'use test', '\nx']],
+    // A comment glued to an argument (no space) is still a comment, not part of the argument.
+    ['use test// c\ndb.c.find()', ['use test', '\ndb.c.find()']],
+    ['show dbs//x', ['show dbs']],
+    ['show dbs/* x */', ['show dbs']],
+    ['use test/* c */\nx', ['use test', '\nx']],
+    ['show profile 5//last\nx', ['show profile 5', '\nx']],
+    // A single `/` inside an argument is still part of it.
+    ['use a/b\nx', ['use a/b', '\nx']],
   ])('trailing comment edge cases: %j', (input, pieces) => {
     expect(splitShellInput(input)).toEqual(pieces);
   });

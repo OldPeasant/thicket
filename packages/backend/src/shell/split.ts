@@ -81,12 +81,13 @@ export function splitShellInput(code: string): string[] {
 }
 
 /**
- * A shell command statement on one line: the command word, its arguments (none starts a comment),
+ * A shell command statement on one line: the command word, its arguments (none contains `//` or
+ * `/*`, so a comment glued to an argument is still a comment),
  * then optional trailing comments (`// ...` to the end of the line, `/* ... *\/` on the line),
  * ended by `;`, a line break or the end of the input. Group 1 is the command without comments.
  */
 const COMMAND =
-  /^((use|show|it|exit|quit)(?=$|[\s;]|\/[/*])(?:[^\S\n]+(?!\/[/*])[^\s;]+)*)[^\S\n]*(?:(?:\/\*.*?\*\/|\/\/.*)[^\S\n]*)*(?:;|(?=\n)|$)/;
+  /^((use|show|it|exit|quit)(?=$|[\s;]|\/[/*])(?:[^\S\n]+(?:(?!\/[/*])[^\s;])+)*)[^\S\n]*(?:(?:\/\*.*?\*\/|\/\/.*)[^\S\n]*)*(?:;|(?=\n)|$)/;
 
 /** The shell command statement at `index`, if one starts there. */
 function commandAt(code: string, index: number): { text: string; end: number } | undefined {
