@@ -1,10 +1,11 @@
 ---
 title: CSV edge cases: one-column blank rows, dates beyond year 9999, dotted field names; ARCHITECTURE.md io section
-status: todo
-owner:
+status: in_progress
+owner: dell26/agent-2
 deps: [io-advanced]
 touches: [packages/backend/src/io/csv,packages/backend/src/io/export.ts,docs/ARCHITECTURE.md]
 prio: 2
+lease_until: 2026-11-17T06:40:47Z
 ---
 ## Goal
 Fix the P3 findings deferred from io-advanced (reviews/io-advanced/review.md CR-1..CR-4).
