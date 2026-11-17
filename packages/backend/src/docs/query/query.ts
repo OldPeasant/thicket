@@ -370,16 +370,17 @@ export async function streamFind(
   const op = new Operation(client, p.db, p.coll, signal);
   const size = p.batchSize ?? DEFAULT_EVENT_BATCH;
   const projection = cmd['projection'] as Document | undefined;
+  const slice = p.slice;
   let delivered = 0;
   const emit = (docs: Document[]) => {
     for (let i = 0; i < docs.length; i += size) {
       const chunk = docs.slice(i, i + size);
-      if (p.slice === undefined) {
+      if (slice === undefined) {
         send({ docs: chunk.map(canonical) });
       } else {
         const sliced: NonNullable<DocsBatch['sliced']> = [];
         const texts = chunk.map((doc, index) => {
-          const cut = sliceLargeArrays(doc, p.slice!.above, p.slice!.docBytes, projection);
+          const cut = sliceLargeArrays(doc, slice.above, slice.docBytes, projection);
           if (cut.arrays.length > 0) sliced.push({ index, arrays: cut.arrays });
           return canonical(cut.doc);
         });

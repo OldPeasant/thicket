@@ -81,15 +81,6 @@ describe('Explorer with BSON values', () => {
     fixture.componentRef.setInput('value', toExplorerValue(parseEJsonDocument(ejson)));
     fixture.componentRef.setInput('layout', layout);
     await fixture.whenStable();
-    showAll();
-    await fixture.whenStable();
-  };
-
-  // Long documents are revealed in batches; show every field.
-  const showAll = () => {
-    for (const b of el().querySelectorAll<HTMLButtonElement>('.reveal-btn')) {
-      if (b.textContent?.includes('Show all')) b.click();
-    }
   };
 
   const field = (key: string) => el().querySelector<HTMLElement>(`.field[data-node=".${key}"]`);

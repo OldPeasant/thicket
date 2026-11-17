@@ -7,9 +7,9 @@ import {
   type JsonLinesDoc,
 } from '../json-lines.util';
 
-// The key RevealService pages the list of lines by, and how many it shows first.
-export const LINES_REVEAL_KEY = '~lines';
-export const LINES_INITIAL_COUNT = 50;
+// The key PageService pages the list of lines by, and how many lines a page holds.
+export const LINES_PAGE_KEY = '~lines';
+export const LINES_PAGE_SIZE = 50;
 
 // The document, when the file is JSON Lines rather than one JSON document.
 // `App` owns loading and saving; the explorer and the jump service read it.

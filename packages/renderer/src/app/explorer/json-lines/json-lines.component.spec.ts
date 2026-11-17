@@ -94,27 +94,27 @@ describe('JsonLinesComponent', () => {
     expect(badges).toEqual(['', '⚠ 1']);
   });
 
-  it('pages long files and reveals more lines on request', async () => {
+  it('pages long files with a pager', async () => {
     const text = Array.from({ length: 200 }, (_, i) => JSON.stringify({ n: i })).join('\n');
     await render(text);
     expect(lineNumbers()).toHaveLength(50);
-    const button = (label: string) => {
-      const found = [...el().querySelectorAll<HTMLButtonElement>('.reveal-btn')].find(
-        (b) => b.textContent?.trim() === label,
-      );
-      if (!found) throw new Error(`no button "${label}"`);
-      return found;
-    };
+    const pager = () => el().querySelector('[data-testid="nested-pager"]');
+    expect(pager()?.querySelector('[data-testid="pager-range"]')?.textContent?.trim()).toBe(
+      '1–50 of 200 lines',
+    );
 
-    button('+20').click();
+    pager()?.querySelector<HTMLButtonElement>('[data-testid="pager-next"]')?.click();
     await fixture.whenStable();
-    expect(lineNumbers()).toHaveLength(70);
-    expect(el().querySelector('.reveal-info')?.textContent).toBe('70 / 200 lines');
+    expect(lineNumbers()).toHaveLength(50);
+    expect(pager()?.querySelector('[data-testid="pager-range"]')?.textContent?.trim()).toBe(
+      '51–100 of 200 lines',
+    );
 
-    button('Show all 200').click();
+    pager()?.querySelector<HTMLButtonElement>('[data-testid="pager-last"]')?.click();
     await fixture.whenStable();
-    expect(lineNumbers()).toHaveLength(200);
-    expect(el().querySelector('.reveal-btn')).toBeNull();
+    expect(pager()?.querySelector('[data-testid="pager-range"]')?.textContent?.trim()).toBe(
+      '151–200 of 200 lines',
+    );
   });
 
   it('emits the edited line with its index', async () => {

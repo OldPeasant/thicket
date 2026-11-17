@@ -4,15 +4,22 @@ import { ColumnSyncService } from '../services/column-sync.service';
 import { FilterService } from '../services/filter.service';
 import { NodeVisibilityService } from '../services/node-visibility.service';
 import { CollapseService } from '../services/collapse.service';
-import { RevealService } from '../services/reveal.service';
+import { PageService } from '../services/page.service';
+import { NestedPageSizeService } from '../services/nested-page-size.service';
+import {
+  ArraySliceService,
+  type SlicePage,
+  type SliceSource,
+} from '../services/array-slice.service';
 import { ColumnMenuComponent } from '../column-menu/column-menu.component';
 import { EditableValueComponent } from '../editable-value/editable-value.component';
 import { HighlightComponent } from '../highlight/highlight.component';
+import { PagerComponent } from '../pager/pager.component';
 import { SchemaInfoComponent } from '../schema-info/schema-info.component';
 import { EditModeService } from '../services/edit-mode.service';
 import { SchemaService } from '../services/schema.service';
 import { appendKey, type GhostKey, type Problem } from '../../schema';
-import { estimateAvgItemBytes, initialRevealCount } from '../reveal.util';
+import type { PageWindow } from '../page.util';
 import {
   type JsonType,
   blankItemLike,
@@ -35,6 +42,7 @@ const NO_KEYS: readonly string[] = [];
     ColumnMenuComponent,
     EditableValueComponent,
     HighlightComponent,
+    PagerComponent,
     SchemaInfoComponent,
   ],
   templateUrl: './json-table.component.html',
@@ -52,6 +60,8 @@ export class JsonTableComponent implements OnInit {
   // The filter's default for this node: show its key but keep the value
   // collapsed behind a click.
   @Input() filterCollapsed = false;
+  // Inside a partly loaded array (see childLocked): shown, never edited.
+  @Input() locked = false;
 
   // Emits the new value for THIS node — either a direct edit at this node
   // (leaf value or type switch, handled by onSelfChange) or a rebuilt
@@ -65,7 +75,9 @@ export class JsonTableComponent implements OnInit {
   private visibility = inject(NodeVisibilityService);
   protected filter = inject(FilterService);
   protected editMode = inject(EditModeService);
-  protected reveal = inject(RevealService);
+  private pages = inject(PageService);
+  private pageSize = inject(NestedPageSizeService);
+  private slices = inject(ArraySliceService);
   private collapse = inject(CollapseService);
   private schema = inject(SchemaService);
 
@@ -94,7 +106,7 @@ export class JsonTableComponent implements OnInit {
   // Edit controls at this node: on in edit mode, unless the schema makes the
   // node (or something above it) read-only.
   get canEdit(): boolean {
-    return this.editMode.enabled() && !this.schema.readOnlyFor(this.uid);
+    return this.editMode.enabled() && !this.childLocked && !this.schema.readOnlyFor(this.uid);
   }
 
   // Schema problems about this very node — or, for something the data lacks
@@ -142,9 +154,14 @@ export class JsonTableComponent implements OnInit {
 
   addGhost(g: GhostKey): void {
     const obj = this.value as Record<string, unknown>;
-    this.valueChange.emit(withEntry(obj, g.key, this.schema.seed(g.schema)));
-    // See addItem's comment: keeps a fully-shown object fully shown.
-    this.reveal.revealMore(this.path, 1);
+    this.emit(withEntry(obj, g.key, this.schema.seed(g.schema)));
+    this.showLastEntry(this.objEntries.length + 1);
+  }
+
+  // Every change of this node goes out here. Nothing goes out from a partly
+  // loaded array or from below one: its loaded value is not all of it.
+  private emit(value: unknown): void {
+    if (!this.childLocked) this.valueChange.emit(value);
   }
 
   get isContainer(): boolean {
@@ -197,13 +214,13 @@ export class JsonTableComponent implements OnInit {
     return this.objEntries.filter(([k, v]) => this.entryVisible(k, v, widened));
   }
 
-  // Post-filter AND post-reveal: only the currently-revealed slice of
-  // whatever the filter left visible. Filtering happens first (above) so a
-  // search never gets hidden behind an unrelated reveal boundary — if a
-  // filter narrows this down to 3 entries, revealedCount clamps to 3 (see
-  // RevealService.count), so all 3 show regardless of the byte-budget slice.
+  // Post-filter AND post-paging: only the page shown of whatever the filter
+  // left visible. Filtering happens first (above) so a search never gets
+  // hidden behind an unrelated page boundary: a filter that narrows this down
+  // to 3 entries shows all 3 on one page.
   get visibleObjEntries(): [string, unknown][] {
-    return this.filteredObjEntries.slice(0, this.revealedCount);
+    const w = this.pageWindow;
+    return this.filteredObjEntries.slice(w.start, w.end);
   }
 
   get visibleObjKeys(): string[] {
@@ -211,8 +228,45 @@ export class JsonTableComponent implements OnInit {
   }
 
   // --- array helpers ---
+  // A partly loaded array (a large document, see ArraySliceService) is shown
+  // as a sparse array of its whole length: the loaded first items and the
+  // page shown are there, the rest are holes (which some/filter/map skip).
   get arr(): unknown[] {
-    return this.value as unknown[];
+    const source = this.sliceSource;
+    if (!source) return this.value as unknown[];
+    const loaded = this.value as unknown[];
+    const page = this.slicePage;
+    const memo = this.sparseMemo;
+    if (memo && memo.loaded === loaded && memo.page === page) return memo.arr;
+    const arr: unknown[] = new Array<unknown>(Math.max(source.total, loaded.length));
+    loaded.forEach((item, i) => (arr[i] = item));
+    const w = this.pageWindow;
+    page?.items?.forEach((item, i) => (arr[w.start + i] = item));
+    this.sparseMemo = { loaded, page, arr };
+    return arr;
+  }
+  private sparseMemo?: { loaded: unknown[]; page: SlicePage | null; arr: unknown[] };
+
+  /** Where the rest of this array comes from when its document was loaded with only its first items. */
+  get sliceSource(): SliceSource | undefined {
+    return this.type === 'array' ? this.slices.sourceOf(this.value) : undefined;
+  }
+
+  /** The page shown of a partly loaded array (`null` for any other node). */
+  get slicePage(): SlicePage | null {
+    if (!this.sliceSource) return null;
+    const w = this.pageWindow;
+    return this.slices.page(this.value as unknown[], w.start, w.end);
+  }
+
+  retrySlice(): void {
+    const w = this.pageWindow;
+    this.slices.retry(this.value as unknown[], w.start, w.end);
+  }
+
+  /** Nodes below a partly loaded array can't be edited (Save would replace the whole array). */
+  get childLocked(): boolean {
+    return this.locked || this.sliceSource !== undefined;
   }
 
   isObjectItem(item: unknown): boolean {
@@ -343,10 +397,26 @@ export class JsonTableComponent implements OnInit {
       });
   }
 
-  // See visibleObjEntries above for why filtering happens before slicing.
+  // See visibleObjEntries above for why filtering happens before paging.
   get visibleArrayIndices(): number[] {
-    return this.filteredArrayIndices.slice(0, this.revealedCount);
+    if (this.sliceSource) return this.sliceIndices;
+    const w = this.pageWindow;
+    return this.filteredArrayIndices.slice(w.start, w.end);
   }
+
+  // A partly loaded array pages over its whole length (the search only sees
+  // loaded items, so it doesn't filter here): the indices of the page shown,
+  // once its items are there.
+  private get sliceIndices(): number[] {
+    const w = this.pageWindow;
+    if (!this.slicePage?.items) return [];
+    const memo = this.sliceIndexMemo;
+    if (memo && memo.start === w.start && memo.end === w.end) return memo.indices;
+    const indices = Array.from({ length: w.end - w.start }, (_, i) => w.start + i);
+    this.sliceIndexMemo = { start: w.start, end: w.end, indices };
+    return indices;
+  }
+  private sliceIndexMemo?: { start: number; end: number; indices: number[] };
 
   // Indices of the shown plain (non-object) array items. Indices (not
   // items) are exposed so edits/deletes can address the real position in
@@ -357,50 +427,39 @@ export class JsonTableComponent implements OnInit {
   }
 
   get visibleArrItemIndices(): number[] {
-    return this.filteredArrItemIndices.slice(0, this.revealedCount);
+    if (this.sliceSource) return this.sliceIndices;
+    const w = this.pageWindow;
+    return this.filteredArrItemIndices.slice(w.start, w.end);
   }
 
-  // --- reveal (pagination) helpers ---
+  // --- paging helpers ---
   // Exactly one of these three "filtered length" sources is ever relevant
   // for a given component instance, decided structurally by type/shape —
-  // never both at once — so it's safe for revealedCount/hasMoreItems/etc.
-  // to be generic across all three without the caller specifying which.
+  // never both at once — so it's safe for the page window to be generic
+  // across all three without the caller specifying which.
   private get currentFilteredLength(): number {
+    const source = this.sliceSource;
+    if (source) return Math.max(source.total, (this.value as unknown[]).length);
     if (this.type === 'object') return this.filteredObjEntries.length;
     if (this.isArrayOfObjects) return this.filteredArrayIndices.length;
     return this.filteredArrItemIndices.length;
   }
 
-  private get currentAvgItemBytes(): number {
-    if (this.type === 'object') {
-      return estimateAvgItemBytes(
-        this.value as object,
-        this.objEntries.map(([, v]) => v),
-      );
-    }
-    return estimateAvgItemBytes(this.arr, this.arr);
+  /** The entries shown: one page when there are more than `nestedPageSize`. */
+  get pageWindow(): PageWindow {
+    return this.pages.window(this.uid, this.currentFilteredLength, this.pageSize.size());
   }
 
-  get revealedCount(): number {
-    const filteredLength = this.currentFilteredLength;
-    const initial = initialRevealCount(filteredLength, this.currentAvgItemBytes);
-    return this.reveal.count(this.path, filteredLength, initial);
+  setPage(page: number): void {
+    this.pages.set(this.uid, page);
+    this.colSync.scheduleSync();
   }
 
-  get hasMoreItems(): boolean {
-    return this.revealedCount < this.currentFilteredLength;
-  }
-
-  get totalFilteredCount(): number {
-    return this.currentFilteredLength;
-  }
-
-  revealMoreItems(by: number): void {
-    this.reveal.revealMore(this.path, by);
-  }
-
-  revealAllItems(): void {
-    this.reveal.revealAll(this.path);
+  // After adding an entry: show the page it landed on (the last), so the new
+  // row is never hidden on a page the user isn't looking at.
+  private showLastEntry(length: number): void {
+    if (length > this.pageSize.size())
+      this.pages.ensure(this.uid, length - 1, this.pageSize.size());
   }
 
   itemForceVisible(item: unknown): boolean {
@@ -511,12 +570,12 @@ export class JsonTableComponent implements OnInit {
   // --- edits at this node itself (leaf edit, or a type switch from the
   // `<app-editable-value>` shown for any value, primitive or container) ---
   onSelfChange(newValue: unknown): void {
-    this.valueChange.emit(newValue);
+    this.emit(newValue);
   }
 
   // --- object mutation ---
   onEntryChange(key: string, newValue: unknown): void {
-    this.valueChange.emit(
+    this.emit(
       this.switchedByDiscriminator(
         this.uid,
         this.value as Record<string, unknown>,
@@ -546,7 +605,7 @@ export class JsonTableComponent implements OnInit {
   }
 
   onEntryDelete(key: string): void {
-    this.valueChange.emit(withoutEntry(this.value as Record<string, unknown>, key));
+    this.emit(withoutEntry(this.value as Record<string, unknown>, key));
   }
 
   addEntry(key: string): void {
@@ -558,18 +617,17 @@ export class JsonTableComponent implements OnInit {
     // map with a value schema (e.g. products keyed by slug) — same reasoning
     // as addItem.
     const seeded = this.schema.seedFor(this.uid, trimmed);
-    this.valueChange.emit(withEntry(obj, trimmed, seeded !== undefined ? seeded : ''));
-    // See addItem's comment: keeps a fully-shown object fully shown.
-    this.reveal.revealMore(this.path, 1);
+    this.emit(withEntry(obj, trimmed, seeded !== undefined ? seeded : ''));
+    this.showLastEntry(this.objEntries.length + 1);
   }
 
   // --- array mutation (plain items and array-of-objects items alike) ---
   onItemChange(index: number, newValue: unknown): void {
-    this.valueChange.emit(withItem(this.arr, index, newValue));
+    this.emit(withItem(this.arr, index, newValue));
   }
 
   onItemDelete(index: number): void {
-    this.valueChange.emit(withoutItemAt(this.arr, index));
+    this.emit(withoutItemAt(this.arr, index));
   }
 
   // Seeded from the array's item schema when there is one; otherwise shaped
@@ -579,14 +637,8 @@ export class JsonTableComponent implements OnInit {
   addItem(): void {
     const seeded = this.schema.seedItemFor(this.uid);
     const next = withAppended(this.arr, seeded !== undefined ? seeded : blankItemLike(this.arr));
-    this.valueChange.emit(next);
-    // A short array is normally shown in full (revealedCount === its
-    // length); appending an item then leaves it one short, hiding exactly
-    // the row just added, with no visible sign anything is missing unless
-    // the reveal bar is noticed. Growing the revealed count by one keeps a
-    // "fully shown" array fully shown; a genuinely paginated (huge) array
-    // is deliberately left as is, so one click never dumps thousands of rows.
-    this.reveal.revealMore(this.path, 1);
+    this.emit(next);
+    this.showLastEntry(next.length);
   }
 
   // --- array-of-objects cell mutation: edits/deletes one key within one

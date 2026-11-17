@@ -10,9 +10,16 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import { type BsonDocument, parseEJsonDocument, stringifyEJson } from '@thicket/core/bson';
+import type { SlicedArray } from '@thicket/contract';
+import {
+  type BsonDocument,
+  parseEJson,
+  parseEJsonDocument,
+  stringifyEJson,
+} from '@thicket/core/bson';
 import { printShellSyntax } from '@thicket/core/shellsyntax';
 
+import { ApiService } from '../api';
 import {
   DocumentActions,
   DocumentEdits,
@@ -39,7 +46,8 @@ import { LayoutService } from '../explorer/services/layout.service';
 import { NodeVisibilityService } from '../explorer/services/node-visibility.service';
 import { NumberDefaultService } from '../explorer/services/number-default.service';
 import { PanelService } from '../explorer/services/panel.service';
-import { RevealService } from '../explorer/services/reveal.service';
+import { ArraySliceService, type SliceSource } from '../explorer/services/array-slice.service';
+import { PageService } from '../explorer/services/page.service';
 import { SchemaService } from '../explorer/services/schema.service';
 import { TableOrientationService } from '../explorer/services/table-orientation.service';
 import type { WorkspaceTab } from '../layout/workspace.service';
@@ -108,7 +116,8 @@ const numberFormat = new Intl.NumberFormat();
     LayoutService,
     NodeVisibilityService,
     PanelService,
-    RevealService,
+    PageService,
+    ArraySliceService,
     SchemaService,
     TableOrientationService,
   ],
@@ -125,6 +134,8 @@ export class CollectionView {
   private readonly numbers = inject(NumberDefaultService);
   private readonly safety = inject(ProfileSafetyService);
   protected readonly display = inject(BsonDisplayService);
+  private readonly api = inject(ApiService);
+  private readonly slices = inject(ArraySliceService);
   protected readonly pageSizes = PAGE_SIZES;
   protected readonly labels = FIELD_LABELS;
 
@@ -177,9 +188,13 @@ export class CollectionView {
    * edit in the table can be told apart from the rows it left alone (by identity).
    */
   private readonly trees = new WeakMap<BsonDocument, unknown>();
-  protected readonly explorerDocs = computed(() =>
-    this.shownDocs().map((doc) => (doc === null ? null : this.treeOf(doc))),
-  );
+  protected readonly explorerDocs = computed(() => {
+    const loaded = this.docs();
+    const sliced = this.results.page()?.sliced;
+    return this.shownDocs().map((doc, i) =>
+      doc === null ? null : this.treeOf(doc, loaded[i] ?? null, sliced?.[i]),
+    );
+  });
   protected readonly rawText = computed(() => {
     const page = this.results.page();
     if (page === null) return '';
@@ -243,6 +258,15 @@ export class CollectionView {
   /** The page was read with a projection: its documents may be partial (see `docChanged`). */
   protected readonly partialDocs = computed(() => this.results.query().projection !== undefined);
   protected readonly readOnly = computed(() => this.safety.readOnly(this.target().profileId)());
+
+  /**
+   * The document at `index` may be partial: read with a projection, or a large document whose
+   * long arrays came cut to their first page. Save then refuses edits that would replace what
+   * wasn't loaded.
+   */
+  protected isPartial(index: number): boolean {
+    return this.partialDocs() || this.results.page()?.sliced?.[index] !== undefined;
+  }
 
   protected key(doc: BsonDocument): string | null {
     return documentKey(doc);
@@ -386,9 +410,10 @@ export class CollectionView {
   protected docChanged(index: number, tree: unknown): void {
     const original = this.docs()[index];
     const edited = this.toDocument(tree);
-    // With a projection the loaded document may be partial: Save then refuses edits that would
-    // replace what the projection hides, also after the projection was cleared.
-    const partial = this.partialDocs();
+    // With a projection, or cut arrays of a large document, the loaded document may be partial:
+    // Save then refuses edits that would replace what wasn't loaded, also after the projection
+    // was cleared.
+    const partial = this.isPartial(index);
     if (original && edited !== null) this.edits.edit(original, edited, partial);
   }
 
@@ -403,13 +428,48 @@ export class CollectionView {
     return value.type === 'object' ? value : null;
   }
 
-  private treeOf(doc: BsonDocument): unknown {
+  /**
+   * The explorer tree of `doc` (the shown version of the loaded document `loaded`). The arrays
+   * `loaded` came with only partly (`sliced`) are registered with their source: the explorer
+   * reads their other pages with `docs.getSlice`.
+   */
+  private treeOf(
+    doc: BsonDocument,
+    loaded: BsonDocument | null,
+    sliced: readonly SlicedArray[] | undefined,
+  ): unknown {
     let tree = this.trees.get(doc);
     if (tree === undefined) {
       tree = toExplorerValue(doc);
       this.trees.set(doc, tree);
     }
+    const id = loaded === null ? null : documentKey(loaded);
+    if (sliced && loaded !== null && id !== null && tree !== null && typeof tree === 'object') {
+      for (const s of sliced) {
+        const arr = (tree as Record<string, unknown>)[s.path];
+        if (Array.isArray(arr)) this.slices.register(arr, loaded, s.path, this.sliceSource(id, s));
+      }
+    }
     return tree;
+  }
+
+  /** Reads items of the array `s` of the document with `_id` `id` (canonical EJSON). */
+  private sliceSource(id: string, s: SlicedArray): SliceSource {
+    const target = this.target();
+    return {
+      total: s.total,
+      load: async (skip, limit) => {
+        const { items } = await this.api.request('docs.getSlice', {
+          ...target,
+          id,
+          path: s.path,
+          skip,
+          limit,
+        });
+        const value = parseEJson(items);
+        return value.type === 'array' ? value.items.map((item) => toExplorerValue(item)) : [];
+      },
+    };
   }
 
   /** A document of this tab was saved or deleted: the shown page follows. */

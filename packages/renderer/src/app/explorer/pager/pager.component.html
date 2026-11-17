@@ -1,0 +1,66 @@
+<nav
+  class="pager"
+  data-testid="nested-pager"
+  [attr.aria-label]="'Pages of ' + noun"
+  (click)="$event.stopPropagation()"
+>
+  <button
+    type="button"
+    class="pg-btn"
+    data-testid="pager-first"
+    title="First page"
+    aria-label="First page"
+    [disabled]="window.page === 0"
+    (click)="go(0)"
+  >
+    «
+  </button>
+  <button
+    type="button"
+    class="pg-btn"
+    data-testid="pager-prev"
+    title="Previous page"
+    aria-label="Previous page"
+    [disabled]="window.page === 0"
+    (click)="go(window.page - 1)"
+  >
+    ‹
+  </button>
+  <label class="pg-page">
+    <span>Page</span>
+    <input
+      #pageInput
+      class="pg-input"
+      data-testid="pager-page"
+      inputmode="numeric"
+      [attr.aria-label]="'Page of ' + noun + ' (1 to ' + window.pages + ')'"
+      [value]="window.page + 1"
+      (keydown.enter)="jump(pageInput)"
+      (blur)="jump(pageInput)"
+    />
+    <span>of {{ pagesText }}</span>
+  </label>
+  <button
+    type="button"
+    class="pg-btn"
+    data-testid="pager-next"
+    title="Next page"
+    aria-label="Next page"
+    [disabled]="window.page >= window.pages - 1"
+    (click)="go(window.page + 1)"
+  >
+    ›
+  </button>
+  <button
+    type="button"
+    class="pg-btn"
+    data-testid="pager-last"
+    title="Last page"
+    aria-label="Last page"
+    [disabled]="window.page >= window.pages - 1"
+    (click)="go(window.pages - 1)"
+  >
+    »
+  </button>
+  <span class="pg-range" data-testid="pager-range">{{ rangeText }} {{ noun }}</span>
+</nav>

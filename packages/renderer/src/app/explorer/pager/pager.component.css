@@ -1,0 +1,75 @@
+/* Pager under (or above) a large array or object: compact, in the same quiet
+   monospace style as the table chrome, so it reads as part of the node. */
+:host {
+  display: block;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 2px;
+  cursor: default;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-faint);
+}
+
+.pg-btn {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1;
+  min-width: 22px;
+  padding: 2px 6px;
+  background: var(--bg-input);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+  transition:
+    color 0.12s,
+    border-color 0.12s,
+    box-shadow 0.12s;
+}
+
+.pg-btn:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--border-strong);
+  box-shadow: var(--glow);
+}
+
+.pg-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pg-page {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 2px;
+  white-space: nowrap;
+}
+
+.pg-input {
+  width: 4.5em;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  padding: 1px 4px;
+  text-align: right;
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.pg-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--glow);
+}
+
+.pg-range {
+  margin-left: 4px;
+  white-space: nowrap;
+}

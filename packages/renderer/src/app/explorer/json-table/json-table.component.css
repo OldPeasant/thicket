@@ -259,45 +259,40 @@ th.idx .del-btn {
   background: var(--bg-hover);
 }
 
-/* Reveal bar — appears under a table whose row/entry count was clipped to
-   a byte-size budget (see reveal.util.ts), offering progressively bigger
-   batches plus "show everything". */
-.reveal-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 2px;
+/* Under a partly loaded array (large document): the page being read, a read
+   that failed, and why its items can't be edited. */
+.slice-status,
+.slice-note {
+  margin: 4px 2px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-muted);
   cursor: default;
 }
 
-.reveal-info {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
+.slice-note {
   color: var(--text-faint);
-  margin-right: 2px;
-  white-space: nowrap;
 }
 
-.reveal-btn {
+.slice-status.error {
+  color: var(--danger);
+}
+
+.slice-retry {
+  margin-left: 6px;
   font-family: var(--font-mono);
   font-size: 0.7rem;
-  padding: 2px 7px;
+  padding: 1px 6px;
   background: var(--bg-input);
   color: var(--text-muted);
   border: 1px solid var(--border);
   border-radius: 3px;
   cursor: pointer;
-  white-space: nowrap;
-  transition:
-    color 0.12s,
-    border-color 0.12s,
-    box-shadow 0.12s;
 }
 
-.reveal-btn:hover {
+.slice-retry:hover {
   color: var(--accent);
   border-color: var(--border-strong);
-  box-shadow: var(--glow);
 }
 
 /* Collapse / expand */

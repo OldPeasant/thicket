@@ -49,35 +49,3 @@
   font-family: var(--font-mono);
   font-size: 0.8125rem;
 }
-
-.reveal-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 2px;
-}
-
-.reveal-info {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: var(--text-faint);
-  margin-right: 2px;
-  white-space: nowrap;
-}
-
-.reveal-btn {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  padding: 2px 7px;
-  background: var(--bg-input);
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  cursor: pointer;
-}
-
-.reveal-btn:hover {
-  color: var(--accent);
-  border-color: var(--border-strong);
-  box-shadow: var(--glow);
-}

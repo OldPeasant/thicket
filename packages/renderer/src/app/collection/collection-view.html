@@ -355,7 +355,7 @@
                       @defer (on immediate) {
                         <app-raw-editor
                           [doc]="loaded"
-                          [partial]="partialDocs()"
+                          [partial]="isPartial($index)"
                           [readOnly]="readOnly()"
                         />
                       } @loading {
