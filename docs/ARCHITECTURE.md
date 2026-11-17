@@ -99,6 +99,8 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   `packages/renderer/dist` or `THICKET_RENDERER_DIR`) with the CSP as a response header; every
   http(s) response (dev server) gets it via `onHeadersReceived`. Window settings, CSP, navigation /
   `window.open` / webview / permission guards are pure functions in `src/main/security.ts`.
+  `windowOpenHandler` denies every new window; its only exception is a Thicket release tag page
+  (the update notice's link), which it opens in the user's browser.
 - Ports: per window (and per reload) main creates two `MessageChannelMain`s and sends one end of
   each to the preload on IPC channel `thicket:port` with `{ target: 'main' | 'backend' }`. Main
   serves its end with `serve()` (`packages/backend/src/server/rpc.ts`); the backend gets the other
@@ -131,11 +133,13 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
 - Update notice (`src/update/`, `UpdateChecker`, contract `app.checkForUpdate`, routed to main):
   main asks `api.github.com/repos/OldPeasant/thicket/releases` and reports the newest release that
   is neither a draft, flagged pre-release nor has a pre-release tag; only `html_url`s below
-  `https://github.com/OldPeasant/thicket/releases/` are used. Failures (offline, timeout, HTTP
+  `https://github.com/OldPeasant/thicket/releases/tag/` are used (`isReleaseUrl`; asset
+  `.../releases/download/...` URLs are rejected). Failures (offline, timeout, HTTP
   error, odd body) are silent (logged, "no update"); successes are cached for 1 h. With the
   `checkForUpdates` setting off no request is made; an unpackaged app (dev, tests, version 0.0.0)
-  doesn't check unless `THICKET_UPDATE_CHECK=1`. The window-open handler opens exactly those
-  release pages with `shell.openExternal` (and still denies the window). The renderer's
+  doesn't check unless `THICKET_UPDATE_CHECK=1`. The window-open handler (`windowOpenHandler` in
+  `src/main/security.ts`) opens exactly those release pages with `shell.openExternal` (and still
+  denies the window). The renderer's
   `UpdateNoticeService` (`app/update/`) checks at start and every 24 h while the setting is on
   and shows `UpdateNotice`, a non-modal card in the shell.
 - Query history (`src/history/`, `HistoryStore`, contract `history.*`, routed to main):

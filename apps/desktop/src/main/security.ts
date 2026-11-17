@@ -3,6 +3,8 @@
  * values and functions so they are unit-tested without Electron.
  */
 
+import { isReleaseUrl } from '../update/checker';
+
 /** Scheme the packaged renderer is served from (`thicket://app/index.html`). */
 export const APP_SCHEME = 'thicket';
 export const APP_HOST = 'app';
@@ -69,8 +71,19 @@ export function withCspHeader(
   return out;
 }
 
-/** `webContents.setWindowOpenHandler`: no new windows, ever. */
-export function denyWindowOpen(): { action: 'deny' } {
+/**
+ * `webContents.setWindowOpenHandler`: no new windows, ever. The one exception is the update
+ * notice's link: a Thicket release tag page (`isReleaseUrl`) is opened in the user's browser via
+ * `openExternal`; the window itself is still denied. Every other URL is ignored.
+ */
+export function windowOpenHandler(
+  url: string,
+  openExternal: (url: string) => Promise<void>,
+  log: (message: string) => void = () => undefined,
+): { action: 'deny' } {
+  if (isReleaseUrl(url)) {
+    openExternal(url).catch((error: unknown) => log(`could not open ${url}: ${String(error)}`));
+  }
   return { action: 'deny' };
 }
 

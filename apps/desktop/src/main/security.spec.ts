@@ -6,10 +6,10 @@ import {
   blockWebview,
   contentSecurityPolicy,
   denyPermission,
-  denyWindowOpen,
   mimeType,
   resolveAppFile,
   secureWebPreferences,
+  windowOpenHandler,
   withCspHeader,
 } from './security';
 
@@ -68,8 +68,16 @@ describe('withCspHeader', () => {
 });
 
 describe('window.open and navigation', () => {
-  it('denies every window.open', () => {
-    expect(denyWindowOpen()).toEqual({ action: 'deny' });
+  it('denies every window.open and opens nothing for non-release URLs', () => {
+    const openExternal = vi.fn(() => Promise.resolve());
+    for (const url of [
+      'thicket://app/index.html',
+      'https://evil.test/',
+      'https://github.com/OldPeasant/thicket/releases/download/v1.0.0/Thicket-1.0.0.exe',
+    ]) {
+      expect(windowOpenHandler(url, openExternal)).toEqual({ action: 'deny' });
+    }
+    expect(openExternal).not.toHaveBeenCalled();
   });
 
   it('blocks navigation to other pages', () => {
@@ -126,13 +134,6 @@ describe('window.open and navigation', () => {
       false,
     );
     expect(event.preventDefault).not.toHaveBeenCalled();
-  });
-
-  it('denies window.open regardless of the requested URL', () => {
-    // Electron passes the details object; the handler ignores it and always denies.
-    const handler = denyWindowOpen as (details?: unknown) => { action: string };
-    expect(handler({ url: 'thicket://app/index.html' })).toEqual({ action: 'deny' });
-    expect(handler({ url: 'https://evil.test/' })).toEqual({ action: 'deny' });
   });
 
   it('blocks webviews and refuses all permissions', () => {
@@ -223,5 +224,39 @@ describe('mimeType', () => {
     expect(mimeType('/r/blob')).toBe('application/octet-stream');
     expect(mimeType('/r/styles.css')).toBe('text/css; charset=utf-8');
     expect(mimeType('/r/a.exe')).toBe('application/octet-stream');
+  });
+});
+
+describe('windowOpenHandler: update notice release link', () => {
+  it('opens a release page externally and denies every window', () => {
+    const openExternal = vi.fn(() => Promise.resolve());
+    const page = 'https://github.com/OldPeasant/thicket/releases/tag/v1.0.0';
+    expect(windowOpenHandler(page, openExternal)).toEqual({ action: 'deny' });
+    expect(openExternal).toHaveBeenCalledWith(page);
+    expect(windowOpenHandler('https://evil.example/', openExternal)).toEqual({ action: 'deny' });
+    expect(openExternal).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs when the browser cannot be opened', async () => {
+    const log = vi.fn();
+    windowOpenHandler(
+      'https://github.com/OldPeasant/thicket/releases/tag/v1.0.0',
+      () => Promise.reject(new Error('no browser')),
+      log,
+    );
+    await vi.waitFor(() => expect(log).toHaveBeenCalledWith(expect.stringContaining('no browser')));
+  });
+
+  it('a browser failure without a log is swallowed (test-writer)', async () => {
+    let rejected = false;
+    const openExternal = () => {
+      rejected = true;
+      return Promise.reject(new Error('no browser'));
+    };
+    const page = 'https://github.com/OldPeasant/thicket/releases/tag/v1.0.0';
+    expect(windowOpenHandler(page, openExternal)).toEqual({ action: 'deny' });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(rejected).toBe(true);
   });
 });

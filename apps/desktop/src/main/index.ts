@@ -32,7 +32,7 @@ import { ProfilesStore } from '../profiles';
 import { SecretsStore } from '../secrets';
 import { HistoryStore } from '../history';
 import { SettingsStore } from '../settings/store';
-import { UpdateChecker, openReleaseLink } from '../update';
+import { UpdateChecker } from '../update';
 import { BackendHost } from './backend-host';
 import { Broadcaster } from './broadcast';
 import { mainHandlers, privilegedHandlers } from './handlers';
@@ -45,6 +45,7 @@ import {
   denyPermission,
   mimeType,
   resolveAppFile,
+  windowOpenHandler,
   withCspHeader,
 } from './security';
 import { rendererSource } from './renderer-source';
@@ -73,7 +74,7 @@ protocol.registerSchemesAsPrivileged([
 app.on('web-contents-created', (_event, contents) => {
   // No popups; the update notice's link to a Thicket release page opens in the user's browser.
   contents.setWindowOpenHandler(({ url }) =>
-    openReleaseLink(url, (link) => shell.openExternal(link), log),
+    windowOpenHandler(url, (link) => shell.openExternal(link), log),
   );
   contents.on('will-navigate', (event) => {
     if (blockNavigation(event, event.url, contents.getURL()))

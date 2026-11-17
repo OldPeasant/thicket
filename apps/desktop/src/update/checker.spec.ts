@@ -10,7 +10,7 @@ import {
   parseVersion,
   type FetchLike,
 } from './checker';
-import { openReleaseLink, updateHandlers } from './handlers';
+import { updateHandlers } from './handlers';
 import rateLimited from './fixtures/rate-limited.json';
 import releasesWithPrerelease from './fixtures/releases-prerelease.json';
 import releases from './fixtures/releases.json';
@@ -409,13 +409,16 @@ describe('versions', () => {
 });
 
 describe('release links', () => {
-  it('accepts only https pages of the Thicket releases', () => {
+  it('accepts only https tag pages of the Thicket releases', () => {
     expect(isReleaseUrl('https://github.com/OldPeasant/thicket/releases/tag/v1.0.0')).toBe(true);
     expect(isReleaseUrl('https://github.com/oldpeasant/thicket/releases/tag/v1.0.0')).toBe(true);
     for (const bad of [
       'http://github.com/OldPeasant/thicket/releases/tag/v1.0.0',
       'https://github.com/OldPeasant/thicket-evil/releases/tag/v1',
       'https://github.com/OldPeasant/thicket/releases',
+      'https://github.com/OldPeasant/thicket/releases/latest',
+      'https://github.com/OldPeasant/thicket/releases/download/v1.0.0/Thicket-1.0.0-x86_64.AppImage',
+      'https://github.com/OldPeasant/thicket/releases/tag/../download/v1.0.0/Thicket.exe',
       'https://github.com.evil.example/OldPeasant/thicket/releases/tag/v1',
       'https://user@github.com/OldPeasant/thicket/releases/tag/v1',
       'javascript:alert(1)',
@@ -424,37 +427,5 @@ describe('release links', () => {
     ]) {
       expect(isReleaseUrl(bad)).toBe(false);
     }
-  });
-
-  it('opens a release page externally and denies every window', () => {
-    const openExternal = vi.fn(() => Promise.resolve());
-    const page = 'https://github.com/OldPeasant/thicket/releases/tag/v1.0.0';
-    expect(openReleaseLink(page, openExternal)).toEqual({ action: 'deny' });
-    expect(openExternal).toHaveBeenCalledWith(page);
-    expect(openReleaseLink('https://evil.example/', openExternal)).toEqual({ action: 'deny' });
-    expect(openExternal).toHaveBeenCalledTimes(1);
-  });
-
-  it('logs when the browser cannot be opened', async () => {
-    const log = vi.fn();
-    openReleaseLink(
-      'https://github.com/OldPeasant/thicket/releases/tag/v1.0.0',
-      () => Promise.reject(new Error('no browser')),
-      log,
-    );
-    await vi.waitFor(() => expect(log).toHaveBeenCalledWith(expect.stringContaining('no browser')));
-  });
-
-  it('a browser failure without a log is swallowed (test-writer)', async () => {
-    let rejected = false;
-    const openExternal = () => {
-      rejected = true;
-      return Promise.reject(new Error('no browser'));
-    };
-    const page = 'https://github.com/OldPeasant/thicket/releases/tag/v1.0.0';
-    expect(openReleaseLink(page, openExternal)).toEqual({ action: 'deny' });
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(rejected).toBe(true);
   });
 });

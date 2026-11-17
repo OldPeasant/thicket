@@ -6,8 +6,11 @@ export type UpdateCheck = ResultOf<'app.checkForUpdate'>;
 export const RELEASE_REPO = 'OldPeasant/thicket';
 /** GitHub's releases API for `RELEASE_REPO` (newest first; drafts are only visible to owners). */
 export const RELEASES_API = `https://api.github.com/repos/${RELEASE_REPO}/releases?per_page=30`;
-/** Only links below this prefix are shown in the notice and opened in the browser. */
-export const RELEASE_PAGE_PREFIX = `https://github.com/${RELEASE_REPO}/releases/`;
+/**
+ * Only release tag pages below this prefix are shown in the notice and opened in the browser
+ * (not `.../releases/download/...` assets or other pages).
+ */
+export const RELEASE_PAGE_PREFIX = `https://github.com/${RELEASE_REPO}/releases/tag/`;
 /** A successful answer is reused this long (several windows, a reload) before asking again. */
 export const UPDATE_CACHE_MS = 60 * 60 * 1000;
 /** A request that takes longer than this counts as a network error. */
@@ -70,7 +73,7 @@ export function compareVersions(a: Version, b: Version): number {
   return Math.sign(a.pre.length - b.pre.length);
 }
 
-/** Whether `url` is a release page of `RELEASE_REPO` (the only external link the notice opens). */
+/** Whether `url` is a release tag page of `RELEASE_REPO` (the only external link the notice opens). */
 export function isReleaseUrl(url: unknown): url is string {
   if (typeof url !== 'string') return false;
   try {
