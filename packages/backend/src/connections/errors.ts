@@ -109,8 +109,12 @@ function isTls(c: Cause): boolean {
   return /certificate|\bSSL\b|\bTLS\b|handshake/i.test(c.message);
 }
 
+/** The driver refuses an OIDC connect to a host outside its `ALLOWED_HOSTS`. */
+const OIDC_HOST_REFUSED = /is not valid for OIDC authentication with ALLOWED_HOSTS/;
+
 function isAuth(c: Cause, connecting: boolean): boolean {
   if (AUTH_NAMES.has(c.name)) return true;
+  if (OIDC_HOST_REFUSED.test(c.message)) return true;
   if (connecting && (c.code === USER_NOT_FOUND || c.codeName === 'UserNotFound')) return true;
   if (typeof c.code === 'number' && AUTH_SERVER_CODES.has(c.code)) return true;
   if (c.codeName === 'AuthenticationFailed') return true;
@@ -180,7 +184,12 @@ export function toConnectError(
   const raw = error instanceof Error ? error.message : String(error);
   const text = redact(raw, secrets);
   const prefix = PREFIX[code] ?? 'Connection failed';
-  const message = text.length > 0 ? `${prefix}: ${text}` : prefix;
+  let message = text.length > 0 ? `${prefix}: ${text}` : prefix;
+  if (causes(error).some((c) => OIDC_HOST_REFUSED.test(c.message))) {
+    message =
+      `${message}. OIDC tokens are only sent to MongoDB Atlas and local servers unless the ` +
+      'profile considers its target endpoint trusted (auth option oidcTrustedEndpoint)';
+  }
   if (code === 'SERVER_ERROR') {
     const e = error as { code?: unknown; codeName?: unknown };
     const detail: { serverCode?: number; codeName?: string } = {};

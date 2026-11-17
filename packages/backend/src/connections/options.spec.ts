@@ -7,6 +7,7 @@ import { MongoClient } from 'mongodb';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { RpcError } from '../server/rpc';
+import { toConnectError } from './errors';
 import { DEFAULT_APP_NAME, clientConfig } from './options';
 
 /** Fictitious secret values; nothing here is a real credential. */
@@ -280,6 +281,95 @@ describe('clientConfig', () => {
       callback,
     );
     expect(anonymous.options.auth).toBeUndefined();
+  });
+
+  describe('MONGODB-OIDC trusted endpoint (ALLOWED_HOSTS)', () => {
+    const callback = () => Promise.resolve({ accessToken: 'x' });
+    const oidc = (connectionString: string, oidcTrustedEndpoint?: boolean) =>
+      clientConfig(
+        draft({
+          connectionString,
+          auth: {
+            mechanism: 'MONGODB-OIDC',
+            secretMode: 'none',
+            ...(oidcTrustedEndpoint !== undefined ? { oidcTrustedEndpoint } : {}),
+          },
+        }),
+        {},
+        undefined,
+        callback,
+      );
+
+    it('keeps the driver default (Atlas and local servers) unless the endpoint is trusted', () => {
+      const uri = 'mongodb://db.corp.example.test:27017';
+      expect(oidc(uri).options.authMechanismProperties).not.toHaveProperty('ALLOWED_HOSTS');
+      expect(oidc(uri, false).options.authMechanismProperties).not.toHaveProperty('ALLOWED_HOSTS');
+    });
+
+    it("a trusted endpoint allows the connection string's own hosts (lower case, no port)", () => {
+      const { options } = oidc('mongodb://DB1.corp.example.test:27017,[::2]:27018,10.0.0.5', true);
+      expect(options.authMechanismProperties?.ALLOWED_HOSTS).toEqual([
+        'db1.corp.example.test',
+        '::2',
+        '10.0.0.5',
+      ]);
+    });
+
+    it("a trusted mongodb+srv endpoint allows the SRV name's domain (where its hosts must be)", () => {
+      expect(
+        oidc('mongodb+srv://cluster0.corp.example.test/', true).options.authMechanismProperties
+          ?.ALLOWED_HOSTS,
+      ).toEqual(['*.corp.example.test']);
+      expect(
+        oidc('mongodb+srv://corp.example/', true).options.authMechanismProperties?.ALLOWED_HOSTS,
+      ).toEqual(['*.corp.example']);
+    });
+
+    it('the driver accepts the option', () => {
+      const { uri, options } = oidc('mongodb://db.corp.example.test:27017', true);
+      const client = new MongoClient(uri, options);
+      expect(client.options.credentials?.mechanismProperties.ALLOWED_HOSTS).toEqual([
+        'db.corp.example.test',
+      ]);
+    });
+
+    // 127.0.0.2 is not in the driver's default list; nothing listens on port 9 (discard).
+    const untrusted = 'mongodb://127.0.0.2:9/?serverSelectionTimeoutMS=300&connectTimeoutMS=300';
+
+    it('the driver refuses a host outside the default list: AUTH_FAILED naming the option', async () => {
+      const { uri, options } = oidc(untrusted);
+      const client = new MongoClient(uri, options);
+      try {
+        const error = await client.connect().then(
+          () => undefined,
+          (e: unknown) => e,
+        );
+        const failure = toConnectError(error, [], true);
+        expect(failure.code).toBe('AUTH_FAILED');
+        expect(failure.message).toMatch(
+          /^Authentication failed: Host '127\.0\.0\.2:9' is not valid/,
+        );
+        expect(failure.message).toContain('oidcTrustedEndpoint');
+      } finally {
+        await client.close();
+      }
+    });
+
+    it('a trusted endpoint passes the host check (the connect then fails to reach it)', async () => {
+      const { uri, options } = oidc(untrusted, true);
+      const client = new MongoClient(uri, options);
+      try {
+        const error = await client.connect().then(
+          () => undefined,
+          (e: unknown) => e,
+        );
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).not.toContain('ALLOWED_HOSTS');
+        expect(toConnectError(error, [], true).code).not.toBe('AUTH_FAILED');
+      } finally {
+        await client.close();
+      }
+    });
   });
 
   it('maps MONGODB-AWS explicit keys to a credential provider, never to auth or the URI', async () => {

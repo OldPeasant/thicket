@@ -77,6 +77,10 @@ export function clientConfig(
     options.authSource = '$external';
     if (auth.username !== undefined) options.auth = { username: auth.username };
     options.authMechanismProperties = { OIDC_HUMAN_CALLBACK: oidcCallback };
+    // Without it the driver only sends tokens to Atlas and local servers (its ALLOWED_HOSTS).
+    const allowedHosts =
+      auth.oidcTrustedEndpoint === true ? ownHosts(profile.connectionString) : undefined;
+    if (allowedHosts) options.authMechanismProperties.ALLOWED_HOSTS = allowedHosts;
   } else if (auth?.mechanism !== 'NONE' && auth?.mechanism !== 'MONGODB-X509') {
     const username = auth?.username ?? uriUsername(profile.connectionString);
     const needsPassword = auth !== undefined && auth.secretMode !== 'none';
@@ -193,6 +197,30 @@ function uriUsername(uri: string): string | undefined {
     // The driver reports an invalid connection string itself, with a better message.
     return undefined;
   }
+}
+
+/**
+ * The driver's OIDC `ALLOWED_HOSTS` for a trusted endpoint: the connection string's hosts. The
+ * driver checks the hosts after SRV resolution, and SRV results must lie in the SRV name's parent
+ * domain (the name itself with fewer than three labels), so `mongodb+srv://` allows that domain's
+ * subdomains. Undefined for an invalid connection string (the driver reports it).
+ */
+function ownHosts(uri: string): string[] | undefined {
+  let model: ReturnType<typeof parseConnectionString>;
+  try {
+    model = parseConnectionString(uri);
+  } catch {
+    return undefined;
+  }
+  // The driver compares lower-cased host names.
+  const hosts = model.hosts.map(({ host }) => host.toLowerCase());
+  if (model.scheme === 'mongodb+srv') {
+    return hosts.map((host) => {
+      const labels = host.split('.');
+      return `*.${labels.length >= 3 ? labels.slice(1).join('.') : host}`;
+    });
+  }
+  return hosts;
 }
 
 /** Reads a PEM file named in the profile; a missing or unreadable file is a `TLS_ERROR`. */

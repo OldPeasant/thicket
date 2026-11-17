@@ -311,6 +311,21 @@ describe('classifyCode', () => {
 });
 
 describe('toConnectError', () => {
+  it("maps the driver's OIDC ALLOWED_HOSTS refusal to AUTH_FAILED naming the trust option", () => {
+    const refusal = driverError(
+      'MongoInvalidArgumentError',
+      "Host 'db.corp.example.test:27017' is not valid for OIDC authentication with " +
+        "ALLOWED_HOSTS of '*.mongodb.net,localhost'",
+    );
+    expect(classifyCode(refusal, true)).toBe('AUTH_FAILED');
+    const failure = toConnectError(refusal, [], true);
+    expect(failure.code).toBe('AUTH_FAILED');
+    expect(failure.message).toMatch(
+      /^Authentication failed: Host 'db\.corp\.example\.test:27017' is not valid for OIDC/,
+    );
+    expect(failure.message).toContain('oidcTrustedEndpoint');
+  });
+
   it('returns RpcErrors unchanged', () => {
     const original = new RpcError('NOT_FOUND', 'No profile p1');
     expect(toConnectError(original)).toBe(original);

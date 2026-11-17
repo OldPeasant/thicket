@@ -449,6 +449,36 @@ describe('OidcAuthenticator: token cache', () => {
     expect(h.env.openBrowser).toHaveBeenCalledTimes(2);
   });
 
+  it('tokens the server refused are forgotten: the next connect signs in interactively', async () => {
+    const h = harness();
+    // Answered from the stored cache (refresh, no browser); the server then refuses the token.
+    const first = target({ stored: cache() });
+    await signIn(h, first);
+    expect(h.env.openBrowser).not.toHaveBeenCalled();
+    await expect(h.auth.refused(first)).resolves.toBe(true);
+    expect(h.env.saveTokens).toHaveBeenLastCalledWith('p1', null);
+    // Main cleared the keychain, so the next connect has no stored tokens either.
+    await signIn(h, target());
+    expect(h.env.openBrowser).toHaveBeenCalledTimes(1);
+    expect(grants()).toEqual(['refresh_token', 'authorization_code']);
+  });
+
+  it('refused forgets nothing when the callback handed out no tokens, or for a draft', async () => {
+    idp.on('/.well-known/openid-configuration', () => ({ status: 503, body: {} }));
+    const h = harness();
+    const failed = target({ stored: cache() });
+    await rejection(signIn(h, failed));
+    await expect(h.auth.refused(failed)).resolves.toBe(false);
+    await expect(h.auth.refused(target())).resolves.toBe(false);
+    // A draft signed in (no profile id) has nothing cached to forget.
+    const document = idp.metadata();
+    idp.on('/.well-known/openid-configuration', () => ({ body: document }));
+    const draft: OidcTarget = { profileName: 'Draft' };
+    await signIn(h, draft);
+    await expect(h.auth.refused(draft)).resolves.toBe(false);
+    expect(h.env.saveTokens).not.toHaveBeenCalled();
+  });
+
   it('log lines never contain tokens', async () => {
     refreshAnswer = () => ({ status: 400, body: { error: 'invalid_grant' } });
     const h = harness();

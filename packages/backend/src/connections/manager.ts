@@ -15,7 +15,7 @@ import {
   type RunCommandOptions,
 } from 'mongodb';
 
-import type { OidcAuthenticator } from '../auth/oidc';
+import type { OidcAuthenticator, OidcTarget } from '../auth/oidc';
 import { RpcError } from '../server/rpc';
 import { openSshTunnel, type SshEnvironment, type SshTunnel } from '../ssh/tunnel';
 import { redact, toConnectError } from './errors';
@@ -117,14 +117,10 @@ export class ConnectionManager {
     const secrets = await this.secretsFor(profile, storedFrom, password);
     const label = `test ${profile.name}`;
     const tunnel = await this.openTunnelFor(profile, secrets, label, signal);
+    const oidc = this.oidcSession(profile, storedFrom, secrets, signal);
     let config: ReturnType<typeof clientConfig>;
     try {
-      config = clientConfig(
-        profile,
-        secrets,
-        tunnel?.proxy,
-        this.oidcCallback(profile, storedFrom, secrets, signal),
-      );
+      config = clientConfig(profile, secrets, tunnel?.proxy, oidc?.callback);
     } catch (error) {
       await tunnel?.close();
       throw error;
@@ -155,6 +151,7 @@ export class ConnectionManager {
     } catch (error) {
       const failure = toConnectError(error, Object.values(secrets).filter(isString), true);
       this.log(`${label}: ${failure.code} ${failure.message}`, secrets);
+      await oidc?.refused(failure, label);
       throw failure;
     } finally {
       await closeQuietly(client);
@@ -172,11 +169,12 @@ export class ConnectionManager {
   }
 
   /**
-   * The OIDC sign-in callback of a MONGODB-OIDC profile (undefined otherwise, or without an
-   * authenticator). Tokens are cached for `storedFrom` (a saved profile) only; `signal` ends a
-   * sign-in that waits for the user.
+   * The OIDC sign-in of one connect of a MONGODB-OIDC profile (undefined otherwise, or without an
+   * authenticator): the driver callback, and `refused`, which a failed connect calls so that
+   * tokens the server refused (`AUTH_FAILED`) are not reused. Tokens are cached for `storedFrom`
+   * (a saved profile) only; `signal` ends a sign-in that waits for the user.
    */
-  private oidcCallback(
+  private oidcSession(
     profile: ProfileDraft,
     storedFrom: string | undefined,
     secrets: ConnectSecrets,
@@ -185,13 +183,26 @@ export class ConnectionManager {
     const oidc = this.deps.oidc;
     if (profile.auth?.mechanism !== 'MONGODB-OIDC' || !oidc) return undefined;
     const stored = secrets['oidcTokens'];
-    return oidc.callbackFor({
+    const target: OidcTarget = {
       profileName: profile.name,
       ...(storedFrom !== undefined ? { profileId: storedFrom } : {}),
       ...(profile.auth.oidcFlow !== undefined ? { flow: profile.auth.oidcFlow } : {}),
       ...(stored !== undefined ? { stored } : {}),
       ...(signal ? { signal } : {}),
-    });
+    };
+    return {
+      callback: oidc.callbackFor(target),
+      refused: async (failure: RpcError, label: string): Promise<void> => {
+        if (failure.code !== 'AUTH_FAILED') return;
+        try {
+          if (await oidc.refused(target)) {
+            this.log(`${label}: forgot the refused OIDC tokens; the next connect signs in again`);
+          }
+        } catch (error) {
+          this.log(`${label}: cannot forget the refused OIDC tokens (${String(error)})`, secrets);
+        }
+      },
+    };
   }
 
   /**
@@ -295,6 +306,7 @@ export class ConnectionManager {
     password: string | undefined,
   ): Promise<ConnStatus> {
     let secrets: ConnectSecrets = {};
+    let oidc: ReturnType<ConnectionManager['oidcSession']>;
     try {
       const profile = await this.deps.loadProfile(profileId);
       secrets = await this.secretsFor(profile, profileId, password);
@@ -308,12 +320,8 @@ export class ConnectionManager {
       );
       if (tunnel) entry.tunnel = tunnel;
       if (this.entries.get(profileId) !== entry) throw closedWhileConnecting();
-      const { uri, options } = clientConfig(
-        profile,
-        secrets,
-        tunnel?.proxy,
-        this.oidcCallback(profile, profileId, secrets, entry.abort.signal),
-      );
+      oidc = this.oidcSession(profile, profileId, secrets, entry.abort.signal);
+      const { uri, options } = clientConfig(profile, secrets, tunnel?.proxy, oidc?.callback);
       this.log(`open ${profileId}: connecting to ${uri}`, secrets);
       const client = this.createClient(uri, options);
       entry.client = client;
@@ -349,6 +357,7 @@ export class ConnectionManager {
         }
       }
       this.log(`open ${profileId}: ${failure.code} ${failure.message}`, secrets);
+      await oidc?.refused(failure, `open ${profileId}`);
       throw failure;
     }
   }

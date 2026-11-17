@@ -222,7 +222,15 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   `finished`); no tokens in it. New tokens go to main's privileged `oidc.saveTokens`, kept as the
   `oidcTokens` secret only with `secure` storage (else memory only, `saved: false`) and only for an
   existing profile; an unsaved draft (`conn.test`) caches nothing. `conn.close`/cancel aborts a
-  waiting sign-in (`CANCELLED`); the driver's own limit is 5 min. Integration fixture
+  waiting sign-in (`CANCELLED`); the driver's own limit is 5 min. A connect that fails with
+  `AUTH_FAILED` after the callback handed out tokens forgets them (`OidcAuthenticator.refused` →
+  memory and keychain), so the next connect signs in interactively. The discovery fetch is shared
+  per issuer and bound by its 30 s timeout only; each connect waits on it with its own signal.
+  The driver sends tokens only to its default `ALLOWED_HOSTS` (Atlas, localhost/127.0.0.1/::1);
+  `auth.oidcTrustedEndpoint: true` (mongosh's `--oidcTrustedEndpoint`) sets them to the
+  connection string's own hosts (`mongodb+srv://`: `*.<SRV name's parent domain>`, where the
+  driver requires the SRV results to be); the driver's refusal is `AUTH_FAILED` naming that
+  option. Integration fixture
   `test/integration/fixtures/oidc.ts`: Keycloak 26 (HTTPS, per-run CA, realm import with a public
   PKCE client that allows the device grant and an audience mapper) and MongoDB Enterprise 8.0
   sharing Keycloak's network namespace, so `https://localhost:<P>/realms/thicket` is the same

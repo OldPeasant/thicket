@@ -70,6 +70,12 @@ export const profileAuth = z.strictObject({
    * can be opened). Ignored by the other mechanisms.
    */
   oidcFlow: z.enum(OIDC_FLOWS).optional(),
+  /**
+   * MONGODB-OIDC: the profile's own hosts are trusted to receive the identity provider's tokens
+   * (mongosh's `--oidcTrustedEndpoint`). Default false: only Atlas and local servers (the driver's
+   * `ALLOWED_HOSTS` default). Ignored by the other mechanisms.
+   */
+  oidcTrustedEndpoint: z.boolean().optional(),
 });
 
 /**

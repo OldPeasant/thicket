@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { OidcFlow, OidcPrompt } from '@thicket/contract';
 import type { OIDCCallbackFunction, OIDCCallbackParams, OIDCResponse } from 'mongodb';
 
+import { abortable } from '../../connections/manager';
 import { RpcError } from '../../server/rpc';
 import {
   authCodeFlow,
@@ -103,12 +104,32 @@ export class OidcAuthenticator {
   /** Newest tokens per profile id in this process (also when they could not be persisted). */
   private readonly memory = new Map<string, CachedTokens>();
   private readonly metadata = new Map<string, Promise<OidcMetadata>>();
+  /** Targets whose callback handed tokens to the driver (see `refused`). */
+  private readonly answered = new WeakSet<OidcTarget>();
 
   constructor(private readonly env: OidcEnvironment) {}
 
   /** The driver callback for one connect of `target`. */
   callbackFor(target: OidcTarget): OIDCCallbackFunction {
-    return (params) => this.signIn(target, params);
+    return async (params) => {
+      const answer = await this.signIn(target, params);
+      this.answered.add(target);
+      return answer;
+    };
+  }
+
+  /**
+   * The server refused the connect of `target` (`AUTH_FAILED`). When its callback handed out
+   * tokens (cached, refreshed or new), the profile's tokens are forgotten (memory and keychain):
+   * otherwise every later connect would refresh the same refused identity and never sign in
+   * interactively again. Answers whether it forgot them.
+   */
+  async refused(target: OidcTarget): Promise<boolean> {
+    if (target.profileId === undefined || !this.answered.has(target)) return false;
+    this.answered.delete(target);
+    this.log(`oidc ${target.profileName}: the server refused the tokens, forgetting them`);
+    await this.forget(target.profileId);
+    return true;
   }
 
   /** Forgets a profile's tokens (memory and keychain). */
@@ -138,7 +159,8 @@ export class OidcAuthenticator {
       signal,
     };
     const label = `oidc ${target.profileName}`;
-    const meta = await this.discover(idp.issuer, http);
+    // Shared by concurrent connects: each one only stops waiting when its own signal aborts.
+    const meta = await abortable(this.discover(idp.issuer), signal);
     const clientId = idp.clientId;
 
     const refreshWith = async (refreshToken: string): Promise<OIDCResponse | undefined> => {
@@ -214,11 +236,14 @@ export class OidcAuthenticator {
     return toResponse(cached, this.now());
   }
 
-  /** Discovery documents are cached per issuer for this process (a failed fetch is retried). */
-  private discover(issuer: string, http: OidcHttpOptions): Promise<OidcMetadata> {
+  /**
+   * Discovery documents are cached per issuer for this process (a failed fetch is retried). The
+   * fetch is shared, so no caller's signal ends it (the request timeout bounds it).
+   */
+  private discover(issuer: string): Promise<OidcMetadata> {
     let meta = this.metadata.get(issuer);
     if (!meta) {
-      meta = discover(issuer, http);
+      meta = discover(issuer, this.env.ca !== undefined ? { ca: this.env.ca } : {});
       this.metadata.set(issuer, meta);
       meta.catch(() => this.metadata.delete(issuer));
     }

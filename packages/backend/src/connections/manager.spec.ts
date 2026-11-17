@@ -1992,11 +1992,13 @@ describe('ConnectionManager: MONGODB-OIDC (task oidc-auth)', () => {
       callbacks.push(callback);
       return callback;
     });
+    const refused = vi.fn<(target: OidcTarget) => Promise<boolean>>(() => Promise.resolve(true));
     return {
       callbackFor,
+      refused,
       targets,
       callbacks,
-      oidc: { callbackFor } as unknown as OidcAuthenticator,
+      oidc: { callbackFor, refused } as unknown as OidcAuthenticator,
     };
   }
 
@@ -2132,6 +2134,63 @@ describe('ConnectionManager: MONGODB-OIDC (task oidc-auth)', () => {
     await manager.open('p1', undefined);
     await manager.test({ profileId: 'p2' }, undefined);
     expect(fake.callbackFor).not.toHaveBeenCalled();
+    await manager.close('p1');
+  });
+
+  const authFailed = () =>
+    Promise.reject(
+      Object.assign(new Error('Authentication failed.'), { name: 'MongoServerError', code: 18 }),
+    );
+
+  it('an AUTH_FAILED open or test tells the authenticator, which forgets the refused tokens', async () => {
+    const fake = fakeOidc();
+    const { manager, logs } = setup({
+      profiles: { p1: oidcProfile('p1') },
+      secrets: { p1: { oidcTokens: STORED_TOKENS } },
+      clients: [fakeClient(authFailed), fakeClient(authFailed)],
+      oidc: fake.oidc,
+    });
+    expect((await rejection(manager.open('p1', undefined))).code).toBe('AUTH_FAILED');
+    expect(fake.refused).toHaveBeenCalledTimes(1);
+    expect(fake.refused).toHaveBeenLastCalledWith(fake.targets[0]);
+    expect((await rejection(manager.test({ profileId: 'p1' }, undefined))).code).toBe(
+      'AUTH_FAILED',
+    );
+    expect(fake.refused).toHaveBeenCalledTimes(2);
+    expect(fake.refused).toHaveBeenLastCalledWith(fake.targets[1]);
+    expect(logs.join('\n')).toContain('forgot the refused OIDC tokens');
+    await manager.close('p1');
+  });
+
+  it('other connect failures keep the tokens', async () => {
+    const fake = fakeOidc();
+    const refusedConnect = () =>
+      Promise.reject(Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }));
+    const { manager } = setup({
+      profiles: { p1: oidcProfile('p1') },
+      secrets: { p1: { oidcTokens: STORED_TOKENS } },
+      clients: [fakeClient(refusedConnect), fakeClient(refusedConnect)],
+      oidc: fake.oidc,
+    });
+    expect((await rejection(manager.open('p1', undefined))).code).toBe('NETWORK_ERROR');
+    expect((await rejection(manager.test({ profileId: 'p1' }, undefined))).code).toBe(
+      'NETWORK_ERROR',
+    );
+    expect(fake.refused).not.toHaveBeenCalled();
+    await manager.close('p1');
+  });
+
+  it('a failing forget is logged; the answer stays AUTH_FAILED', async () => {
+    const fake = fakeOidc();
+    fake.refused.mockRejectedValueOnce(new Error('keychain locked'));
+    const { manager, logs } = setup({
+      profiles: { p1: oidcProfile('p1') },
+      secrets: { p1: { oidcTokens: STORED_TOKENS } },
+      clients: [fakeClient(authFailed)],
+      oidc: fake.oidc,
+    });
+    expect((await rejection(manager.open('p1', undefined))).code).toBe('AUTH_FAILED');
+    expect(logs.join('\n')).toContain('cannot forget the refused OIDC tokens');
     await manager.close('p1');
   });
 
