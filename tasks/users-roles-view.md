@@ -13,7 +13,8 @@ Per database: users with roles, roles with privileges and inherited roles (read-
 ## Acceptance criteria
 - [x] Integration test against a fixture with custom roles
   - verified (2026-11-17 04:46+0100 by dell26/agent-2): npm run test:int -- users-roles (mongo8 fixture via Podman; custom roles orderReader/orderClerk inheriting a custom and built-in role, users alice/bob/carol) -> 10 passed
-- [ ] Component tests for the views
+- [x] Component tests for the views
+  - verified (2026-11-17 04:46+0100 by dell26/agent-2): cd packages/renderer && npx ng test --include='src/app/admin/**/*.spec.ts' (UsersRolesView + users-roles.model) -> 42 passed; sidebar specs incl. Users and roles menu item -> 184 passed
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
