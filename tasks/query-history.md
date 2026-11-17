@@ -11,7 +11,8 @@ lease_until: 2026-11-17T05:02:18Z
 Per-collection history of recent queries and named favorites, stored in main (history/ and favorites.json), re-run from a dropdown.
 
 ## Acceptance criteria
-- [ ] Unit tests for the store (limit, dedupe, per collection)
+- [x] Unit tests for the store (limit, dedupe, per collection)
+  - verified (2026-11-17 05:46+0100 by dell26/agent-3): npx vitest run apps/desktop/src/history -> 40 passed (store.spec.ts: 50-entry default + custom limit, dedupe moves equal query to top, per collection/profile history and favorites, corrupt/unreadable files)
 - [ ] Component test: run → appears in history; save favorite; re-run fills the query bar
 
 ## Notes
