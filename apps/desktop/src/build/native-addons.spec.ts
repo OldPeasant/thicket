@@ -1,5 +1,5 @@
 import { build } from 'esbuild';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, sep } from 'node:path';
@@ -26,7 +26,9 @@ const SSHCRYPTO_MESSAGE =
   "Cannot find module 'ssh2/lib/protocol/crypto/build/Release/sshcrypto.node' (native addon not bundled into Thicket)";
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'thicket-native-addons-'));
+  // realpath: on macOS tmpdir() is /var/... (a symlink to /private/var/...) and esbuild reports the
+  // resolved path, so expected messages must use it too. Test-only; the product is correct there.
+  dir = realpathSync(mkdtempSync(join(tmpdir(), 'thicket-native-addons-')));
   // Laid out like ssh2: an optional addon next to its JS, loaded in try/catch.
   // Not a real addon: the build must never read it.
   put([...SSH2_CRYPTO, 'crypto', 'build', 'Release', 'sshcrypto.node'], 'not an ELF/PE/Mach-O');
