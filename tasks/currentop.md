@@ -1,10 +1,11 @@
 ---
 title: M6 (Should): currentOp and killOp
-status: todo
-owner:
+status: in_progress
+owner: felix/agent-1
 deps: [conn-manager,app-layout,safety-ui]
 touches: [packages/backend/src/admin/currentop,packages/renderer/src/app/admin/currentop]
 prio: 3
+lease_until: 2026-11-17T05:48:29Z
 ---
 ## Goal
 List running operations with filters (namespace, duration, type) and auto-refresh; kill with confirm.
