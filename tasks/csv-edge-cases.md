@@ -11,7 +11,8 @@ lease_until: 2026-11-17T06:57:09Z
 Fix the P3 findings deferred from io-advanced (reviews/io-advanced/review.md CR-1..CR-4).
 
 ## Acceptance criteria
-- [ ] A one-column CSV export of a document with an empty value round-trips (no silently dropped row), unit tested
+- [x] A one-column CSV export of a document with an empty value round-trips (no silently dropped row), unit tested
+  - verified (2026-11-17 07:37+0100 by dell26/agent-2): npx vitest run packages/backend/src/io -> 466 passed; csv.spec 'writes a record of one empty cell as ""' and export.spec 'a one-column export keeps documents with an empty, null or missing value' (export csvFields:[email] then CsvScanner+recordToDocument re-import -> 5 of 5 rows)
 - [ ] Dates outside years 0000-9999 export in a form the `date` CSV type imports back, unit tested
 - [ ] A field name containing a dot is exported with its value (or the behavior is defined and documented), unit tested
 - [ ] docs/ARCHITECTURE.md io section describes the CSV/BSON scanners instead of `UNSUPPORTED`
