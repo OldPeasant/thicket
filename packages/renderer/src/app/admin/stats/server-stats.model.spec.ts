@@ -41,6 +41,13 @@ describe('ejsonNumber / ejsonDate', () => {
     expect(ejsonNumber(null)).toBeNull();
   });
 
+  it('is null for non-finite relaxed numbers and objects that are not EJSON numbers', () => {
+    expect(ejsonNumber(Number.NaN)).toBeNull();
+    expect(ejsonNumber(Number.POSITIVE_INFINITY)).toBeNull();
+    expect(ejsonNumber({ value: 3 })).toBeNull();
+    expect(ejsonNumber({ $numberInt: 3 })).toBeNull();
+  });
+
   it('reads canonical and relaxed dates', () => {
     expect(ejsonDate({ $date: { $numberLong: '1000' } })).toBe(1000);
     expect(ejsonDate({ $date: '1970-01-01T00:00:01Z' })).toBe(1000);
@@ -109,6 +116,16 @@ describe('pointBetween / addSample', () => {
   it('is null when no time passed or the counters went back', () => {
     expect(pointBetween(sample(status1), sample(status1))).toBeNull();
     expect(pointBetween(sample(status2), sample(status1))).toBeNull();
+  });
+
+  it('is null when time went on but one counter went back (no negative or bogus rate)', () => {
+    const before = sample(status2);
+    const after: StatusSample = {
+      ...before,
+      uptimeMs: before.uptimeMs + 2000,
+      opcounters: { ...before.opcounters, delete: before.opcounters.delete - 1 },
+    };
+    expect(pointBetween(before, after)).toBeNull();
   });
 
   it('collects points, keeps at most `size` and starts over on restart or another host', () => {

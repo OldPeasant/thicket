@@ -306,6 +306,158 @@ describe('ServerStatsView', () => {
     expect(fake.requestsFor('admin.serverStatus')).toHaveLength(3);
   });
 
+  it('says so when serverStatus answers something that is not a document', async () => {
+    statuses = ['[1]'];
+    await create();
+    expect(text(get('stats-error'))).toContain('unexpected');
+    expect(tile('tile-ops')).toBe('–/s');
+  });
+
+  it('treats a replica set status without members as not a member', async () => {
+    repl = '{"ok":{"$numberInt":"1"}}';
+    await create();
+    expect(all('stats-repl-none')).toHaveLength(1);
+    expect(all('stats-repl-error')).toHaveLength(0);
+  });
+
+  it('samples again when Refresh is clicked', async () => {
+    await create();
+    get('stats-refresh').click();
+    await settle();
+    expect(fake.requestsFor('admin.serverStatus')).toHaveLength(2);
+    expect(tile('tile-ops')).toBe('47.2/s');
+  });
+
+  it('a refresh supersedes a pending one: the old answer is cancelled and never charted', async () => {
+    let releaseFirst: (() => void) | undefined;
+    let calls = 0;
+    fake.handle('admin.serverStatus', () => {
+      calls++;
+      if (calls === 1) {
+        return new Promise((resolve) => {
+          releaseFirst = () => resolve({ status: S2 });
+        });
+      }
+      return { status: S1 };
+    });
+    await create();
+    expect(fake.requestsFor('admin.serverStatus')).toHaveLength(1);
+    const first = fake.requestsFor('admin.serverStatus')[0]?.id;
+    await sampleAgain();
+    expect(fake.cancels).toContain(first);
+    // The older request (S2, the later sample) answers last; it must not become a point.
+    releaseFirst?.();
+    await settle();
+    expect(tile('tile-ops')).toBe('–/s');
+    expect(all('waiting-ops')).toHaveLength(1);
+    expect(all('stats-error')).toHaveLength(0);
+    expect(text(get('stats-server'))).toContain('up 20 s');
+  });
+
+  it('turns auto-refresh off for an unknown interval chosen in the select', async () => {
+    vi.useFakeTimers();
+    fixture = TestBed.createComponent(ServerStatsView);
+    view = fixture.componentInstance;
+    fixture.componentRef.setInput('tab', TAB);
+    await vi.advanceTimersByTimeAsync(0);
+    view.setRefresh('soon');
+    expect(view.refreshSecs()).toBe(0);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(fake.requestsFor('admin.serverStatus')).toHaveLength(1);
+    const select = get<HTMLSelectElement>('stats-interval');
+    select.value = '1';
+    select.dispatchEvent(new Event('change'));
+    expect(view.refreshSecs()).toBe(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fake.requestsFor('admin.serverStatus')).toHaveLength(2);
+  });
+
+  it('shows an empty database list', async () => {
+    fake.respond('db.listDatabases', { databases: [] });
+    await create();
+    expect(all('db-row')).toHaveLength(0);
+    expect(text(get('stats-dbs'))).toContain('No databases.');
+  });
+
+  it('reads at most four dbStats at a time and cancels them when the tab closes', async () => {
+    const names = ['a', 'b', 'c', 'd', 'e', 'f'];
+    fake.respond('db.listDatabases', { databases: names.map((name) => ({ name })) });
+    fake.handle('db.stats', () => new Promise(() => undefined));
+    await create();
+    const started = fake.requestsFor('db.stats');
+    expect(started.map((r) => (r.params as { db: string }).db)).toEqual(['a', 'b', 'c', 'd']);
+    fixture.destroy();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    for (const request of started) expect(fake.cancels).toContain(request.id);
+    expect(fake.requestsFor('db.stats')).toHaveLength(4);
+  });
+
+  it('Reload while the listing is pending: the older listing never overwrites the newer', async () => {
+    let releaseFirst: (() => void) | undefined;
+    let calls = 0;
+    fake.handle('db.listDatabases', () => {
+      calls++;
+      if (calls === 1) {
+        return new Promise((resolve) => {
+          releaseFirst = () => resolve({ databases: [{ name: 'stale' }] });
+        });
+      }
+      return { databases: [{ name: 'shop' }] };
+    });
+    await create();
+    get('stats-dbs-reload').click();
+    await settle();
+    expect(all('db-row').map((r) => r.dataset['db'])).toEqual(['shop']);
+    releaseFirst?.();
+    await settle();
+    expect(all('db-row').map((r) => r.dataset['db'])).toEqual(['shop']);
+    expect(all('stats-dbs-error')).toHaveLength(0);
+    expect(fake.requestsFor('db.stats').map((r) => (r.params as { db: string }).db)).toEqual([
+      'shop',
+    ]);
+  });
+
+  it('names a secondary and a mongos as such', async () => {
+    const secondary = structuredClone(statusRs) as unknown as {
+      repl: Record<string, unknown>;
+    };
+    secondary.repl['isWritablePrimary'] = false;
+    secondary.repl['secondary'] = true;
+    const mongos = { ...structuredClone(status1), process: 'mongos' };
+    statuses = [JSON.stringify(secondary), JSON.stringify(mongos)];
+    await create();
+    expect(text(get('stats-role'))).toBe('secondary of rs0');
+    await sampleAgain();
+    expect(text(get('stats-role'))).toBe('mongos');
+  });
+
+  it('reads nothing for a tab without a connection', async () => {
+    fixture = TestBed.createComponent(ServerStatsView);
+    view = fixture.componentInstance;
+    view.refreshSecs.set(0);
+    fixture.componentRef.setInput('tab', { ...TAB, data: undefined });
+    await settle();
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it('shows no error when the backend answers CANCELLED', async () => {
+    fake.fail('admin.serverStatus', { code: 'CANCELLED', message: 'Cancelled' });
+    fake.fail('admin.replSetStatus', { code: 'CANCELLED', message: 'Cancelled' });
+    await create();
+    expect(all('stats-error')).toHaveLength(0);
+    expect(all('stats-repl-error')).toHaveLength(0);
+  });
+
+  it('a Refresh or Reload after the tab closed sends nothing', async () => {
+    await create();
+    const sent = fake.requests.length;
+    fixture.destroy();
+    await view.refresh();
+    await view.loadDatabases();
+    expect(fake.requests).toHaveLength(sent);
+  });
+
   it('stops sampling when the tab closes', async () => {
     vi.useFakeTimers();
     fixture = TestBed.createComponent(ServerStatsView);

@@ -143,6 +143,16 @@ describe('statsHandlers', () => {
     });
   });
 
+  it('admin.replSetStatus does not mistake a failure without a server code for a standalone', async () => {
+    const { call } = await setup((db, command) => {
+      if ('replSetGetStatus' in command) throw new Error('socket hang up');
+      return defaultAnswer(db, command);
+    });
+    const failure = call('admin.replSetStatus', { profileId: 'p1' });
+    await expect(failure).rejects.toBeInstanceOf(RpcError);
+    await expect(failure).rejects.not.toMatchObject({ code: 'SERVER_ERROR' });
+  });
+
   it('admin.serverStatus answers a refusal as SERVER_ERROR', async () => {
     const { call } = await setup((db, command) => {
       if ('serverStatus' in command) throw serverError(13, 'Unauthorized', 'not authorized');

@@ -709,6 +709,40 @@ describe('SidebarTree', () => {
     });
   });
 
+  describe('server stats', () => {
+    it('is offered on a connection only while it is connected', async () => {
+      await start();
+      await menu(node('conn', 'Profile p1'));
+      const item = must('menu-server-stats') as HTMLButtonElement;
+      expect(item.textContent?.trim()).toBe('Server stats');
+      expect(item.disabled).toBe(true);
+      await click(item);
+      expect(TestBed.inject(WorkspaceService).tabs()).toHaveLength(0);
+    });
+
+    it('opens the server stats tab from the connection menu', async () => {
+      await start();
+      await click(node('conn', 'Profile p1'));
+      await menu(node('conn', 'Profile p1'));
+      await click(must('menu-server-stats'));
+      expect(TestBed.inject(WorkspaceService).active()).toMatchObject({
+        id: 'serverstats:p1',
+        kind: 'serverstats',
+        title: 'Server stats',
+        detail: 'Profile p1',
+        data: { profileId: 'p1' },
+      });
+      expect(byTestId('tree-menu')).toBeNull();
+    });
+
+    it('stays available on read-only profiles (it only reads)', async () => {
+      await start();
+      await click(node('conn', 'Reader'));
+      await menu(node('conn', 'Reader'));
+      expect((must('menu-server-stats') as HTMLButtonElement).disabled).toBe(false);
+    });
+  });
+
   describe('read-only profiles', () => {
     it('disables every write action and shows the badge', async () => {
       await start();
