@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "task": "doc-paging",
+  "reviewed_revision": "3df4162396a221742828a6559a4eb08d68be77fb",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/doc-paging/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/doc-paging/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/doc-paging/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "sparse-array memo on the loaded first page (fixer round 1)"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "read-back after Save keeps arrays cut (fixer round 1)"},
+    {"id": "CR-3", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "documents without _id are not cut (fixer round 1)"},
+    {"id": "CR-4", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "slice wiring tests added by the test-writer"},
+    {"id": "CR-5", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "page state reset on a new result page (fixer round 1)"},
+    {"id": "CR-6", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "PARTIAL_REFUSED wording for Save (fixer round 1)"},
+    {"id": "CR-7", "source": "code-reviewer", "severity": "P3", "disposition": "deferred", "note": "all-digit array field names cut by read-back but not pageable; follow-up task docs-get-numeric-slice"},
+    {"id": "CR-8", "source": "code-reviewer", "severity": "P3", "disposition": "deferred", "note": "Keep server version with failed read-back shows complete version still marked cut; display only, follow-up task conflict-partial-docs"},
+    {"id": "TW-1", "source": "test-writer", "severity": "Medium", "disposition": "deferred", "note": "conflict diff counts never-loaded items of a cut array; no data loss (Overwrite/Merge refused); conflict-ui view code; follow-up task conflict-partial-docs"},
+    {"id": "TW-2", "source": "test-writer", "severity": "Low", "disposition": "deferred", "note": "conflict note blames a projection for a partly loaded document; follow-up task conflict-partial-docs"}
+  ],
+  "validation": [
+    {"command": "cd packages/renderer && npx ng test --include src/app/explorer/doc-paging.spec.ts", "result": "pass"},
+    {"command": "npm run build -w packages/renderer && npm run build -w apps/desktop && npx playwright test test/e2e/doc-paging.e2e.ts", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}

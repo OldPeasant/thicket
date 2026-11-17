@@ -4,7 +4,9 @@ import type { ProfileDraft } from '@thicket/contract';
 import { parseConnectionString } from '@thicket/core';
 import type { MongoClientOptions, W } from 'mongodb';
 
+import { awsAuthOptions } from '../auth/aws';
 import { RpcError } from '../server/rpc';
+import type { TunnelProxy } from '../ssh/tunnel';
 
 /** Secrets a connect may use, by `SecretKind` (from `secrets.get` or the request). */
 export type ConnectSecrets = Partial<Record<string, string>>;
@@ -18,18 +20,35 @@ export interface ClientConfig {
 /** `appName` when the profile sets none, so server logs show who connected. */
 export const DEFAULT_APP_NAME = 'Thicket';
 
-/** Mechanisms this build connects with; the others belong to later tasks (LDAP, OIDC, AWS, Kerberos). */
-const SUPPORTED_MECHANISMS = new Set(['NONE', 'SCRAM-SHA-1', 'SCRAM-SHA-256', 'MONGODB-X509']);
+/** Mechanisms this build connects with; the others belong to later tasks (LDAP, OIDC, Kerberos). */
+const SUPPORTED_MECHANISMS = new Set([
+  'NONE',
+  'SCRAM-SHA-1',
+  'SCRAM-SHA-256',
+  'MONGODB-X509',
+  'MONGODB-AWS',
+]);
 
 /**
  * Builds the driver configuration of a profile. The connection string stays as saved (hosts,
  * `mongodb+srv://`, `replicaSet`, `directConnection` and other URI options come from there); the
  * profile's form fields and the secrets are passed as driver options, which take precedence over
- * the same options in the URI. Passwords never go into the URI, so it can be logged masked.
+ * the same options in the URI. Passwords never go into the URI, so it can be logged masked. A
+ * profile with `ssh` needs its open tunnel's proxy options (`openSshTunnel`).
  */
-export function clientConfig(profile: ProfileDraft, secrets: ConnectSecrets): ClientConfig {
-  if (profile.ssh) {
-    throw new RpcError('UNSUPPORTED', 'SSH tunnels are not supported by this build yet');
+export function clientConfig(
+  profile: ProfileDraft,
+  secrets: ConnectSecrets,
+  tunnel?: TunnelProxy,
+): ClientConfig {
+  if (profile.ssh && profile.proxy) {
+    throw new RpcError(
+      'INVALID_PARAMS',
+      'A profile connects through either an SSH tunnel or a SOCKS5 proxy, not both',
+    );
+  }
+  if (profile.ssh && !tunnel) {
+    throw new RpcError('INTERNAL', 'The SSH tunnel of this profile is not open');
   }
   const options: MongoClientOptions = { appName: profile.appName ?? DEFAULT_APP_NAME };
 
@@ -40,7 +59,9 @@ export function clientConfig(profile: ProfileDraft, secrets: ConnectSecrets): Cl
       `Authentication mechanism ${auth.mechanism} is not supported by this build yet`,
     );
   }
-  if (auth?.mechanism !== 'NONE' && auth?.mechanism !== 'MONGODB-X509') {
+  if (auth?.mechanism === 'MONGODB-AWS') {
+    Object.assign(options, awsAuthOptions(auth, secrets, uriUsername(profile.connectionString)));
+  } else if (auth?.mechanism !== 'NONE' && auth?.mechanism !== 'MONGODB-X509') {
     const username = auth?.username ?? uriUsername(profile.connectionString);
     const needsPassword = auth !== undefined && auth.secretMode !== 'none';
     const password = auth?.secretMode === 'none' ? undefined : secrets['password'];
@@ -117,6 +138,12 @@ export function clientConfig(profile: ProfileDraft, secrets: ConnectSecrets): Cl
       options.proxyUsername = proxy.username;
       options.proxyPassword = proxyPassword;
     }
+  }
+
+  if (profile.ssh && tunnel) {
+    // The driver reaches every host (each replica set member, SRV results) through the tunnel's
+    // local SOCKS5 port; the SSH server resolves the names.
+    Object.assign(options, tunnel);
   }
 
   if (profile.readPreference !== undefined) options.readPreference = profile.readPreference;

@@ -1,5 +1,5 @@
 import { computed, inject, Injectable, type OnDestroy, signal } from '@angular/core';
-import type { ParamsOf } from '@thicket/contract';
+import type { ParamsOf, SlicedArray } from '@thicket/contract';
 import {
   canNext,
   canPrevious,
@@ -20,6 +20,7 @@ import {
 import type { Subscription } from 'rxjs';
 
 import { ApiError, ApiService, describeError } from '../api';
+import { NestedPageSizeService } from '../explorer/services/nested-page-size.service';
 import type { ParsedQuery } from './query.util';
 
 /** Page sizes offered by the pager (SPEC.md M1 Paging). */
@@ -32,9 +33,20 @@ export interface CollectionTarget {
   coll: string;
 }
 
+/**
+ * Documents bigger than this (BSON bytes) come with their long top-level arrays cut to one page
+ * (`docs.find`'s `slice`); the other pages are read with `docs.getSlice` when shown.
+ */
+export const LARGE_DOC_BYTES = 1024 * 1024;
+
 /** A loaded page: documents as canonical EJSON text, in display order. */
 export interface ResultPage {
   docs: readonly string[];
+  /**
+   * The arrays a large document came with only partly, at the document's index (`undefined`
+   * for a document loaded whole).
+   */
+  sliced?: readonly (readonly SlicedArray[] | undefined)[];
   /** 0-based index of the first row in the whole result, when known. */
   firstRow: number;
 }
@@ -49,6 +61,7 @@ const EMPTY_QUERY: ParsedQuery = { filter: '{}', sortSpec: [], emptyFilter: true
 @Injectable()
 export class CollectionResults implements OnDestroy {
   private readonly api = inject(ApiService);
+  private readonly nestedPageSize = inject(NestedPageSizeService);
 
   private targetValue: CollectionTarget | null = null;
   private readonly queryState = signal<ParsedQuery>(EMPTY_QUERY);
@@ -74,10 +87,13 @@ export class CollectionResults implements OnDestroy {
    * only a placeholder (at least 1 on a last page, so Previous stays possible).
    */
   private readonly fromEndState = signal<number | null>(null);
+  private readonly pageLoadsState = signal(0);
 
   readonly query = this.queryState.asReadonly();
   readonly paging = this.pagingState.asReadonly();
   readonly page = this.pageState.asReadonly();
+  /** Bumped whenever a page read arrives (not when `patchDocument` changes the page shown). */
+  readonly pageLoads = this.pageLoadsState.asReadonly();
   readonly loading = this.loadingState.asReadonly();
   readonly counting = this.countingState.asReadonly();
   /** Something is running that Cancel stops. */
@@ -247,15 +263,33 @@ export class CollectionResults implements OnDestroy {
   /**
    * A shown document changed on the server (saved or deleted from this tab): replaces the
    * document at `index` of the shown page with `doc` (canonical EJSON), or removes it for `null`.
-   * The page is not read again; paging and counts stay as they are.
+   * `docSliced`: the arrays `doc` has only partly (a large document read back cut); without it
+   * `doc` is whole. The page is not read again; paging and counts stay as they are.
    */
-  patchDocument(index: number, doc: string | null): void {
+  patchDocument(index: number, doc: string | null, docSliced?: readonly SlicedArray[]): void {
     const page = this.pageState();
     if (page === null || index < 0 || index >= page.docs.length) return;
     const docs = page.docs.slice();
-    if (doc === null) docs.splice(index, 1);
-    else docs[index] = doc;
-    this.pageState.set({ ...page, docs });
+    let sliced = page.sliced?.slice();
+    if (doc === null) {
+      docs.splice(index, 1);
+      sliced?.splice(index, 1);
+    } else {
+      docs[index] = doc;
+      if (docSliced !== undefined && docSliced.length > 0) {
+        sliced ??= new Array<readonly SlicedArray[] | undefined>(docs.length).fill(undefined);
+        sliced[index] = docSliced;
+      } else if (sliced) {
+        sliced[index] = undefined;
+      }
+    }
+    if (sliced && !sliced.some(Boolean)) sliced = undefined;
+    this.pageState.set(sliced ? { ...page, docs, sliced } : { docs, firstRow: page.firstRow });
+  }
+
+  /** Arrays above this many items are cut in large documents (`docs.find`'s `slice.above`). */
+  sliceAbove(): number {
+    return this.nestedPageSize.size();
   }
 
   ngOnDestroy(): void {
@@ -336,15 +370,19 @@ export class CollectionResults implements OnDestroy {
     }
     this.loadingState.set(true);
     const docs: string[] = [];
+    const sliced: (SlicedArray[] | undefined)[] = [];
     this.find = this.api.stream('docs.find', this.findParams(target, query, clipped)).subscribe({
       next: (batch) => {
-        if (generation === this.findGeneration) docs.push(...batch.docs);
+        if (generation !== this.findGeneration) return;
+        for (const s of batch.sliced ?? []) sliced[docs.length + s.index] = s.arrays;
+        docs.push(...batch.docs);
       },
       complete: () => {
         if (generation !== this.findGeneration) return;
         this.find = null;
         this.loadingState.set(false);
-        this.pageArrived(clipped, docs, pageSize);
+        sliced.length = docs.length;
+        this.pageArrived(clipped, docs, pageSize, sliced.some(Boolean) ? sliced : undefined);
       },
       error: (error: unknown) => {
         if (generation !== this.findGeneration) return;
@@ -356,7 +394,12 @@ export class CollectionResults implements OnDestroy {
     return true;
   }
 
-  private pageArrived(request: PageRequest, docs: readonly string[], pageSize?: number): void {
+  private pageArrived(
+    request: PageRequest,
+    docs: readonly string[],
+    pageSize?: number,
+    sliced?: readonly (readonly SlicedArray[] | undefined)[],
+  ): void {
     if (request.before && this.fromEndState() !== null && docs.length < request.limit) {
       // Paging back by range from a page of unknown position reached the start. The short (or
       // empty) answer is not an aligned page 1 (the count need not be a multiple of the page
@@ -404,7 +447,9 @@ export class CollectionResults implements OnDestroy {
     }
     this.fromEndState.set(nextFromEnd);
     this.pagingState.set(state);
-    this.pageState.set({ docs, firstRow: state.pageIndex * state.pageSize });
+    const firstRow = state.pageIndex * state.pageSize;
+    this.pageState.set(sliced ? { docs, sliced, firstRow } : { docs, firstRow });
+    this.pageLoadsState.update((n) => n + 1);
     this.realign();
   }
 
@@ -457,6 +502,7 @@ export class CollectionResults implements OnDestroy {
     if (request.after !== undefined) params.after = JSON.stringify(request.after);
     if (request.before !== undefined) params.before = JSON.stringify(request.before);
     if (request.fromEnd) params.fromEnd = true;
+    params.slice = { above: this.nestedPageSize.size(), docBytes: LARGE_DOC_BYTES };
     return params;
   }
 

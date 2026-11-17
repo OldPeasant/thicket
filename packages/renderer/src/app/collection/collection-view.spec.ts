@@ -4,7 +4,8 @@ import type { Request } from '@thicket/contract';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
-import type { WorkspaceTab } from '../layout/workspace.service';
+import { DocumentEdits } from '../document';
+import { WorkspaceService, type WorkspaceTab } from '../layout/workspace.service';
 import { ProfileSafetyService } from '../safety/profile-safety.service';
 import { CollectionView } from './collection-view';
 
@@ -724,6 +725,43 @@ describe('CollectionView', () => {
     expect(q('pager-rows')?.textContent).toMatch(/of 1,234 documents/);
   });
 
+  it('Aggregate… opens the aggregation tab of this collection, once', async () => {
+    const workspace = TestBed.inject(WorkspaceService);
+    fixture.componentRef.setInput('tab', {
+      ...TAB,
+      detail: 'Live / shop',
+      production: true,
+    });
+    await settle();
+    click('open-aggregation');
+    await settle();
+    expect(workspace.active()).toEqual({
+      id: 'aggregation:p1:shop.orders',
+      kind: 'aggregation',
+      title: 'orders aggregation',
+      detail: 'Live / shop',
+      production: true,
+      data: { profileId: 'p1', db: 'shop', coll: 'orders', type: 'collection' },
+    });
+    // Its data is a copy: the builder cannot change the collection tab's data.
+    expect(workspace.active()?.data).not.toBe(TAB.data);
+
+    click('open-aggregation');
+    await settle();
+    expect(workspace.tabs().filter((t) => t.kind === 'aggregation')).toHaveLength(1);
+  });
+
+  it('Aggregate… is offered on a read-only profile (it reads)', async () => {
+    TestBed.inject(ProfileSafetyService).set({
+      id: 'p1',
+      name: 'Reporting',
+      readOnly: true,
+      production: false,
+    });
+    await settle();
+    expect(get<HTMLButtonElement>('open-aggregation').disabled).toBe(false);
+  });
+
   it('lets the explorer edit documents on a writable profile', () => {
     const toggle = el().querySelector<HTMLButtonElement>('.mode-toggle');
     expect(toggle?.disabled).toBe(false);
@@ -855,5 +893,339 @@ describe('CollectionView', () => {
     expect(q('import-status')?.getAttribute('data-phase')).toBe('error');
     expect(finds()).toHaveLength(2);
     expect(lastFind()).toMatchObject({ coll: 'orders' });
+  });
+
+  describe('a large document with a cut array', () => {
+    const sku = (i: number) => `SKU-${String(i).padStart(6, '0')}`;
+    const skus = (from: number, n: number) => Array.from({ length: n }, (_, i) => sku(from + i));
+    /** `{_id: Int32(1), name, items: [first 100 skus]}`, as `docs.find` sends it cut. */
+    const bigDoc = JSON.stringify({
+      _id: { $numberInt: '1' },
+      name: 'large order (fictitious)',
+      items: skus(0, 100),
+    });
+    const smallDoc = docs(2, 1)[0] ?? '';
+    let slices: Record<string, unknown>[];
+
+    /** Every text shown in the explorer that is one of the skus. */
+    const shownSkus = () =>
+      [...el().querySelectorAll('app-json-explorer .val')]
+        .map((v) => /SKU-\d{6}/.exec(v.textContent ?? '')?.[0])
+        .filter((t): t is string => t !== undefined);
+    const pagerButton = (id: string) =>
+      el().querySelector<HTMLButtonElement>(`[data-testid="nested-pager"] [data-testid="${id}"]`);
+
+    beforeEach(async () => {
+      slices = [];
+      fake.handle('docs.getSlice', (params) => {
+        const p = params as unknown as Record<string, unknown>;
+        slices.push(p);
+        const skip = p['skip'] as number;
+        const limit = p['limit'] as number;
+        return { items: JSON.stringify(skus(skip, limit)), total: 50_000 };
+      });
+      fake.handle('docs.find', () => {
+        const id = `s${++streams}`;
+        setTimeout(() => {
+          fake.data('docs.find', id, {
+            docs: [bigDoc, smallDoc],
+            sliced: [{ index: 0, arrays: [{ path: 'items', total: 50_000, loaded: 100 }] }],
+          });
+          fake.end(id, { delivered: 2 });
+        });
+        return { streamId: id };
+      });
+      type('query-filter', '{ big: true }');
+      click('query-run');
+      await settle();
+    });
+
+    it('asks docs.find for cut arrays and shows the cut one with a pager over its whole length', () => {
+      expect(lastFind()['slice']).toEqual({ above: 100, docBytes: 1024 * 1024 });
+      expect(
+        el().querySelector('[data-testid="nested-pager"] [data-testid="nested-pager-range"]')
+          ?.textContent,
+      ).toContain('1–100 of 50,000');
+      expect(shownSkus()[0]).toBe(sku(0));
+      expect(slices).toEqual([]);
+    });
+
+    it('reads another page of the array with docs.getSlice by _id and path', async () => {
+      pagerButton('nested-pager-next')?.click();
+      await settle();
+      expect(slices).toEqual([
+        {
+          profileId: 'p1',
+          db: 'shop',
+          coll: 'orders',
+          id: '{"$numberInt":"1"}',
+          path: 'items',
+          skip: 100,
+          limit: 100,
+        },
+      ]);
+      expect(shownSkus()[0]).toBe(sku(100));
+      pagerButton('nested-pager-last')?.click();
+      await settle();
+      expect(slices.at(-1)).toMatchObject({ skip: 49_900, limit: 100 });
+      expect(shownSkus().at(-1)).toBe(sku(49_999));
+    });
+
+    it('marks an edit of the large document partial, and leaves the cut array out of the update', async () => {
+      el().querySelector<HTMLButtonElement>('.mode-toggle')?.click();
+      await settle();
+      const name = [...el().querySelectorAll<HTMLInputElement>('input.val-input.str')].find(
+        (i) => i.value === 'large order (fictitious)',
+      );
+      if (!name) throw new Error('name of the large document not editable');
+      name.value = 'renamed order';
+      name.dispatchEvent(new Event('blur'));
+      await settle();
+
+      const edits = fixture.debugElement.injector.get(DocumentEdits);
+      const entry = edits.get('{"$numberInt":"1"}');
+      expect(entry?.partial).toBe(true);
+      const pending = edits.pending().get('{"$numberInt":"1"}');
+      expect(pending?.ok).toBe(true);
+      // Only `name` changes: the 100 loaded items must never replace the 50 000 on the server.
+      expect(JSON.stringify(pending)).toContain('renamed order');
+      expect(JSON.stringify(pending)).not.toContain('items');
+    });
+
+    /** Renames the large document in the explorer and saves it with the edit bar. */
+    const renameAndSave = async () => {
+      el().querySelector<HTMLButtonElement>('.mode-toggle')?.click();
+      await settle();
+      const name = [...el().querySelectorAll<HTMLInputElement>('input.val-input.str')].find(
+        (i) => i.value === 'large order (fictitious)',
+      );
+      if (!name) throw new Error('name of the large document not editable');
+      name.value = 'renamed order';
+      name.dispatchEvent(new Event('blur'));
+      await settle();
+      get<HTMLButtonElement>('edit-save').click();
+      await settle();
+    };
+    const pagerRange = () =>
+      el().querySelector('[data-testid="nested-pager"] [data-testid="nested-pager-range"]')
+        ?.textContent;
+
+    it('reads a saved large document back with its arrays cut, and keeps paging them', async () => {
+      const gets: Record<string, unknown>[] = [];
+      fake.respond('docs.update', { modified: true });
+      fake.handle('docs.get', (params) => {
+        gets.push(params as unknown as Record<string, unknown>);
+        return {
+          doc: bigDoc.replace('large order (fictitious)', 'renamed order'),
+          sliced: [{ path: 'items', total: 50_000, loaded: 100 }],
+        };
+      });
+      await renameAndSave();
+      expect(fake.requestsFor('docs.update')).toHaveLength(1);
+      expect(gets).toEqual([
+        {
+          profileId: 'p1',
+          db: 'shop',
+          coll: 'orders',
+          id: '{"$numberInt":"1"}',
+          sliceAbove: 100,
+        },
+      ]);
+      // Still a partly loaded array: the pager spans the whole length and reads by getSlice.
+      expect(pagerRange()).toContain('1–100 of 50,000');
+      pagerButton('nested-pager-next')?.click();
+      await settle();
+      expect(slices.at(-1)).toMatchObject({ path: 'items', skip: 100, limit: 100 });
+      expect(shownSkus()[0]).toBe(sku(100));
+    });
+
+    it('reads a saved small document back whole (no sliceAbove)', async () => {
+      const gets: Record<string, unknown>[] = [];
+      fake.respond('docs.update', { modified: true });
+      fake.handle('docs.get', (params) => {
+        gets.push(params as unknown as Record<string, unknown>);
+        return { doc: smallDoc.replace('doc 2', 'doc 2 renamed'), sliced: [] };
+      });
+      el().querySelector<HTMLButtonElement>('.mode-toggle')?.click();
+      await settle();
+      const name = [...el().querySelectorAll<HTMLInputElement>('input.val-input.str')].find(
+        (i) => i.value === 'doc 2',
+      );
+      if (!name) throw new Error('name of the small document not editable');
+      name.value = 'doc 2 renamed';
+      name.dispatchEvent(new Event('blur'));
+      await settle();
+      get<HTMLButtonElement>('edit-save').click();
+      await settle();
+      expect(gets).toHaveLength(1);
+      expect(gets[0]).not.toHaveProperty('sliceAbove');
+    });
+
+    it('keeps the cut array partly loaded and the document partial when the read-back fails', async () => {
+      fake.respond('docs.update', { modified: true });
+      fake.fail('docs.get', { code: 'INTERNAL', message: 'not readable' });
+      await renameAndSave();
+      expect(fake.requestsFor('docs.get')).toHaveLength(1);
+      // The saved version (with only the first 100 items) is shown, still as a cut array.
+      expect(
+        [...el().querySelectorAll<HTMLInputElement>('input.val-input.str')].some(
+          (i) => i.value === 'renamed order',
+        ),
+      ).toBe(true);
+      expect(pagerRange()).toContain('1–100 of 50,000');
+      const edits = fixture.debugElement.injector.get(DocumentEdits);
+      const name = [...el().querySelectorAll<HTMLInputElement>('input.val-input.str')].find(
+        (i) => i.value === 'renamed order',
+      );
+      if (!name) throw new Error('name of the saved document not editable');
+      name.value = 'renamed again';
+      name.dispatchEvent(new Event('blur'));
+      await settle();
+      expect(edits.get('{"$numberInt":"1"}')?.partial).toBe(true);
+    });
+
+    describe('and a save conflict (conflict-ui)', () => {
+      /** The server version someone else renamed; shortened to the loaded items for the test. */
+      const serverDoc = (n = 100) =>
+        JSON.stringify({
+          _id: { $numberInt: '1' },
+          name: 'renamed elsewhere (fictitious)',
+          items: skus(0, n),
+        });
+      const shownNames = () =>
+        [...el().querySelectorAll<HTMLInputElement>('input.val-input.str')].map((i) => i.value);
+
+      /** Renames and saves the large document into a conflict with `serverDoc(n)`. */
+      const saveIntoConflict = async (n?: number) => {
+        fake.fail('docs.update', {
+          code: 'CONFLICT',
+          message: 'changed (fictitious)',
+          detail: { current: serverDoc(n) },
+        });
+        await renameAndSave();
+        expect(fake.requestsFor('docs.update')).toHaveLength(1);
+      };
+
+      it('keeps the edit and the cut array paging through getSlice', async () => {
+        await saveIntoConflict();
+        expect(q('conflict-view')).not.toBeNull();
+        expect(fake.requestsFor('docs.get')).toHaveLength(0);
+        const edits = fixture.debugElement.injector.get(DocumentEdits);
+        expect(edits.get('{"$numberInt":"1"}')?.partial).toBe(true);
+        expect(shownNames()).toContain('renamed order');
+        expect(pagerRange()).toContain('1–100 of 50,000');
+        pagerButton('nested-pager-next')?.click();
+        await settle();
+        expect(slices.at(-1)).toMatchObject({ path: 'items', skip: 100, limit: 100 });
+      });
+
+      it('offers only Keep server version (Overwrite and Merge would replace unloaded items)', async () => {
+        await saveIntoConflict();
+        expect(q('conflict-keep-server')).not.toBeNull();
+        expect(q('conflict-overwrite')).toBeNull();
+        expect(q('conflict-merge')).toBeNull();
+      });
+
+      it('Keep server version reads the document back cut and keeps paging it', async () => {
+        await saveIntoConflict();
+        const gets: Record<string, unknown>[] = [];
+        fake.handle('docs.get', (params) => {
+          gets.push(params as unknown as Record<string, unknown>);
+          return { doc: serverDoc(), sliced: [{ path: 'items', total: 50_000, loaded: 100 }] };
+        });
+        click('conflict-keep-server');
+        await settle();
+        expect(gets).toEqual([
+          {
+            profileId: 'p1',
+            db: 'shop',
+            coll: 'orders',
+            id: '{"$numberInt":"1"}',
+            sliceAbove: 100,
+          },
+        ]);
+        expect(q('conflict-view')).toBeNull();
+        expect(shownNames()).toContain('renamed elsewhere (fictitious)');
+        expect(pagerRange()).toContain('1–100 of 50,000');
+        pagerButton('nested-pager-last')?.click();
+        await settle();
+        expect(slices.at(-1)).toMatchObject({ path: 'items', skip: 49_900, limit: 100 });
+        expect(shownSkus().at(-1)).toBe(sku(49_999));
+      });
+
+      it('Keep server version shows the conflict version, still cut, when the read-back fails', async () => {
+        // The conflict carries more items than were loaded; the array still spans the whole length.
+        await saveIntoConflict(300);
+        fake.fail('docs.get', { code: 'INTERNAL', message: 'not readable (fictitious)' });
+        click('conflict-keep-server');
+        await settle();
+        expect(fake.requestsFor('docs.get')).toHaveLength(1);
+        expect(shownNames()).toContain('renamed elsewhere (fictitious)');
+        expect(pagerRange()).toContain('1–100 of 50,000');
+        const before = slices.length;
+        pagerButton('nested-pager-next')?.click();
+        await settle();
+        // Items 100-199 are among the shown version's items: nothing is read for them.
+        expect(slices).toHaveLength(before);
+        expect(shownSkus()[0]).toBe(sku(100));
+        // The document is still partial for the next edit.
+        const name = [...el().querySelectorAll<HTMLInputElement>('input.val-input.str')].find(
+          (i) => i.value === 'renamed elsewhere (fictitious)',
+        );
+        if (!name) throw new Error('name of the kept document not editable');
+        name.value = 'renamed again';
+        name.dispatchEvent(new Event('blur'));
+        await settle();
+        const edits = fixture.debugElement.injector.get(DocumentEdits);
+        expect(edits.get('{"$numberInt":"1"}')?.partial).toBe(true);
+      });
+
+      it('an unknown server version: Keep server version leaves the cut document as loaded', async () => {
+        // No readable version in the conflict, and reading it fails: nothing to show instead.
+        fake.fail('docs.update', { code: 'CONFLICT', message: 'changed (fictitious)' });
+        fake.fail('docs.get', { code: 'INTERNAL', message: 'not readable (fictitious)' });
+        await renameAndSave();
+        expect(get('conflict-title').textContent).toContain('could not be read');
+        click('conflict-keep-server');
+        await settle();
+        const gets = fake.requestsFor('docs.get').map((r) => r.params as Record<string, unknown>);
+        expect(gets).toHaveLength(2);
+        expect(gets[1]).toMatchObject({ sliceAbove: 100 });
+        expect(q('conflict-view')).toBeNull();
+        // The edit is discarded; the loaded version stays, with its cut array.
+        expect(shownNames()).toContain('large order (fictitious)');
+        expect(shownNames()).not.toContain('renamed order');
+        expect(pagerRange()).toContain('1–100 of 50,000');
+        pagerButton('nested-pager-next')?.click();
+        await settle();
+        expect(slices.at(-1)).toMatchObject({ path: 'items', skip: 100, limit: 100 });
+      });
+    });
+
+    it('starts the inner pages over when another page of documents is read', async () => {
+      pagerButton('nested-pager-next')?.click();
+      await settle();
+      expect(pagerRange()).toContain('101–200 of 50,000');
+      const before = slices.length;
+      click('query-run');
+      await settle();
+      expect(pagerRange()).toContain('1–100 of 50,000');
+      // The first page is among the loaded items: nothing is read for it.
+      expect(slices).toHaveLength(before);
+    });
+
+    it('does not mark the small document of the same page partial', async () => {
+      el().querySelector<HTMLButtonElement>('.mode-toggle')?.click();
+      await settle();
+      const name = [...el().querySelectorAll<HTMLInputElement>('input.val-input.str')].find(
+        (i) => i.value === 'doc 2',
+      );
+      if (!name) throw new Error('name of the small document not editable');
+      name.value = 'doc 2 renamed';
+      name.dispatchEvent(new Event('blur'));
+      await settle();
+      const edits = fixture.debugElement.injector.get(DocumentEdits);
+      expect(edits.get('{"$numberInt":"2"}')?.partial).toBe(false);
+    });
   });
 });

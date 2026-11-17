@@ -177,13 +177,27 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   and passes the form fields and secrets as driver options (`auth`, `authMechanism`
   SCRAM-SHA-1/256, `authSource`, `tls`, `tlsCAFile`, `tlsCertificateKeyFile` + passphrase,
   allow-invalid flags, read preference, `appName` (default `Thicket`), timeouts), so passwords
-  never enter the URI; SSH and the other mechanisms answer `UNSUPPORTED` until their tasks.
+  never enter the URI; the other mechanisms (LDAP, OIDC, AWS, Kerberos) answer `UNSUPPORTED`
+  until their tasks.
   MONGODB-X509 (task x509-proxy) needs TLS with a client certificate (`AUTH_FAILED` otherwise),
   always uses `authSource: '$external'`, and sends a user name only when the profile has one
   (else the server takes the certificate subject). The client certificate is a PEM bundle
   (`tls.certificateKeyFile` → `tlsCertificateKeyFile`) or certificate + `tls.keyFile`, which
   `clientConfig()` reads itself (driver `cert`/`key`/`passphrase`; unreadable → `TLS_ERROR`);
-  the key passphrase is the `tlsKeyPassphrase` secret. `proxy` → `proxyHost`/`proxyPort`
+  the key passphrase is the `tlsKeyPassphrase` secret.
+  MONGODB-AWS (task aws-auth, `packages/backend/src/auth/aws/`, always `authSource: '$external'`):
+  driver 7 takes AWS credentials only from `authMechanismProperties.AWS_CREDENTIAL_PROVIDER` (a
+  user/password or `AWS_SESSION_TOKEN` is refused, so a user name in the URI is `AUTH_FAILED`).
+  With `auth.username` (the access key ID) the secret access key is the `password` secret (typed at
+  connect, or the stored `password` kind: the profile's primary secret and what the connection
+  editor saves; with `secretMode: 'ask'` only the typed one). It wins over a stored
+  `awsSecretAccessKey`, which is only a fallback for `secretMode: 'saved'`. An optional
+  `awsSessionToken` is added; the credentials are given
+  as a static provider (missing secret or `secretMode: 'none'` → `AUTH_FAILED`). Without a user name
+  the driver uses the default chain (`fromNodeProviderChain()` of `@aws-sdk/credential-providers`,
+  a backend dependency the driver needs for MONGODB-AWS at all: environment, SSO, shared
+  config/`AWS_PROFILE`, web identity, ECS/EC2 role); a chain without credentials is a `MongoAWSError`
+  → `AUTH_FAILED`. Real Atlas verification is the human task `aws-verify`. `proxy` → `proxyHost`/`proxyPort`
   (+ `proxyUsername` and the `proxyPassword` secret; a user without a stored password is
   `AUTH_FAILED`) through the `socks` package (a backend dependency the driver loads lazily).
   `readPreferenceTags` (contract: tag sets as `{ name, value }` pairs, no free-form records) and
@@ -197,6 +211,33 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   counts as `AUTH_FAILED` only for connect errors, e.g. an X.509 subject without a user); messages start with a readable prefix and are masked (`maskText` + the
   connect's secret values), as is every log line. Later handlers get a connected client with
   `manager.client(profileId)` (`NOT_CONNECTED` otherwise).
+- SSH tunnels (`packages/backend/src/ssh/`, task ssh-tunnel, `ssh2`): for a profile with `ssh`
+  the manager first runs `openSshTunnel()` (password = `sshPassword` secret, private key file +
+  optional `sshKeyPassphrase` secret, or the agent at `SSH_AUTH_SOCK` / `pageant`), then gives the
+  driver the tunnel as its SOCKS5 proxy: a local SOCKS5 server on `127.0.0.1` (random port,
+  random user/password per tunnel, `socks.ts`) turns every driver socket into one SSH
+  `forwardOut` channel to the host the driver asked for. So each replica set member gets its
+  own forwarded channel under the name the set reports (resolved by the SSH server), and
+  `mongodb+srv://` is resolved by the driver (locally) before any socket goes through the
+  tunnel. `ssh` + `proxy` in one profile is `INVALID_PARAMS`. The tunnel is closed with the
+  connection (`conn.close`, failed connect, end of `conn.test`): channels, local port, SSH
+  session. An SSH session lost while the connection is open (keepalive, server restart) closes
+  the tunnel; the connection becomes `error` (`SSH_ERROR`), the backend broadcasts `conn.status`,
+  and the next `conn.open` builds a new tunnel. Host keys: `KnownHosts` keeps `userData/known_hosts` (OpenSSH format, `[host]:port`,
+  reads hashed entries); main passes `THICKET_USER_DATA` to the backend process. A known key
+  connects; a host listed with other keys only is refused (`SSH_ERROR`, detail `reason:
+  'hostKeyChanged'`, the message names the file to edit); an unknown key pauses the handshake
+  timeout and asks: the backend broadcasts `ssh.hostKey` (`SshHostKeyPrompt`: `promptId`, host,
+  port, key type, `SHA256:` fingerprint) to every window and waits up to 5 min for
+  `conn.trustHostKey({ promptId, trust })` (then appends the key); "no", the time out or no
+  window fail with `SSH_ERROR` (`reason: 'hostKeyRejected'`); a cancelled connect (`conn.close`,
+  request cancel) ends the question and fails with `CANCELLED`, and a server that closes the
+  connection meanwhile ends it too (`SSH_ERROR`). Other failures are
+  `SSH_ERROR` with readable messages (authentication, missing/wrong passphrase, unreachable,
+  timeout = `connectTimeoutMS`, default 20 s). The bundles keep ssh2's optional native
+  `cpu-features` external (ssh2 falls back to JS). Integration fixture
+  `test/integration/fixtures/ssh.ts`: `linuxserver/openssh-server` (forwarding switched on) in
+  front of a two-member set whose names only sshd resolves.
 - Streams (`serve()` in `packages/backend/src/server/rpc.ts`): a streaming handler calls
   `context.openStream(producer)` and returns `{ streamId }`. The producer starts after the
   response was sent, gets a `StreamSink` (`send(payload)`, validated against the method's
@@ -254,6 +295,12 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   stops the same way (earlier documents inserted, last progress, `INVALID_PARAMS` "Line N: …");
   a failed write to the export file (cannot be created, disk full) answers `INTERNAL`. `end.delivered` is the number of
   documents written (export) or inserted (import). `io.import` is behind the write guard.
+- Indexes (`packages/backend/src/indexes/`, `indexHandlers`): `idx.list` (`listIndexes`, server
+  order), `idx.stats` (`$collStats` `indexSizes` + `$indexStats` usage; summed over shards,
+  earliest `since`; without the `indexStats` privilege sizes only), `idx.create` (`createIndexes`,
+  options passed as given; without `options.name` the driver's default name `a_1_b_-1`, which it
+  answers), `idx.drop` (one index by name; `*` is `INVALID_PARAMS`), `idx.hide` (`collMod`
+  `index.hidden`). The writes are behind the write guard; int tests `test/integration/indexes.int.spec.ts`.
 - Write guard (`packages/backend/src/guard/`): `startBackend` wraps every handler of a
   `WRITE_METHODS` method with `guardWrites()`, which loads the profile from main (fresh, per
   write) and throws `READ_ONLY` for read-only profiles (even when confirmed), and
@@ -431,6 +478,22 @@ Contract layout (`packages/contract/src/`):
 - Views: table (explorer, `tables` layout), document list (one `app-json-form` per document), raw
   (shell syntax via `printShellSyntax`, or the canonical EJSON as received). e2e:
   `test/e2e/collection.e2e.ts` (10 000 documents).
+- Paging inside documents (task doc-paging): arrays and objects with more entries than the
+  `nestedPageSize` setting (`NestedPageSizeService`, default 100) show one page at a time with
+  `app-pager` (first/previous/page field/next/last, `nested-pager-*` test ids) instead of
+  Canopy's "show more"; the page per node instance (`uid`; the form's `form:<uid>`) lives in
+  `PageService` (pure math in `explorer/page.util.ts`), edits stay in the document. Large
+  documents: `docs.find` takes `slice: { above, docBytes }` (`LARGE_DOC_BYTES` = 1 MiB): in a
+  document above `docBytes` the backend (`sliceLargeArrays`) cuts top-level arrays longer than
+  `above` to their first `above` items and lists them in the batch's `sliced` (documents without
+  `_id` stay whole: `docs.getSlice` can't address them). The collection view
+  registers each cut array with `ArraySliceService` (source: `docs.getSlice`); `app-json-table`
+  shows it as a sparse array of its full length, reads other pages on demand (cached per loaded
+  document), and keeps it and everything below read-only (`locked`); the document counts as
+  partial for Save. A saved large document is read back with `docs.get` `sliceAbove` (cut again;
+  a failed read-back keeps its `sliced` entry). Inner pages reset when a new result page arrives
+  (`CollectionResults.pageLoads`). e2e: `test/e2e/doc-paging.e2e.ts` (50 000 items, server
+  profiler as the log).
 - Raw editor (`packages/renderer/src/app/raw-editor`, `RawEditor`, `app-raw-editor`): each
   document of the document list has a **Raw** toggle that swaps its form for a CodeMirror 6
   editor of the whole document (`@codemirror/*`, JavaScript highlighting for shell syntax, JSON for
@@ -449,6 +512,26 @@ Contract layout (`packages/contract/src/`):
   ESLint's `no-eval`/`no-implied-eval`/`no-new-func` cover renderer and core sources. Specs that
   render it call `installJsdomLayoutStubs()` (`raw-editor/testing.ts`: jsdom has no `Range`
   rectangles for CodeMirror's measuring).
+
+## Aggregation builder (`packages/renderer/src/app/aggregation`)
+- `AggregationView` is the `aggregation` tab view (id `aggregationTabId(profileId, db, coll)`,
+  `data` like a collection tab), opened with "Aggregate…" (`open-aggregation`) on the
+  collection tab; dropping or renaming the collection closes it too.
+- `pipeline.model.ts` (pure): a `Stage` is `{ id, operator, body, enabled }`, the body in shell
+  syntax; `parseStage` → `{ [operator]: value }` with line/column errors (core's parser, never
+  `eval`). The full-text mode (`printPipeline` / `parsePipeline`) is one shell-syntax array;
+  disabled stages are lines starting with `//- ` (comments for the parser) and come back
+  disabled.
+- Previews: each enabled, valid stage gets `agg.previewStage` with the enabled, valid stages up
+  to it (debounced 400 ms, only when its prefix changed, older requests aborted). A stage with an
+  error blocks only its own preview; later stages are previewed without it and say so.
+  `$out`/`$merge` stages are not previewed.
+- Run: `agg.run` with `$skip`/`$limit` appended (20 per page + 1 to know whether there is a next
+  page); a pipeline with `$out`/`$merge` runs unpaged through `WriteGuard.approve` with
+  `alwaysConfirm`. Export: core's `generateCode` (`@thicket/core/codegen`) for shell, Node,
+  Python and Java, with the profile's connection string. Create view: `agg.createView` through
+  `WriteGuard.run`. Saving pipelines is task `saved-pipelines`. e2e:
+  `test/e2e/aggregation.e2e.ts` (demo step 8).
 
 ## Write safety in the renderer (`packages/renderer/src/app/safety`)
 - Every write UI sends writes through `WriteGuard.run(method, params, options)` (or `approve()`,

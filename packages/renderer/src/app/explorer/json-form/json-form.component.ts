@@ -8,7 +8,8 @@ import {
 } from '../../schema';
 import { EditableValueComponent } from '../editable-value/editable-value.component';
 import { type FormField, formFields } from '../form-fields.util';
-import { estimateAvgItemBytes, formRevealKey, initialFormRevealCount } from '../reveal.util';
+import { formPageKey, type PageWindow } from '../page.util';
+import { PagerComponent } from '../pager/pager.component';
 import { type JsonType, moveEntry, typeOf, withEntry, withoutEntry } from '../json-edit.util';
 import { orderedKeys } from '../key-order.util';
 import { HighlightComponent } from '../highlight/highlight.component';
@@ -18,7 +19,8 @@ import { CollapseService } from '../services/collapse.service';
 import { EditModeService } from '../services/edit-mode.service';
 import { FilterService } from '../services/filter.service';
 import { FocusService } from '../services/focus.service';
-import { RevealService } from '../services/reveal.service';
+import { NestedPageSizeService } from '../services/nested-page-size.service';
+import { PageService } from '../services/page.service';
 import { SchemaService } from '../services/schema.service';
 
 type Kind = 'object' | 'array' | 'scalar';
@@ -33,7 +35,6 @@ interface FieldMemo {
   declared: readonly string[];
   required: ReadonlySet<string>;
   fields: FormField[];
-  avgBytes: number;
   /** Each own key's place in document order (what the move buttons change). */
   keyIndex: ReadonlyMap<string, number>;
 }
@@ -52,6 +53,7 @@ interface FieldMemo {
     EditableValueComponent,
     SchemaInfoComponent,
     HighlightComponent,
+    PagerComponent,
   ],
   templateUrl: './json-form.component.html',
   styleUrl: './json-form.component.css',
@@ -74,7 +76,8 @@ export class JsonFormComponent {
 
   protected editMode = inject(EditModeService);
   protected filter = inject(FilterService);
-  protected reveal = inject(RevealService);
+  private pages = inject(PageService);
+  private pageSize = inject(NestedPageSizeService);
   private focus = inject(FocusService);
   private schema = inject(SchemaService);
   private collapse = inject(CollapseService);
@@ -133,7 +136,6 @@ export class JsonFormComponent {
       declared,
       required,
       fields,
-      avgBytes: estimateAvgItemBytes(value, Object.values(value)),
       keyIndex: new Map(orderedKeys(value).map((k, i) => [k, i])),
     };
     return this.fieldMemo;
@@ -165,30 +167,22 @@ export class JsonFormComponent {
     );
   }
 
-  // --- pagination: a very large object shows a first page, like a table ---
-  get revealedCount(): number {
-    const length = this.visibleFields.length;
-    return this.reveal.count(
-      formRevealKey(this.path),
-      length,
-      initialFormRevealCount(length, this.fieldMemo?.avgBytes ?? 0),
+  // --- paging: an object with more fields than a page holds pages, like a table ---
+  get pageWindow(): PageWindow {
+    return this.pages.window(
+      formPageKey(this.uid),
+      this.visibleFields.length,
+      this.pageSize.size(),
     );
   }
 
   get pagedFields(): FormField[] {
-    return this.visibleFields.slice(0, this.revealedCount);
+    const w = this.pageWindow;
+    return this.visibleFields.slice(w.start, w.end);
   }
 
-  get hasMore(): boolean {
-    return this.revealedCount < this.visibleFields.length;
-  }
-
-  revealMore(by: number): void {
-    this.reveal.revealMore(formRevealKey(this.path), by);
-  }
-
-  revealAll(): void {
-    this.reveal.revealAll(formRevealKey(this.path));
+  setPage(page: number): void {
+    this.pages.set(formPageKey(this.uid), page);
   }
 
   childForce(key: string): boolean {
@@ -366,9 +360,10 @@ export class JsonFormComponent {
     const trimmed = key.trim();
     if (!trimmed || Object.prototype.hasOwnProperty.call(this.value, trimmed)) return;
     this.onFieldChange(trimmed, this.schema.seedFor(this.uid, trimmed) ?? '');
-    // See JsonTableComponent.addItem's comment: keeps a fully-shown object
-    // fully shown. Ghost keys (declared but absent) don't need this — they
-    // are already counted in `fields`/`visibleFields` before being added.
-    this.reveal.revealMore(formRevealKey(this.path), 1);
+    // The new field is the last one: show its page. Ghost keys (declared but
+    // absent) don't need this: they already have their place in `fields`.
+    const size = this.pageSize.size();
+    const length = this.visibleFields.length + 1;
+    if (length > size) this.pages.ensure(formPageKey(this.uid), length - 1, size);
   }
 }

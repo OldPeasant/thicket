@@ -1,18 +1,20 @@
 ---
 title: M3: Aggregation pipeline builder
-status: in_progress
+status: done
 owner: felix/agent-1
 deps: [agg-backend,collection-view,codegen,raw-editor]
 touches: [packages/renderer/src/app/aggregation]
 prio: 2
-lease_until: 2026-11-17T02:29:16Z
+lease_until: 
 ---
 ## Goal
 Stage list (add/remove/reorder/disable), each stage in shell syntax with live preview, full-text mode, run with paging, save pipelines, export code, create view. Use the frontend-design skill for the visual direction; respect the Business and Tron tokens (no hard-coded colors).
 
 ## Acceptance criteria
-- [ ] e2e: demo step 8 ($match → $group → $sort, preview per stage, export as shell and Node)
-- [ ] Component tests: reorder/disable updates the pipeline; syntax error blocks preview of that stage only
+- [x] e2e: demo step 8 ($match → $group → $sort, preview per stage, export as shell and Node)
+  - verified (2026-11-17 03:29+0100 by felix/agent-1): npm run test:e2e -- aggregation (builds renderer + desktop, Playwright Electron, test/e2e/aggregation.e2e.ts against the e2e Mongo fixture) at 14aed95 -> 1 passed: $match→$group→$sort, preview per stage, run matches driver aggregate, shell and Node export
+- [x] Component tests: reorder/disable updates the pipeline; syntax error blocks preview of that stage only
+  - verified (2026-11-17 03:29+0100 by felix/agent-1): cd packages/renderer && npx ng test --include='src/app/aggregation/**/*.spec.ts' at 14aed95 -> 80 passed, incl. 'reordering stages changes the pipeline that runs and the previews', 'a disabled stage is left out of the pipeline and of later previews', 'a syntax error blocks the preview of that stage only'
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
@@ -23,3 +25,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 02:55+0100 by felix/agent-1): Run pages by appending $skip/$limit (20 per page, one extra doc to know if there is a next page); pipelines with $out/$merge run unpaged and always open the confirm dialog (SPEC: they ask first), not only on production
 - ASSUMPTION (2026-11-17 02:56+0100 by felix/agent-1): Exported Node/Python/Java code uses the profile's connectionString (profiles.get; it never holds a password), else codegen's localhost default
 - ASSUMPTION (2026-11-17 02:56+0100 by felix/agent-1): Stage arguments and the full text are edited in plain monospace textareas (errors under them with line/column), not CodeMirror, to keep the tab light; CodeMirror can come later
+- done by felix/agent-1: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 112s on e328ce61f; criteria verified 2/2

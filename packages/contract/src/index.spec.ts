@@ -81,6 +81,7 @@ const SAMPLES: { [M in MethodName]: { valid: ParamsOf<M>; invalid: unknown } } =
   'conn.open': { valid: { profileId: P }, invalid: { profileId: P, password: 1 } },
   'conn.close': { valid: { profileId: P }, invalid: {} },
   'conn.status': { valid: {}, invalid: { profileId: '' } },
+  'conn.trustHostKey': { valid: { promptId: 'k1', trust: true }, invalid: { promptId: 'k1' } },
   'conn.serverInfo': { valid: { profileId: P }, invalid: { id: P } },
 
   'db.listDatabases': {
@@ -407,6 +408,42 @@ describe('result validation', () => {
   });
 });
 
+describe('docs.find slice (large documents)', () => {
+  const find = (slice: unknown) => parseParams('docs.find', { ...NS, filter: '{}', slice });
+  const batch = (value: unknown) => methods['docs.find'].stream.safeParse(value).success;
+  const DOC = `{"_id":${OID}}`;
+  const ITEMS = { path: 'items', total: 50_000, loaded: 100 };
+
+  it('takes a slice of positive whole numbers', () => {
+    expect(find({ above: 100, docBytes: 1_048_576 }).ok).toBe(true);
+    expect(parseParams('docs.find', { ...NS, filter: '{}' }).ok).toBe(true);
+  });
+
+  it('rejects a slice with a size below 1, a fraction, a missing or an unknown key', () => {
+    for (const bad of [
+      { above: 0, docBytes: 1000 },
+      { above: 100, docBytes: -1 },
+      { above: 1.5, docBytes: 1000 },
+      { above: 100 },
+      { above: 100, docBytes: 1000, depth: 2 },
+      true,
+    ]) {
+      expect(find(bad).ok).toBe(false);
+    }
+  });
+
+  it('a batch may list its cut documents, each with at least one array', () => {
+    expect(batch({ docs: [DOC] })).toBe(true);
+    expect(batch({ docs: [DOC], sliced: [{ index: 0, arrays: [ITEMS] }] })).toBe(true);
+    expect(batch({ docs: [DOC], sliced: [] })).toBe(true);
+    expect(batch({ docs: [DOC], sliced: [{ index: 0, arrays: [] }] })).toBe(false);
+    expect(batch({ docs: [DOC], sliced: [{ index: -1, arrays: [ITEMS] }] })).toBe(false);
+    expect(batch({ docs: [DOC], sliced: [{ index: 0, arrays: [{ ...ITEMS, path: '' }] }] })).toBe(
+      false,
+    );
+  });
+});
+
 /** Field names that hold documents, query parts, pipelines or BSON values. */
 const DOC_FIELDS = new Set([
   'after',
@@ -634,6 +671,7 @@ describe('envelope', () => {
       'app.theme',
       'app.settings.changed',
       'backend.restarted',
+      'ssh.hostKey',
     ]);
   });
 

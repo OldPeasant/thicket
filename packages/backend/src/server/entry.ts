@@ -17,4 +17,6 @@ startBackend({
   // Bundled next to backend.cjs by apps/desktop/scripts/build.mjs.
   shellWorker: join(__dirname, 'shell-worker.cjs'),
   log: (message) => console.error(`[backend] ${message}`),
+  // Set by main when it starts the backend (Electron's userData folder, holds known_hosts).
+  ...(process.env['THICKET_USER_DATA'] ? { userData: process.env['THICKET_USER_DATA'] } : {}),
 });

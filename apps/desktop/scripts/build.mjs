@@ -17,7 +17,9 @@ const common = {
   sourcemap: 'linked',
   // Native modules stay out of the bundles (optional driver dependencies, docs/mongosh.md
   // "Packaging impact"): without them GSSAPI and client-side encryption are unavailable.
-  external: ['electron', 'kerberos', 'mongodb-client-encryption'],
+  // cpu-features: ssh2's optional native helper (main gets the backend package too). ssh2 requires
+  // it in try/catch and falls back to pure JS, so it stays out of the bundles and isn't shipped.
+  external: ['electron', 'kerberos', 'mongodb-client-encryption', 'cpu-features'],
   logLevel: 'info',
 };
 

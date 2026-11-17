@@ -25,11 +25,6 @@ export const queryFields = {
   maxTimeMS,
 };
 
-/** One page of documents on a `docs.find` / `agg.run` stream. */
-export const docsBatch = z.object({ docs: z.array(ejsonDocument('document')) });
-
-export type DocsBatch = z.infer<typeof docsBatch>;
-
 /** An array inside a document that was loaded only partly (large documents). */
 export const slicedArray = z.object({
   /** Dotted path of the array, e.g. `items` or `a.b`. */
@@ -41,6 +36,18 @@ export const slicedArray = z.object({
 });
 
 export type SlicedArray = z.infer<typeof slicedArray>;
+
+/** One page of documents on a `docs.find` / `agg.run` stream. */
+export const docsBatch = z.object({
+  docs: z.array(ejsonDocument('document')),
+  /**
+   * `docs.find` with `slice`: the documents of this batch whose large arrays were cut to their
+   * first items (`index` into `docs`). The rest of such an array is read with `docs.getSlice`.
+   */
+  sliced: z.array(z.object({ index: count, arrays: z.array(slicedArray).min(1) })).optional(),
+});
+
+export type DocsBatch = z.infer<typeof docsBatch>;
 
 const collWrite = { ...writeFields, db: dbName, coll: collName };
 
@@ -81,6 +88,18 @@ export const docsMethods = defineMethods({
          */
         fromEnd: z.boolean().optional(),
         batchSize: z.number().int().positive().optional(),
+        /**
+         * Large documents: in a document whose BSON size is above `docBytes`, top-level arrays
+         * with more than `above` items are sent cut to their first `above` items and listed in
+         * the batch's `sliced` (only arrays the projection returns whole, and whose field name
+         * `docs.getSlice` can address).
+         */
+        slice: z
+          .strictObject({
+            above: z.number().int().positive(),
+            docBytes: z.number().int().positive(),
+          })
+          .optional(),
       })
       .refine((p) => p.after === undefined || p.before === undefined, {
         message: 'docs.find takes at most one of after or before',

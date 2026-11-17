@@ -206,6 +206,14 @@
       <button
         type="button"
         class="btn quiet"
+        data-testid="open-aggregation"
+        (click)="openAggregation()"
+      >
+        Aggregate…
+      </button>
+      <button
+        type="button"
+        class="btn quiet"
         data-testid="io-export"
         [attr.aria-pressed]="ioPanel() === 'export'"
         (click)="toggleIo('export')"
@@ -356,7 +364,7 @@
                       @defer (on immediate) {
                         <app-raw-editor
                           [doc]="loaded"
-                          [partial]="partialDocs()"
+                          [partial]="isPartial($index)"
                           [hidesSubFields]="subFieldDocs()"
                           [readOnly]="readOnly()"
                         />

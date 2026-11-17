@@ -10,9 +10,16 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import { type BsonDocument, parseEJsonDocument, stringifyEJson } from '@thicket/core/bson';
+import type { SlicedArray } from '@thicket/contract';
+import {
+  type BsonDocument,
+  parseEJson,
+  parseEJsonDocument,
+  stringifyEJson,
+} from '@thicket/core/bson';
 import { printShellSyntax } from '@thicket/core/shellsyntax';
 
+import { ApiService } from '../api';
 import {
   ConflictView,
   DocumentActions,
@@ -41,10 +48,12 @@ import { LayoutService } from '../explorer/services/layout.service';
 import { NodeVisibilityService } from '../explorer/services/node-visibility.service';
 import { NumberDefaultService } from '../explorer/services/number-default.service';
 import { PanelService } from '../explorer/services/panel.service';
-import { RevealService } from '../explorer/services/reveal.service';
+import { ArraySliceService, type SliceSource } from '../explorer/services/array-slice.service';
+import { PageService } from '../explorer/services/page.service';
 import { SchemaService } from '../explorer/services/schema.service';
 import { TableOrientationService } from '../explorer/services/table-orientation.service';
-import type { WorkspaceTab } from '../layout/workspace.service';
+import { WorkspaceService, type WorkspaceTab } from '../layout/workspace.service';
+import { aggregationTabId } from '../aggregation/aggregation-view';
 import { RawEditor } from '../raw-editor/raw-editor';
 import { ProfileSafetyService } from '../safety/profile-safety.service';
 import type { CollectionTabData } from '../sidebar/sidebar-tree.service';
@@ -111,7 +120,8 @@ const numberFormat = new Intl.NumberFormat();
     LayoutService,
     NodeVisibilityService,
     PanelService,
-    RevealService,
+    PageService,
+    ArraySliceService,
     SchemaService,
     TableOrientationService,
   ],
@@ -127,7 +137,10 @@ export class CollectionView {
   private readonly editMode = inject(EditModeService);
   private readonly numbers = inject(NumberDefaultService);
   private readonly safety = inject(ProfileSafetyService);
+  private readonly workspace = inject(WorkspaceService);
   protected readonly display = inject(BsonDisplayService);
+  private readonly api = inject(ApiService);
+  private readonly slices = inject(ArraySliceService);
   protected readonly pageSizes = PAGE_SIZES;
   protected readonly labels = FIELD_LABELS;
 
@@ -180,9 +193,13 @@ export class CollectionView {
    * edit in the table can be told apart from the rows it left alone (by identity).
    */
   private readonly trees = new WeakMap<BsonDocument, unknown>();
-  protected readonly explorerDocs = computed(() =>
-    this.shownDocs().map((doc) => (doc === null ? null : this.treeOf(doc))),
-  );
+  protected readonly explorerDocs = computed(() => {
+    const loaded = this.docs();
+    const sliced = this.results.page()?.sliced;
+    return this.shownDocs().map((doc, i) =>
+      doc === null ? null : this.treeOf(doc, loaded[i] ?? null, sliced?.[i]),
+    );
+  });
   protected readonly rawText = computed(() => {
     const page = this.results.page();
     if (page === null) return '';
@@ -252,6 +269,15 @@ export class CollectionView {
   });
   protected readonly readOnly = computed(() => this.safety.readOnly(this.target().profileId)());
 
+  /**
+   * The document at `index` may be partial: read with a projection, or a large document whose
+   * long arrays came cut to their first page. Save then refuses edits that would replace what
+   * wasn't loaded.
+   */
+  protected isPartial(index: number): boolean {
+    return this.partialDocs() || this.results.page()?.sliced?.[index] !== undefined;
+  }
+
   protected key(doc: BsonDocument): string | null {
     return documentKey(doc);
   }
@@ -299,7 +325,8 @@ export class CollectionView {
         this.actions.setHost({
           ...target,
           projection: () => this.results.query().projection,
-          documentChanged: (key, doc) => this.documentChanged(key, doc),
+          slicedOf: (key) => this.slicedOf(key),
+          documentChanged: (key, doc, sliced) => this.documentChanged(key, doc, sliced),
         });
         this.run();
       });
@@ -313,6 +340,13 @@ export class CollectionView {
     // (the explorer's default is one row per field). The user can still flip it.
     const orientation = inject(TableOrientationService);
     if (orientation.read('') === 'v') orientation.toggle('');
+    // Inner pages are kept by row: a newly read page of documents (next page, query run again)
+    // starts every array on its first page instead of the page the previous row's array was on.
+    const pages = inject(PageService);
+    effect(() => {
+      this.results.pageLoads();
+      untracked(() => pages.clear());
+    });
   }
 
   protected edit(field: QueryField, event: Event): void {
@@ -394,9 +428,10 @@ export class CollectionView {
   protected docChanged(index: number, tree: unknown): void {
     const original = this.docs()[index];
     const edited = this.toDocument(tree);
-    // With a projection the loaded document may be partial: Save then refuses edits that would
-    // replace what the projection hides, also after the projection was cleared.
-    const partial = this.partialDocs();
+    // With a projection, or cut arrays of a large document, the loaded document may be partial:
+    // Save then refuses edits that would replace what wasn't loaded, also after the projection
+    // was cleared.
+    const partial = this.isPartial(index);
     if (original && edited !== null) {
       this.edits.edit(original, edited, partial, this.subFieldDocs());
     }
@@ -413,19 +448,75 @@ export class CollectionView {
     return value.type === 'object' ? value : null;
   }
 
-  private treeOf(doc: BsonDocument): unknown {
+  /**
+   * The explorer tree of `doc` (the shown version of the loaded document `loaded`). The arrays
+   * `loaded` came with only partly (`sliced`) are registered with their source: the explorer
+   * reads their other pages with `docs.getSlice`.
+   */
+  private treeOf(
+    doc: BsonDocument,
+    loaded: BsonDocument | null,
+    sliced: readonly SlicedArray[] | undefined,
+  ): unknown {
     let tree = this.trees.get(doc);
     if (tree === undefined) {
       tree = toExplorerValue(doc);
       this.trees.set(doc, tree);
     }
+    const id = loaded === null ? null : documentKey(loaded);
+    if (sliced && loaded !== null && id !== null && tree !== null && typeof tree === 'object') {
+      for (const s of sliced) {
+        const arr = (tree as Record<string, unknown>)[s.path];
+        if (Array.isArray(arr)) this.slices.register(arr, loaded, s.path, this.sliceSource(id, s));
+      }
+    }
     return tree;
   }
 
+  /** Reads items of the array `s` of the document with `_id` `id` (canonical EJSON). */
+  private sliceSource(id: string, s: SlicedArray): SliceSource {
+    const target = this.target();
+    return {
+      total: s.total,
+      load: async (skip, limit) => {
+        const { items } = await this.api.request('docs.getSlice', {
+          ...target,
+          id,
+          path: s.path,
+          skip,
+          limit,
+        });
+        const value = parseEJson(items);
+        return value.type === 'array' ? value.items.map((item) => toExplorerValue(item)) : [];
+      },
+    };
+  }
+
   /** A document of this tab was saved or deleted: the shown page follows. */
-  private documentChanged(key: string, doc: string | null): void {
+  private documentChanged(key: string, doc: string | null, sliced?: readonly SlicedArray[]): void {
     const index = this.docs().findIndex((d) => d !== null && documentKey(d) === key);
-    if (index !== -1) this.results.patchDocument(index, doc);
+    if (index !== -1) this.results.patchDocument(index, doc, sliced);
+  }
+
+  /** The cut arrays of the shown large document `key` (`undefined`: it was loaded whole). */
+  private slicedOf(key: string): { above: number; arrays: readonly SlicedArray[] } | undefined {
+    const index = this.docs().findIndex((d) => d !== null && documentKey(d) === key);
+    const arrays = index === -1 ? undefined : this.results.page()?.sliced?.[index];
+    return arrays === undefined ? undefined : { above: this.results.sliceAbove(), arrays };
+  }
+
+  /** Opens the aggregation builder of this collection in its own tab. */
+  protected openAggregation(): void {
+    const tab = this.tab();
+    const { profileId, db, coll } = this.target();
+    this.workspace.open({
+      id: aggregationTabId(profileId, db, coll),
+      kind: 'aggregation',
+      title: `${coll} aggregation`,
+      detail: tab.detail,
+      production: tab.production,
+      data: { ...tab.data },
+    });
   }
 
   protected toggleIo(panel: 'export' | 'import'): void {

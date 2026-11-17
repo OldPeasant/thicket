@@ -1,4 +1,6 @@
-import { methods, type Profile } from '@thicket/contract';
+import { join } from 'node:path';
+
+import { BROADCAST_STREAMS, methods, type Event, type Profile } from '@thicket/contract';
 
 import { aggHandlers } from '../agg';
 import { browseHandlers } from '../browse';
@@ -6,8 +8,10 @@ import { ConnectionManager, connHandlers } from '../connections';
 import { docsQueryHandlers } from '../docs/query';
 import { docsWriteHandlers } from '../docs/write';
 import { guardWrites } from '../guard';
+import { indexHandlers } from '../indexes';
 import { dialogsOverLink, ioHandlers } from '../io';
 import { ShellHost, shellHandlers } from '../shell';
+import { HostKeyPrompts, KnownHosts, sshHandlers } from '../ssh';
 import { wiringHandlers, type PrivilegedLink } from './handlers';
 import { fromMainPort, type MainPortLike } from './ports';
 import { isBackendControlMessage } from './protocol';
@@ -30,6 +34,11 @@ export interface BackendOptions {
    * without it `shell.open` answers `UNSUPPORTED`.
    */
   shellWorker?: string | URL;
+  /**
+   * Electron's `userData` folder (`THICKET_USER_DATA`, set by main when it starts the backend);
+   * holds `known_hosts`. Without it SSH tunnels answer `UNSUPPORTED`.
+   */
+  userData?: string;
 }
 
 /**
@@ -43,6 +52,15 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
     if (!privileged) throw new RpcError('INTERNAL', 'The backend has no link to main yet');
     return privileged;
   };
+  // Senders of the connected renderer ports, for the backend's broadcasts (`ssh.hostKey`,
+  // `conn.status` of a connection whose SSH tunnel was lost).
+  const renderers = new Set<(event: Event) => void>();
+  const prompts = new HostKeyPrompts((prompt) => {
+    for (const send of renderers) {
+      send({ stream: BROADCAST_STREAMS.sshHostKey, kind: 'data', payload: prompt });
+    }
+    return renderers.size;
+  });
   const loadProfile = async (profileId: string): Promise<Profile> =>
     ((await link().call('profiles.forConnect', { profileId })) as { profile: Profile }).profile;
   const connections = new ConnectionManager({
@@ -54,6 +72,19 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
         }
       ).secrets,
     log: (message) => log(`connections: ${message}`),
+    onStatus: (status) => {
+      for (const send of renderers) {
+        send({ stream: BROADCAST_STREAMS.connStatus, kind: 'data', payload: status });
+      }
+    },
+    ...(options.userData !== undefined
+      ? {
+          ssh: {
+            knownHosts: new KnownHosts(join(options.userData, 'known_hosts')),
+            confirmHostKey: (question, signal) => prompts.ask(question, signal),
+          },
+        }
+      : {}),
   });
   const shells = new ShellHost({
     workerUrl: options.shellWorker,
@@ -74,11 +105,13 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
     {
       ...wiringHandlers({ pid: options.pid, privileged: () => privileged }),
       ...conn,
+      ...sshHandlers(prompts),
       ...browseHandlers(connections),
       ...docsQueryHandlers(connections),
       ...docsWriteHandlers(connections),
       ...aggHandlers(connections),
       ...shellHandlers(connections, shells),
+      ...indexHandlers(connections),
       // File dialogs can stay open as long as the user likes: no timeout.
       ...ioHandlers(
         connections,
@@ -101,10 +134,13 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
     }
     const window = event.data.window;
     let stop: () => void = () => undefined;
+    const send = (message: Event) => port.send(message);
     const port = fromMainPort(raw, () => {
       stop();
+      renderers.delete(send);
       log(`renderer ${window} disconnected`);
     });
+    renderers.add(send);
     stop = serve(port, {
       table: methods,
       route: 'backend',

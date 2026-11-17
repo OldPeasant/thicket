@@ -9,7 +9,12 @@
 }
 
 @if (!(showChip && !isContainer)) {
-  <app-editable-value [value]="value" [uid]="uid" (valueChange)="onSelfChange($event)" />
+  <app-editable-value
+    [value]="value"
+    [uid]="uid"
+    [readOnly]="childLocked"
+    (valueChange)="onSelfChange($event)"
+  />
 }
 
 @if (showChip) {
@@ -73,6 +78,7 @@
                   <app-json-table
                     [value]="e[1]"
                     [path]="objChildPath(e[0])"
+                    [locked]="childLocked"
                     [forceVisible]="entryForceVisible(e[0], e[1])"
                     [filterCollapsed]="entryCollapsed(e[0], e[1])"
                     [uid]="objChildUid(e[0])"
@@ -107,6 +113,7 @@
                   <app-json-table
                     [value]="e[1]"
                     [path]="objChildPath(e[0])"
+                    [locked]="childLocked"
                     [forceVisible]="entryForceVisible(e[0], e[1])"
                     [filterCollapsed]="entryCollapsed(e[0], e[1])"
                     [uid]="objChildUid(e[0])"
@@ -118,18 +125,8 @@
           </tbody>
         }
       </table>
-      @if (hasMoreItems) {
-        <div class="reveal-bar" (click)="$event.stopPropagation()">
-          <span class="reveal-info">{{ revealedCount }} / {{ totalFilteredCount }}</span>
-          @for (batch of reveal.batches; track batch) {
-            <button type="button" class="reveal-btn" (click)="revealMoreItems(batch)">
-              +{{ batch }}
-            </button>
-          }
-          <button type="button" class="reveal-btn" (click)="revealAllItems()">
-            Show all {{ totalFilteredCount }}
-          </button>
-        </div>
+      @if (pageWindow.paged) {
+        <app-pager [window]="pageWindow" noun="fields" (pageChange)="setPage($event)" />
       }
     </div>
   }
@@ -224,6 +221,7 @@
                       <app-json-table
                         [value]="cell(arr[i], k)"
                         [path]="arrCellPath(k)"
+                        [locked]="childLocked"
                         [forceVisible]="cellForceVisible(arr[i], k)"
                         [filterCollapsed]="cellCollapsed(arr[i], k)"
                         [uid]="cellUid(i, k)"
@@ -258,6 +256,7 @@
                       <app-json-table
                         [value]="arr[i]"
                         [path]="arrItemPath()"
+                        [locked]="childLocked"
                         [forceVisible]="itemForceVisible(arr[i])"
                         [uid]="itemUid(i)"
                         (valueChange)="onItemChange(i, $event)"
@@ -328,6 +327,7 @@
                       <app-json-table
                         [value]="cell(arr[i], k)"
                         [path]="arrCellPath(k)"
+                        [locked]="childLocked"
                         [forceVisible]="cellForceVisible(arr[i], k)"
                         [filterCollapsed]="cellCollapsed(arr[i], k)"
                         [uid]="cellUid(i, k)"
@@ -367,6 +367,7 @@
                       <app-json-table
                         [value]="arr[i]"
                         [path]="arrItemPath()"
+                        [locked]="childLocked"
                         [forceVisible]="itemForceVisible(arr[i])"
                         [uid]="itemUid(i)"
                         (valueChange)="onItemChange(i, $event)"
@@ -379,18 +380,31 @@
           </tbody>
         }
       </table>
-      @if (hasMoreItems) {
-        <div class="reveal-bar" (click)="$event.stopPropagation()">
-          <span class="reveal-info">{{ revealedCount }} / {{ totalFilteredCount }}</span>
-          @for (batch of reveal.batches; track batch) {
-            <button type="button" class="reveal-btn" (click)="revealMoreItems(batch)">
-              +{{ batch }}
+      @if (slicePage; as sp) {
+        @if (sp.error) {
+          <p class="slice-status error" data-testid="slice-error" role="alert">
+            Could not load items {{ pageWindow.start + 1 }}–{{ pageWindow.end }}: {{ sp.error }}
+            <button
+              type="button"
+              class="slice-retry"
+              (click)="$event.stopPropagation(); retrySlice()"
+            >
+              Retry
             </button>
-          }
-          <button type="button" class="reveal-btn" (click)="revealAllItems()">
-            Show all {{ totalFilteredCount }}
-          </button>
-        </div>
+          </p>
+        } @else if (!sp.items) {
+          <p class="slice-status" data-testid="slice-loading" role="status">
+            Loading items {{ pageWindow.start + 1 }}–{{ pageWindow.end }}…
+          </p>
+        }
+      }
+      @if (pageWindow.paged) {
+        <app-pager [window]="pageWindow" noun="items" (pageChange)="setPage($event)" />
+      }
+      @if (sliceSource) {
+        <p class="slice-note" data-testid="slice-note">
+          Large document: items are loaded page by page and can't be edited here.
+        </p>
       }
     </div>
   } @else {
@@ -412,6 +426,7 @@
                   <app-json-table
                     [value]="arr[i]"
                     [path]="arrItemPath()"
+                    [locked]="childLocked"
                     [forceVisible]="itemForceVisible(arr[i])"
                     [uid]="itemUid(i)"
                     (valueChange)="onItemChange(i, $event)"
@@ -438,6 +453,7 @@
                   <app-json-table
                     [value]="arr[i]"
                     [path]="arrItemPath()"
+                    [locked]="childLocked"
                     [forceVisible]="itemForceVisible(arr[i])"
                     [uid]="itemUid(i)"
                     (valueChange)="onItemChange(i, $event)"
@@ -458,18 +474,31 @@
           </tbody>
         }
       </table>
-      @if (hasMoreItems) {
-        <div class="reveal-bar" (click)="$event.stopPropagation()">
-          <span class="reveal-info">{{ revealedCount }} / {{ totalFilteredCount }}</span>
-          @for (batch of reveal.batches; track batch) {
-            <button type="button" class="reveal-btn" (click)="revealMoreItems(batch)">
-              +{{ batch }}
+      @if (slicePage; as sp) {
+        @if (sp.error) {
+          <p class="slice-status error" data-testid="slice-error" role="alert">
+            Could not load items {{ pageWindow.start + 1 }}–{{ pageWindow.end }}: {{ sp.error }}
+            <button
+              type="button"
+              class="slice-retry"
+              (click)="$event.stopPropagation(); retrySlice()"
+            >
+              Retry
             </button>
-          }
-          <button type="button" class="reveal-btn" (click)="revealAllItems()">
-            Show all {{ totalFilteredCount }}
-          </button>
-        </div>
+          </p>
+        } @else if (!sp.items) {
+          <p class="slice-status" data-testid="slice-loading" role="status">
+            Loading items {{ pageWindow.start + 1 }}–{{ pageWindow.end }}…
+          </p>
+        }
+      }
+      @if (pageWindow.paged) {
+        <app-pager [window]="pageWindow" noun="items" (pageChange)="setPage($event)" />
+      }
+      @if (sliceSource) {
+        <p class="slice-note" data-testid="slice-note">
+          Large document: items are loaded page by page and can't be edited here.
+        </p>
       }
     </div>
   }

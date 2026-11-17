@@ -10,6 +10,7 @@ import {
   privilegedMethods,
   route,
   settingsChanged,
+  sshHostKeyPrompt,
   themeInfo,
   type MethodDef,
 } from './index';
@@ -199,6 +200,7 @@ describe('no renderer-routable method can return a secret (schemas)', () => {
       [BROADCAST_STREAMS.theme]: themeInfo,
       [BROADCAST_STREAMS.settingsChanged]: settingsChanged,
       [BROADCAST_STREAMS.backendRestarted]: backendRestarted,
+      [BROADCAST_STREAMS.sshHostKey]: sshHostKeyPrompt,
     };
     expect(Object.keys(payloads).sort()).toEqual(Object.values(BROADCAST_STREAMS).sort());
     for (const [stream, schema] of Object.entries(payloads))

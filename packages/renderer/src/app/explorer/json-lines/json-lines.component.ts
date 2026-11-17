@@ -5,12 +5,10 @@ import { JsonTableComponent } from '../json-table/json-table.component';
 import { groupRootPath, lineUid, type JsonLine, type JsonLinesDoc } from '../json-lines.util';
 import type { Layout } from '../layout.util';
 import { FilterService } from '../services/filter.service';
-import {
-  JsonLinesService,
-  LINES_INITIAL_COUNT,
-  LINES_REVEAL_KEY,
-} from '../services/json-lines.service';
-import { RevealService } from '../services/reveal.service';
+import { JsonLinesService, LINES_PAGE_KEY, LINES_PAGE_SIZE } from '../services/json-lines.service';
+import type { PageWindow } from '../page.util';
+import { PagerComponent } from '../pager/pager.component';
+import { PageService } from '../services/page.service';
 import { SchemaService } from '../services/schema.service';
 
 // A JSON Lines file: each line shown the way a whole document is, one below
@@ -21,7 +19,7 @@ import { SchemaService } from '../services/schema.service';
 @Component({
   selector: 'app-json-lines',
   standalone: true,
-  imports: [JsonTableComponent, JsonFormComponent, HighlightComponent],
+  imports: [JsonTableComponent, JsonFormComponent, HighlightComponent, PagerComponent],
   templateUrl: './json-lines.component.html',
   styleUrl: './json-lines.component.css',
 })
@@ -32,7 +30,7 @@ export class JsonLinesComponent {
 
   protected lines = inject(JsonLinesService);
   protected filter = inject(FilterService);
-  protected reveal = inject(RevealService);
+  private pages = inject(PageService);
   private schema = inject(SchemaService);
 
   protected readonly groupRootPath = groupRootPath;
@@ -60,25 +58,17 @@ export class JsonLinesComponent {
       : this.filter.valueMatch(line.text);
   }
 
-  get revealedCount(): number {
-    const length = this.matching.length;
-    return this.reveal.count(LINES_REVEAL_KEY, length, Math.min(length, LINES_INITIAL_COUNT));
+  get pageWindow(): PageWindow {
+    return this.pages.window(LINES_PAGE_KEY, this.matching.length, LINES_PAGE_SIZE);
   }
 
   get paged(): number[] {
-    return this.matching.slice(0, this.revealedCount);
+    const w = this.pageWindow;
+    return this.matching.slice(w.start, w.end);
   }
 
-  get hasMore(): boolean {
-    return this.revealedCount < this.matching.length;
-  }
-
-  revealMore(by: number): void {
-    this.reveal.revealMore(LINES_REVEAL_KEY, by);
-  }
-
-  revealAll(): void {
-    this.reveal.revealAll(LINES_REVEAL_KEY);
+  setPage(page: number): void {
+    this.pages.set(LINES_PAGE_KEY, page);
   }
 
   // A letter per group of alike lines, shown only when there is more than one.

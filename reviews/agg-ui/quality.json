@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "task": "agg-ui",
+  "reviewed_revision": "14aed958785daecb18a1621b3b830bed712bfd02",
+  "helpers": {
+    "test-writer":   {"status": "completed", "report": "reviews/agg-ui/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/agg-ui/review.md"},
+    "fixer":         {"status": "completed", "report": "reviews/agg-ui/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P1", "disposition": "fixed", "note": "text mode: Create view and Export used the stale stage list"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "tests for text-mode Export/Create view added"},
+    {"id": "CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "failed preview can be retried"},
+    {"id": "CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "paging uses the pipeline that produced the result; errors clear old results"},
+    {"id": "CR-5", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "live region narrowed; stage errors no longer alerts"},
+    {"id": "TW-obs-1", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "same as CR-3 (failed preview retry)"},
+    {"id": "TW-obs-2", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "same as CR-4 (paging after edit)"},
+    {"id": "TW-obs-3", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "unused readOnly computed removed"},
+    {"id": "CR-6", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "text-mode Run with a parse error clears the earlier result and run error"},
+    {"id": "CR-7", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "persistent per-stage live region agg-preview-live"},
+    {"id": "CR-8", "source": "code-reviewer", "severity": "P3", "disposition": "deferred", "note": "live region text does not name its stage; follow-up task agg-ui-polish"},
+    {"id": "CR-9", "source": "code-reviewer", "severity": "P3", "disposition": "deferred", "note": "previews requested while in text mode; follow-up task agg-ui-polish"}
+  ],
+  "validation": [
+    {"command": "cd packages/renderer && npx ng test --include='src/app/aggregation/**/*.spec.ts'", "result": "pass"},
+    {"command": "npm run test:e2e -- aggregation", "result": "pass"},
+    {"command": "npm ci && npm run check", "result": "pass"}
+  ]
+}

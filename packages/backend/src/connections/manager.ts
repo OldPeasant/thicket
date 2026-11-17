@@ -16,6 +16,7 @@ import {
 } from 'mongodb';
 
 import { RpcError } from '../server/rpc';
+import { openSshTunnel, type SshEnvironment, type SshTunnel } from '../ssh/tunnel';
 import { redact, toConnectError } from './errors';
 import { clientConfig, type ClientConfig, type ConnectSecrets } from './options';
 
@@ -37,12 +38,25 @@ export interface ConnectionManagerDeps {
   log?(message: string): void;
   /** Clock for latencies (ms). */
   now?(): number;
+  /** SSH tunnels (`known_hosts`, host key questions); without it SSH profiles are `UNSUPPORTED`. */
+  ssh?: SshEnvironment;
+  /** Defaults to `openSshTunnel` (tests pass fakes). */
+  openTunnel?: typeof openSshTunnel;
+  /**
+   * State changes the manager notices by itself (not answers to `conn.*` calls), for the
+   * `conn.status` broadcast: an open connection whose SSH tunnel was lost.
+   */
+  onStatus?(status: ConnStatus): void;
 }
 
 interface Entry {
   state: ConnStatus['state'];
   error?: ErrorSummary;
   client?: ClientLike;
+  /** The SSH tunnel the client connects through, closed with the connection. */
+  tunnel?: SshTunnel;
+  /** Aborted when the connection is closed while connecting (stops an SSH host key question). */
+  abort: AbortController;
   /** Settles when the connect in progress is over (connected or failed). */
   opening?: Promise<ConnStatus>;
   /** `open` callers waiting for `opening`; when the last one cancels, the connect is closed. */
@@ -91,11 +105,28 @@ export class ConnectionManager {
       storedFrom = (await this.matchesSaved(profile)) ? profile.id : undefined;
     }
     const secrets = await this.secretsFor(profile, storedFrom, password);
-    const { uri, options } = clientConfig(profile, secrets);
     const label = `test ${profile.name}`;
+    const tunnel = await this.openTunnelFor(profile, secrets, label, signal);
+    let config: ReturnType<typeof clientConfig>;
+    try {
+      config = clientConfig(profile, secrets, tunnel?.proxy);
+    } catch (error) {
+      await tunnel?.close();
+      throw error;
+    }
+    const { uri, options } = config;
     this.log(`${label}: connecting to ${uri}`, secrets);
-    const client = this.createClient(uri, options);
-    const connecting = client.connect();
+    let client: ClientLike;
+    let connecting: Promise<unknown>;
+    try {
+      // `new MongoClient` throws for some connection strings (e.g. directConnection with two
+      // hosts): the tunnel must not outlive that.
+      client = this.createClient(uri, options);
+      connecting = client.connect();
+    } catch (error) {
+      await tunnel?.close();
+      throw error;
+    }
     let connected = false;
     try {
       await abortable(connecting, signal);
@@ -120,6 +151,51 @@ export class ConnectionManager {
           () => undefined,
         );
       }
+      // Closing the tunnel also ends a driver connect still in progress (its sockets fail).
+      await tunnel?.close();
+    }
+  }
+
+  /**
+   * Opens the SSH tunnel of a profile with `ssh` (undefined otherwise). Fails with `SSH_ERROR`,
+   * `CANCELLED` (signal), or `UNSUPPORTED` when this manager has no SSH environment.
+   */
+  private async openTunnelFor(
+    profile: ProfileDraft,
+    secrets: ConnectSecrets,
+    label: string,
+    signal: AbortSignal | undefined,
+    onClosed?: () => void,
+  ): Promise<SshTunnel | undefined> {
+    if (!profile.ssh) return undefined;
+    const env = this.deps.ssh;
+    if (!env) throw new RpcError('UNSUPPORTED', 'SSH tunnels are not available here');
+    if (profile.proxy) {
+      throw new RpcError(
+        'INVALID_PARAMS',
+        'A profile connects through either an SSH tunnel or a SOCKS5 proxy, not both',
+      );
+    }
+    const ssh = profile.ssh;
+    this.log(`${label}: opening SSH tunnel via ${ssh.username}@${ssh.host}:${String(ssh.port)}`);
+    const open = this.deps.openTunnel ?? openSshTunnel;
+    try {
+      return await open(
+        ssh,
+        secrets,
+        { ...env, log: (message) => this.log(`${label}: ${message}`, secrets) },
+        {
+          ...(signal ? { signal } : {}),
+          ...(profile.connectTimeoutMS !== undefined
+            ? { readyTimeoutMS: profile.connectTimeoutMS }
+            : {}),
+          ...(onClosed ? { onClosed } : {}),
+        },
+      );
+    } catch (error) {
+      const failure = toConnectError(error, Object.values(secrets).filter(isString), true);
+      this.log(`${label}: ${failure.code} ${failure.message}`, secrets);
+      throw failure;
     }
   }
 
@@ -139,7 +215,7 @@ export class ConnectionManager {
     if (current?.state === 'connected') return this.statusOf(profileId);
     if (current?.opening) return this.waitFor(profileId, current, current.opening, signal);
 
-    const entry: Entry = { state: 'connecting', waiters: 0 };
+    const entry: Entry = { state: 'connecting', waiters: 0, abort: new AbortController() };
     this.entries.set(profileId, entry);
     const opening = this.connect(profileId, entry, password).finally(() => {
       delete entry.opening;
@@ -185,7 +261,16 @@ export class ConnectionManager {
       const profile = await this.deps.loadProfile(profileId);
       secrets = await this.secretsFor(profile, profileId, password);
       if (this.entries.get(profileId) !== entry) throw closedWhileConnecting();
-      const { uri, options } = clientConfig(profile, secrets);
+      const tunnel = await this.openTunnelFor(
+        profile,
+        secrets,
+        `open ${profileId}`,
+        entry.abort.signal,
+        () => void this.tunnelLost(profileId, entry),
+      );
+      if (tunnel) entry.tunnel = tunnel;
+      if (this.entries.get(profileId) !== entry) throw closedWhileConnecting();
+      const { uri, options } = clientConfig(profile, secrets, tunnel?.proxy);
       this.log(`open ${profileId}: connecting to ${uri}`, secrets);
       const client = this.createClient(uri, options);
       entry.client = client;
@@ -210,6 +295,8 @@ export class ConnectionManager {
           : toConnectError(error, Object.values(secrets).filter(isString), true);
       if (entry.client) await closeQuietly(entry.client);
       delete entry.client;
+      await entry.tunnel?.close();
+      delete entry.tunnel;
       if (this.entries.get(profileId) === entry) {
         if (failure.code === 'CANCELLED') {
           this.entries.delete(profileId);
@@ -223,12 +310,34 @@ export class ConnectionManager {
     }
   }
 
+  /**
+   * The SSH tunnel of an open connection closed by itself (session lost): the connection is
+   * `error` from now on, its client is closed and the new state is broadcast. The next `open`
+   * builds a new tunnel. While still connecting, the failing driver connect handles it.
+   */
+  private async tunnelLost(profileId: string, entry: Entry): Promise<void> {
+    if (this.entries.get(profileId) !== entry || entry.state !== 'connected') return;
+    entry.state = 'error';
+    entry.error = {
+      code: 'SSH_ERROR',
+      message: 'The SSH tunnel was closed (connection to the SSH server lost); open it again',
+    };
+    const client = entry.client;
+    delete entry.client;
+    delete entry.tunnel;
+    this.log(`open ${profileId}: SSH_ERROR ${entry.error.message}`);
+    this.deps.onStatus?.(this.statusOf(profileId));
+    if (client) await closeQuietly(client);
+  }
+
   /** Closes the connection of a profile; nothing happens when it isn't open. */
   async close(profileId: string): Promise<void> {
     const entry = this.entries.get(profileId);
     if (!entry) return;
     this.entries.delete(profileId);
+    entry.abort.abort();
     if (entry.client) await closeQuietly(entry.client);
+    await entry.tunnel?.close();
     this.log(`close ${profileId}`);
   }
 
