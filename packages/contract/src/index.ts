@@ -12,6 +12,7 @@ import { docsMethods } from './docs';
 import type { ErrorInfo } from './errors';
 import { idxMethods } from './idx';
 import { ioMethods } from './io';
+import { pipelinesMethods } from './pipelines';
 import { profilesMethods } from './profiles';
 import { schemaMethods } from './schema';
 import { shellMethods } from './shell';
@@ -30,6 +31,7 @@ export * from './envelope';
 export * from './errors';
 export * from './idx';
 export * from './io';
+export * from './pipelines';
 export * from './profiles';
 export * from './schema';
 export * from './shell';
@@ -47,6 +49,7 @@ export const methods = {
   ...ioMethods,
   ...shellMethods,
   ...adminMethods,
+  ...pipelinesMethods,
   ...appMethods,
   ...backendMethods,
 } as const satisfies Record<string, MethodDef>;

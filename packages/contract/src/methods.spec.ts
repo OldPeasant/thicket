@@ -51,6 +51,16 @@ const SERVER = {
   enterprise: false,
   raw: '{"ok":{"$numberDouble":"1.0"}}',
 };
+const SAVED_PIPELINE = {
+  ...NS,
+  pipelineId: 'pl-1',
+  name: 'Big orders',
+  stages: [
+    { stage: '{"$match":{"total":{"$gt":{"$numberInt":"100"}}}}', enabled: true },
+    { stage: '{"$limit":{"$numberInt":"5"}}', enabled: false },
+  ],
+  updatedAt: '2026-11-17T04:00:00.000Z',
+};
 const SETTINGS = {
   style: 'business' as const,
   mode: 'system' as const,
@@ -289,6 +299,20 @@ const RESULTS: { [M in MethodName]: { valid: ResultOf<M>; invalid: unknown } } =
   'admin.roles': { valid: { roles: ['{"role":"read"}'] }, invalid: { roles: ['read'] } },
   'admin.serverStatus': { valid: { status: '{"ok":1}' }, invalid: { status: { ok: 1 } } },
   'admin.watch': { valid: { streamId: 's6' }, invalid: { stream: 's6' } },
+
+  'pipelines.list': {
+    valid: { pipelines: [SAVED_PIPELINE] },
+    invalid: { pipelines: [{ ...SAVED_PIPELINE, stages: [{ stage: { $match: {} }, enabled: true }] }] },
+  },
+  'pipelines.save': {
+    valid: { saved: SAVED_PIPELINE },
+    invalid: { saved: { ...SAVED_PIPELINE, updatedAt: 'yesterday' } },
+  },
+  'pipelines.rename': {
+    valid: { saved: { ...SAVED_PIPELINE, name: 'Renamed' } },
+    invalid: { saved: { ...SAVED_PIPELINE, name: '' } },
+  },
+  'pipelines.delete': { valid: {}, invalid: null },
 
   'app.settings.get': {
     valid: { settings: SETTINGS },

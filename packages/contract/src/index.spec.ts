@@ -239,6 +239,24 @@ const SAMPLES: { [M in MethodName]: { valid: ParamsOf<M>; invalid: unknown } } =
     invalid: { profileId: P, fullDocument: 'all' },
   },
 
+  'pipelines.list': { valid: NS, invalid: { profileId: P, db: 'shop' } },
+  'pipelines.save': {
+    valid: {
+      ...NS,
+      name: 'Big orders',
+      stages: [
+        { stage: '{"$match":{"total":{"$gt":{"$numberInt":"100"}}}}', enabled: true },
+        { stage: '{"$limit":{"$numberInt":"5"}}', enabled: false },
+      ],
+    },
+    invalid: { ...NS, name: '   ', stages: [] },
+  },
+  'pipelines.rename': {
+    valid: { pipelineId: 'pl-1', name: 'Renamed' },
+    invalid: { pipelineId: 'pl-1', name: 'x'.repeat(201) },
+  },
+  'pipelines.delete': { valid: { pipelineId: 'pl-1' }, invalid: { pipelineId: '' } },
+
   'app.ping': { valid: {}, invalid: { echo: 1 } },
   'app.settings.get': { valid: {}, invalid: { key: 'style' } },
   'app.settings.set': {
@@ -291,6 +309,7 @@ describe('method table', () => {
         'docs',
         'idx',
         'io',
+        'pipelines',
         'profiles',
         'schema',
         'shell',
@@ -617,12 +636,12 @@ describe('writes', () => {
 });
 
 describe('route', () => {
-  it('sends profiles.* and app.* to main, the rest to the backend', () => {
+  it('sends profiles.*, pipelines.* and app.* to main, the rest to the backend', () => {
     for (const name of METHOD_NAMES) {
       const group = name.split('.')[0] ?? '';
       expect([name, route(name)]).toEqual([
         name,
-        ['profiles', 'app'].includes(group) ? 'main' : 'backend',
+        ['profiles', 'pipelines', 'app'].includes(group) ? 'main' : 'backend',
       ]);
     }
   });

@@ -243,6 +243,7 @@ Method groups (exact signatures are written in the contract task, M0):
 | `io.*` | export, import (file chosen in the main process with a native dialog) |
 | `shell.*` | open, eval, complete, close |
 | `admin.*` | currentOp, killOp, users, roles, serverStatus, watch |
+| `pipelines.*` | list, save, rename, delete (saved aggregation pipelines, `pipelines.json`) |
 | `app.*` | settings get/set, theme, checkForUpdate |
 
 Writes carry the profile id; the backend checks the profile's read-only flag itself. Confirmation
