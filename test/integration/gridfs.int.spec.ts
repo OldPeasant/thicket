@@ -485,4 +485,52 @@ describe('gridfs', () => {
       await expectNoFile('steps');
     }
   });
+
+  // Server-side failures in the middle of an upload: a validator on the chunks (or files)
+  // collection refuses one insert, so the awaited write (or end) of the GridFS stream fails.
+  it('an upload whose third chunk insert is refused fails as SERVER_ERROR and removes the chunks already stored', async () => {
+    await direct.db(DB).createCollection('badchunk.chunks', { validator: { n: { $lt: 2 } } });
+    const source = path.join(dir, 'badchunk.bin');
+    await writeFile(source, randomBytes(3 * MB));
+    const { outcome } = await upload(source, 'badchunk');
+    expect(outcome.end).toBeUndefined();
+    expect(outcome.error?.code).toBe('SERVER_ERROR');
+    expect(outcome.error?.message).toMatch(/validation/i);
+    expect(outcome.error?.message).not.toContain('Could not read');
+    // No final progress event with a file id was sent.
+    expect(outcome.progress.some((p) => p.fileId !== undefined)).toBe(false);
+    await expectNoFile('badchunk');
+  });
+
+  it('an upload whose files document is refused fails as SERVER_ERROR and removes all its chunks', async () => {
+    await direct
+      .db(DB)
+      .createCollection('badfiles.files', { validator: { filename: { $ne: 'refused.bin' } } });
+    const source = path.join(dir, 'refused.bin');
+    await writeFile(source, randomBytes(600 * 1024));
+    const progress: GridfsProgress[] = [];
+    const error = await uploadFile(direct, DB, 'badfiles', source, 'refused.bin', {
+      signal: new AbortController().signal,
+      progressBytes: 64 * 1024,
+      progress: (p) => progress.push(p),
+    }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(RpcError);
+    expect((error as RpcError).code).toBe('SERVER_ERROR');
+    // Every chunk had been written (all progress steps seen) before the end failed.
+    expect(progress.at(-1)?.bytes).toBe(9 * 64 * 1024);
+    expect(progress.some((p) => p.fileId !== undefined)).toBe(false);
+    await expectNoFile('badfiles');
+    // The same bucket still takes another file.
+    const ok = path.join(dir, 'accepted.bin');
+    await writeFile(ok, randomBytes(1000));
+    const stored = await uploadFile(direct, DB, 'badfiles', ok, 'accepted.bin', {
+      signal: new AbortController().signal,
+      progress: () => undefined,
+    });
+    expect(stored.bytes).toBe(1000);
+    expect(await direct.db(DB).collection('badfiles.chunks').countDocuments()).toBe(1);
+  });
 });

@@ -431,6 +431,29 @@ describe('GridfsView', () => {
       expect(sent('gridfs.upload')).toHaveLength(2);
     });
 
+    it('Cancel of an upload into another bucket reloads that bucket, keeps it chosen and keeps the message', async () => {
+      await select('images');
+      await click(get('gridfs-upload'));
+      fake.data('gridfs.upload', 'up1', { bytes: 4096, totalBytes: 4096 });
+      await settle();
+      // The backend stored the file before the cancel arrived.
+      const photo = file('photo.png', { length: 4096 });
+      buckets = [
+        { name: 'fs', files: 2, hasChunks: true },
+        { name: 'images', files: 1, hasChunks: true },
+      ];
+      fake.handle('gridfs.files', (p) =>
+        p.bucket === 'images' ? { files: [photo], total: 1 } : { files, total: files.length },
+      );
+      await click(get('gridfs-transfer-cancel'));
+      expect(fake.cancels).toContain('up1');
+      expect(sent('gridfs.files').at(-1)).toMatchObject({ bucket: 'images' });
+      expect(get<HTMLSelectElement>('gridfs-bucket').value).toBe('images');
+      expect(all('gridfs-row').map((r) => r.dataset['name'])).toEqual(['photo.png']);
+      expect(text(get('gridfs-message'))).toBe('Cancelled the upload of photo.png.');
+      expect(get('gridfs-message').getAttribute('role')).toBe('status');
+    });
+
     it('a stream failing midway shows an alert and ends the transfer', async () => {
       await click(get('gridfs-upload'));
       fake.failStream('up1', { code: 'SERVER_ERROR', message: 'disk quota exceeded (fictitious)' });
