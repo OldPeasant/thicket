@@ -11,7 +11,8 @@ lease_until: 2026-11-17T00:47:27Z
 Profile list (folders, colors), editor with form and connection-string tabs kept in sync, SCRAM and TLS fields, secrets options (save / ask each time, weak-keychain warning), read-only and production flags, Test connection with explained errors. Use the frontend-design skill for the visual direction; respect the Business and Tron tokens (no hard-coded colors).
 
 ## Acceptance criteria
-- [ ] Component tests: editing the form updates the URI and vice versa; masked password
+- [x] Component tests: editing the form updates the URI and vice versa; masked password
+  - verified (2026-11-17 01:28+0100 by felix/agent-2): cd packages/renderer && npx ng test --watch=false --include='src/app/connections/**/*.spec.ts' at 0414a53 -> 3 files, 127 passed (editor spec: form edits update URI and URI paste updates form; password field masked and URI shows **** / secret URI options stripped and masked)
 - [ ] e2e: create a profile for the int-harness fixture, Test connection succeeds; wrong password shows AUTH_FAILED text
 - [ ] Ask-each-time prompts for the password on connect and does not store it (e2e checks secrets.bin unchanged)
 
