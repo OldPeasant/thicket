@@ -5,7 +5,7 @@ owner: dell26/agent-1
 deps: [docs-query-backend]
 touches: [packages/backend/src/agg]
 prio: 2
-lease_until: 2026-11-17T01:48:48Z
+lease_until: 2026-11-17T01:53:49Z
 ---
 ## Goal
 agg.run (streamed, paged), previewStage (pipeline up to stage n on a sample), explain for find and aggregate, createView; `$out`/`$merge` treated as writes through the guard.
