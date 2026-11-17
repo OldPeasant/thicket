@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { Locator, Page } from '@playwright/test';
 import { Decimal128, MongoClient, ObjectId } from 'mongodb';
 
-import { expect, test } from './harness';
+import { expect, screenshot, test } from './harness';
 
 /** Where the screenshots go (git-ignored; copied into reviews/ for a review). */
 const SHOTS = process.env['THICKET_SCREENSHOTS'] ?? join('test-results', 'screenshots');
@@ -64,6 +64,7 @@ async function fill(locator: Locator, text: string): Promise<void> {
 }
 
 test('demo step 8: $match → $group → $sort with a preview per stage, export as shell and Node', async ({
+  electronApp,
   window,
   mongo,
 }) => {
@@ -146,7 +147,7 @@ test('demo step 8: $match → $group → $sort with a preview per stage, export 
     await expect(results.nth(i)).toContainText(`NumberDecimal("${String(doc['revenue'])}")`);
   }
   await mkdir(SHOTS, { recursive: true });
-  await window.screenshot({ path: join(SHOTS, 'aggregation-builder.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'aggregation-builder.png'));
 
   // Export as shell code.
   await builder.getByTestId('agg-export').click();
@@ -161,5 +162,5 @@ test('demo step 8: $match → $group → $sort with a preview per stage, export 
   const node = (await code.textContent()) ?? '';
   expect(node).toContain(mongo.uri);
   expect(node).toMatch(/\.aggregate\(\[[\s\S]*\$match[\s\S]*\$group[\s\S]*\$sort/);
-  await window.screenshot({ path: join(SHOTS, 'aggregation-export-node.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'aggregation-export-node.png'));
 });

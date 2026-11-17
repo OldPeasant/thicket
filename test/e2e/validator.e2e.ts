@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { Locator, Page } from '@playwright/test';
 import { MongoClient } from 'mongodb';
 
-import { expect, test } from './harness';
+import { expect, screenshot, test } from './harness';
 
 /** Where the screenshots go (git-ignored). */
 const SHOTS = process.env['THICKET_SCREENSHOTS'] ?? join('test-results', 'screenshots');
@@ -46,6 +46,7 @@ function treeNode(window: Page, kind: 'conn' | 'db' | 'coll', name: string): Loc
 }
 
 test('validator tab: edit the $jsonSchema validator; failing documents show a marker', async ({
+  electronApp,
   window,
   mongo,
 }) => {
@@ -124,7 +125,7 @@ test('validator tab: edit the $jsonSchema validator; failing documents show a ma
   });
 
   await mkdir(SHOTS, { recursive: true });
-  await window.screenshot({ path: join(SHOTS, 'validator-tab.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'validator-tab.png'));
 
   // Back in the collection tab, the documents that fail are marked (checked by the server).
   await window
@@ -141,7 +142,7 @@ test('validator tab: edit the $jsonSchema validator; failing documents show a ma
   await expect(collection.getByTestId('validator-summary')).toContainText(
     '2 documents on this page fail the validator',
   );
-  await window.screenshot({ path: join(SHOTS, 'validator-marks.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'validator-marks.png'));
 
   // Fixing a document on the server and running the query again clears its marker.
   await withClient(mongo.uri, (client) =>

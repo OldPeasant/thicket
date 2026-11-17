@@ -1,15 +1,16 @@
 import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Locator, Page } from '@playwright/test';
+import type { ElectronApplication, Locator, Page } from '@playwright/test';
 import { Decimal128, MongoClient, ObjectId, type Collection } from 'mongodb';
 
 import {
   containerRuntimeUnavailable,
+  type E2EMongo,
   expect,
+  screenshot,
   startMongoSpec,
   test,
-  type E2EMongo,
 } from '../harness';
 
 /*
@@ -178,7 +179,7 @@ function treeNode(window: Page, kind: 'conn' | 'db' | 'coll', name: string): Loc
   return window.locator(`[data-testid="tree-${kind}"][data-name="${name}"]`);
 }
 
-async function shot(window: Page, name: string): Promise<void> {
+async function shot(electronApp: ElectronApplication, window: Page, name: string): Promise<void> {
   await mkdir(SHOTS, { recursive: true });
   // Let fonts and transitions settle so the screenshots are stable.
   await window.evaluate(async () => {
@@ -186,7 +187,7 @@ async function shot(window: Page, name: string): Promise<void> {
       .fonts.ready;
   });
   await window.waitForTimeout(300);
-  await window.screenshot({ path: join(SHOTS, name) });
+  await screenshot(electronApp, window, join(SHOTS, name));
 }
 
 /** The value input of top-level field `key` in the first document of the list. */
@@ -211,7 +212,11 @@ async function saveConfirmed(window: Page, check?: (operation: Locator) => Promi
   await expect(dialog).toBeHidden();
 }
 
-test('M1 demo, steps 2–7, against a TLS replica set', async ({ window, userDataDir }) => {
+test('M1 demo, steps 2–7, against a TLS replica set', async ({
+  electronApp,
+  window,
+  userDataDir,
+}) => {
   test.skip(unavailable !== undefined, unavailable);
   test.setTimeout(240_000);
   const mongo = server as E2EMongo;
@@ -257,11 +262,11 @@ test('M1 demo, steps 2–7, against a TLS replica set', async ({ window, userDat
     await production.check();
     await expect(production).toBeChecked();
     await production.scrollIntoViewIfNeeded();
-    await shot(window, 'step-2-production.png');
+    await shot(electronApp, window, 'step-2-production.png');
     await window.getByTestId('secret-saved').check();
     await window.getByTestId('test-connection').click();
     await expect(window.getByTestId('test-ok')).toContainText('Connected in', { timeout: 30_000 });
-    await shot(window, 'step-2-connection-form.png');
+    await shot(electronApp, window, 'step-2-connection-form.png');
 
     await window.getByTestId('save').click();
     await expect(window.getByTestId('saved-notice')).toBeVisible();
@@ -290,7 +295,7 @@ test('M1 demo, steps 2–7, against a TLS replica set', async ({ window, userDat
     await expect(window.locator('[data-testid="tab"][data-tab-id$="shop.orders"]')).toBeVisible();
     // Production: red accent on the shell and the tab.
     await expect(window.locator('app-shell')).toHaveClass(/production/);
-    await shot(window, 'step-3-sidebar.png');
+    await shot(electronApp, window, 'step-3-sidebar.png');
   });
 
   await test.step('4. table, 50 per page, page 3 one click away, filter and sort', async () => {
@@ -317,7 +322,7 @@ test('M1 demo, steps 2–7, against a TLS replica set', async ({ window, userDat
     await expect(
       window.locator('app-json-explorer .json-output > app-json-table > .tw > table > tbody > tr'),
     ).toHaveCount(50);
-    await shot(window, 'step-4-table.png');
+    await shot(electronApp, window, 'step-4-table.png');
 
     await window.getByTestId('query-filter').fill('{status: "open", total: {$gt: 100}}');
     await window.getByTestId('query-sort').fill('{total: -1}');
@@ -356,7 +361,7 @@ test('M1 demo, steps 2–7, against a TLS replica set', async ({ window, userDat
     expect(/ObjectId\("([0-9a-f]{24})"\)/.exec((await raw.textContent()) ?? '')?.[1]).toBe(
       DEMO_ID.toHexString(),
     );
-    await shot(window, 'step-4-filter-sort.png');
+    await shot(electronApp, window, 'step-4-filter-sort.png');
   });
 
   const doc = window.getByTestId('result-doc').first();
@@ -380,7 +385,7 @@ test('M1 demo, steps 2–7, against a TLS replica set', async ({ window, userDat
     await expect(range).toHaveText('101–200 of 2,000 items');
     await expect(doc.getByText('ITEM-0100', { exact: true })).toBeVisible();
     await expect(doc.getByText('ITEM-0000', { exact: true })).toHaveCount(0);
-    await shot(window, 'step-5-document.png');
+    await shot(electronApp, window, 'step-5-document.png');
   });
 
   await test.step('6. edit total, set a new field, 2 changes, production confirm, save', async () => {
@@ -392,7 +397,7 @@ test('M1 demo, steps 2–7, against a TLS replica set', async ({ window, userDat
     await addKey.press('Enter');
     await typeValue(doc, 'reviewed', 'yes');
     await expect(window.getByTestId('edit-count')).toHaveText('2 changes');
-    await shot(window, 'step-6-two-changes.png');
+    await shot(electronApp, window, 'step-6-two-changes.png');
 
     await saveConfirmed(window, async (operation) => {
       await expect(operation).toContainText(
@@ -401,7 +406,7 @@ test('M1 demo, steps 2–7, against a TLS replica set', async ({ window, userDat
       await expect(operation).toContainText('$set: {');
       await expect(operation).toContainText('total: NumberDecimal("1234.56")');
       await expect(operation).toContainText('reviewed: "yes"');
-      await shot(window, 'step-6-production-confirm.png');
+      await shot(electronApp, window, 'step-6-production-confirm.png');
     });
     await expect(window.getByTestId('edit-message')).toHaveText(
       `Saved ObjectId("${DEMO_ID.toHexString()}").`,
@@ -435,7 +440,7 @@ test('M1 demo, steps 2–7, against a TLS replica set', async ({ window, userDat
     const statusRow = changed.filter({ hasText: 'status' });
     await expect(statusRow.getByTestId('conflict-local')).toContainText('status: "open"');
     await expect(statusRow.getByTestId('conflict-server')).toContainText('status: "shipped"');
-    await shot(window, 'step-7-conflict.png');
+    await shot(electronApp, window, 'step-7-conflict.png');
     // The failed save wrote nothing.
     const stored = await withOrders(mongo, (c) => c.findOne({ _id: DEMO_ID }));
     expect(stored?.status).toBe('shipped');

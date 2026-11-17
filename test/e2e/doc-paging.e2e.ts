@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { Locator, Page } from '@playwright/test';
 import { type Document, MongoClient } from 'mongodb';
 
-import { expect, test } from './harness';
+import { expect, screenshot, test } from './harness';
 
 /** Where the screenshots go (git-ignored; copied into reviews/ for a review). */
 const SHOTS = process.env['THICKET_SCREENSHOTS'] ?? join('test-results', 'screenshots');
@@ -84,6 +84,7 @@ function treeNode(window: Page, kind: 'conn' | 'db' | 'coll', name: string): Loc
 }
 
 test('a 50 000-item array document opens in < 2 s and pages via docs.getSlice', async ({
+  electronApp,
   window,
   mongo,
 }) => {
@@ -116,7 +117,7 @@ test('a 50 000-item array document opens in < 2 s and pages via docs.getSlice', 
   expect(sliceReads(log)).toEqual([]);
 
   await mkdir(SHOTS, { recursive: true });
-  await window.screenshot({ path: join(SHOTS, 'doc-paging-open.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'doc-paging-open.png'));
 
   // Next page: items 101–200, read with docs.getSlice.
   await pager.getByTestId('nested-pager-next').click();
@@ -134,7 +135,7 @@ test('a 50 000-item array document opens in < 2 s and pages via docs.getSlice', 
   await pager.getByTestId('nested-pager-last').click();
   await expect(range).toHaveText('49,901–50,000 of 50,000 items');
   await expect(window.getByText(sku(49_999), { exact: true })).toBeVisible();
-  await window.screenshot({ path: join(SHOTS, 'doc-paging-last.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'doc-paging-last.png'));
   await pager.getByTestId('nested-pager-first').click();
   await expect(window.getByText(sku(0), { exact: true })).toBeVisible();
 

@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import type { Locator, Page } from '@playwright/test';
 import { MongoClient } from 'mongodb';
 
-import { expect, test } from './harness';
+import { expect, screenshot, test } from './harness';
 
 /** Where the screenshots go (git-ignored; copied into reviews/ for a review). */
 const SHOTS = process.env['THICKET_SCREENSHOTS'] ?? join('test-results', 'screenshots');
@@ -71,6 +71,7 @@ async function shownCount(locator: Locator): Promise<number> {
 }
 
 test('updateMany on 1 500 documents needs the collection name typed; preview count = result', async ({
+  electronApp,
   window,
   mongo,
 }) => {
@@ -105,7 +106,7 @@ test('updateMany on 1 500 documents needs the collection name typed; preview cou
   const previewed = await shownCount(matched);
   expect(previewed).toBe(OPEN);
   await expect(window.getByTestId('bulk-sample-doc').first()).toContainText('status: "open"');
-  await panel.screenshot({ path: join(SHOTS, 'bulk-preview.png') });
+  await screenshot(electronApp, panel, join(SHOTS, 'bulk-preview.png'));
 
   // Over 1 000 documents: the dialog only confirms once the collection name is typed.
   await window.getByTestId('bulk-execute').click();
@@ -116,7 +117,7 @@ test('updateMany on 1 500 documents needs the collection name typed; preview cou
   await expect(ok).toBeDisabled();
   await window.getByTestId('confirm-type').fill('order');
   await expect(ok).toBeDisabled();
-  await window.screenshot({ path: join(SHOTS, 'bulk-confirm.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'bulk-confirm.png'));
   // Nothing was written while the dialog waits.
   expect(await countOf(mongo.uri, { status: 'archived' })).toBe(0);
   await window.getByTestId('confirm-type').fill(COLL);
@@ -140,6 +141,7 @@ test('updateMany on 1 500 documents needs the collection name typed; preview cou
 });
 
 test('deleteMany: preview count equals the deleted count; cancel deletes nothing', async ({
+  electronApp,
   window,
   mongo,
 }) => {
@@ -164,7 +166,7 @@ test('deleteMany: preview count equals the deleted count; cancel deletes nothing
   await window.getByTestId('bulk-preview').click();
   const previewed = await shownCount(window.getByTestId('bulk-matched'));
   expect(previewed).toBe(CLOSED);
-  await window.getByTestId('bulk-panel').screenshot({ path: join(SHOTS, 'bulk-delete.png') });
+  await screenshot(electronApp, window.getByTestId('bulk-panel'), join(SHOTS, 'bulk-delete.png'));
 
   await window.getByTestId('bulk-execute').click();
   await expect(window.getByTestId('confirm-type')).toHaveCount(0);

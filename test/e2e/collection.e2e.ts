@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { Locator, Page } from '@playwright/test';
 import { MongoClient } from 'mongodb';
 
-import { expect, test } from './harness';
+import { expect, screenshot, test } from './harness';
 
 /** Where the screenshots go (git-ignored; copied into reviews/ for a review). */
 const SHOTS = process.env['THICKET_SCREENSHOTS'] ?? join('test-results', 'screenshots');
@@ -60,6 +60,7 @@ async function firstN(window: Page): Promise<number> {
 }
 
 test('filter and sort 10 000 documents, page, jump to the last page, count exactly', async ({
+  electronApp,
   window,
   mongo,
 }) => {
@@ -86,14 +87,14 @@ test('filter and sort 10 000 documents, page, jump to the last page, count exact
   ).toHaveCount(50);
 
   await mkdir(SHOTS, { recursive: true });
-  await window.screenshot({ path: join(SHOTS, 'collection-table.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'collection-table.png'));
 
   // An invalid filter shows the parse error and does not run.
   await window.getByTestId('query-filter').fill('{ group: 1');
   await window.getByTestId('query-run').click();
   await expect(window.getByTestId('query-error-filter')).toContainText('line 1');
   await expect(rows).toContainText('~10,000');
-  await window.screenshot({ path: join(SHOTS, 'collection-parse-error.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'collection-parse-error.png'));
 
   // Filter + sort: 3 333 documents with group 1, highest n first (range paging on n, _id).
   await window.getByTestId('query-filter').fill('{ group: 1 }');
@@ -132,10 +133,10 @@ test('filter and sort 10 000 documents, page, jump to the last page, count exact
   expect(await firstN(window)).toBe(97);
   await expect(window.getByTestId('pager-pages')).toHaveText('of 67');
   await expect(window.getByTestId('pager-page')).toHaveValue('67');
-  await window.screenshot({ path: join(SHOTS, 'collection-last-page.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'collection-last-page.png'));
 
   // The document list view shows the same page.
   await window.getByTestId('view-list').click();
   await expect(window.getByTestId('result-doc')).toHaveCount(33);
-  await window.screenshot({ path: join(SHOTS, 'collection-list.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'collection-list.png'));
 });

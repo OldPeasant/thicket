@@ -21,11 +21,16 @@ export const repoDir = resolve(appDir, '..', '..');
 // The `electron` package's main export is the path of the Electron binary.
 const electronPath = createRequire(import.meta.url)('electron') as string;
 
-/** Without a display (CI without xvfb-run), use Chromium's headless Ozone backend. */
+/**
+ * Without a display (CI without xvfb-run), use Chromium's headless Ozone backend, with a real
+ * screen size (its default 1×1 screen shrinks the window to 1×1, so nothing visible is painted).
+ */
 export function headlessArgs(): string[] {
   const noDisplay = !process.env['DISPLAY'] && !process.env['WAYLAND_DISPLAY'];
   const wanted = process.env['THICKET_TEST_HEADLESS'] === '1';
-  return process.platform === 'linux' && (noDisplay || wanted) ? ['--ozone-platform=headless'] : [];
+  return process.platform === 'linux' && (noDisplay || wanted)
+    ? ['--ozone-platform=headless', '--ozone-override-screen-size=1920,1080']
+    : [];
 }
 
 /**

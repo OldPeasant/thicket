@@ -34,11 +34,13 @@ function defined<T>(value: T | undefined, what = 'value'): T {
 
 test.describe('headlessArgs', () => {
   test.skip(process.platform !== 'linux', 'the headless switch is only used on Linux');
+  // A real screen size: the headless backend's default 1×1 screen shrinks the window to 1×1.
+  const HEADLESS = ['--ozone-platform=headless', '--ozone-override-screen-size=1920,1080'];
 
   test('adds the headless Ozone switch when there is no display', async () => {
     await withEnv(
       { DISPLAY: undefined, WAYLAND_DISPLAY: undefined, THICKET_TEST_HEADLESS: undefined },
-      () => expect(headlessArgs()).toEqual(['--ozone-platform=headless']),
+      () => expect(headlessArgs()).toEqual(HEADLESS),
     );
   });
 
@@ -55,7 +57,7 @@ test.describe('headlessArgs', () => {
 
   test('THICKET_TEST_HEADLESS=1 forces headless even with a display; other values do not', async () => {
     await withEnv({ DISPLAY: ':99', THICKET_TEST_HEADLESS: '1' }, () =>
-      expect(headlessArgs()).toEqual(['--ozone-platform=headless']),
+      expect(headlessArgs()).toEqual(HEADLESS),
     );
     await withEnv({ DISPLAY: ':99', THICKET_TEST_HEADLESS: 'true' }, () =>
       expect(headlessArgs()).toEqual([]),

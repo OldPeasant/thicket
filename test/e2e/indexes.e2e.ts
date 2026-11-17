@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { Locator, Page } from '@playwright/test';
 import { MongoClient } from 'mongodb';
 
-import { expect, test } from './harness';
+import { expect, screenshot, test } from './harness';
 
 /** Where the screenshots go (git-ignored). */
 const SHOTS = process.env['THICKET_SCREENSHOTS'] ?? join('test-results', 'screenshots');
@@ -46,6 +46,7 @@ function treeNode(window: Page, kind: 'conn' | 'db' | 'coll', name: string): Loc
 }
 
 test('indexes tab: create a TTL index and a partial index, see them listed with options', async ({
+  electronApp,
   window,
   mongo,
 }) => {
@@ -137,7 +138,7 @@ test('indexes tab: create a TTL index and a partial index, see them listed with 
   });
 
   await mkdir(SHOTS, { recursive: true });
-  await window.screenshot({ path: join(SHOTS, 'indexes-tab.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'indexes-tab.png'));
 
   // Hide and unhide.
   await partial.getByTestId('idx-hide').click();

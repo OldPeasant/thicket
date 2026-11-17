@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { Locator, Page } from '@playwright/test';
 import { Decimal128, Int32, MongoClient } from 'mongodb';
 
-import { expect, test } from './harness';
+import { expect, screenshot, test } from './harness';
 
 // Edit session and explicit save (doc-edit-save): edits stay local until Save, which sends the
 // minimal `$set` through the write guard; production profiles ask first and show the operation.
@@ -117,7 +117,11 @@ async function typeValue(window: Page, n: number, key: string, value: string): P
   await input.press('Tab');
 }
 
-test('edit two fields and save: the server document matches', async ({ window, mongo }) => {
+test('edit two fields and save: the server document matches', async ({
+  electronApp,
+  window,
+  mongo,
+}) => {
   test.setTimeout(90_000);
   const coll = 'orders_plain';
   await seed(mongo.uri, coll);
@@ -140,7 +144,7 @@ test('edit two fields and save: the server document matches', async ({ window, m
   expect(before?.['total']?.toString()).toBe('10.50');
 
   await mkdir(SHOTS, { recursive: true });
-  await window.screenshot({ path: join(SHOTS, 'doc-edit-modified.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'doc-edit-modified.png'));
 
   await window.getByTestId('edit-save').click();
   await expect(window.getByTestId('edit-message')).toHaveText('Saved 1.');
@@ -161,10 +165,11 @@ test('edit two fields and save: the server document matches', async ({ window, m
 
   // The page shows the saved version.
   await expect(fieldInput(window, 0, 'qty')).toHaveValue('7');
-  await window.screenshot({ path: join(SHOTS, 'doc-edit-saved.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'doc-edit-saved.png'));
 });
 
 test('production profile: Save shows the confirm dialog with the $set operation first', async ({
+  electronApp,
   window,
   mongo,
 }) => {
@@ -192,7 +197,7 @@ test('production profile: Save shows the confirm dialog with the $set operation 
   await expect(operation).toContainText('total: NumberDecimal("42.00")');
   await expect(operation).toContainText('qty: 5');
   await mkdir(SHOTS, { recursive: true });
-  await window.screenshot({ path: join(SHOTS, 'doc-edit-production-confirm.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'doc-edit-production-confirm.png'));
 
   // Nothing is written while the dialog is open; cancelling keeps the edits.
   expect((await stored(mongo.uri, coll, 2))?.['total']?.toString()).toBe('20.50');
@@ -211,7 +216,7 @@ test('production profile: Save shows the confirm dialog with the $set operation 
   expect(Number(after?.['qty'])).toBe(5);
 });
 
-test('read-only profile: edit controls are disabled', async ({ window, mongo }) => {
+test('read-only profile: edit controls are disabled', async ({ electronApp, window, mongo }) => {
   test.setTimeout(90_000);
   const coll = 'orders_ro';
   await seed(mongo.uri, coll);
@@ -229,5 +234,5 @@ test('read-only profile: edit controls are disabled', async ({ window, mongo }) 
   await window.getByTestId('view-table').click();
   await expect(window.locator('app-json-explorer .mode-toggle')).toBeDisabled();
   await mkdir(SHOTS, { recursive: true });
-  await window.screenshot({ path: join(SHOTS, 'doc-edit-read-only.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'doc-edit-read-only.png'));
 });

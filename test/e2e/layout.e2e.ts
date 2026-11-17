@@ -2,7 +2,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Page } from '@playwright/test';
 
-import { expect, launchApp, test } from './harness';
+import { expect, launchApp, screenshot, test } from './harness';
 
 /** Where the layout screenshots go (git-ignored; copied into reviews/ for a review). */
 const SHOTS = process.env['THICKET_SCREENSHOTS'] ?? join('test-results', 'screenshots');
@@ -98,7 +98,7 @@ for (const [style, mode] of [
   ['business', 'light'],
   ['tron', 'dark'],
 ] as const) {
-  test(`screenshot: layout in ${style} ${mode}`, async ({ window }) => {
+  test(`screenshot: layout in ${style} ${mode}`, async ({ electronApp, window }) => {
     await window.setViewportSize({ width: 1280, height: 800 });
     await setSettings(window, { style, mode });
     const root = window.locator('html');
@@ -113,6 +113,6 @@ for (const [style, mode] of [
     // Let the theme transition settle before the picture.
     await window.waitForTimeout(400);
     await mkdir(SHOTS, { recursive: true });
-    await window.screenshot({ path: join(SHOTS, `layout-${style}-${mode}.png`) });
+    await screenshot(electronApp, window, join(SHOTS, `layout-${style}-${mode}.png`));
   });
 }

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { Locator, Page } from '@playwright/test';
 import { Decimal128, MongoClient, ObjectId } from 'mongodb';
 
-import { expect, test } from './harness';
+import { expect, screenshot, test } from './harness';
 
 /** Where the screenshots go (git-ignored; copied into reviews/ for a review). */
 const SHOTS = process.env['THICKET_SCREENSHOTS'] ?? join('test-results', 'screenshots');
@@ -44,6 +44,7 @@ function treeNode(window: Page, kind: 'conn' | 'db' | 'coll', name: string): Loc
 }
 
 test('demo step 9: Explain shows COLLSCAN before the index and IXSCAN after it', async ({
+  electronApp,
   window,
   mongo,
 }) => {
@@ -88,7 +89,7 @@ test('demo step 9: Explain shows COLLSCAN before the index and IXSCAN after it',
   await expect(panel.locator('[data-stage="IXSCAN"]')).toHaveCount(0);
   await expect(panel.getByTestId('explain-docs')).toHaveText(/^3\D?000$/);
   await mkdir(SHOTS, { recursive: true });
-  await window.screenshot({ path: join(SHOTS, 'explain-collscan.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'explain-collscan.png'));
 
   // The raw explain output opens in the document viewer.
   await panel.getByTestId('explain-view-raw').click();
@@ -112,7 +113,7 @@ test('demo step 9: Explain shows COLLSCAN before the index and IXSCAN after it',
   await expect(ixscan).toHaveCount(1);
   await expect(ixscan.getByTestId('explain-stage-index')).toHaveText('status_1_total_1');
   await expect(panel.locator('[data-stage="COLLSCAN"]')).toHaveCount(0);
-  await window.screenshot({ path: join(SHOTS, 'explain-ixscan.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'explain-ixscan.png'));
 
   // The pipeline builder explains too: $match on the indexed fields uses the index.
   await panel.getByTestId('explain-close').click();
@@ -127,5 +128,5 @@ test('demo step 9: Explain shows COLLSCAN before the index and IXSCAN after it',
   const aggPanel = builder.getByTestId('explain-panel');
   await expect(aggPanel.getByTestId('explain-verdict')).toContainText('status_1_total_1');
   await expect(aggPanel.locator('[data-stage="IXSCAN"]')).toHaveCount(1);
-  await window.screenshot({ path: join(SHOTS, 'explain-aggregation.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'explain-aggregation.png'));
 });

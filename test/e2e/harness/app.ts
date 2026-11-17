@@ -15,12 +15,21 @@ export const appDir = join(repoDir, 'apps', 'desktop');
 // The `electron` package's main export is the path of the Electron binary.
 const electronPath = createRequire(join(appDir, 'package.json'))('electron') as string;
 
-/** Without a display (CI without xvfb-run), use Chromium's headless Ozone backend. */
+/**
+ * Without a display (CI without xvfb-run), use Chromium's headless Ozone backend. Its screen is
+ * 1×1 px by default, which shrinks the window to 1×1: nothing visible gets painted and
+ * screenshots hang or come out blank. So give the headless screen a real size.
+ */
 export function headlessArgs(): string[] {
   const noDisplay = !process.env['DISPLAY'] && !process.env['WAYLAND_DISPLAY'];
   const wanted = process.env['THICKET_TEST_HEADLESS'] === '1';
-  return process.platform === 'linux' && (noDisplay || wanted) ? ['--ozone-platform=headless'] : [];
+  return process.platform === 'linux' && (noDisplay || wanted)
+    ? ['--ozone-platform=headless', `--ozone-override-screen-size=${HEADLESS_SCREEN}`]
+    : [];
 }
+
+/** Screen size (`width,height`) of the headless Ozone backend; the app window is 1280×800. */
+export const HEADLESS_SCREEN = '1920,1080';
 
 export interface LaunchOptions {
   /** Folder used as Electron's `userData` (`THICKET_USER_DATA`). */

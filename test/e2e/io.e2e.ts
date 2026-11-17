@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { ElectronApplication, Locator, Page } from '@playwright/test';
 import { Decimal128, Long, MongoClient, ObjectId } from 'mongodb';
 
-import { expect, test } from './harness';
+import { expect, screenshot, test } from './harness';
 
 /** Where the screenshots go (git-ignored; copied into reviews/ for a review). */
 const SHOTS = process.env['THICKET_SCREENSHOTS'] ?? join('test-results', 'screenshots');
@@ -126,7 +126,7 @@ test('export the fixture, import it into a new collection: counts and documents 
     expect(exported).toHaveLength(TOTAL);
     expect(JSON.stringify(exported[0])).toContain('$numberLong');
     await mkdir(SHOTS, { recursive: true });
-    await window.screenshot({ path: join(SHOTS, 'io-export.png') });
+    await screenshot(electronApp, window, join(SHOTS, 'io-export.png'));
 
     // Import the file into a new collection.
     await window.getByTestId('export-close').click();
@@ -137,10 +137,10 @@ test('export the fixture, import it into a new collection: counts and documents 
     await expect(window.getByTestId('import-sample')).toHaveCount(5);
     await expect(window.getByTestId('import-sample').first()).toContainText('NumberLong(');
     await window.getByTestId('import-coll').fill('orders_copy');
-    await window.screenshot({ path: join(SHOTS, 'io-import-preview.png') });
+    await screenshot(electronApp, window, join(SHOTS, 'io-import-preview.png'));
     await window.getByTestId('import-start').click();
     await expect(window.getByTestId('import-count')).toHaveText('1,234');
-    await window.screenshot({ path: join(SHOTS, 'io-import-done.png') });
+    await screenshot(electronApp, window, join(SHOTS, 'io-import-done.png'));
 
     // Counts match, and the documents are the same (types included).
     expect(await countOf(mongo.uri, 'orders_copy')).toBe(TOTAL);

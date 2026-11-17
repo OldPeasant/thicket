@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { Locator, Page } from '@playwright/test';
 import { MongoClient } from 'mongodb';
 
-import { expect, test } from './harness';
+import { expect, screenshot, test } from './harness';
 
 /** Where the screenshots go (git-ignored; copied into reviews/ for a review). */
 const SHOTS = process.env['THICKET_SCREENSHOTS'] ?? join('test-results', 'screenshots');
@@ -64,6 +64,7 @@ async function databaseNames(uri: string): Promise<string[]> {
 }
 
 test('create a database and collection, rename, and drop with the typed name', async ({
+  electronApp,
   window,
   mongo,
 }) => {
@@ -111,7 +112,7 @@ test('create a database and collection, rename, and drop with the typed name', a
   await expect(treeNode(window, 'coll', 'first').getByTestId('node-stats')).toHaveText(/^0 docs, /);
 
   await mkdir(SHOTS, { recursive: true });
-  await window.screenshot({ path: join(SHOTS, 'sidebar-tree.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'sidebar-tree.png'));
 
   // Drop the collection: the confirm button works only after the exact name is typed.
   await menuAction(window, treeNode(window, 'coll', 'renamed'), 'drop-coll');
@@ -120,7 +121,7 @@ test('create a database and collection, rename, and drop with the typed name', a
   await expect(ok).toBeDisabled();
   await window.getByTestId('confirm-type').fill('rename');
   await expect(ok).toBeDisabled();
-  await window.screenshot({ path: join(SHOTS, 'sidebar-drop-confirm.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'sidebar-drop-confirm.png'));
   await window.getByTestId('confirm-type').fill('renamed');
   await ok.click();
   await expect(treeNode(window, 'coll', 'renamed')).toHaveCount(0);

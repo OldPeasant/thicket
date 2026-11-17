@@ -15,3 +15,4 @@ export {
   type FixtureName,
   type FixtureSpec,
 } from './mongo';
+export { capturePageWithRepaint, screenshot } from './screenshot';

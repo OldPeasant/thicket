@@ -2,15 +2,16 @@ import { randomBytes } from 'node:crypto';
 import { readdirSync, statSync } from 'node:fs';
 import { mkdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Locator, Page } from '@playwright/test';
+import type { ElectronApplication, Locator, Page } from '@playwright/test';
 import { Decimal128, MongoClient, ObjectId, type Collection } from 'mongodb';
 
 import {
   containerRuntimeUnavailable,
+  type E2EMongo,
   expect,
+  screenshot,
   startMongoSpec,
   test,
-  type E2EMongo,
 } from '../harness';
 import { appDir } from '../harness/app';
 import {
@@ -234,7 +235,12 @@ async function setTheme(window: Page, style: string, mode: string): Promise<void
  * Screenshots the window in every theme of `THEMES`, then returns to Business light. `scrollTo`
  * is scrolled into view after each theme switch: another theme's fonts can move it below the fold.
  */
-async function shot(window: Page, name: string, scrollTo?: Locator): Promise<void> {
+async function shot(
+  electronApp: ElectronApplication,
+  window: Page,
+  name: string,
+  scrollTo?: Locator,
+): Promise<void> {
   for (const theme of THEMES) {
     await setTheme(window, theme.style, theme.mode);
     if (scrollTo) await scrollTo.scrollIntoViewIfNeeded();
@@ -246,7 +252,7 @@ async function shot(window: Page, name: string, scrollTo?: Locator): Promise<voi
         .fonts.ready;
     });
     await window.waitForTimeout(400);
-    await window.screenshot({ path: join(dir, name) });
+    await screenshot(electronApp, window, join(dir, name));
   }
   await setTheme(window, 'business', 'light');
 }
@@ -310,7 +316,7 @@ test('release demo, steps 2–11, against the AppImage', async ({
     await setTheme(window, 'business', 'light');
     await expect(window.getByTestId('welcome-new').first()).toBeVisible();
     await expect(window.getByTestId('welcome-import').first()).toBeVisible();
-    await shot(window, 'step-01-welcome.png');
+    await shot(electronApp, window, 'step-01-welcome.png');
   });
 
   await test.step('2. paste the connection string, mark production, connect', async () => {
@@ -334,7 +340,7 @@ test('release demo, steps 2–11, against the AppImage', async ({
     await expect(window.getByTestId('field-ca-file')).toHaveValue(mongo.tlsCaFile ?? '');
     await expect(window.getByTestId('field-replica-set')).toHaveValue('rs0');
     await expect(window.getByTestId('uri-preview')).not.toContainText(user.password);
-    await shot(window, 'step-02-form-filled.png');
+    await shot(electronApp, window, 'step-02-form-filled.png');
 
     const production = window.getByTestId('field-production');
     await production.check();
@@ -342,7 +348,7 @@ test('release demo, steps 2–11, against the AppImage', async ({
     await window.getByTestId('secret-saved').check();
     await window.getByTestId('test-connection').click();
     await expect(window.getByTestId('test-ok')).toContainText('Connected in', { timeout: 30_000 });
-    await shot(window, 'step-02-production.png', production);
+    await shot(electronApp, window, 'step-02-production.png', production);
 
     await window.getByTestId('save').click();
     await expect(window.getByTestId('saved-notice')).toBeVisible();
@@ -370,7 +376,7 @@ test('release demo, steps 2–11, against the AppImage', async ({
       window.locator('[data-testid="tab"][data-tab-id^="collection:"][data-tab-id$="shop.orders"]'),
     ).toBeVisible();
     await expect(window.locator('app-shell')).toHaveClass(/production/);
-    await shot(window, 'step-03-sidebar.png');
+    await shot(electronApp, window, 'step-03-sidebar.png');
   });
 
   const rows = window.getByTestId('pager-rows');
@@ -390,7 +396,7 @@ test('release demo, steps 2–11, against the AppImage', async ({
     await window.getByTestId('pager-page').press('Enter');
     await expect(rows).toContainText(/^101–150 of ~40,000/);
     await expect(tableRows).toHaveCount(50);
-    await shot(window, 'step-04-page-3.png');
+    await shot(electronApp, window, 'step-04-page-3.png');
 
     await window.getByTestId('query-filter').fill('{status: "open", total: {$gt: 100}}');
     await window.getByTestId('query-sort').fill('{total: -1}');
@@ -417,7 +423,7 @@ test('release demo, steps 2–11, against the AppImage', async ({
     await expect(rows).toContainText(/^1–50 /);
     await window.getByTestId('view-table').click();
     await expect(tableRows).toHaveCount(50);
-    await shot(window, 'step-04-filter-sort.png');
+    await shot(electronApp, window, 'step-04-filter-sort.png');
   });
 
   const doc = window.getByTestId('result-doc').first();
@@ -440,7 +446,7 @@ test('release demo, steps 2–11, against the AppImage', async ({
     await doc.getByTestId('nested-pager-next').click();
     await expect(range).toHaveText('101–200 of 2,000 items');
     await expect(doc.getByText('ITEM-0100', { exact: true })).toBeVisible();
-    await shot(window, 'step-05-document.png');
+    await shot(electronApp, window, 'step-05-document.png');
   });
 
   await test.step('6. edit total, set a new field, 2 changes, production confirm, save', async () => {
@@ -452,7 +458,7 @@ test('release demo, steps 2–11, against the AppImage', async ({
     await addKey.press('Enter');
     await typeValue(doc, 'reviewed', 'yes');
     await expect(window.getByTestId('edit-count')).toHaveText('2 changes');
-    await shot(window, 'step-06-two-changes.png');
+    await shot(electronApp, window, 'step-06-two-changes.png');
 
     await saveConfirmed(window, async (operation) => {
       await expect(operation).toContainText(
@@ -461,7 +467,7 @@ test('release demo, steps 2–11, against the AppImage', async ({
       await expect(operation).toContainText('$set: {');
       await expect(operation).toContainText('total: NumberDecimal("1234.56")');
       await expect(operation).toContainText('reviewed: "yes"');
-      await shot(window, 'step-06-production-confirm.png');
+      await shot(electronApp, window, 'step-06-production-confirm.png');
     });
     await expect(window.getByTestId('edit-message')).toHaveText(
       `Saved ObjectId("${DEMO_ID.toHexString()}").`,
@@ -491,7 +497,7 @@ test('release demo, steps 2–11, against the AppImage', async ({
     const statusRow = changed.filter({ hasText: 'status' });
     await expect(statusRow.getByTestId('conflict-local')).toContainText('status: "open"');
     await expect(statusRow.getByTestId('conflict-server')).toContainText('status: "shipped"');
-    await shot(window, 'step-07-conflict.png');
+    await shot(electronApp, window, 'step-07-conflict.png');
     const stored = await withOrders(mongo, (c) => c.findOne({ _id: DEMO_ID }));
     expect(stored?.total.toString()).toBe('1500.00');
 
@@ -543,7 +549,7 @@ test('release demo, steps 2–11, against the AppImage', async ({
     // Each stage keeps its own preview.
     for (let i = 0; i < 3; i++)
       await expect(stages.nth(i).getByTestId('agg-preview-count')).toContainText('document');
-    await shot(window, 'step-08-stages.png');
+    await shot(electronApp, window, 'step-08-stages.png');
 
     await builder.getByTestId('agg-run').click();
     const results = builder.getByTestId('agg-result-doc');
@@ -554,7 +560,7 @@ test('release demo, steps 2–11, against the AppImage', async ({
       await expect(results.nth(i)).toContainText(`orders: ${String(row['orders'])}`);
       await expect(results.nth(i)).toContainText(`NumberDecimal("${String(row['revenue'])}")`);
     }
-    await shot(window, 'step-08-run.png');
+    await shot(electronApp, window, 'step-08-run.png');
 
     await builder.getByTestId('agg-export').click();
     const code = builder.getByTestId('agg-code');
@@ -562,13 +568,13 @@ test('release demo, steps 2–11, against the AppImage', async ({
       `db.getSiblingDB("${DB}").getCollection("${COLL}").aggregate(`,
     );
     expect((await code.textContent()) ?? '').toMatch(/\$match[\s\S]*\$group[\s\S]*\$sort/);
-    await shot(window, 'step-08-export-shell.png');
+    await shot(electronApp, window, 'step-08-export-shell.png');
     await builder.getByTestId('agg-lang-node').click();
     await expect(code).toContainText("require('mongodb')");
     const node = (await code.textContent()) ?? '';
     expect(node).toMatch(/\.aggregate\(\[[\s\S]*\$match[\s\S]*\$group[\s\S]*\$sort/);
     expect(node).not.toContain(user.password);
-    await shot(window, 'step-08-export-node.png');
+    await shot(electronApp, window, 'step-08-export-node.png');
   });
 
   await test.step('9. Explain: COLLSCAN, create the index in the Indexes tab, IXSCAN', async () => {
@@ -585,7 +591,7 @@ test('release demo, steps 2–11, against the AppImage', async ({
     await expect(verdict).toContainText('No index used', { timeout: 30_000 });
     await expect(verdict).toContainText('COLLSCAN');
     await expect(panel.locator('[data-stage="IXSCAN"]')).toHaveCount(0);
-    await shot(window, 'step-09-collscan.png');
+    await shot(electronApp, window, 'step-09-collscan.png');
     await panel.getByTestId('explain-close').click();
 
     await window.getByTestId('open-indexes').click();
@@ -599,7 +605,7 @@ test('release demo, steps 2–11, against the AppImage', async ({
     await expect(form.getByTestId('idx-preview')).toHaveText(
       `db.${COLL}.createIndex({ status: 1, total: 1 })`,
     );
-    await shot(window, 'step-09-create-index.png');
+    await shot(electronApp, window, 'step-09-create-index.png');
     await form.getByTestId('idx-create-submit').click();
     await confirmProduction(window, async (operation) => {
       await expect(operation).toContainText('createIndex(');
@@ -610,7 +616,7 @@ test('release demo, steps 2–11, against the AppImage', async ({
     await expect(
       view.locator('[data-testid="idx-row"][data-name="status_1_total_1"]'),
     ).toBeVisible();
-    await shot(window, 'step-09-indexes.png');
+    await shot(electronApp, window, 'step-09-indexes.png');
 
     await collTab.click();
     await window.getByTestId('query-explain').click();
@@ -619,7 +625,7 @@ test('release demo, steps 2–11, against the AppImage', async ({
     await expect(ixscan).toHaveCount(1);
     await expect(ixscan.getByTestId('explain-stage-index')).toHaveText('status_1_total_1');
     await expect(panel.locator('[data-stage="COLLSCAN"]')).toHaveCount(0);
-    await shot(window, 'step-09-ixscan.png');
+    await shot(electronApp, window, 'step-09-ixscan.png');
     await panel.getByTestId('explain-close').click();
   });
 
@@ -643,7 +649,7 @@ test('release demo, steps 2–11, against the AppImage', async ({
     await window.getByTestId('ssh-method-privateKey').check();
     await setField(window.getByTestId('field-ssh-key-file'), ssh.sshKeyFile);
     await expect(window.getByTestId('route')).toContainText(`${ssh.sshUser}@${ssh.sshHost}`);
-    await shot(window, 'step-10-ssh-x509-form.png', window.getByTestId('field-ssh'));
+    await shot(electronApp, window, 'step-10-ssh-x509-form.png', window.getByTestId('field-ssh'));
 
     await window.getByTestId('save').click();
     await expect(window.getByTestId('saved-notice')).toBeVisible();
@@ -663,7 +669,7 @@ test('release demo, steps 2–11, against the AppImage', async ({
     const dialog = window.getByTestId('host-key-dialog');
     await expect(dialog).toBeVisible({ timeout: 60_000 });
     await expect(window.getByTestId('host-key-fingerprint')).toHaveText(/^SHA256:\S{20,}$/);
-    await shot(window, 'step-10-host-key.png');
+    await shot(electronApp, window, 'step-10-host-key.png');
     await window.getByTestId('host-key-trust').click();
     await expect(dialog).toBeHidden();
     await expect(conn).toHaveAttribute('data-state', 'connected', { timeout: 60_000 });
@@ -675,7 +681,7 @@ test('release demo, steps 2–11, against the AppImage', async ({
     await expect(
       window.getByRole('region', { name: `Collection ${X509_COLL}` }).getByTestId('pager-rows'),
     ).toContainText(`1–${String(X509_DOCS)} of ~${String(X509_DOCS)} documents`);
-    await shot(window, 'step-10-connected.png');
+    await shot(electronApp, window, 'step-10-connected.png');
   });
 
   await test.step('11. mongosh console: db.orders.countDocuments()', async () => {
@@ -704,6 +710,6 @@ test('release demo, steps 2–11, against the AppImage', async ({
     await expect(run.getByTestId('shell-result')).toHaveText(String(expected), {
       timeout: 30_000,
     });
-    await shot(window, 'step-11-shell.png');
+    await shot(electronApp, window, 'step-11-shell.png');
   });
 });

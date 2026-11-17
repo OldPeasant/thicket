@@ -2,7 +2,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Page } from '@playwright/test';
 
-import { expect, test } from './harness';
+import { expect, screenshot, test } from './harness';
 
 /** Where the screenshots go (git-ignored; copied into reviews/ for a review). */
 const SHOTS = process.env['THICKET_SCREENSHOTS'] ?? join('test-results', 'screenshots');
@@ -71,7 +71,10 @@ for (const [style, mode] of [
   ['tron', 'light'],
   ['tron', 'dark'],
 ] as const) {
-  test(`production accent and confirm dialog in ${style} ${mode}`, async ({ window }) => {
+  test(`production accent and confirm dialog in ${style} ${mode}`, async ({
+    electronApp,
+    window,
+  }) => {
     await window.setViewportSize({ width: 1280, height: 800 });
     await setSettings(window, { style, mode });
     const root = window.locator('html');
@@ -106,16 +109,16 @@ for (const [style, mode] of [
     });
     await window.waitForTimeout(400);
     await mkdir(SHOTS, { recursive: true });
-    await window.screenshot({ path: join(SHOTS, `safety-${style}-${mode}.png`) });
+    await screenshot(electronApp, window, join(SHOTS, `safety-${style}-${mode}.png`));
 
     // Typing the collection name enables the button; cancel closes the dialog.
     await window.getByTestId('confirm-type').fill('orders');
     await expect(window.getByTestId('confirm-ok')).toBeEnabled();
-    await window.screenshot({ path: join(SHOTS, `safety-${style}-${mode}-typed.png`) });
+    await screenshot(electronApp, window, join(SHOTS, `safety-${style}-${mode}-typed.png`));
     await window.getByTestId('confirm-cancel').click();
     await expect(dialog).toBeHidden();
     // The accent without the dialog's backdrop.
     await window.waitForTimeout(200);
-    await window.screenshot({ path: join(SHOTS, `safety-${style}-${mode}-accent.png`) });
+    await screenshot(electronApp, window, join(SHOTS, `safety-${style}-${mode}-accent.png`));
   });
 }

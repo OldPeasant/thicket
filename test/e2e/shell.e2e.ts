@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { Locator, Page } from '@playwright/test';
 import { MongoClient } from 'mongodb';
 
-import { expect, test } from './harness';
+import { expect, screenshot, test } from './harness';
 
 /** Where the screenshots go (git-ignored; copied into reviews/ for a review). */
 const SHOTS = process.env['THICKET_SCREENSHOTS'] ?? join('test-results', 'screenshots');
@@ -61,6 +61,7 @@ async function openShell(window: Page, name: string, from: 'conn' | 'db'): Promi
 }
 
 test('demo step 11: run db.orders.countDocuments() in the mongosh console', async ({
+  electronApp,
   window,
   mongo,
 }) => {
@@ -112,7 +113,7 @@ test('demo step 11: run db.orders.countDocuments() in the mongosh console', asyn
     timeout: 30_000,
   });
   await mkdir(SHOTS, { recursive: true });
-  await window.screenshot({ path: join(SHOTS, 'shell-console.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'shell-console.png'));
   await console.getByTestId('shell-view-text').click();
   await expect(docs.getByTestId('shell-result')).toContainText("status: 'closed'");
 

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { Locator, Page } from '@playwright/test';
 import { MongoClient } from 'mongodb';
 
-import { expect, test } from './harness';
+import { expect, screenshot, test } from './harness';
 
 // Conflict resolution (conflict-ui), demo step 7: the document changes on the server between
 // load and save; Save then shows both versions side by side, and Overwrite / Keep server
@@ -96,6 +96,7 @@ async function editIntoConflict(window: Page, uri: string, n: number, qty: numbe
 const stored = (uri: string, id: number) => withColl(uri, (c) => c.findOne({ _id: id }));
 
 test('external change between load and save shows the conflict view; Overwrite writes the local version', async ({
+  electronApp,
   window,
   mongo,
 }) => {
@@ -118,7 +119,7 @@ test('external change between load and save shows the conflict view; Overwrite w
   await expect(changed.getByTestId('conflict-local')).toHaveClass(/diff/);
 
   await mkdir(SHOTS, { recursive: true });
-  await window.screenshot({ path: join(SHOTS, 'conflict-view.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'conflict-view.png'));
 
   await view.getByTestId('conflict-overwrite').click();
   await expect(window.getByTestId('conflict-view')).toHaveCount(0);
