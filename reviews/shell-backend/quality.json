@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "task": "shell-backend",
-  "reviewed_revision": "b4a4a7ad97d0c8f35f429cd52cd07cbcefce0e6b",
+  "reviewed_revision": "8fd9c3f188b322e3892b169ece7497bfe3791e59",
   "helpers": {
     "test-writer":   {"status": "completed", "report": "reviews/shell-backend/tests.md"},
     "code-reviewer": {"status": "completed", "report": "reviews/shell-backend/review.md"},
@@ -32,11 +32,17 @@
     {"id": "TW-2", "source": "test-writer", "severity": "Low", "disposition": "fixed",
      "note": "catastrophic backtracking in the COMMAND regex (8712197)"},
     {"id": "R4-CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
-     "note": "CR/U+2028 inside a trailing block comment now accepted; reviewer rates the new behaviour more correct, documentation/test hygiene only, optional"}
+     "note": "CR/U+2028 inside a trailing block comment now accepted; reviewer rates the new behaviour more correct, documentation/test hygiene only, optional"},
+    {"id": "R5-CR-2", "source": "code-reviewer", "severity": "P1", "disposition": "fixed",
+     "note": "round 5: AWS credential provider function not cloneable to the shell worker; resolved in the host, rebuilt in the worker; postMessage inside try; AWS secrets masked (5914df0)"},
+    {"id": "R5-CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "round 5: shells closed when the connection status becomes error/disconnected (5914df0)"},
+    {"id": "R6-CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "deferred",
+     "note": "round 6: a shell still opening during conn.close/tunnel loss outlives the connection; pre-existing narrow race; follow-up task shell-open-close-race"}
   ],
   "validation": [
-    {"command": "npm run check (merged HEAD 369c532)", "result": "pass"},
-    {"command": "npx vitest run --config test/integration/vitest.config.ts test/integration/shell.int.spec.ts (Podman MongoDB, merged HEAD)", "result": "pass"},
-    {"command": "npx vitest run packages/backend/src/shell (test-writer round 4)", "result": "pass"}
+    {"command": "npm run check (repo root, merged origin/main b739b48, final code)", "result": "pass"},
+    {"command": "npx vitest run in packages/backend (test-writer round 6) -> 33 files, 1444 passed", "result": "pass"},
+    {"command": "npx vitest run --config test/integration/vitest.config.ts test/integration/shell.int.spec.ts (Podman MongoDB 8, test-writer round 6) -> 18/18 passed", "result": "pass"}
   ]
 }
