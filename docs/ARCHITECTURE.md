@@ -570,6 +570,18 @@ Contract layout (`packages/contract/src/`):
   render it call `installJsdomLayoutStubs()` (`raw-editor/testing.ts`: jsdom has no `Range`
   rectangles for CodeMirror's measuring).
 
+## Users and roles (`packages/renderer/src/app/admin/users`, backend `src/admin/users`)
+- Tab kind `users`, id `usersTabId(profileId, db)`, data `UsersTabData` (`profileId`, `db`);
+  opened by "Users and roles" in the sidebar's database menu (`SidebarTreeService.openUsers`).
+  Read-only: users (direct roles, roles held through them, all privileges, custom data,
+  restriction count) and roles (own privileges, parents, all privileges; built-in on request).
+  A role of the same database is a link to it. `users-roles.model.ts` reduces the EJSON entries.
+- Backend `admin.users`: `usersInfo: 1` for the names, then an exact-match `usersInfo` list with
+  `showPrivileges` + `showAuthenticationRestrictions` (the server refuses privileges for
+  `usersInfo: 1`); credentials are never asked for and dropped if present. `admin.roles`:
+  `rolesInfo: 1` with `showPrivileges` and `showBuiltinRoles`. Integration:
+  `test/integration/users-roles.int.spec.ts`.
+
 ## Aggregation builder (`packages/renderer/src/app/aggregation`)
 - `AggregationView` is the `aggregation` tab view (id `aggregationTabId(profileId, db, coll)`,
   `data` like a collection tab), opened with "Aggregate…" (`open-aggregation`) on the
