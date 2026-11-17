@@ -1,4 +1,4 @@
-import { parseEJsonDocument } from '@thicket/core/bson';
+import { parseEJson, parseEJsonDocument } from '@thicket/core/bson';
 import { printShellSyntax } from '@thicket/core/shellsyntax';
 
 /**
@@ -47,6 +47,8 @@ export interface RoleEntry {
   readonly privileges: readonly Privilege[];
   /** Every privilege of the role, its own and inherited ones. */
   readonly allPrivileges: readonly Privilege[];
+  /** The role's own privileges as the server lists them, in shell syntax (for editing). */
+  readonly privilegesSource: string;
 }
 
 type Json = Record<string, unknown>;
@@ -115,6 +117,16 @@ function privileges(value: unknown): Privilege[] {
     .sort((a, b) => rank(a.resource) - rank(b.resource) || a.resource.localeCompare(b.resource));
 }
 
+/** The `privileges` array of a role in shell syntax (`[]` when missing). */
+function privilegesSource(value: unknown): string {
+  if (!Array.isArray(value) || value.length === 0) return '[]';
+  try {
+    return printShellSyntax(parseEJson(JSON.stringify(value)), { indent: 2 });
+  } catch {
+    return '[]';
+  }
+}
+
 function customData(value: unknown): string | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
   try {
@@ -154,5 +166,6 @@ export function toRoleEntry(text: string): RoleEntry {
     inheritedRoles: onlyInherited(roleRefs(doc['inheritedRoles']), roles),
     privileges: privileges(doc['privileges']),
     allPrivileges: privileges(doc['inheritedPrivileges']),
+    privilegesSource: privilegesSource(doc['privileges']),
   };
 }

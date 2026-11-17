@@ -201,6 +201,9 @@ describe('toRoleEntry', () => {
         { resource: 'shop.orders', actions: ['find', 'insert', 'update'] },
         { resource: 'shop.system.buckets.ticks', actions: ['find'] },
       ],
+      privilegesSource: expect.stringMatching(
+        /^\[\s*\{\s*resource: \{\s*db: "shop",\s*collection: "orders"\s*\},\s*actions: \[\s*"update",\s*"insert"\s*\]\s*\}\s*\]$/,
+      ) as unknown,
     });
   });
 
@@ -222,6 +225,7 @@ describe('toRoleEntry', () => {
       inheritedRoles: [],
       privileges: [],
       allPrivileges: [],
+      privilegesSource: '[]',
     });
   });
 });

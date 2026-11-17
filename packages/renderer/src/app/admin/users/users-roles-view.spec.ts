@@ -3,6 +3,8 @@ import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { FakeThicketBridge, provideFakeThicket } from '../../api/testing';
+import { ConfirmService } from '../../safety/confirm.service';
+import { ProfileSafetyService } from '../../safety/profile-safety.service';
 import type { WorkspaceTab } from '../../layout/workspace.service';
 import { UsersRolesView, usersTabId } from './users-roles-view';
 
@@ -451,5 +453,148 @@ describe('UsersRolesView', () => {
     const id = fake.requestsFor('admin.users')[0]?.id;
     fixture.destroy();
     expect(fake.cancels).toContain(id);
+  });
+
+  describe('changes', () => {
+    const type = async (id: string, value: string) => {
+      const field = get<HTMLInputElement>(id);
+      field.value = value;
+      field.dispatchEvent(new Event('input'));
+      await settle();
+    };
+    const click = async (id: string) => {
+      get(id).click();
+      await settle();
+    };
+    const sent = (method: Parameters<FakeThicketBridge['requestsFor']>[0]) =>
+      fake.requestsFor(method).map((r) => r.params as Record<string, unknown>);
+
+    it('creates a user with a password and roles, then reads the lists again', async () => {
+      fake.respond('admin.createUser', {});
+      await create();
+      await click('create');
+      await type('editor-name', 'carl');
+      await type('editor-password', 's3cret');
+      await type('editor-repeat', 's3cret');
+      await type('role-input', 'clerk');
+      await click('role-add');
+      await type('role-input', 'readAnyDatabase@admin');
+      await click('role-add');
+      await click('editor-save');
+      expect(sent('admin.createUser')).toEqual([
+        {
+          profileId: 'p1',
+          db: 'shop',
+          user: 'carl',
+          password: 's3cret',
+          roles: [
+            { role: 'clerk', db: 'shop' },
+            { role: 'readAnyDatabase', db: 'admin' },
+          ],
+        },
+      ]);
+      expect(fake.requestsFor('admin.users')).toHaveLength(2);
+      expect(get('notice').textContent).toContain('User carl created.');
+    });
+
+    it('does not save a new user while the passwords differ', async () => {
+      await create();
+      await click('create');
+      await type('editor-name', 'carl');
+      await type('editor-password', 'one');
+      await type('editor-repeat', 'two');
+      await settle();
+      expect(get<HTMLButtonElement>('editor-save').disabled).toBe(true);
+      expect(get('editor-problem').textContent).toContain('The passwords differ.');
+    });
+
+    it('changes a role: privileges in shell syntax replace the old ones', async () => {
+      fake.respond('admin.updateRole', {});
+      await create();
+      await click('mode-roles');
+      await click('edit');
+      await type(
+        'editor-privileges',
+        '[{ resource: { db: "shop", collection: "" }, actions: ["find"] }]',
+      );
+      await click('editor-save');
+      const [params] = sent('admin.updateRole');
+      expect(params).toMatchObject({ profileId: 'p1', db: 'shop', role: 'clerk' });
+      expect(JSON.parse(params?.['privileges'] as string)).toEqual([
+        { resource: { db: 'shop', collection: '' }, actions: ['find'] },
+      ]);
+      expect(params).not.toHaveProperty('roles');
+    });
+
+    it('grants and revokes a role of the selected user', async () => {
+      fake.respond('admin.grantRoles', {});
+      fake.respond('admin.revokeRoles', {});
+      await create();
+      await type('role-input', 'reader');
+      await click('role-add');
+      expect(sent('admin.grantRoles')).toEqual([
+        {
+          profileId: 'p1',
+          db: 'shop',
+          kind: 'user',
+          name: 'alice',
+          roles: [{ role: 'reader', db: 'shop' }],
+        },
+      ]);
+      await click('revoke');
+      expect(sent('admin.revokeRoles')).toEqual([
+        {
+          profileId: 'p1',
+          db: 'shop',
+          kind: 'user',
+          name: 'alice',
+          roles: [{ role: 'clerk', db: 'shop' }],
+        },
+      ]);
+    });
+
+    it('drops a user only after the confirm dialog', async () => {
+      fake.respond('admin.dropUser', {});
+      await create();
+      const confirm = TestBed.inject(ConfirmService);
+      get('drop').click();
+      await settle();
+      expect(confirm.current()?.operation).toBe('db.getSiblingDB("shop").dropUser("alice")');
+      expect(sent('admin.dropUser')).toEqual([]);
+      confirm.answer(true);
+      await settle();
+      expect(sent('admin.dropUser')).toEqual([
+        { profileId: 'p1', db: 'shop', user: 'alice', confirmed: true },
+      ]);
+    });
+
+    it('turns every change off on a read-only connection', async () => {
+      TestBed.inject(ProfileSafetyService).set({
+        id: 'p1',
+        name: 'Local',
+        readOnly: true,
+        production: false,
+      });
+      await create();
+      expect(get<HTMLButtonElement>('create').disabled).toBe(true);
+      expect(get<HTMLButtonElement>('drop').disabled).toBe(true);
+      expect(all('grant')).toEqual([]);
+      expect(el().textContent).toContain('Read-only');
+    });
+
+    it('shows a server refusal and keeps the form open', async () => {
+      fake.fail('admin.createUser', {
+        code: 'SERVER_ERROR',
+        message: 'User "carl@shop" already exists',
+      });
+      await create();
+      await click('create');
+      await type('editor-name', 'carl');
+      await type('editor-password', 'pw');
+      await type('editor-repeat', 'pw');
+      await click('editor-save');
+      expect(get('editor-error').textContent).toContain('already exists');
+      expect(all('principal-editor')).toHaveLength(1);
+    });
   });
 });
