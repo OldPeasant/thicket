@@ -15,6 +15,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 
 import { RpcError } from '../server/rpc';
 import { describeHostKey, hostPattern, KnownHosts } from './known-hosts';
+import { generateTestKeyPair } from './testing';
 import {
   openSshTunnel,
   toSshError,
@@ -30,10 +31,10 @@ const USER = 'tunnel-tester';
 const PASSWORD = 'fictitious-ssh-Pw1';
 const PASSPHRASE = 'fictitious-key-passphrase';
 
-const hostKey = utils.generateKeyPairSync('ed25519');
-const otherHostKey = utils.generateKeyPairSync('ed25519');
-const userKey = utils.generateKeyPairSync('ed25519');
-const encryptedUserKey = utils.generateKeyPairSync('ed25519', {
+const hostKey = generateTestKeyPair();
+const otherHostKey = generateTestKeyPair();
+const userKey = generateTestKeyPair();
+const encryptedUserKey = generateTestKeyPair({
   passphrase: PASSPHRASE,
   cipher: 'aes256-ctr',
   rounds: 16,

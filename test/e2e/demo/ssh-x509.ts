@@ -3,10 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { MongoClient } from 'mongodb';
-// Default import: ssh2 is CommonJS, and Node's ESM loader (Playwright e2e) has no named `utils`.
-import ssh2 from 'ssh2';
 import { GenericContainer, Network, Wait, type StartedTestContainer } from 'testcontainers';
 
+import { generateTestKeyPair } from '../../../packages/backend/src/ssh/testing.ts';
 import { generateTestPki } from '../../integration/fixtures/certs.ts';
 import { MONGO_IMAGES, MONGOD_8_ARGS } from '../../integration/fixtures/mongo.ts';
 import { SSH_IMAGE } from '../../integration/fixtures/ssh.ts';
@@ -53,7 +52,7 @@ export async function startSshX509Fixture(): Promise<SshX509Fixture> {
   };
   const { certs, issuer } = generateTestPki([X509_HOST, 'localhost', '127.0.0.1']);
   const client = issueClientCertificate(issuer, X509_USER_SUBJECT);
-  const key = ssh2.utils.generateKeyPairSync('ed25519', { comment: 'thicket-demo' });
+  const key = generateTestKeyPair({ comment: 'thicket-demo' });
   const root = { username: 'demoroot', password: randomBytes(16).toString('hex') };
   const caFile = await write('ca.pem', certs.caCert);
   const certKeyFile = await write('client.pem', client.certPem + client.keyPem);

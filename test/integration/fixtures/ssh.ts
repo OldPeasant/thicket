@@ -1,6 +1,4 @@
 import { randomBytes } from 'node:crypto';
-// Default import: ssh2 is CommonJS, and Node's ESM loader (Playwright e2e) has no named `utils`.
-import ssh2 from 'ssh2';
 import {
   GenericContainer,
   Network,
@@ -9,6 +7,7 @@ import {
   type StartedTestContainer,
 } from 'testcontainers';
 
+import { generateTestKeyPair } from '../../../packages/backend/src/ssh/testing.ts';
 import { MONGO_IMAGES, MONGOD_8_ARGS } from './mongo.ts';
 
 /**
@@ -67,8 +66,8 @@ function member(network: StartedNetwork, alias: string): Promise<StartedTestCont
 export async function startSshFixture(): Promise<SshFixture> {
   const password = randomBytes(12).toString('hex');
   const passphrase = randomBytes(12).toString('hex');
-  const plain = ssh2.utils.generateKeyPairSync('ed25519', { comment: 'thicket-plain' });
-  const encrypted = ssh2.utils.generateKeyPairSync('ed25519', {
+  const plain = generateTestKeyPair({ comment: 'thicket-plain' });
+  const encrypted = generateTestKeyPair({
     comment: 'thicket-encrypted',
     passphrase,
     cipher: 'aes256-ctr',

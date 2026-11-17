@@ -3,11 +3,12 @@ import { connect, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { Server, utils } from 'ssh2';
+import { Server } from 'ssh2';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { KnownHosts } from './known-hosts';
 import type { LocalSocks } from './socks';
+import { generateTestKeyPair } from './testing';
 import { openSshTunnel } from './tunnel';
 
 // CR-6: the SSH session ends while the local SOCKS port is still starting. `startLocalSocks` is
@@ -60,19 +61,16 @@ describe('openSshTunnel: session lost while the local port starts', () => {
   it('closes the SOCKS port that started too late and fails with SSH_ERROR', async () => {
     let sessionGone!: () => void;
     const gone = new Promise<void>((resolve) => (sessionGone = resolve));
-    const server = new Server(
-      { hostKeys: [utils.generateKeyPairSync('ed25519').private] },
-      (conn) => {
-        conn.on('error', () => undefined);
-        conn.on('close', () => sessionGone());
-        conn.on('authentication', (ctx) =>
-          ctx.method === 'password' && ctx.username === USER && ctx.password === PASSWORD
-            ? ctx.accept()
-            : ctx.reject(['password']),
-        );
-        conn.on('ready', () => setTimeout(() => conn.end(), 10));
-      },
-    );
+    const server = new Server({ hostKeys: [generateTestKeyPair().private] }, (conn) => {
+      conn.on('error', () => undefined);
+      conn.on('close', () => sessionGone());
+      conn.on('authentication', (ctx) =>
+        ctx.method === 'password' && ctx.username === USER && ctx.password === PASSWORD
+          ? ctx.accept()
+          : ctx.reject(['password']),
+      );
+      conn.on('ready', () => setTimeout(() => conn.end(), 10));
+    });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     cleanups.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
     const port = (server.address() as AddressInfo).port;
@@ -112,19 +110,16 @@ describe('openSshTunnel: the local port cannot start', () => {
     let sessionReady = false;
     let sessionGone!: () => void;
     const gone = new Promise<void>((resolve) => (sessionGone = resolve));
-    const server = new Server(
-      { hostKeys: [utils.generateKeyPairSync('ed25519').private] },
-      (conn) => {
-        conn.on('error', () => undefined);
-        conn.on('close', () => sessionGone());
-        conn.on('authentication', (ctx) =>
-          ctx.method === 'password' && ctx.username === USER && ctx.password === PASSWORD
-            ? ctx.accept()
-            : ctx.reject(['password']),
-        );
-        conn.on('ready', () => (sessionReady = true));
-      },
-    );
+    const server = new Server({ hostKeys: [generateTestKeyPair().private] }, (conn) => {
+      conn.on('error', () => undefined);
+      conn.on('close', () => sessionGone());
+      conn.on('authentication', (ctx) =>
+        ctx.method === 'password' && ctx.username === USER && ctx.password === PASSWORD
+          ? ctx.accept()
+          : ctx.reject(['password']),
+      );
+      conn.on('ready', () => (sessionReady = true));
+    });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     cleanups.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
     const port = (server.address() as AddressInfo).port;

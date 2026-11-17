@@ -11,11 +11,12 @@ import {
   type Profile,
   type Response,
 } from '@thicket/contract';
-import { Server as SshServer, utils as sshUtils } from 'ssh2';
+import { Server as SshServer } from 'ssh2';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ConnectionManager } from '../connections/manager';
 import { ShellHost } from '../shell';
+import { generateTestKeyPair } from '../ssh/testing';
 import { startBackend, type ParentPortLike } from './backend';
 import { sleep } from './handlers';
 import type { MainPortLike } from './ports';
@@ -755,16 +756,13 @@ describe('startBackend: SSH host key prompts (task ssh-tunnel)', () => {
 
   /** An in-process SSH server on 127.0.0.1 (accepts the password, never forwards). */
   async function sshServer(): Promise<number> {
-    const server = new SshServer(
-      { hostKeys: [sshUtils.generateKeyPairSync('ed25519').private] },
-      (conn) => {
-        conn.on('error', () => undefined);
-        conn.on('authentication', (ctx) =>
-          ctx.method === 'password' && ctx.password === SSH_PASSWORD ? ctx.accept() : ctx.reject(),
-        );
-        cleanups.push(() => Promise.resolve(void conn.end()));
-      },
-    );
+    const server = new SshServer({ hostKeys: [generateTestKeyPair().private] }, (conn) => {
+      conn.on('error', () => undefined);
+      conn.on('authentication', (ctx) =>
+        ctx.method === 'password' && ctx.password === SSH_PASSWORD ? ctx.accept() : ctx.reject(),
+      );
+      cleanups.push(() => Promise.resolve(void conn.end()));
+    });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     cleanups.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
     return (server.address() as AddressInfo).port;

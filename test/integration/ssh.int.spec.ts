@@ -31,6 +31,7 @@ import {
 import type { MongoClient } from 'mongodb';
 
 import { portPair } from '../../packages/backend/src/server/testing';
+import { generateTestKeyPair } from '../../packages/backend/src/ssh/testing';
 import {
   SSH_PRIMARY,
   SSH_REPLICA_SET,
@@ -283,7 +284,7 @@ describe('SSH host keys', () => {
 
   it('a changed host key → refused with a clear error, without asking', async () => {
     const knownHosts = freshKnownHosts();
-    const other = utils.generateKeyPairSync('ed25519').public.split(' ')[1] ?? '';
+    const other = generateTestKeyPair().public.split(' ')[1] ?? '';
     // The same host with another key of each type the server might offer.
     const rsa = utils.generateKeyPairSync('ecdsa', { bits: 256 }).public.split(' ');
     await writeFile(
