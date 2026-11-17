@@ -27,14 +27,15 @@ import {
  *        the OS keychain; mark the connection production; connect.
  *        -> welcome "New connection", paste the URI into the Connection string tab; the form tab
  *           shows host, port, user, TLS + CA file, replica set; the password is not in
- *           connections.json but secrets.bin was written; "Production" checked; Test connection
+ *           connections.json, secrets.bin was written and does not hold it in plain text;"Production" checked; Test connection
  *           succeeds; Save; connect from the sidebar; the shell shows the production accent.
  * [x] 3. Sidebar shows databases and collections (with document counts and sizes); open `orders`.
  *        -> `shop` and `orders` in the tree, "Stats" shows "40,000 docs, …"; click opens the tab.
  * [x] 4. Table, one row per document, 50 per page; page 3 of ~40 000 one click away; filter
  *        `{status: "open", total: {$gt: 100}}` and a sort; results update.
  *        -> 50 table rows, "~40,000", "of ~800"; page field 3 -> rows 101–150; filter + sort
- *           `{total: -1}` -> the first document is the largest open order.
+ *           `{total: -1}` -> only open orders, totals above 100 in descending
+ *           order, the first document is the largest open order.
  * [x] 5. Open a document: nested `items` (2 000 subdocuments) pages inside the document; `_id`
  *        ObjectId, `createdAt` Date, `total` Decimal128.
  *        -> list view, first document: "1–100 of 2,000 items", Next -> "101–200 …"; type badges
@@ -249,6 +250,9 @@ test('M1 demo, steps 2–7, against a TLS replica set', async ({ window, userDat
     expect(profiles).toContain(user.username);
     expect(profiles).not.toContain(user.password);
     expect((await stat(join(userDataDir, 'secrets.bin'))).size).toBeGreaterThan(0);
+    // secrets.bin is encrypted: the password is not in it as plain text either.
+    const secrets = await readFile(join(userDataDir, 'secrets.bin'));
+    expect(secrets.includes(Buffer.from(user.password, 'utf8'))).toBe(false);
 
     const conn = treeNode(window, 'conn', PROFILE);
     await conn.click();
@@ -297,6 +301,15 @@ test('M1 demo, steps 2–7, against a TLS replica set', async ({ window, userDat
     await expect(raw).toContainText(`ObjectId("${DEMO_ID.toHexString()}")`);
     const text = (await raw.textContent()) ?? '';
     expect(text).not.toMatch(/status: "(paid|shipped|cancelled)"/);
+    // The sort put the demo document (the largest open total) first, and the page's totals are
+    // all above 100 and in descending order.
+    expect(/ObjectId\("([0-9a-f]{24})"\)/.exec(text)?.[1]).toBe(DEMO_ID.toHexString());
+    const totals = [...text.matchAll(/total: NumberDecimal\("([0-9.]+)"\)/g)].map((m) =>
+      Number(m[1]),
+    );
+    expect(totals.length).toBeGreaterThan(1);
+    expect(totals.every((t) => t > 100)).toBe(true);
+    expect(totals).toEqual([...totals].sort((a, b) => b - a));
     await shot(window, 'step-4-filter-sort.png');
   });
 
