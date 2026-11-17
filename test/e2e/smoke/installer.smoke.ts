@@ -7,12 +7,13 @@ import {
   type TestInfo,
 } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import { appDir, headlessArgs } from '../harness/app';
 import { containerRuntimeUnavailable, startMongo } from '../harness/mongo';
+import { endProcessTree, removeAppDir } from '../harness/processes';
 import {
   findInstaller,
   installApp,
@@ -68,7 +69,8 @@ const test = base.extend<SmokeFixtures, SmokeWorkerFixtures>({
     try {
       await use(dir);
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      // appBrowser's teardown (it depends on this fixture) has ended the app's processes already.
+      await removeAppDir(dir);
     }
   },
 
@@ -106,7 +108,8 @@ const test = base.extend<SmokeFixtures, SmokeWorkerFixtures>({
         });
       }
       await browser?.close().catch(() => undefined);
-      await killTree(child);
+      // The whole tree: the AppImage runtime exits before Electron and its helpers do.
+      await endProcessTree(child);
     }
   },
 
@@ -188,30 +191,6 @@ function devToolsEndpoint(
     child.stderr?.on('data', onData);
     child.on('exit', onExit);
   });
-}
-
-/** Ends the app with all its processes (POSIX: the process group; Windows: taskkill /T). */
-async function killTree(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) return;
-  const exited = new Promise<void>((r) => child.once('exit', () => r()));
-  if (process.platform === 'win32') {
-    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
-  } else {
-    try {
-      process.kill(-child.pid, 'SIGTERM');
-    } catch {
-      child.kill('SIGTERM');
-    }
-  }
-  const timeout = new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 10_000));
-  if ((await Promise.race([exited, timeout])) === 'timeout') {
-    try {
-      if (process.platform === 'win32') child.kill('SIGKILL');
-      else process.kill(-child.pid, 'SIGKILL');
-    } catch {
-      // already gone
-    }
-  }
 }
 
 test('the packaged app starts and shows the welcome screen', async ({ window }) => {

@@ -5,12 +5,13 @@ import {
   type Page,
   type TestInfo,
 } from '@playwright/test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { launchApp, realUserDataDir, snapshotDir } from './app';
 import { containerRuntimeUnavailable, startMongo, type E2EMongo, type FixtureName } from './mongo';
+import { endProcessTree, removeAppDir } from './processes';
 import { screenshot } from './screenshot';
 
 export interface E2EFixtures {
@@ -61,7 +62,8 @@ export const test = base.extend<E2EFixtures, E2EWorkerFixtures>({
     try {
       await use(dir);
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      // electronApp's teardown (it depends on this fixture) has ended the app's processes already.
+      await removeAppDir(dir);
     }
   },
 
@@ -94,6 +96,9 @@ export const test = base.extend<E2EFixtures, E2EWorkerFixtures>({
         });
       }
       await app.close().catch(() => app.process().kill('SIGKILL'));
+      // close() waits for the process Playwright started only: for an AppImage that is the runtime,
+      // and Chromium helpers may still be writing into userDataDir. Wait for the whole group.
+      await endProcessTree(app.process(), { terminate: false });
     }
     // The real user's data must be exactly as before: the app only uses the temporary folder.
     expect(await snapshotDir(realDir), `the app wrote to the real userData ${realDir}`).toEqual(
