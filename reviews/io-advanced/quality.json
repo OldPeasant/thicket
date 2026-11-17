@@ -1,0 +1,90 @@
+{
+  "schema": 1,
+  "task": "io-advanced",
+  "reviewed_revision": "2d5955dbd96f3fb903c622297e66bfee5f86a51a",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/io-advanced/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/io-advanced/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/io-advanced/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "R1-CR-1",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "first review round (see fixes.md CR-1): repeated/overlapping CSV header names no longer break the preview; lenient default mapping, csvMapping entries carry the column index"
+    },
+    {
+      "id": "R1-CR-2",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "first review round (fixes.md CR-2): CSV record size limit counts separators"
+    },
+    {
+      "id": "R1-CR-3",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "first review round (fixes.md CR-3): date cells accept only ISO 8601 or epoch millis; no offset means UTC"
+    },
+    {
+      "id": "TW-1",
+      "source": "test-writer",
+      "severity": "Medium",
+      "disposition": "fixed",
+      "note": "CR-only line break inside quotes now advances the line count"
+    },
+    {
+      "id": "TW-2",
+      "source": "test-writer",
+      "severity": "Medium",
+      "disposition": "fixed",
+      "note": "Timestamp cells are written as Extended JSON"
+    },
+    {
+      "id": "TW-3",
+      "source": "test-writer",
+      "severity": "Low",
+      "disposition": "fixed",
+      "note": "readMetadata refuses a metadata file that is not a plain object"
+    },
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "deferred",
+      "note": "final review: one-column CSV export with an empty value writes a blank line that import skips; edge case (single selected column), left for a follow-up"
+    },
+    {
+      "id": "CR-2",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "deferred",
+      "note": "final review: dates outside years 0000-9999 export as +010000-... which the date type refuses; rare, follow-up"
+    },
+    {
+      "id": "CR-3",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "deferred",
+      "note": "final review: field names containing a dot export as empty cells (dotted paths read as nesting); follow-up"
+    },
+    {
+      "id": "CR-4",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "deferred",
+      "note": "final review: docs/ARCHITECTURE.md:354 still says CSV/BSON answer UNSUPPORTED; doc update for a follow-up"
+    }
+  ],
+  "validation": [
+    { "command": "npx vitest run packages/backend/src/io packages/contract/src/methods.spec.ts", "result": "pass" },
+    { "command": "cd packages/renderer && npx ng test --include='src/app/io/**/*.spec.ts'", "result": "pass" },
+    { "command": "npm run test:int -- test/integration/io-advanced.int.spec.ts", "result": "pass" },
+    { "command": "npm run test:e2e -- test/e2e/io.e2e.ts", "result": "pass" },
+    { "command": "npm run check", "result": "pass" }
+  ]
+}
