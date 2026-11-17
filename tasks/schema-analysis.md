@@ -16,3 +16,4 @@ Sample-based (default 1 000) analysis with mongodb-schema: fields, types and sha
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-17 05:42+0100 by felix/agent-2): Analysis is shown in its own table (one row per path: present %, type-share bar, clickable type and example chips) styled like the explorer, not inside the explorer component itself: the explorer has no per-value click hooks for 'use as filter'.
