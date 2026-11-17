@@ -34,7 +34,7 @@
       "id": "CR-4",
       "source": "code-reviewer",
       "severity": "P3",
-      "disposition": "superseded",
+      "disposition": "invalid",
       "note": "fixer reused screenshotWindows, but after the CDP switch there is no ElectronApplication; a small page-based screenshotPages replaces it (second review: moot)"
     },
     {
