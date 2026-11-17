@@ -219,6 +219,39 @@ describe('ExportPanel', () => {
     expect(q('export-command')?.textContent).toBe('db.orders.find({})');
   });
 
+  it('keeps describing the exported query after Cancel, even when the query changed', async () => {
+    const sent = 'db.orders.find({ status: "open" }).sort({ total: -1 }).limit(100)';
+    click('export-start');
+    await settle();
+    fixture.componentRef.setInput('query', { filter: '{}', sortSpec: [], emptyFilter: true });
+    await settle();
+    click('export-cancel');
+    await settle();
+    expect(status().getAttribute('data-phase')).toBe('cancelled');
+    expect(q('export-command')?.textContent).toBe(sent);
+  });
+
+  it('after a failed export, describes the query the next try would send', async () => {
+    click('export-start');
+    await settle();
+    fixture.componentRef.setInput('query', { filter: '{}', sortSpec: [], emptyFilter: true });
+    await settle();
+    fake.failStream('x1', { code: 'SERVER_ERROR', message: 'cursor killed (fictitious)' });
+    await settle();
+    expect(status().getAttribute('data-phase')).toBe('error');
+    expect(q('export-command')?.textContent).toBe('db.orders.find({})');
+  });
+
+  it('after a cancelled save dialog, describes the live query', async () => {
+    result = { streamId: null, path: null };
+    click('export-start');
+    await settle();
+    fixture.componentRef.setInput('query', { filter: '{}', sortSpec: [], emptyFilter: true });
+    await settle();
+    expect(status().getAttribute('data-phase')).toBe('idle');
+    expect(q('export-command')?.textContent).toBe('db.orders.find({})');
+  });
+
   it('Close while idle emits closed and cancels nothing', async () => {
     click('export-close');
     await settle();

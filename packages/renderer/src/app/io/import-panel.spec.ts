@@ -276,6 +276,57 @@ describe('ImportPanel', () => {
       expect(get<HTMLButtonElement>('import-start').disabled).toBe(false);
     });
 
+    it('production: a cancelled confirm dialog does not block a later Import', async () => {
+      safety.set({ id: 'p1', name: 'Prod (fictitious)', readOnly: false, production: true });
+      await choose();
+      click('import-start');
+      await settle();
+      confirm.answer(false);
+      await settle();
+      click('import-start');
+      await settle();
+      expect(confirm.current()).not.toBeNull();
+      confirm.answer(true);
+      await settle();
+      expect(imports()).toHaveLength(1);
+      expect(phase()).toBe('importing');
+    });
+
+    it('production: a second Import while the confirm dialog is open sends only one import', async () => {
+      safety.set({ id: 'p1', name: 'Prod (fictitious)', readOnly: false, production: true });
+      await choose();
+      click('import-start');
+      await settle();
+      const first = confirm.current();
+      expect(first).not.toBeNull();
+      await fixture.componentInstance.start();
+      await settle();
+      // The pending confirmation is not replaced (which would cancel it).
+      expect(confirm.current()).toBe(first);
+      confirm.answer(true);
+      await settle();
+      expect(imports()).toHaveLength(1);
+      expect(confirm.current()).toBeNull();
+    });
+
+    it('a cancelled import keeps the file chosen, so Import can be tried again', async () => {
+      await choose();
+      click('import-start');
+      await settle();
+      fake.data('io.import', 'i1', { processed: 7, failed: 2, errors: [] });
+      await settle();
+      click('import-cancel');
+      await settle();
+      expect(imported).toEqual([{ coll: 'orders', inserted: 5 }]);
+      expect(q('import-file')?.textContent).toContain('orders-sample.json');
+      expect(get<HTMLButtonElement>('import-start').disabled).toBe(false);
+      fake.handle('io.import', () => ({ streamId: 'i2' }));
+      click('import-start');
+      await settle();
+      expect(imports()).toHaveLength(2);
+      expect(phase()).toBe('importing');
+    });
+
     it('shows progress and the first failures, then the inserted count when done', async () => {
       await choose();
       click('import-start');
@@ -500,6 +551,21 @@ describe('ImportPanel', () => {
       confirm.answer(true);
       await settle();
       expect(imports()).toHaveLength(0);
+    });
+
+    it('turning read-only while the confirm dialog is open withdraws the dialog', async () => {
+      safety.set({ id: 'p1', name: 'Prod (fictitious)', readOnly: false, production: true });
+      await choose();
+      click('import-start');
+      await settle();
+      expect(confirm.current()).not.toBeNull();
+      safety.set({ id: 'p1', name: 'Prod (fictitious)', readOnly: true, production: true });
+      await settle();
+      expect(confirm.current()).toBeNull();
+      expect(q('import-panel')).toBeNull();
+      expect(closed).toBe(1);
+      expect(imports()).toHaveLength(0);
+      expect(imported).toHaveLength(0);
     });
 
     it('closing the panel while the confirm dialog is open withdraws it and sends nothing', async () => {

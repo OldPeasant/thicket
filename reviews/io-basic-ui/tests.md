@@ -4,54 +4,84 @@ Date: 2026-11-17
 
 Task: io-basic-ui - M1: Import/export dialogs
 
-Scope: `git diff ef00038..c2dc346`, where ef00038b48cdc807f0ae7b7bc57eeab948b9a0c8 is the base
-(`git merge-base HEAD origin/main` after the parent's rebase). The task commits are 000bc3e (panels),
-f535cbe (e2e and read-only tests) and c2dc346 (duplicate `readOnly` removed after the raw-editor
-merge). These are the rebased versions of 60e88fd/d90f400 and later 3d9869a/364d2bb; the parent
-supplied them. Branch `main`, HEAD c2dc34613fe520be399340190adce400677279af. Production files were
-committed when measured. The only uncommitted inputs are the test files listed below.
+Scope: `git diff 01305873def284d41f41a923f25d0fd12c685d72..78316e45ef1cb9ea76d6241930c003e79e9b0ce9`
+(second pass, final code after the fixes). Base 01305873def284d41f41a923f25d0fd12c685d72 comes from
+the parent. The task commits are 548f7eb (panels), dc2e96e (e2e and read-only tests), e11f536
+(reuses the `readOnly` signal after the raw-editor merge), fbc733f (unit tests and reports) and
+78316e4 (fixes for TW-1 and CR-1..CR-4). Branch `main`, HEAD
+78316e45ef1cb9ea76d6241930c003e79e9b0ce9. All production files were committed when measured. The
+only uncommitted inputs are the three spec files listed below. `reviews/io-basic-ui/review.md` also
+had uncommitted changes, made by another helper. It is not a test input.
 
 Requirements:
 - `tasks/io-basic-ui.md`: the acceptance criteria and the three recorded assumptions (panels under
   the pager, import defaults and a 5-of-20 preview, read-only profiles hide Import and close the
   panel)
+- `reviews/io-basic-ui/review.md` (CR-1..CR-4), `reviews/io-basic-ui/fixes.md`, and the first-pass
+  TW-1 in this report's earlier revision
 - `docs/ARCHITECTURE.md`, section "Coverage"
-- The parent's instructions: the list of behaviours to cover, the FakeThicketBridge style, and edit
-  test files only
+- The parent's instructions: check the fixes have tests, edit test files only
 
 ## Test files changed
 
-- `packages/renderer/src/app/io/io.util.spec.ts` (new)
-- `packages/renderer/src/app/io/export-panel.spec.ts` (new)
-- `packages/renderer/src/app/io/import-panel.spec.ts` (new)
-- `packages/renderer/src/app/collection/collection-view.spec.ts` (3 tests appended; existing
-  tests unchanged)
+In this pass (uncommitted):
+- `packages/renderer/src/app/io/import-panel.spec.ts` (4 tests added)
+- `packages/renderer/src/app/io/export-panel.spec.ts` (3 tests added)
+- `packages/renderer/src/app/collection/collection-view.spec.ts` (1 test added)
+
+From the first pass and the fixer (committed): `io.util.spec.ts` (new), `export-panel.spec.ts`
+(new), `import-panel.spec.ts` (new), and 3 + 1 tests appended to `collection-view.spec.ts`.
 
 ## Tests added or updated
 
-Count: 55 (16 io.util, 11 export panel, 25 import panel, 3 collection view)
+Count in this pass: 8 added, none changed. The 4 spec files now hold 111 tests (103 before this pass).
+
+The new tests:
+- ImportPanel `production: a cancelled confirm dialog does not block a later Import`. Checks that the
+  new `approveAbort` guard is released in `finally`.
+- ImportPanel `production: a second Import while the confirm dialog is open sends only one import`.
+  Checks the TW-1 fix's double-start guard.
+- ImportPanel `a cancelled import keeps the file chosen, so Import can be tried again`. Checks
+  CR-1's boundary (only a finished import drops the file) and the CR-2 emit (`inserted` = 7 − 2).
+- ImportPanel `turning read-only while the confirm dialog is open withdraws the dialog`. TW-1: the
+  dialog closes at once, the panel closes, and nothing is sent or emitted.
+- ExportPanel `keeps describing the exported query after Cancel, even when the query changed` (CR-4,
+  cancelled phase)
+- ExportPanel `after a failed export, describes the query the next try would send` (CR-4, error
+  phase)
+- ExportPanel `after a cancelled save dialog, describes the live query` (CR-4, idle after a null
+  stream)
+- CollectionView `a failed import into the tab collection also runs the query again` (CR-2, error
+  path through the real view)
+
+## Fix coverage
+
+| Finding | Tests that cover the fix |
+|---|---|
+| TW-1 (pending confirmation not withdrawn) | `a profile turning read-only while the confirm dialog is open sends nothing` (the original failing test, now passing), `turning read-only while the confirm dialog is open withdraws the dialog`*, `closing the panel while the confirm dialog is open withdraws it and sends nothing`, `destroying the panel while the confirm dialog is open withdraws it`, `production: a second Import while the confirm dialog is open sends only one import`*, `production: a cancelled confirm dialog does not block a later Import`* |
+| CR-1 (repeated import of a finished file) | `a finished import needs a new file choice before importing again`, `a cancelled import keeps the file chosen, so Import can be tried again`*, `a stream that fails shows the error and still reloads the sidebar` (the file stays chosen after an error) |
+| CR-2 (tab not refreshed after a partial import) | ImportPanel `a stream that fails…` and `Cancel stops the import stream…` (both assert `imported`), `a cancelled import keeps the file chosen…`*; CollectionView `a cancelled import into the tab collection also runs the query again`, `a failed import into the tab collection also runs the query again`* |
+| CR-3 (short `db.name` form printed for non-identifiers) | `collRef` x2, `describeExport` `quotes a collection name that is not an identifier`, ExportPanel `quotes a collection name…`, ImportPanel `shows a target name that is not an identifier with getCollection` |
+| CR-4 (export header follows the live query) | `describes the exported query while running and done, not one applied later`, `keeps describing the exported query after Cancel…`*, `after a failed export, describes the query the next try would send`*, `after a cancelled save dialog, describes the live query`* |
+
+\* added in this pass.
 
 ## Requirement coverage
 
 | Requirement | Tests | Command | Result |
 |---|---|---|---|
-| AC1: e2e export the fixture, import into a new collection, counts match | `export the fixture, import it into a new collection: counts and documents match` (test/e2e/io.e2e.ts) | `npm run test:e2e -- test/e2e/io.e2e.ts` (headless, Podman fixture) | Pass (1 passed) |
+| AC1: e2e export the fixture, import into a new collection, counts match | `export the fixture, import it into a new collection: counts and documents match` (test/e2e/io.e2e.ts) | `npm run test:e2e -- test/e2e/io.e2e.ts` (headless Electron, mongo fixture through Podman) | Pass (1 passed) |
 | AC2: Import into a read-only profile is not offered | CollectionView `does not offer import on a read-only profile, and closes an open import panel`; ImportPanel `a read-only profile gets no panel and closes it at once`, `turning read-only during an import stops it and closes the panel`, `turning read-only after the preview closes without importing` | `cd packages/renderer && npx ng test --include='src/app/io/**/*.spec.ts' --include='src/app/collection/collection-view.spec.ts'` | Pass |
-| AC2 (edge): read-only while the production confirm dialog is open | ImportPanel `a profile turning read-only while the confirm dialog is open sends nothing` | same | **Fail**, TW-1 |
+| AC2 (edge, TW-1): read-only while the production confirm dialog is open | `a profile turning read-only while the confirm dialog is open sends nothing`, `turning read-only while the confirm dialog is open withdraws the dialog` | same | Pass |
+| Pending confirmation withdrawn on close and destroy; no double start | `closing the panel while the confirm dialog is open…`, `destroying the panel while the confirm dialog is open…`, `production: a second Import while the confirm dialog is open…`, `production: a cancelled confirm dialog does not block a later Import` | same | Pass |
 | Export params (filter/projection/sort/collation/limit, format, EJSON mode, no skip, limit 0) | `exportParams` x4, ExportPanel `sends the applied query with the default JSON / relaxed options`, `sends the chosen format and EJSON mode`, CollectionView `exports the applied query; a second click on Export… closes the panel` | same | Pass |
-| Export command text, formatBytes, formatNumber, printSample | `describeExport` x4, `formatBytes` x3, `formatNumber`, `printSample` x3, `NO_PROGRESS` | same | Pass |
-| Export: cancelled save dialog (streamId null) returns to idle | `a cancelled save dialog (streamId null) returns to the form without an error` | same | Pass |
-| Export: progress, then done | `shows the path and progress while running, then the count when done` | same | Pass |
-| Export: Cancel unsubscribes (fake records the cancel) | `Cancel stops the stream (the backend is told) and says how far it got`, `Close cancels a running export and emits closed`, `destroying the panel stops a running export` | same | Pass |
-| Export: error display | `shows a failed request as an error and allows another try`, `shows a stream that fails midway as an error` | same | Pass |
-| Import preview (format, 5 of 20, file info, empty or unreadable sample, format switch) | `asks for a preview of the chosen format and shows the first documents`, `shows an empty file and unreadable sample documents without failing`, `switching the format drops the chosen file`, `shows "choosing" and blocks a second dialog…`, `shows a failed preview as an error…` | same | Pass |
-| Import: cancelled open dialog | `a cancelled open dialog returns to idle without an error`, `a cancelled open dialog keeps the file chosen before`, `closing while the open dialog is up withdraws the request and emits closed` | same | Pass |
-| Import: WriteGuard confirmation on production, and CANCELLED | `production: nothing is sent before the confirm dialog; confirmed: true after Import`, `production: cancelling the confirm dialog sends nothing and shows no error`, `non-production: sends io.import with the options at once, without confirmed` | same | Pass |
-| Import: progress and failures list | `shows progress and the first failures, then the inserted count when done` | same | Pass |
-| Import: cancel, stream error, request error | `Cancel stops the import stream…`, `a stream that fails shows the error and still reloads the sidebar`, `a refused import request shows the error`, `destroying the panel stops a running import` | same | Pass |
-| Import: an invalid collection name blocks the import | `an invalid collection name blocks the import and shows why`, `imports into a new, trimmed collection name…` | same | Pass |
-| Import: sidebar reload after import | `reloads the sidebar collections after an import…`, `a failed sidebar reload does not turn a finished import into an error` | same | Pass |
-| An import into the tab's own collection re-runs its query | CollectionView `an import into the tab collection shows the new documents (the query runs again)`, `an import into another collection leaves the shown page alone` | same | Pass |
+| Export command text (incl. quoted names, snapshot while running/done/cancelled, live query when idle/error) | `describeExport` x5, `collRef` x2, ExportPanel CR-4 tests listed above | same | Pass |
+| Export: cancelled save dialog, progress, done, Cancel, Close, destroy, errors | ExportPanel tests from the first pass | same | Pass |
+| Import preview, open dialog cancel, format switch, errors | ImportPanel `preview` describe (8 tests) | same | Pass |
+| Import: WriteGuard confirmation on production, CANCELLED, non-production | `production: nothing is sent before…`, `production: cancelling the confirm dialog…`, `non-production: sends io.import…` | same | Pass |
+| Import: progress, failures, cancel, stream/request error, invalid names, sidebar reload | ImportPanel `import` describe | same | Pass |
+| Import: a finished import cannot be repeated without a new file choice (CR-1) | `a finished import needs a new file choice before importing again` | same | Pass |
+| An import into the tab's collection re-runs its query (done, cancelled, failed; CR-2) | CollectionView `an import into the tab collection shows the new documents`, `a cancelled import into the tab collection also runs the query again`, `a failed import into the tab collection also runs the query again`, `an import into another collection leaves the shown page alone` | same | Pass |
 
 ## Focused test execution
 
@@ -61,149 +91,116 @@ Command:
 
 Result:
 
-Fail: 4 files, 90 tests, 89 passed, 1 failed. The failure is TW-1, a production defect, not a test
-error.
+Pass: 4 files, 111 tests, 111 passed.
 
 ## Full test execution
 
 Command:
 
-`npm run check` (lint: eslint + prettier --check; typecheck; root vitest; renderer `ng test`)
+`npm run check` (repo root: eslint + prettier --check, tsc and ngc typecheck, root vitest, renderer `ng test`)
 
 Result:
 
-Fail. Lint passed, typecheck passed, and root vitest passed (53 files, 3160 tests). The renderer
-run had 71 files and 1996 tests: 1995 passed and 1 failed (TW-1 only).
+Pass. Lint and typecheck passed. Root vitest: 53 files, 3160 tests passed. Renderer: 71 files, 2014
+tests passed.
 
-E2E: `npm run test:e2e -- test/e2e/io.e2e.ts` passed (1 test).
+E2E: `npm run test:e2e -- test/e2e/io.e2e.ts` (headless, Podman fixture). Pass: 1 passed
+(`export the fixture, import it into a new collection: counts and documents match`).
+
+`npx prettier --write` was run on the three changed spec files and left them unchanged.
 
 ## .taskcheck
 
 Result:
 
-Fail. `.taskcheck` runs `npm run check`, so the result is the same as above: TW-1 is the only
-failure.
+Pass. `.taskcheck` runs `npm run check`, which passed (see above). `.taskcheck` itself was not run
+separately.
 
 ## Bugs found
 
-### Import is still sent after the profile turned read-only while the confirm dialog was open
-
-Finding ID:
-
-`TW-1`
-
-Test:
-
-`ImportPanel > read-only profiles > a profile turning read-only while the confirm dialog is open sends nothing`
-(`packages/renderer/src/app/io/import-panel.spec.ts:455`)
-
-Production source:
-
-`packages/renderer/src/app/io/import-panel.ts:178-208` (`start()`) and `:242` (`close()`/`cancel()`)
-
-Requirement:
-
-AC2 "Import into a read-only profile is not offered". The task assumption says an open import
-panel closes when the profile turns read-only. The component documents that "the panel itself
-refuses (and closes) when the profile is or becomes read-only."
-
-Expected behavior:
-
-The flow is: a production profile, a file chosen, Import clicked (the WriteGuard confirm dialog is
-open), and then the profile turns read-only. Closing the panel should withdraw the pending
-confirmation, or `start()` should re-check `readOnly()` after `guard.approve` resolves. Either way,
-no `io.import` request is sent.
-
-Actual behavior:
-
-`close()` → `cancel()` only cancels an active stream or a preview request. The pending
-`guard.approve(...)` is not aborted, because `start()` passes no signal. The confirm dialog stays
-open. When the user confirms, `start()` continues: the panel is hidden or destroyed, yet it sends
-`io.import` with `confirmed: true` to a read-only profile. The backend's `guardWrites` should
-refuse this (it fails closed), so no data is written. But the UI breaks its own read-only contract.
-When the panel is destroyed (as in CollectionView), the new stream subscription is also created
-after `onDestroy`, so nothing ever unsubscribes it.
-
-Severity:
-
-Low. The backend refuses read-only writes, and in practice the confirm dialog is modal.
-
-Fix required:
-
-`Yes — production code must be fixed by the parent worker / fixer.`
+None in this pass. TW-1 from the first pass is fixed: its original test was not changed and now
+passes, and the tests listed above cover the fix.
 
 ## Coverage
 
-Status: verified (diagnostic filter). The run that includes the TW-1 test exits 1, and Vitest then
-writes no coverage report (the files in `coverage/` were stale, dated 2026-11-16, and were not
-used). The numbers below come from a fresh run of the same selection with only the TW-1 test
-filtered out (89 passed, 1 skipped, exit 0). Once TW-1 is fixed, the test should cover the same
-lines of `start()` that the production-confirm tests already cover.
+Status: verified. The run includes every test, and it exited 0.
 
 Metric: whole-file coverage of task-changed production files.
 Changed-line coverage: not measured as a separate intersection. `io.util.ts`, `export-panel.ts`,
 `import-panel.ts` and `index.ts` are entirely new in this task, so for them whole-file coverage
 equals changed-line coverage. In `collection-view.ts`, the task's executable lines (the `ioPanel`
-signal, `toggleIo`, `imported`, lines 143-144 and 421-428) are not in the provider's uncovered-line
-list (that list ends at 417-418).
+signal, `toggleIo` and `imported`) are not in the provider's uncovered-line list, which ends at
+417-418. The file's hash is the same as in the first pass, so those line numbers still apply.
 
 Evidence:
 - Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: io-basic-ui;
-  base ef00038b48cdc807f0ae7b7bc57eeab948b9a0c8; HEAD c2dc34613fe520be399340190adce400677279af;
-  commits 000bc3e, f535cbe, c2dc346 (from the parent and `git log ef00038..HEAD`).
-- Source/test snapshot identifier (sha256): export-panel.ts 9eef73e8…; import-panel.ts 168b9b95…;
-  io.util.ts f7ad3432…; index.ts affd71fa…; collection-view.ts ff821d56…; io.util.spec.ts 05db2489…;
-  export-panel.spec.ts 2af655d4…; import-panel.spec.ts 214fc4e8…; collection-view.spec.ts 81b60d7c….
-  The production hashes were the same before and after the runs.
+  base 01305873def284d41f41a923f25d0fd12c685d72 (from the parent); HEAD
+  78316e45ef1cb9ea76d6241930c003e79e9b0ce9; commits 548f7eb, dc2e96e, e11f536, fbc733f, 78316e4
+  (from `git log 01305873..HEAD`).
+- Source/test snapshot identifier (sha256, first 12 hex): export-panel.ts e95871c96ed6;
+  import-panel.ts 581579076a1f; io.util.ts fa1f8c6b5a27; index.ts affd71fa5793; collection-view.ts
+  ff821d56fe51; export-panel.spec.ts 1aae0c170ce0; import-panel.spec.ts e64412ca7e2a;
+  io.util.spec.ts fec138d969d2; collection-view.spec.ts 860a6c3df16f. All were the same before and
+  after the run.
 - Exact included files: `packages/renderer/src/app/io/{io.util,export-panel,import-panel,index}.ts`
-  and `packages/renderer/src/app/collection/collection-view.ts`. Excluded: the `.html` and `.css`
+  and `packages/renderer/src/app/collection/collection-view.ts`. Excluded: the `.html`/`.css`
   templates and styles (v8 does not instrument them; the specs exercise the templates through the
-  DOM), `test/e2e/io.e2e.ts` (a test), and `tasks/` (metadata). `index.ts` is measured but has no
-  executable statements (re-exports only; 0/0).
+  DOM, and the e2e test runs them in the built app), `test/e2e/io.e2e.ts` (a test), and
+  `tasks/` and `reviews/` (metadata). `index.ts` is measured but has no executable statements
+  (re-exports only; 0/0).
 - Provider/version, command, working directory, and test selection: Vitest 5.1.0 with v8 through
   `@angular/build` `ng test`, run in `packages/renderer`:
-  `npx ng test --include='src/app/io/**/*.spec.ts' --include='src/app/collection/collection-view.spec.ts' --filter='^(?!.*while the confirm dialog is open sends nothing)' --coverage --coverage-include='src/app/io/io.util.ts' --coverage-include='src/app/io/export-panel.ts' --coverage-include='src/app/io/import-panel.ts' --coverage-include='src/app/io/index.ts' --coverage-include='src/app/collection/collection-view.ts' --coverage-reporters=text --coverage-reporters=json-summary --coverage-reporters=json`
-- Run start/completion time and exit status: started 2026-11-17 02:09:10 +0100, report written
-  02:09:15 +0100, exit 0.
+  `npx ng test --include='src/app/io/**/*.spec.ts' --include='src/app/collection/collection-view.spec.ts' --coverage --coverage-include='src/app/io/io.util.ts' --coverage-include='src/app/io/export-panel.ts' --coverage-include='src/app/io/import-panel.ts' --coverage-include='src/app/io/index.ts' --coverage-include='src/app/collection/collection-view.ts' --coverage-reporters=text --coverage-reporters=json-summary --coverage-reporters=json`
+  (no filter; 111 tests)
+- Run start/completion time and exit status: started 2026-11-17 02:15:56 +0100, report written
+  02:16:04 +0100, exit 0 (111 passed).
 - Generated report paths and hashes: `packages/renderer/coverage/renderer/coverage-summary.json`
-  (sha256 076cdd43…), `packages/renderer/coverage/renderer/coverage-final.json` (sha256 2739e56d…).
-- Evidence outputs are fresh and inputs stayed unchanged: yes. The report timestamps fall within
-  the run, and the input hashes were unchanged.
-- Final run after latest test additions and production fixes: yes for the test additions. No
-  production fix exists yet, so TW-1 needs a re-run after its fix.
+  (sha256 8d105d239d6d…), `packages/renderer/coverage/renderer/coverage-final.json`
+  (sha256 dc5e54294a40…).
+- Evidence outputs are fresh and inputs stayed unchanged: yes. The report mtimes (02:16:04) fall
+  within the run, and the input hashes were the same before and after.
+- Final run after latest test additions and production fixes: yes. It ran on HEAD 78316e4 (which
+  contains all fixes) plus this pass's spec additions.
 
-Values below use covered/total (percentage).
+Values below use covered/total (percentage), from the provider's json-summary.
 
 | Changed file | Statements | Branches | Functions | Lines |
 |---|---:|---:|---:|---:|
-| `packages/renderer/src/app/io/io.util.ts` | 41/42 (97.6%) | 27/28 (96.4%) | 6/6 (100%) | 33/33 (100%) |
-| `packages/renderer/src/app/io/export-panel.ts` | 53/54 (98.1%) | 15/16 (93.8%) | 15/15 (100%) | 44/44 (100%) |
-| `packages/renderer/src/app/io/import-panel.ts` | 129/133 (97.0%) | 50/56 (89.3%) | 28/28 (100%) | 110/113 (97.3%) |
-| `packages/renderer/src/app/io/index.ts` | N/A (0/0) | N/A | N/A | N/A |
-| `packages/renderer/src/app/collection/collection-view.ts` (whole file, mostly pre-existing code) | 151/204 (74.0%) | 79/126 (62.7%) | 44/59 (74.6%) | 129/164 (78.7%) |
-| Aggregate (summed counters, all 5 files; no files missing) | 374/433 (86.4%) | 171/226 (75.7%) | 93/108 (86.1%) | 316/354 (89.3%) |
+| `packages/renderer/src/app/io/io.util.ts` | 42/43 (97.7%) | 29/30 (96.7%) | 7/7 (100%) | 34/34 (100%) |
+| `packages/renderer/src/app/io/export-panel.ts` | 57/58 (98.3%) | 20/21 (95.2%) | 15/15 (100%) | 49/49 (100%) |
+| `packages/renderer/src/app/io/import-panel.ts` | 146/151 (96.7%) | 62/70 (88.6%) | 30/30 (100%) | 126/129 (97.7%) |
+| `packages/renderer/src/app/io/index.ts` | N/A (0/0) | N/A (0/0) | N/A (0/0) | N/A (0/0) |
+| `packages/renderer/src/app/collection/collection-view.ts` (whole file, mostly code from earlier tasks) | 151/204 (74.0%) | 79/126 (62.7%) | 44/59 (74.6%) | 129/164 (78.7%) |
+| Aggregate (summed counters, all 5 files; no files missing or unmeasured) | 396/456 (86.8%) | 190/247 (76.9%) | 96/111 (86.5%) | 338/376 (89.9%) |
+
+The `io/` files alone, summed: statements 245/252 (97.2%), branches 111/121 (91.7%), functions 52/52
+(100%), lines 209/212 (98.6%).
 
 | File and uncovered lines/branch locations | Required behavior or risk | Action/test added or reason left uncovered |
 |---|---|---|
-| `collection-view.ts:422,427` (toggle closes the same panel; re-run after an import into the tab's collection) | Task behavior: after an import, the tab's documents are shown again | Tests added: `exports the applied query; a second click on Export… closes the panel`, `an import into the tab collection shows the new documents`, `an import into another collection leaves the shown page alone`. Now covered. |
-| `collection-view.ts` remaining uncovered lines (151-215, 259-262, 341-403, 417-418) | Code from earlier tasks (query, paging, editing) | Outside this task's scope |
-| `import-panel.ts:202-204` (a non-CANCELLED error from `guard.approve`) | Defensive: the only other rejection is READ_ONLY, which `start()` checks first | Not reachable through the UI without stubbing WriteGuard; justified gap |
-| `import-panel.ts:158` (preview resolves after an abort) | Race guard: `ApiService.request` rejects with CANCELLED on abort, so the resolve branch can't happen | Justified gap; the abort path is covered by `closing while the open dialog is up…` |
-| `import-panel.ts:238` (cancel during "choosing" with an earlier file) | Only reachable through `close()`, which closes the panel anyway | Non-material |
-| `import-panel.ts:90,92` (`?? []` / `?? 0` with no preview) | Computed values read only once a preview exists | Non-material |
-| `export-panel.ts:84` (`start()` while running) | A double-start guard; the Start button is not rendered while running | Non-material |
+| `import-panel.ts:222-224`, branch at 221 (a non-CANCELLED `guard.approve` error that arrives without an abort) | Defensive: the only other rejection is READ_ONLY. `start()` checks `readOnly()` just before, and an abort always turns into CANCELLED | Not reachable through the UI without stubbing WriteGuard, which is core behavior. Justified gap |
+| `import-panel.ts:229` (after `approve` resolved: aborted, destroyed or read-only) | TW-1 defense in depth. `WriteGuard.approve` already rejects with CANCELLED when the signal is aborted (`write-guard.service.ts:124`), and read-only/close/destroy all abort | Not reachable with the real WriteGuard. The behavior it protects is covered by the 4 TW-1 tests above. Justified gap |
+| `import-panel.ts:172` (preview resolves after an abort) | Race guard: `ApiService.request` rejects with CANCELLED on abort | Justified gap; the abort path is covered by `closing while the open dialog is up…` |
+| `import-panel.ts:266` (cancel during "choosing" with an earlier file) | Only reachable through `close()`, which closes the panel anyway | Non-material |
+| `import-panel.ts:99,101` (`?? []` / `?? 0` with no preview) | Computed values read only while a preview exists | Non-material |
+| `export-panel.ts:93` (`start()` while running) | Double-start guard; the Start button is not rendered while running | Non-material |
 | `io.util.ts:56` (`shell()` with `undefined`) | Defensive: every caller checks for `undefined` first | Non-material |
+| `collection-view.ts` remaining uncovered lines (151-215, 259-262, 341-403, 417-418) | Code from earlier tasks (query, paging, editing) | Outside this task's scope |
 
 ## Unable to test
 
 - The visual result of `io-panel.css` (layout, colours) is not checked by unit tests. The e2e test
-  exercises the panels in the built app. No follow-up needed beyond the task's scope.
-- A non-CANCELLED `WriteGuard.approve` rejection (`import-panel.ts:202-204`) can't be reached
-  without mocking WriteGuard, which is core behavior. No follow-up needed.
+  exercises the panels in the built app. No follow-up needed within this task.
+- `import-panel.ts:222-224` and `:229` can't be reached through the real WriteGuard (see the table
+  above). No follow-up needed.
+- The fixer noted one more case: a collection named like a mongosh `db` method (e.g. `stats`) still
+  prints the short `db.stats` form. CR-3 did not cover this, so no test was added. The parent can
+  decide whether it needs a follow-up.
 
 ## Summary
 
-Tests added; production defects were discovered and must be passed to the `fixer` before task
-completion. TW-1 (Low): a pending production confirmation is not withdrawn when the profile turns
-read-only, so `io.import` is still sent. Both acceptance criteria otherwise pass: the e2e round trip
-passes, and the read-only hiding and closing pass in the unit specs.
+Tests and task-scoped coverage are sufficient; no production defects found. TW-1 and CR-1..CR-4
+are fixed, and tests cover each fix. This pass added 8 tests for the edge cases of the fixes (no
+double start, the guard released after a cancelled confirm, the cancelled and error export
+headers, and a failed import refreshing the tab). The focused specs (111), `npm run check`, and the
+io e2e test all pass on HEAD 78316e4 plus these spec additions.
