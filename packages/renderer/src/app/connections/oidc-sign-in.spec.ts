@@ -429,7 +429,10 @@ describe('OidcSignIn panel', () => {
     vi.advanceTimersByTime(117_000);
     fixture.detectChanges();
     expect(text('oidc-expiry')).toBe('The code expires in 2 seconds.');
-    vi.advanceTimersByTime(2000);
+    vi.advanceTimersByTime(1000);
+    fixture.detectChanges();
+    expect(text('oidc-expiry')).toBe('The code expires in 1 second.');
+    vi.advanceTimersByTime(1000);
     fixture.detectChanges();
     expect(find('oidc-sign-in')).toBeNull();
     expect(find('oidc-result')).toBeNull();

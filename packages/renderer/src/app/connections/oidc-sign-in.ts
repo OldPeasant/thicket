@@ -139,7 +139,7 @@ export class OidcSignIn {
     if (s?.expiresAt === undefined) return '';
     const seconds = Math.max(0, Math.ceil((s.expiresAt - this.now()) / 1000));
     if (seconds >= 120) return `The code expires in ${String(Math.ceil(seconds / 60))} minutes.`;
-    return `The code expires in ${String(seconds)} seconds.`;
+    return `The code expires in ${String(seconds)} ${seconds === 1 ? 'second' : 'seconds'}.`;
   });
 
   constructor() {

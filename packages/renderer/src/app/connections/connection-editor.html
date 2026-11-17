@@ -22,7 +22,13 @@
           autocomplete="new-password"
           spellcheck="false"
           [attr.data-testid]="'field-secret-' + kind"
-          [placeholder]="secretSaved(kind) ? 'Saved; type to replace it' : 'none'"
+          [placeholder]="
+            secretRemoved(kind)
+              ? 'Removed on save; type to replace it'
+              : secretSaved(kind)
+                ? 'Saved; type to replace it'
+                : 'none'
+          "
           [value]="secretValue(kind)"
           [disabled]="!canSave()"
           (input)="setSecret(kind, value($event))"
@@ -615,13 +621,36 @@
                   </button>
                 </div>
                 @if (state().mechanism === 'MONGODB-AWS') {
-                  <ng-container
-                    [ngTemplateOutlet]="secretField"
-                    [ngTemplateOutletContext]="{
-                      kind: 'awsSessionToken',
-                      label: 'Session token (temporary credentials only)',
-                    }"
-                  />
+                  <div class="password-row">
+                    <ng-container
+                      [ngTemplateOutlet]="secretField"
+                      [ngTemplateOutletContext]="{
+                        kind: 'awsSessionToken',
+                        label: 'Session token (temporary credentials only)',
+                      }"
+                    />
+                    @if (secretSaved('awsSessionToken')) {
+                      <button
+                        type="button"
+                        class="btn quiet"
+                        data-testid="remove-aws-session-token"
+                        [disabled]="!canSave()"
+                        [attr.aria-pressed]="secretRemoved('awsSessionToken')"
+                        (click)="toggleRemoveSecret('awsSessionToken')"
+                      >
+                        {{
+                          secretRemoved('awsSessionToken')
+                            ? 'Keep saved token'
+                            : 'Remove saved token'
+                        }}
+                      </button>
+                    }
+                  </div>
+                  @if (secretRemoved('awsSessionToken')) {
+                    <p class="hint" data-testid="aws-token-removed">
+                      The saved session token is removed on save.
+                    </p>
+                  }
                   <p class="hint" data-testid="aws-token-hint">
                     The session token is stored in the system keychain on save; Test connection uses
                     the saved one, so save before testing temporary credentials.
@@ -654,7 +683,11 @@
                 </fieldset>
                 @if (state().secretMode === 'ask') {
                   <p class="hint" data-testid="ask-hint">
-                    The password above is used for Test connection only and is not stored.
+                    The {{ passwordNoun() }} above is used for Test connection only and is not
+                    stored.
+                    @if (state().mechanism === 'MONGODB-AWS') {
+                      The session token is still stored in the system keychain on save.
+                    }
                   </p>
                 }
                 @switch (storage()?.level) {

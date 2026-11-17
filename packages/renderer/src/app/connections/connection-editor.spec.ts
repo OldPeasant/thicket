@@ -1709,6 +1709,111 @@ describe('ConnectionEditor', () => {
       });
     });
 
+    describe('stored AWS session token (review fix CR-1)', () => {
+      const clearCalls = () => fake.requestsFor('profiles.clearSecret').map((r) => r.params);
+
+      beforeEach(() => {
+        stored = saved({
+          connectionString: 'mongodb://aws.example:27017/?authMechanism=MONGODB-AWS',
+          auth: { mechanism: 'MONGODB-AWS', username: 'AKIAOLD', secretMode: 'saved' },
+        });
+        fake.handle('profiles.get', () => ({
+          profile: stored,
+          storedSecrets: ['password', 'awsSessionToken'],
+        }));
+        fake.respond('profiles.clearSecret', {});
+      });
+
+      it('"Remove saved token" removes it with clearSecret on save', async () => {
+        await start('p1');
+        expect(must<HTMLInputElement>('field-secret-awsSessionToken').placeholder).toBe(
+          'Saved; type to replace it',
+        );
+        expect(text('remove-aws-session-token')).toBe('Remove saved token');
+        await click('remove-aws-session-token');
+        expect(must<HTMLInputElement>('field-secret-awsSessionToken').placeholder).toBe(
+          'Removed on save; type to replace it',
+        );
+        expect(text('aws-token-removed')).toContain('removed on save');
+        expect(clearCalls()).toHaveLength(0);
+
+        await click('save');
+        expect(clearCalls()).toEqual([{ profileId: 'p1', kind: 'awsSessionToken' }]);
+        expect(secretsSet()).toHaveLength(0);
+        expect(el.querySelector('[data-testid="save-error"]')).toBeNull();
+        // Gone: no remove button, no "Saved" placeholder.
+        expect(el.querySelector('[data-testid="remove-aws-session-token"]')).toBeNull();
+        expect(must<HTMLInputElement>('field-secret-awsSessionToken').placeholder).toBe('none');
+      });
+
+      it('a changed access key ID removes the stored token on save', async () => {
+        await start('p1');
+        await input(must('field-username'), 'AKIANEW');
+        await input(must('field-password'), 'new-secret');
+        await click('save');
+        expect(savedDraft().auth).toMatchObject({ username: 'AKIANEW' });
+        expect(clearCalls()).toEqual([{ profileId: 'p1', kind: 'awsSessionToken' }]);
+        expect(secretsSet()).toEqual([
+          expect.objectContaining({ kind: 'password', value: 'new-secret' }),
+        ]);
+      });
+
+      it('an unchanged key ID keeps the stored token', async () => {
+        await start('p1');
+        await input(must('field-password'), 'rotated-secret');
+        await click('save');
+        expect(clearCalls()).toHaveLength(0);
+      });
+
+      it('typing a new token cancels the removal: setSecret, no clearSecret', async () => {
+        await start('p1');
+        await click('remove-aws-session-token');
+        await input(must('field-username'), 'AKIANEW');
+        await input(must('field-secret-awsSessionToken'), 'NEWTOKEN');
+        expect(el.querySelector('[data-testid="aws-token-removed"]')).toBeNull();
+        await click('save');
+        expect(clearCalls()).toHaveLength(0);
+        expect(secretsSet()).toContainEqual(
+          expect.objectContaining({ kind: 'awsSessionToken', value: 'NEWTOKEN' }),
+        );
+      });
+
+      it('a failed clearSecret is reported, and a retry removes it again', async () => {
+        fake.fail('profiles.clearSecret', {
+          code: 'INTERNAL',
+          message: 'keychain locked (fictitious)',
+        });
+        await start('p1');
+        await click('remove-aws-session-token');
+        await click('save');
+        expect(text('save-error')).toContain(
+          'Saved, but the AWS session token could not be removed',
+        );
+        expect(text('save-error')).toContain('keychain locked (fictitious)');
+        expect(el.querySelector('[data-testid="saved-notice"]')).toBeNull();
+        // Still marked for removal.
+        expect(text('aws-token-removed')).toContain('removed on save');
+
+        fake.respond('profiles.clearSecret', {});
+        await click('save');
+        expect(clearCalls()).toHaveLength(2);
+        expect(el.querySelector('[data-testid="save-error"]')).toBeNull();
+      });
+    });
+
+    it('ask hint names the secret access key and says the session token is stored', async () => {
+      await start();
+      await change(must<HTMLSelectElement>('field-mechanism'), 'MONGODB-AWS');
+      await input(must('field-username'), 'AKIA1');
+      await check('secret-ask');
+      expect(text('ask-hint')).toContain('The secret access key above');
+      expect(text('ask-hint')).toContain('session token is still stored');
+      await change(must<HTMLSelectElement>('field-mechanism'), 'PLAIN');
+      await check('secret-ask');
+      expect(text('ask-hint')).toContain('The LDAP password above');
+      expect(text('ask-hint')).not.toContain('session token');
+    });
+
     it('switching to or from AWS clears the user name and password', async () => {
       await start();
       await change(must<HTMLSelectElement>('field-mechanism'), 'SCRAM-SHA-256');

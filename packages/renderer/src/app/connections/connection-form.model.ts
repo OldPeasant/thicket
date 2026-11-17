@@ -153,6 +153,8 @@ export interface EditorState {
   tlsKeyFile?: string;
   /** Extra secrets typed in this editor ('' or absent = none typed; saved ones are not known). */
   secrets: Partial<Record<ExtraSecretKind, string>>;
+  /** Stored extra secrets the user chose to remove on save (typing a new value cancels it). */
+  removedSecrets?: readonly ExtraSecretKind[];
   /**
    * Secret options of the connection string (`proxyPassword`, ...) that were removed from it:
    * the editor never keeps them, it only tells the user they were not stored.

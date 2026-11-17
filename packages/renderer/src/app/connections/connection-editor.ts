@@ -193,6 +193,10 @@ export class ConnectionEditor {
         ? 'LDAP password'
         : 'Password',
   );
+  /** `passwordLabel` within a sentence. */
+  protected readonly passwordNoun = computed(() =>
+    this.state().mechanism === 'PLAIN' ? 'LDAP password' : this.passwordLabel().toLowerCase(),
+  );
   protected readonly usernameLabel = computed(() => {
     switch (this.state().mechanism) {
       case 'MONGODB-AWS':
@@ -534,11 +538,38 @@ export class ConnectionEditor {
   }
 
   protected setSecret(kind: ExtraSecretKind, value: string): void {
-    this.update((s) => ({ ...s, secrets: { ...s.secrets, [kind]: value } }));
+    this.update((s) => {
+      const next: EditorState = { ...s, secrets: { ...s.secrets, [kind]: value } };
+      // A newly typed value replaces the stored one instead of removing it.
+      if (value !== '' && s.removedSecrets?.includes(kind)) {
+        next.removedSecrets = s.removedSecrets.filter((k) => k !== kind);
+      }
+      return next;
+    });
   }
 
   protected secretSaved(kind: ExtraSecretKind): boolean {
     return this.storedSecrets().includes(kind);
+  }
+
+  /** The stored secret is marked to be removed on save. */
+  protected secretRemoved(kind: ExtraSecretKind): boolean {
+    return this.state().removedSecrets?.includes(kind) === true;
+  }
+
+  /** Marks a stored secret to be removed on save (drops a typed value), or keeps it again. */
+  protected toggleRemoveSecret(kind: ExtraSecretKind): void {
+    this.update((s) => {
+      const removed = s.removedSecrets ?? [];
+      if (removed.includes(kind)) {
+        return { ...s, removedSecrets: removed.filter((k) => k !== kind) };
+      }
+      return {
+        ...s,
+        secrets: { ...s.secrets, [kind]: '' },
+        removedSecrets: [...removed, kind],
+      };
+    });
   }
 
   protected secretValue(kind: ExtraSecretKind): string {
@@ -784,6 +815,8 @@ export class ConnectionEditor {
     this.attempted.set(true);
     if (this.problems().length > 0 || this.saving()) return;
     const state = this.state();
+    // Decided against the profile as loaded (its key ID, its stored secrets), before saving.
+    const toRemove = this.secretsToRemove(state);
     // A profile switch while saving (same editor instance) or leaving the page (destroyed
     // instance) must not show the saved profile or navigate to it.
     const gen = this.loadGeneration;
@@ -812,11 +845,12 @@ export class ConnectionEditor {
       const fallback = this.storage()?.defaultSecretMode ?? 'ask';
       const adopted: EditorState = { ...editorStateFromProfile(profile, fallback), password: '' };
       if (state.droppedSecrets) adopted.droppedSecrets = state.droppedSecrets;
-      // Keeps the typed password and other secrets until they are stored.
+      // Keeps the typed password and other secrets, and the removals, until they are done.
       const pending: EditorState = {
         ...adopted,
         password: state.password,
         secrets: state.secrets,
+        ...(toRemove.length > 0 ? { removedSecrets: toRemove } : {}),
       };
       if (current()) {
         this.state.set(pending);
@@ -848,7 +882,7 @@ export class ConnectionEditor {
         this.storedSecrets.update((kinds) => kinds.filter((k) => k !== 'password'));
       }
       if (!current()) return;
-      const failed = await this.storeSecrets(profile.id, state, current);
+      const failed = await this.storeSecrets(profile.id, state, toRemove, current);
       if (!current()) return;
       if (failed.length > 0) {
         this.saveError.set(`Saved, but ${failed.join('; ')}`);
@@ -872,17 +906,58 @@ export class ConnectionEditor {
   }
 
   /**
-   * Stores the extra secrets typed for the current settings. Returns what failed, as text.
-   * Already stored secrets that the settings no longer use are left alone (the backend ignores
-   * them). Typed values are kept in the editor (also those already stored) until the whole save
-   * succeeds, so a retry after a partial failure sends them again.
+   * Stored extra secrets to remove on save: those the user marked for removal, and a stored AWS
+   * session token when the access key ID changed and no new token was typed. Only secrets the
+   * current settings use are considered.
+   */
+  private secretsToRemove(state: EditorState): ExtraSecretKind[] {
+    const stored = this.storedSecrets();
+    const used = usedSecretKinds(state);
+    const typed = (kind: ExtraSecretKind) => (state.secrets[kind] ?? '') !== '';
+    const remove = (state.removedSecrets ?? []).filter(
+      (kind) => used.includes(kind) && stored.includes(kind) && !typed(kind),
+    );
+    // A session token belongs to the one temporary access key it was issued with: with another
+    // key ID the backend would still send the stored token, and AWS refuses the pair.
+    const kind = 'awsSessionToken';
+    if (
+      state.base !== undefined &&
+      used.includes(kind) &&
+      stored.includes(kind) &&
+      !typed(kind) &&
+      !remove.includes(kind) &&
+      state.model.username?.trim() !== state.base.auth?.username
+    ) {
+      remove.push(kind);
+    }
+    return remove;
+  }
+
+  /**
+   * Stores the extra secrets typed for the current settings and removes `toRemove` with
+   * `profiles.clearSecret`. Returns what failed, as text. Other stored secrets are left alone,
+   * also those the settings no longer use; the backend may still read some of them (a stored
+   * AWS session token is sent with any access key ID), which is why a changed key ID removes the
+   * token. Typed values and removals are kept in the editor until the whole save succeeds, so a
+   * retry after a partial failure does them again.
    */
   private async storeSecrets(
     profileId: string,
     state: EditorState,
+    toRemove: readonly ExtraSecretKind[],
     current: () => boolean,
   ): Promise<string[]> {
     const failed: string[] = [];
+    for (const kind of toRemove) {
+      try {
+        await this.api.request('profiles.clearSecret', { profileId, kind });
+      } catch (error) {
+        failed.push(`the ${SECRET_LABELS[kind]} could not be removed: ${describeError(error)}`);
+        continue;
+      }
+      if (!current()) return failed;
+      this.storedSecrets.update((kinds) => kinds.filter((k) => k !== kind));
+    }
     for (const kind of usedSecretKinds(state)) {
       const value = state.secrets[kind];
       if (value === undefined || value === '') continue;
