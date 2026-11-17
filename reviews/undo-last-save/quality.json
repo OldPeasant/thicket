@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "task": "undo-last-save",
+  "reviewed_revision": "fae91c1b11cb5a3cd425cdfe52124fc6b86483f1",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/undo-last-save/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/undo-last-save/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/undo-last-save/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "R1-CR-1", "source": "code-reviewer", "severity": "P1", "disposition": "fixed",
+     "note": "round 1: order-restoring replace overwrote server changes outside the conflict check; whole-document check added (round 2 made it a whole-value $expr check)"},
+    {"id": "R1-CR-2", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "round 1: replace path not exercised against real MongoDB; round-2 e2e tests cover it (12/12 pass on the final code)"},
+    {"id": "R1-CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "round 1: projection/partial refusal wording"},
+    {"id": "R1-TW-1", "source": "test-writer", "severity": "High", "disposition": "fixed",
+     "note": "round 1: same defect as R1-CR-1"},
+    {"id": "R2-CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "round 2: field turned into an array containing the saved value passed the query $eq check; now aggregation $eq via exprFieldCheck"},
+    {"id": "R2-TW-2", "source": "test-writer", "severity": "Medium", "disposition": "fixed",
+     "note": "round 2: applyUpdate now models MongoDB's field-name order"},
+    {"id": "R2-TW-3", "source": "test-writer", "severity": "Medium", "disposition": "fixed",
+     "note": "round 2: saved version taken from the read-back; no false conflict for added sub-fields"},
+    {"id": "R3-CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "multi-edit saves are not tracked by Undo last save; recorded as a task assumption (no data loss, outside this task's touches)"},
+    {"id": "R3-CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "SavedVersion.after doc comment"},
+    {"id": "R3-TW-1", "source": "test-writer", "severity": "Medium", "disposition": "fixed",
+     "note": "undo of a repeated-key document replaced with only the changed-field check; now refused (assumption recorded)"},
+    {"id": "R4-CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "unreachable 'update' branch and its comment in keepingOrder; behavior is safe (always refused), assumption text corrected via tasks.py assume"}
+  ],
+  "validation": [
+    {"command": "cd packages/renderer && npx ng test --include='src/app/document/**/*.spec.ts'", "result": "pass"},
+    {"command": "npm run test:e2e -- test/e2e/undo-last-save.e2e.ts", "result": "pass"},
+    {"command": "sh .taskcheck", "result": "pass"}
+  ]
+}
