@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "task": "shell-backend",
+  "reviewed_revision": "b4a4a7ad97d0c8f35f429cd52cd07cbcefce0e6b",
+  "helpers": {
+    "test-writer":   {"status": "completed", "report": "reviews/shell-backend/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/shell-backend/review.md"},
+    "fixer":         {"status": "completed", "report": "reviews/shell-backend/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "R1-CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "round 1: ShellHost lifecycle tests added by test-writer in 92c9fb1"},
+    {"id": "R1-CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "round 1: exit/quit no longer close the client (2708094)"},
+    {"id": "R1-CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "round 1: completion after a worker restart (2708094)"},
+    {"id": "R1-CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "round 1: queued evals of a closed session (2708094, same as O-2)"},
+    {"id": "TW-1", "source": "test-writer", "severity": "Medium", "disposition": "fixed",
+     "note": "trailing comment on a shell command line swallowed the rest (2708094)"},
+    {"id": "O-1", "source": "test-writer", "severity": "Low", "disposition": "fixed",
+     "note": "worker death during eval ends the stream with an error (2708094)"},
+    {"id": "O-2", "source": "test-writer", "severity": "Low", "disposition": "fixed",
+     "note": "same as R1-CR-4 (2708094)"},
+    {"id": "O-3", "source": "test-writer", "severity": "Low", "disposition": "fixed",
+     "note": "ensureWorker restart honours the abort signal (2708094)"},
+    {"id": "O-4", "source": "test-writer", "severity": "Low", "disposition": "fixed",
+     "note": "unknown session answers a rejected promise (2708094)"},
+    {"id": "R2-CR-5", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "comment glued to a command argument (02d12f9)"},
+    {"id": "TW-2", "source": "test-writer", "severity": "Low", "disposition": "fixed",
+     "note": "catastrophic backtracking in the COMMAND regex (8712197)"},
+    {"id": "R4-CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "CR/U+2028 inside a trailing block comment now accepted; reviewer rates the new behaviour more correct, documentation/test hygiene only, optional"}
+  ],
+  "validation": [
+    {"command": "npm run check (merged HEAD 369c532)", "result": "pass"},
+    {"command": "npx vitest run --config test/integration/vitest.config.ts test/integration/shell.int.spec.ts (Podman MongoDB, merged HEAD)", "result": "pass"},
+    {"command": "npx vitest run packages/backend/src/shell (test-writer round 4)", "result": "pass"}
+  ]
+}

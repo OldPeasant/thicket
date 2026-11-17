@@ -18,7 +18,7 @@ import {
 import { RpcError } from '../server/rpc';
 import { openSshTunnel, type SshEnvironment, type SshTunnel } from '../ssh/tunnel';
 import { redact, toConnectError } from './errors';
-import { clientConfig, type ConnectSecrets } from './options';
+import { clientConfig, type ClientConfig, type ConnectSecrets } from './options';
 
 /** The part of `MongoClient` the manager uses (tests pass fakes). */
 export interface ClientLike {
@@ -71,10 +71,17 @@ export class ConnectionManager {
   private readonly entries = new Map<string, Entry>();
   private readonly createClient: (uri: string, options: MongoClientOptions) => ClientLike;
   private readonly now: () => number;
+  /** The driver configuration each client was created with (`configOf`). */
+  private readonly configs = new WeakMap<ClientLike, ClientConfig>();
 
   constructor(private readonly deps: ConnectionManagerDeps) {
-    this.createClient =
+    const create =
       deps.createClient ?? ((uri, options) => new MongoClient(uri, options) as ClientLike);
+    this.createClient = (uri, options) => {
+      const client = create(uri, options);
+      this.configs.set(client, { uri, options });
+      return client;
+    };
     this.now = deps.now ?? (() => performance.now());
   }
 
@@ -360,6 +367,17 @@ export class ConnectionManager {
       throw new RpcError('NOT_CONNECTED', `The profile ${profileId} has no open connection`);
     }
     return entry.client;
+  }
+
+  /**
+   * The driver configuration of an open connection (secrets resolved), for components that need
+   * a client of their own on the same connection (the mongosh shell); `NOT_CONNECTED` otherwise.
+   */
+  configOf(profileId: string): ClientConfig {
+    const config = this.configs.get(this.client(profileId));
+    if (!config)
+      throw new RpcError('NOT_CONNECTED', `The profile ${profileId} has no open connection`);
+    return config;
   }
 
   /** Server version, topology and build info of an open connection. */

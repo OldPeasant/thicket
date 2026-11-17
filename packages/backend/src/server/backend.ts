@@ -10,6 +10,7 @@ import { docsWriteHandlers } from '../docs/write';
 import { guardWrites } from '../guard';
 import { indexHandlers } from '../indexes';
 import { dialogsOverLink, ioHandlers } from '../io';
+import { ShellHost, shellHandlers } from '../shell';
 import { HostKeyPrompts, KnownHosts, sshHandlers } from '../ssh';
 import { wiringHandlers, type PrivilegedLink } from './handlers';
 import { fromMainPort, type MainPortLike } from './ports';
@@ -28,6 +29,11 @@ export interface BackendOptions {
   parentPort: ParentPortLike;
   pid: number;
   log?: (message: string) => void;
+  /**
+   * Script of the shell workers (`shell-worker.cjs` of the bundle, see `ShellHostOptions`);
+   * without it `shell.open` answers `UNSUPPORTED`.
+   */
+  shellWorker?: string | URL;
   /**
    * Electron's `userData` folder (`THICKET_USER_DATA`, set by main when it starts the backend);
    * holds `known_hosts`. Without it SSH tunnels answer `UNSUPPORTED`.
@@ -80,16 +86,31 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
         }
       : {}),
   });
+  const shells = new ShellHost({
+    workerUrl: options.shellWorker,
+    log: (message) => log(`shell: ${message}`),
+  });
+  const conn = connHandlers(connections);
+  const connClose = conn['conn.close'];
+  if (connClose) {
+    // A closed connection ends its shell sessions too (they have clients of their own).
+    conn['conn.close'] = async (params, context) => {
+      const result = await connClose(params, context);
+      await shells.closeProfile((params as { profileId: string }).profileId);
+      return result;
+    };
+  }
   // Every write handler goes through the guard; it checks the profile as main has it now.
   const handlers = guardWrites(
     {
       ...wiringHandlers({ pid: options.pid, privileged: () => privileged }),
-      ...connHandlers(connections),
+      ...conn,
       ...sshHandlers(prompts),
       ...browseHandlers(connections),
       ...docsQueryHandlers(connections),
       ...docsWriteHandlers(connections),
       ...aggHandlers(connections),
+      ...shellHandlers(connections, shells),
       ...indexHandlers(connections),
       // File dialogs can stay open as long as the user likes: no timeout.
       ...ioHandlers(
