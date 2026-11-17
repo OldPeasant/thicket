@@ -4,12 +4,16 @@ Date: 2026-11-17
 
 Task: release-native-modules - Release: bundle works when native modules (ssh2, os-dns-native) are compiled
 
-Scope: task diff `f6b1b1225b680609226e3caa422fb0f5038b2e46..574bc4978e4edf895e84284e3213bf24dd5bc015` (supplied by the parent worker). Measured at HEAD `f15d3456ddc0adb51377187a8161aa15d4d88c93`; `git diff 574bc497 HEAD` touches only `tasks/` files, so the code under test is identical to the task commit. Uncommitted input: the updated spec file (this report's test changes).
+Scope: the task diff `f6b1b1225b680609226e3caa422fb0f5038b2e46..bb4a42ff4cec40525760c77f80b1b579a777a8cb`, base and final revision supplied by the parent worker. This is the final code after the fixes for review findings CR-1 and CR-2. I measured at HEAD `bb4a42ff4cec40525760c77f80b1b579a777a8cb` on branch `main`. The only uncommitted input is this pass's change to `apps/desktop/src/build/native-addons.spec.ts`. `reviews/release-native-modules/review.md` also had an uncommitted change during this pass. I did not make it, and it is not a code input.
 
 Requirements:
-- `tasks/release-native-modules.md` acceptance criteria and recorded assumptions (the esbuild plugin turns every `*.node` require into a stub throwing MODULE_NOT_FOUND)
-- `docs/ARCHITECTURE.md` "Coverage"; `AGENTS.md` project notes (OS-neutral tests, no timing asserts)
-- Parent worker instructions
+- The acceptance criteria and recorded assumptions in `tasks/release-native-modules.md`
+- `reviews/release-native-modules/review.md` (CR-1, CR-2) and `reviews/release-native-modules/fixes.md`. They define the final behavior:
+  - only the addons in `OPTIONAL_ADDONS` are stubbed;
+  - any other `*.node` import fails the build;
+  - stubs are named `<package>/<path inside package>`.
+- The project notes in `AGENTS.md` (OS-neutral tests, no assertions that depend on timing) and the "Coverage" section of `docs/ARCHITECTURE.md`
+- The parent worker's instructions
 
 ## Test files changed
 
@@ -17,54 +21,61 @@ Requirements:
 
 ## Tests added or updated
 
-Count: 5 added (5 existing tests kept unchanged; 10 total)
+Count: 2 added in this pass. The 19 tests from the fixer stay unchanged, for 21 tests in total.
 
-- `omitNativeAddons` > stubs an addon that was never compiled (no toolchain: the file does not exist)
-- `omitNativeAddons` > stubs every addon in one bundle, each failing with its own path (sshcrypto + os_dns_native layout)
-- `omitNativeAddons` > also stubs an addon imported from an ES module
-- `omitNativeAddons` > bundles files whose names only start with or contain ".node" normally (`helper.node.cjs`, `other.nodejs` are not stubbed)
-- `omittedAddonSource` > keeps Windows separators, double quotes and newlines in the path literal
+- `omitNativeAddons` > stubs an allow-listed addon required by absolute path, with its package path in the message. This covers the `isAbsolute` path. The path comes from `path.join`, so on Windows it is a drive-letter path.
+- `omitNativeAddons` > fails the build for an unlisted addon given as an entry point, naming the working directory. This covers the `args.importer || args.resolveDir` fallback, which was the only uncovered branch at the start of this pass.
 
-All paths are built with `path.join`, temp dirs via `os.tmpdir()`/`mkdtempSync`, no file permissions, signals or timing assumptions.
+I reviewed the 19 existing tests against the final `native-addons.ts`. Together with the two new tests, they cover:
+- the allow-list matching, including both Release and Debug builds and addons that were never compiled;
+- build errors for unlisted packages, for unlisted addons in allow-listed packages (whether or not the addon was compiled) and for addons outside `node_modules`;
+- stubs named after their package, including scoped packages;
+- bare-specifier, ESM and absolute imports;
+- POSIX and Windows separators in `addonLocation`;
+- safe quoting in the stub source.
+
+The tests build all paths with `path.join` and create temporary directories with `os.tmpdir()`/`mkdtempSync`. They do not depend on file permissions, signals or timing.
 
 ## Requirement coverage
 
 | Requirement | Tests | Command | Result |
 |---|---|---|---|
-| AC1: the bundle no longer fails with "No loader is configured for .node" when addons are compiled (unit-level part) | `without it, esbuild refuses a compiled addon...`, `bundles code that requires an addon...`, `stubs every addon in one bundle...`, `also stubs an addon imported from an ES module` | `cd apps/desktop && npx vitest run src/build` | Pass (10/10). The container `npm run dist` reproduction itself was run by the parent, not by this helper |
-| AC1/assumption: builds without a toolchain behave the same (addon missing on disk) | `stubs an addon that was never compiled...` | same | Pass |
-| Assumption: stub throws MODULE_NOT_FOUND so the JS fallback in try/catch runs | `bundles code that requires an addon...`, `an unguarded require of an addon throws when the module is loaded...`, `stubs every addon in one bundle...` | same | Pass |
+| AC1, unit-level part: a compiled addon no longer breaks esbuild | `without it, esbuild refuses a compiled addon...`, `bundles code that requires an allow-listed addon...`, `stubs every allow-listed addon in one bundle...`, `also stubs an allow-listed addon imported from an ES module`, `stubs an allow-listed addon named by a bare package specifier`, `stubs an allow-listed addon required by absolute path...` | `cd apps/desktop && npx vitest run src/build --coverage --coverage.include=src/build/native-addons.ts` | Pass (21/21). The parent ran the container `npm run dist` at bb4a42ff and got DIST_EXIT=0. This helper did not run it |
+| AC1 and assumption: builds without a toolchain behave the same | `stubs an allow-listed addon that was never compiled...` (os-dns-native, Release and Debug) | same | Pass |
+| Assumption: the stub throws MODULE_NOT_FOUND, so the JS fallback runs | `bundles code that requires an allow-listed addon...`, `an unguarded require of an allow-listed addon throws when the module is loaded...` | same | Pass |
+| CR-1: only allow-listed addons are stubbed; others fail the build on every machine | `fails the build for an addon of a package that is not allow-listed...`, `fails the build for an unlisted addon of an allow-listed package, whether or not it was compiled`, `fails the build for an addon outside node_modules`, `fails the build for an unlisted addon given as an entry point...`, `isOptionalAddon` > `matches allow-listed packages...` | same | Pass |
+| CR-2: stubs and messages are named after their package | `gives identical relative addon paths in different packages distinct stubs`, `addonLocation` tests (POSIX, Windows, innermost `node_modules`, scoped packages, invalid paths) | same | Pass |
 | Only `*.node` imports are affected | `leaves package imports whose names merely contain "node" alone`, `bundles files whose names only start with or contain ".node" normally` | same | Pass |
-| Stub source is safe for any path (quotes, Windows backslashes, newlines) | `quotes the path safely`, `keeps Windows separators, double quotes and newlines...` | same | Pass |
-| AC2: AppImage starts / loads ssh2 | none (parent ran smoke-packaged and SSH-tunnel e2e on container builds) | - | Not run by test-writer: no C toolchain locally, packaging is outside unit scope |
-| AC3: check.yml bundle job, actionlint | none | - | Not testable with unit tests (workflow YAML; parent ran actionlint) |
-| AC4: `npm run check` passes | whole suite | `npm run check` (repo root) | Pass |
+| The stub source is safe for any path | `quotes the path safely`, `keeps Windows separators, double quotes and newlines...` | same | Pass |
+| AC2: the AppImage starts and loads ssh2 | none | - | Not run by test-writer: there is no C toolchain here, and packaging is outside unit scope. The parent ran smoke-packaged and the SSH e2e test |
+| AC3: the check.yml bundle job; actionlint passes | none | - | Not testable with unit tests: it is workflow YAML. The parent ran actionlint and GitHub run 44127846813 |
+| AC4: `npm run check` passes | the whole suite | `npm run check` (repo root) | Pass |
 
 ## Focused test execution
 
 Command:
 
-`cd apps/desktop && npx vitest run src/build`
+`cd apps/desktop && npx vitest run src/build --coverage --coverage.include=src/build/native-addons.ts`
 
 Result:
 
-Pass - 1 file, 10 tests passed.
+Pass: 1 file, 21 tests. The run before the two new tests also passed, with 19 tests.
 
 ## Full test execution
 
 Command:
 
-`npm run check` (repo root: eslint + prettier --check, typecheck, vitest projects, renderer `ng test`)
+`npm run check` (repo root: eslint and prettier --check, typecheck in all workspaces, vitest, renderer `ng test`)
 
 Result:
 
-Pass - vitest 100 files / 5227 tests passed; renderer 125 files / 4137 tests passed. (A first run failed lint on a non-null assertion in a new test; the test was fixed and the full check rerun green.)
+Pass: lint and prettier clean, typecheck clean, vitest 100 files and 5238 tests passed, renderer 125 files and 4137 tests passed. The run includes the two new tests.
 
 ## .taskcheck
 
 Result:
 
-Pass - `.taskcheck` runs `npm run check`, which passed (see above).
+Pass. `.taskcheck` runs `npm run check`, and that passed (see above). I did not run `.taskcheck` itself.
 
 ## Bugs found
 
@@ -75,35 +86,57 @@ None.
 Status: verified
 
 Metric: whole-file coverage of task-changed production files.
-Changed-line coverage: not measured separately; the only scoped file is entirely new in this task, so whole-file coverage equals coverage of its added lines.
+Changed-line coverage: not measured separately. `native-addons.ts` is new in this task, so whole-file coverage is also the coverage of its added lines.
 
 Evidence:
-- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: `release-native-modules`; base `f6b1b1225b680609226e3caa422fb0f5038b2e46`; task commit `574bc4978e4edf895e84284e3213bf24dd5bc015` (supplied by the parent); measured HEAD `f15d3456ddc0adb51377187a8161aa15d4d88c93` (differs from the task commit only in `tasks/`).
-- Source/test snapshot identifier (including uncommitted inputs): sha256 `native-addons.ts` 0554792e546bcb24f534e71687a9962e5405518bc6db7831396e9c3f0b9bb129 (unchanged throughout); `native-addons.spec.ts` 30eaf6996d0194bc14f1a2fbeec064487093a9a9ae934ab467413fd25150c167 (final, uncommitted).
-- Exact included files; renamed/deleted/excluded files and reasons: included `apps/desktop/src/build/native-addons.ts`. Excluded: `apps/desktop/scripts/build.mjs` (build script, not in any Vitest workspace include; its change is a one-line plugin registration, exercised by the parent's container `npm run dist` runs), `apps/desktop/electron-builder.yml` and `.github/workflows/check.yml` (configuration, no unit-testable code), `native-addons.spec.ts` (test).
-- Provider/version, command, working directory, and test selection: Vitest 5.1.0 with `@vitest/coverage-v8` on Node v24.21.0; `npx vitest run src/build --coverage --coverage.include='src/build/native-addons.ts'` in `apps/desktop`; selection `src/build` (native-addons.spec.ts only).
-- Run start/completion time and exit status: final run started 2026-11-17 17:48:57 +0100, completed within ~0.2 s, exit 0, 10/10 tests passed.
-- Generated report paths and report hashes/run identifier: `apps/desktop/coverage/coverage-summary.json` (mtime 17:48:58, sha256 dead4727896cee6d087f131d656a2b96b8f986620f87dd025fc60a6312a9d5cf), `apps/desktop/coverage/lcov.info` (sha256 6df03613cb407dbdfe4272da6cbd5d484060e9bf7afd4ea31451333c13009cf1), `apps/desktop/coverage/lcov-report/` (git-ignored).
-- Evidence outputs are fresh and inputs stayed unchanged: yes; report files rewritten by the final run (mtime after run start), production file hash identical before and after.
-- Final run after latest test additions and production fixes: yes (no production fixes were made).
+- Task, base, HEAD and file scope:
+  - Task id: `release-native-modules`.
+  - Base: `f6b1b1225b680609226e3caa422fb0f5038b2e46`, supplied by the parent.
+  - Measured HEAD: `bb4a42ff4cec40525760c77f80b1b579a777a8cb`, the final revision after the fixes for CR-1 and CR-2.
+  - Task-owned commits: f15d3456, 9eaa96f9 and bb4a42ff, plus commits that touch only `tasks/`.
+- Snapshot (sha256):
+  - `native-addons.ts`: e2242cfa2b67651dfd7d1ecbf74a404ebc156f19be1a782f1e0edf748038b9ba. Committed at HEAD and unchanged during this pass.
+  - `native-addons.spec.ts`: 93732fda2efe1575d444d2d03412440cfaf004dbfb21262d36b51e20d62004e6. Final and uncommitted.
+- Included and excluded files:
+  - Included: `apps/desktop/src/build/native-addons.ts`.
+  - Excluded: `apps/desktop/scripts/build.mjs`. It registers the plugin and has comments, it is not in any Vitest include, and the parent's container `npm run dist` exercises it.
+  - Excluded: `apps/desktop/electron-builder.yml` and `.github/workflows/check.yml`. They are configuration.
+  - Excluded: the spec file, because it is a test.
+  - No files were renamed or deleted.
+- Provider, command and selection:
+  - Provider: Vitest 5.1.0 with `@vitest/coverage-v8`.
+  - Command: `npx vitest run src/build --coverage --coverage.include=src/build/native-addons.ts`, run in `apps/desktop`.
+  - Selection: `src/build`, which is only `native-addons.spec.ts`.
+- Run time and exit status: started 2026-11-17 17:55:44 +0100, took about 0.2 s, exited 0, 21/21 tests passed.
+- Report paths and hashes (the directory is git-ignored):
+  - `apps/desktop/coverage/coverage-summary.json`: sha256 9e0d454cc4342cca598ee92ec6c77bc4de20c56484eb3b4bdc7e8ad34c9ce454.
+  - `apps/desktop/coverage/lcov.info`: sha256 45b21da10783366281fb334076474f4e5a10d5d655c1189e1c380ab512c66557.
+  - `apps/desktop/coverage/lcov-report/`.
+- Freshness: the outputs are fresh. All report files have mtime 2026-11-17 17:55:44, written by this run. The production file is unchanged from HEAD, and the spec hash above is the version that ran.
+- Final run after the latest test additions and production fixes: yes. The run covers the CR-1/CR-2 fixes and both tests added in this pass.
 
-Values below use covered/total (percentage); zero-denominator or unsupported metrics are N/A.
+Values below use covered/total (percentage).
 
 | Changed file | Statements | Branches | Functions | Lines |
 |---|---:|---:|---:|---:|
-| `apps/desktop/src/build/native-addons.ts` | 8/8 (100%) | 0/0 (N/A) | 4/4 (100%) | 6/6 (100%) |
+| `apps/desktop/src/build/native-addons.ts` | 32/32 (100%) | 26/26 (100%) | 7/7 (100%) | 27/27 (100%) |
 
-Aggregate (summed counters, single measured file): statements 8/8, branches N/A (0/0), functions 4/4, lines 6/6. Unmeasured scoped files: none; excluded files listed above.
+Aggregate (summed counters, one measured file): statements 32/32, branches 26/26, functions 7/7, lines 27/27. No scoped files are unmeasured. The excluded files are listed above.
+
+Before this pass's additions, the same command reported branches 25/26 (96.15%). The uncovered branch was lcov `BRDA:100,7,1,0`.
 
 | File and uncovered lines/branch locations | Required behavior or risk | Action/test added or reason left uncovered |
 |---|---|---|
-| none | - | - |
+| `apps/desktop/src/build/native-addons.ts:100`, the `args.resolveDir` fallback of `args.importer \|\| args.resolveDir` (now covered) | The error for an unlisted addon names where it came from, even when there is no importer (an entry point) | Added `fails the build for an unlisted addon given as an entry point, naming the working directory` |
+
+No lines or branches remain uncovered.
 
 ## Unable to test
 
-- Behavior with real compiled addons (actual `sshcrypto.node` / `os_dns_native.node` binaries) and the packaged AppImage: the local machine has no C toolchain; the unit tests use fake `.node` files instead. The parent covered this in a node:24 container (AC1, AC2). No follow-up needed beyond the parent's evidence.
-- `check.yml` `bundle` job: only verifiable by CI/actionlint (parent ran actionlint). The job's first real run on a push is the definitive evidence.
-- Note (not a defect): the filter `/\.node$/` is case-sensitive, so an import spelled `X.NODE` would not be stubbed; no addon in the dependency tree uses that spelling, so no test was added.
+- **Real compiled addons and the packaged AppImage:** I could not test with real `sshcrypto.node` and `os_dns_native.node` binaries, or with the packaged AppImage, because this machine has no C toolchain. The unit tests use fake `.node` files instead. The parent covered this in a node:24 container at bb4a42ff: DIST_EXIT=0, with stubs for ssh2 sshcrypto and for os-dns-native Release and Debug. The parent also ran smoke-packaged and the SSH e2e test. No follow-up is needed.
+- **Certificate exporters:** the `'any'` allow-list entries for `win-export-certificate-and-key` and `@mongodb-js/macos-export-certificate-and-key` are tested only with fake packages. These packages are not installed locally, and their real addon names were not confirmed (see `fixes.md`). This is low risk because they load their addon through `bindings`, which builds the path at runtime.
+- **`check.yml` bundle job:** only CI and actionlint can verify it. The parent recorded both.
+- **Case-sensitive filter (not a defect):** the `/\.node$/` filter is case-sensitive, so an import spelled `X.NODE` would bypass the plugin. esbuild would then fail with "No loader is configured" rather than produce a broken bundle. I added no test.
 
 ## Summary
 

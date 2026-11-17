@@ -235,6 +235,33 @@ describe('omitNativeAddons', () => {
     );
   });
 
+  it('stubs an allow-listed addon required by absolute path, with its package path in the message', async () => {
+    const addon = join(dir, ...SSH2_CRYPTO, 'crypto', 'build', 'Release', 'sshcrypto.node');
+    put(['absolute.cjs'], tryLoadAll([addon]));
+    const code = await bundle('absolute.cjs');
+    expect(code).not.toContain('not an ELF/PE/Mach-O');
+    expect(run(code)).toEqual([['MODULE_NOT_FOUND', SSHCRYPTO_MESSAGE]]);
+  });
+
+  it('fails the build for an unlisted addon given as an entry point, naming the working directory', async () => {
+    put(['entry', 'own.node'], 'fake addon');
+    const error = await build({
+      entryPoints: ['./own.node'],
+      absWorkingDir: join(dir, 'entry'),
+      bundle: true,
+      platform: 'node',
+      write: false,
+      logLevel: 'silent',
+      plugins: [omitNativeAddons],
+    }).then(
+      () => undefined,
+      (e: unknown) => e as Error,
+    );
+    expect(error?.message).toContain(
+      `Native addon './own.node' imported by ${join(dir, 'entry')} is not in the allow-list`,
+    );
+  });
+
   it('bundles files whose names only start with or contain ".node" normally', async () => {
     put(['helper.node.cjs'], "module.exports = 'js helper';");
     put(['other.nodejs'], "module.exports = 'not an addon';");
