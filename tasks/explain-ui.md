@@ -16,6 +16,7 @@ Explain button on the query bar and the pipeline builder; tree of stages with ke
   - verified (2026-11-17 04:41+0100 by felix/agent-2): final HEAD 7a06a56 (rebased on ef8927e): npm run build -w packages/renderer && npm run build -w apps/desktop && npx playwright test test/e2e/explain.e2e.ts test/e2e/collection.e2e.ts test/e2e/aggregation.e2e.ts (mongo8 fixture, mongo:8.2 via podman; real query bar Explain -> COLLSCAN verdict, idx.create, Explain again -> IXSCAN status_1_total_1; builder Explain -> IXSCAN) -> 3 passed
 - [x] Component test renders a captured 8.x explain fixture correctly
   - verified (2026-11-17 04:24+0100 by felix/agent-2): cd packages/renderer && npx ng test --include 'src/app/explain/**/*.spec.ts' (explain-plan.spec.ts renders fixtures find-ixscan/find-collscan/agg-group captured from mongo:8.2 by explain/fixtures/capture.mjs: verdict, totals, FETCH>IXSCAN tree, index, COLLSCAN flow bar, SBE stages, raw output in explorer) -> all passed
+  - verified (2026-11-17 04:41+0100 by felix/agent-2): final HEAD 7a06a56: cd packages/renderer && npx ng test --include 'src/app/explain/**/*.spec.ts' --include 'src/app/collection/**/*.spec.ts' --include 'src/app/aggregation/**/*.spec.ts' (explain-plan.spec.ts renders mongo:8.2 captured fixtures find-ixscan/find-collscan/agg-group: verdict, totals, FETCH>IXSCAN tree, COLLSCAN flow bar, SBE stages, raw output) -> 8 files, 307 tests passed
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
