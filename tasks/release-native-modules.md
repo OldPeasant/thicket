@@ -17,7 +17,8 @@ The release for tag `v0.1.0-rc.1` (GitHub Actions run 44118230764, 2026-11-17) f
   - verified (2026-11-17 17:47+0100 by dell26/agent-3): node apps/desktop/scripts/smoke-packaged.mjs <container-built AppImage> on the host -> 'smoke: OK' (thicket://app loaded, mainPing ok, backendPing 'backend' = backend.cjs, which imports ssh2 at load, is running; runAsNode/inspect ignored). Plus the container-built dist/*.cjs (main/preload/backend byte-identical to a toolchain-less local build; shell-worker includes the os-dns-native stub) copied into apps/desktop/dist and npx playwright test test/e2e/ssh.e2e.ts (OpenSSH + replica set containers via podman) -> 1 passed: 'SSH-tunnelled profile ... connected'
 - [x] check.yml builds the desktop bundle with compiled native addons on Linux, so the next such failure shows on every push; actionlint passes
   - verified (2026-11-17 17:47+0100 by dell26/agent-3): check.yml new job 'bundle (ubuntu-latest, native addons)': npm ci, asserts sshcrypto.node + os_dns_native.node exist, npm run dist:dir -w apps/desktop, sysctl userns, smoke-packaged on release/linux-unpacked/thicket. podman run docker.io/rhysd/actionlint:latest (v1.7.12, with shellcheck) -no-color -verbose -> 'Found 0 errors in 2 files'
-- [ ] `npm run check` passes
+- [x] `npm run check` passes
+  - verified (2026-11-17 17:47+0100 by dell26/agent-3): npm run check (lint, typecheck, unit tests) at 574bc497 rebased on main -> all passed (5222 + 4137 renderer tests)
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
