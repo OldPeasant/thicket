@@ -5,7 +5,7 @@ owner: felix/agent-1
 deps: [x509-proxy,conn-close-streams,validator]
 touches: [packages/backend/src/docs,packages/backend/src/browse]
 prio: 2
-lease_until: 2026-11-17T04:50:43Z
+lease_until: 2026-11-17T04:55:45Z
 ---
 ## Goal
 `x509-proxy` sets the profile's read preference (+ tags) and write concern as the driver client's
