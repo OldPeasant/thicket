@@ -20,3 +20,4 @@ From x509-proxy review (CR-2, CR-3): the form must not allow `tls.keyFile` witho
 `tls.certificateKeyFile` (the backend ignores such a key file) nor `readPreferenceTags` with
 `readPreference` `primary` or unset (the driver ignores the tags). Proxy password = secret kind
 `proxyPassword`; tag sets are `{ name, value }` pairs.
+- ASSUMPTION (2026-11-17 03:23+0100 by dell26/agent-2): Extra secrets (sshPassword, sshKeyPassphrase, tlsKeyPassphrase, proxyPassword) are typed in the editor and always stored with profiles.setSecret on save (the backend reads them only from stored secrets); only the kinds the current settings use are stored. So Test connection of an unsaved SSH draft can't use a typed SSH password: the form says to save first. A pasted proxyPassword/tlsCertificateKeyFilePassword is still dropped from the URI (note points to the fields).
