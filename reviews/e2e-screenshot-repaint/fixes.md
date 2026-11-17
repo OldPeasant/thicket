@@ -4,8 +4,9 @@ Date: 2026-11-17
 
 Task: e2e-screenshot-repaint - Test: screenshots after view switches don't hang on headless Linux
 
-Scope: current task; findings CR-1 to CR-4 from `reviews/e2e-screenshot-repaint/review.md`, approved by
-the parent worker, plus test-writer observation TW-1 (a locator matching nothing must fail fast).
+Scope: current task. Round 1: findings CR-1 to CR-4 from `reviews/e2e-screenshot-repaint/review.md`,
+approved by the parent worker, plus test-writer observation TW-1 (a locator matching nothing must fail
+fast). Round 2: findings CR-7 and CR-8 from the round-3 review (at fde210bb); CR-9 accepted as is.
 
 ## Fixed findings
 
@@ -109,6 +110,90 @@ Lint/type-check/build:
 
 Remaining unresolved findings:
 0
+
+## Round 1 status
+
+All validated findings fixed and validation passed.
+
+## Round 2 (review round 3, at fde210bb)
+
+### Fixed findings
+
+#### CR-7 — A suite merged from main takes a direct `window.screenshot()`
+
+Files changed:
+- `test/e2e/schema-analysis.e2e.ts`
+
+Problem:
+The schema-analysis suite (merged from main during the rebase) called
+`window.screenshot({ path: join(SHOTS, 'schema-analysis.png') })` after a view switch. That is the
+direct page screenshot the harness rule forbids, and it can hang or come out stale under headless Ozone.
+
+Fix:
+The test now takes the `electronApp` fixture and calls
+`screenshot(electronApp, window, join(SHOTS, 'schema-analysis.png'))`, with `screenshot` imported from
+`./harness`. The `mkdir` call and the `node:fs/promises` import are removed, because nothing else used
+them and the helper creates the folder. This file is not in the task's `touches`. The parent worker
+approved the change in this task.
+A grep of `test/e2e` for `.screenshot(` outside `test/e2e/harness` finds only
+`test/e2e/smoke/installer.smoke.ts:128` (`page.screenshot({ path, timeout: 5_000 })`). It was left as
+is: it belongs to the `test:smoke` config, not `test:e2e`, and attaches without an
+`ElectronApplication`, so the helper cannot be used there (the reviewer gave the same disposition).
+
+Validation:
+- `npx playwright test screenshot.e2e schema-analysis.e2e --output=/tmp/fixer2-e2e` — Pass. The schema-analysis test ran against a Mongo container (not skipped), passed in 1.8 s, and wrote `test-results/screenshots/schema-analysis.png` (157 868 bytes).
+
+#### CR-8 — The element-fallback test's upper bound leaves about 2 s of headroom
+
+Files changed:
+- `test/e2e/screenshot.e2e.ts`
+
+Problem:
+`expect(elapsed).toBeLessThan(9_000)` left about 2 s over the measured 6.9 s, so it could be flaky on a
+loaded runner.
+
+Fix:
+The bound is now `15_000`, with a comment explaining that it is a margin for loaded runners and that a
+hang or retry loop would still be caught. This still tells one fallback (5 s timeout plus 3 x 400 ms
+repaint rounds) apart from a hang. The test timeout is 60 s (`playwright.config.ts:15`), so the bound
+fits.
+
+Validation:
+- `npx playwright test screenshot.e2e schema-analysis.e2e --output=/tmp/fixer2-e2e` — Pass (the fallback test took 6.8 s)
+
+### Not fixed
+
+#### CR-9 — The packaged smoke script keeps a direct `page.screenshot()`
+
+Status:
+Out of scope (accepted)
+
+Reason:
+The script attaches over CDP and has no `ElectronApplication`, so the helper cannot be used there. The
+parent worker accepted the finding as is.
+
+### Validation summary
+
+Builds (run first, because main changed):
+- `npm run build -w packages/renderer` — Pass
+- `npm run build -w apps/desktop` — Pass
+
+Focused tests:
+- `npx playwright test screenshot.e2e schema-analysis.e2e --output=/tmp/fixer2-e2e` — Pass, 10 passed (28.6 s). Mongo container was reachable; schema-analysis ran and passed.
+
+Full test suite:
+- Not run (left to the parent worker)
+
+Lint/type-check:
+- `npx tsc -p tsconfig.json` — Pass (no output)
+- `npx eslint test/e2e` — Pass (no output)
+- `npx prettier --check test/e2e` — Pass ("All matched files use Prettier code style!")
+
+`.taskcheck`:
+- Not run (left to the parent worker)
+
+Remaining unresolved findings:
+0 (CR-9 accepted. CR-5 is a parent-worker action, recording criterion 2 as skipped, and needs no code change)
 
 ## Final status
 

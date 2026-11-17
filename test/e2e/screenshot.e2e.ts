@@ -226,9 +226,10 @@ test.describe('screenshot() on headless Linux', () => {
     const started = Date.now();
     const png = await screenshot(electronApp, moving, path);
     const elapsed = Date.now() - started;
-    // Playwright's 5 s timeout was hit (the fallback path ran), then 3 repaint rounds, no hang.
+    // Playwright's 5 s timeout was hit (the fallback path ran), then 3 repaint rounds, no hang
+    // (a hang or retry loop would run into the test timeout; the margin is for loaded runners).
     expect(elapsed).toBeGreaterThanOrEqual(5_000);
-    expect(elapsed).toBeLessThan(9_000);
+    expect(elapsed).toBeLessThan(15_000);
     expect((await readFile(path)).equals(png)).toBe(true);
     // Only the element's rectangle (240x60 CSS px, give or take rounding), not the whole window.
     const shown = await pixel(window, png, 120, 30);

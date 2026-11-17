@@ -1,9 +1,8 @@
-import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Locator, Page } from '@playwright/test';
 import { Int32, MongoClient, ObjectId } from 'mongodb';
 
-import { expect, test } from './harness';
+import { expect, screenshot, test } from './harness';
 
 /** Where the screenshots go (git-ignored; copied into reviews/ for a review). */
 const SHOTS = process.env['THICKET_SCREENSHOTS'] ?? join('test-results', 'screenshots');
@@ -48,6 +47,7 @@ function treeNode(window: Page, kind: 'conn' | 'db' | 'coll', name: string): Loc
 }
 
 test('schema analysis: shares per type, click a value or a type to set the filter', async ({
+  electronApp,
   window,
   mongo,
 }) => {
@@ -89,8 +89,7 @@ test('schema analysis: shares per type, click a value or a type to set the filte
   );
   const zip = panel.locator('[data-testid="schema-row"][data-path="address.zip"]');
   await expect(zip.locator('[data-testid="schema-type"][data-type="int"]')).toContainText('100 %');
-  await mkdir(SHOTS, { recursive: true });
-  await window.screenshot({ path: join(SHOTS, 'schema-analysis.png') });
+  await screenshot(electronApp, window, join(SHOTS, 'schema-analysis.png'));
 
   // Click a value: it becomes the filter, the query bar shows it.
   const city = panel.locator('[data-testid="schema-row"][data-path="city"]');
