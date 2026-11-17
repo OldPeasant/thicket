@@ -4,25 +4,42 @@ Date: 2026-11-17
 
 Task: installer-smoke - Release: smoke-test installers in CI
 
-Scope: task commit eb45f46 on top of base f285d6e (`git diff f285d6e..eb45f46`), committed changes only
+Scope: second pass over the final revision. The task's `installer-smoke:` commits on top of base 57ae6e16 (`git diff 57ae6e16..f300594f`), committed changes only. Covers the CDP-attach rewrite in f300594f and a re-check of the fixes for the first review's CR-1..CR-4.
 
 Requirements:
-- tasks/installer-smoke.md (goal, acceptance criteria, recorded assumptions)
-- SPEC.md, docs/ARCHITECTURE.md (Electron shell, Packaging, E2E harness), AGENTS.md
-- Parent instructions (CI-only paths: NSIS silent install, hdiutil, xvfb/AppImage/AppArmor userns, Docker availability, `_electron.launch` against packaged apps)
-- Related in-progress task tasks/packaged-hardening.md (Electron fuses)
+- tasks/installer-smoke.md (goal, acceptance criteria, recorded assumptions incl. the CDP-attach assumption)
+- SPEC.md, docs/ARCHITECTURE.md (Packaging, E2E harness, installer smoke test), AGENTS.md
+- Parent instructions: review CI-only paths (Windows taskkill, macOS hdiutil-mounted app launched directly, AppImage process groups under xvfb-run, CDP attach on macOS/Windows)
+- In-progress task packaged-hardening (origin/wip/packaged-hardening: electron-builder.yml `electronFuses`, main/renderer-source.ts), for compatibility only
 
 Git range:
 - Branch: main
-- HEAD: eb45f4638be57ba123d913ddfaa5e6ab22dba5b0
-- Base/start: f285d6e4e863a01d6b870aa598480edfb54a0f2f
-- Commits reviewed: 1
+- HEAD: f300594ffc75a418a772d102316fae438a6e9893
+- Base/start: 57ae6e1619eb7fa2d48bc8cc98d0cad136c8b6b2
+- Commits reviewed: 4 (10ee1bb4, 371a9b9f, de7470be, f300594f)
 
-Summary: 0 P0, 1 P1, 2 P2, 1 P3
+Summary: 0 P0, 0 P1, 0 P2, 0 P3
 
-Checked and found sound: Linux job (xvfb installed and used, `apparmor_restrict_unprivileged_userns=0` exists on ubuntu-24.04 x64 and arm, `APPIMAGE_EXTRACT_AND_RUN=1`, Docker present, `mongo:8.2` is multi-arch, `THICKET_SMOKE_MONGO=1` turns a missing runtime into a failure); installer globs match `artifactName` (`thicket-<v>-mac-arm64.dmg`, `*-win-x64.exe`, one AppImage per Linux job) and the "exactly one" guard; dmg handling (`hdiutil attach -nobrowse -readonly -mountpoint`, the `Applications` symlink is filtered out, detach on cleanup); NSIS `/S /D=<dir>` with `windowsVerbatimArguments` and `/D=` last, `productName` gives `Thicket.exe`/`Uninstall Thicket.exe`; `_electron.launch` without an app path argument for asar-packaged apps; `THICKET_USER_DATA` isolates user data in the packaged app (apps/desktop/src/main/index.ts:63); smoke config does not overlap with `test:e2e` (`*.e2e.ts`) or vitest; type check and lint cover `test/e2e/**`; failure artifacts go to `test-results/smoke`, which the upload step names; the smoke step fails the build job, so `release` (needs: build) makes no draft.
+Status of the first review's findings:
+- CR-1 (MongoDB test ran on Windows): fixed. `mongoSmokeSkipReason` (test/e2e/smoke/installed-app.ts:29) skips the test at describe level unless the platform is Linux or `THICKET_SMOKE_MONGO=1`, so no app launch and no testcontainers call happen on Windows or macOS. On Linux CI `THICKET_SMOKE_MONGO=1` still turns a missing runtime into a failure (installer.smoke.ts:236). Unit-checked in installed-app.smoke.ts.
+- CR-2 (NSIS replaced a real install, asynchronous uninstall): fixed. installed-app.ts:113 refuses on win32 unless `CI` or `THICKET_SMOKE_ALLOW_INSTALL=1` is set (GitHub Actions sets `CI`). The uninstaller runs with `/S _?=<dir>` verbatim, so it runs in place and is awaited before `rm`. NSIS finds `_?=` by scanning for ` _?=`, so the unquoted verbatim argv[0] (`...\Uninstall Thicket.exe`) does not break parsing. The Windows runner temp path has no spaces. Documented in ARCHITECTURE.md.
+- CR-3 (dependency on the inspect fuse): resolved by design. The test no longer uses `_electron.launch`: it spawns the executable with `--remote-debugging-port=0` and attaches with `chromium.connectOverCDP`. The packaged-hardening WIP flips only `runAsNode`, `enableNodeOptionsEnvironmentVariable`, `enableNodeCliInspectArguments`, `onlyLoadAppFromAsar` and `enableEmbeddedAsarIntegrityValidation`. None of them affects the Chromium `--remote-debugging-port` switch, and that task's own smoke script uses the same mechanism. Nothing in apps/desktop/src/main strips command-line switches or takes a single-instance lock. The remaining contract (the switch must keep working in packaged builds) is written down in ARCHITECTURE.md.
+- CR-4 (duplicated harness code): partially moot. `screenshotWindows` needs an `ElectronApplication`, which a CDP-attached app does not have. `screenshotPages` (installer.smoke.ts:124) is the minimal page-based equivalent. Two small `userDataDir`/`appOutput` fixtures stay duplicated. This is acceptable, because the harness's `launchApp` (also `_electron.launch`) cannot drive a fused packaged build.
 
-Evidence note (not a finding): criterion 1 ("Smoke test passes locally against the Linux AppImage") is still unrecorded in tasks/installer-smoke.md; the parent reports 2/2 locally and must record it with `tasks.py verify`. Criterion 2 is skipped with a reason (needs a pushed `v*` tag), which is appropriate.
+Checked and found sound in the final code:
+- Spawn and attach (installer.smoke.ts:85-110): stdout and stderr are always consumed, so the pipes cannot fill and block the app. `devToolsEndpoint` resolves on Chromium's `DevTools listening on ws://...` stderr line. Playwright's own Electron and Chromium launchers rely on that line on all three OSes, including a Windows GUI-subsystem executable with piped stderr. The function rejects with the collected output when the app exits early or after 60 s, and removes its listeners in every path. `appWindow` selects the `thicket://app` page, not DevTools or other targets. Failure screenshots and app output are attached when the test fails.
+- Linux (AppImage under `xvfb-run -a`): `headlessArgs()` returns no Ozone switch because `DISPLAY` is set. `detached: true` puts the AppImage runtime (extract-and-run), Electron and its helpers in one process group, and `process.kill(-pid)` ends them together. SIGKILL follows after 10 s, and the test waits for `exit`, not `close`, so inherited pipes cannot stall teardown. The AppArmor userns sysctl and `APPIMAGE_EXTRACT_AND_RUN=1` are unchanged from the first review.
+- macOS: the executable is launched directly from the read-only `hdiutil` mount (`Thicket.app/Contents/MacOS/Thicket`, from `productName`). User data goes to `THICKET_USER_DATA`, so nothing is written to the image. Worker teardown kills the app before `hdiutil detach -force`, so a helper that is still closing cannot block the detach. MongoDB is skipped.
+- Windows: no process group (`detached` false). `taskkill /pid <pid> /T /F` ends Electron, its renderer, GPU and utility processes (the backend). `child.kill` is the fallback. The workflow uses `shell: bash` at job level, so the bash smoke step works on windows-latest, and `resolve()` turns `out/x.exe` into an absolute path.
+- Timeouts: the attach (60 s) plus the window (30 s) fit in the 90 s per-test budget. The MongoDB test raises its own timeout to 240 s. The worker-scoped install has 180 s.
+- release.yml: the installer globs and the "exactly one" guard are unchanged and correct. `test-results/smoke` matches the config's `outputDir` for the failure upload. A failing smoke test fails the build job, and `release` (needs: build) then makes no draft.
+- `installed-app.smoke.ts` (helper checks) also matches `*.smoke.ts` and runs inside `npm run test:smoke` on every OS. Tests that use POSIX shell stand-ins are skipped off Linux or on win32 as appropriate.
+
+Notes (not findings, for the parent):
+- Criterion 1 ("Smoke test passes locally against the Linux AppImage") is still unchecked in tasks/installer-smoke.md. The recorded assumption says the CDP version was verified against a fuse-flipped `linux-unpacked` copy. The criterion names the AppImage, so record a run of `npm run test:smoke` against the AppImage at the final revision (with `APPIMAGE_EXTRACT_AND_RUN=1` if FUSE is absent).
+- reviews/installer-smoke/tests.md describes an earlier revision (it names 77b3b325 and predates the CDP rewrite). The test-writer has to run again on f300594f before the gate accepts it.
+- The CDP helpers (`devToolsEndpoint`, `killTree`, `appWindow`) are covered only by the real smoke run. Their failure paths and the Windows `taskkill` branch run only in release CI (criterion 2, skipped with a reason).
+- Once packaged-hardening lands, `apps/desktop/scripts/smoke-packaged.mjs` and this test will each contain their own CDP attach code. Merging the two is a follow-up for whichever task lands second, not a defect here.
 
 ## P0 Critical
 
@@ -30,38 +47,16 @@ None.
 
 ## P1 High
 
-- [ ] **CR-1 | The MongoDB smoke test runs (and very likely fails) on the Windows runner instead of being skipped**
-    - File: `test/e2e/smoke/installer.smoke.ts:123`
-    - Category: Correctness
-    - Problem: The Mongo test is skipped only when `containerRuntimeUnavailable()` reports no runtime. testcontainers' `NpipeSocketStrategy` (node_modules/testcontainers/build/container-runtime/strategies/npipe-socket-strategy.js) connects to `//./pipe/docker_engine` on every win32 host, and GitHub's `windows-latest` image ships a running Docker engine in Windows-containers mode. testcontainers records `OSType` but does not reject a Windows daemon (clients/client.js:109). So on the win-x64 job the runtime counts as available, and `startMongo('mongo8')` goes on to start the Linux-only Ryuk reaper image and then `mongo:8.2` against a Windows-container daemon. That fails, or at best pulls a multi-GB windowsservercore image and runs into the timeout. The Windows build job then goes red and blocks the draft release. This contradicts the task goal ("on Linux also connect") and the design described in docs/ARCHITECTURE.md and release.yml, which only set `THICKET_SMOKE_MONGO=1` on Linux.
-    - Why it matters: Criterion 2 ("CI run green on all three OSes") would most likely fail on Windows on the first tag push. Because CI is the only place this can show, it would surface at release time.
-    - Suggested fix: Run the Mongo test only on Linux or only when asked. For example, skip unless `process.platform === 'linux'` or `THICKET_SMOKE_MONGO` is set, or make `THICKET_SMOKE_MONGO=1` a requirement for running it at all (CI sets it on Linux) and skip otherwise. Keep the "required → throw" behavior for Linux. Update the ARCHITECTURE.md sentence to match.
+None.
 
 ## P2 Medium
 
-- [ ] **CR-2 | Running `npm run test:smoke` on a Windows workstation replaces and then uninstalls the user's real Thicket installation**
-    - File: `test/e2e/smoke/installed-app.ts:100`
-    - Category: Correctness
-    - Problem: The NSIS installer uses a fixed `appId`, so it shares one uninstall registry entry with any existing per-user installation. electron-builder's installer silently uninstalls the old version it finds there before it installs into `/D=<temp>`. `cleanup()` then uninstalls the temp copy. A developer who follows docs/ARCHITECTURE.md ("run `npm run dist` first", then `npm run test:smoke`) on Windows loses their installed Thicket. Separately, `run(uninstaller, ['/S'])` (line 110) returns at once: an NSIS uninstaller copies itself to %TEMP% and relaunches unless `_?=<dir>` is passed. The following `rm(dir)` therefore races the uninstall and can leave a stale Add/Remove Programs entry that points at a deleted folder. CI runners are ephemeral, so this affects only local runs. The harness elsewhere explicitly protects the real user's data (harness/fixtures.ts snapshot check).
-    - Why it matters: A test command documented for local use has a destructive side effect on the developer's machine, and cleanup is unreliable.
-    - Suggested fix: On Windows, refuse to run the NSIS path outside CI unless an explicit opt-in is set (for example `CI` or `THICKET_SMOKE_ALLOW_INSTALL=1`), or document the side effect next to the `test:smoke` entry in ARCHITECTURE.md. Run the uninstaller synchronously (`/S`, `_?=${dir}` as the last verbatim argument) before removing the folder.
-
-- [ ] **CR-3 | The installer smoke test depends on the Node inspect fuse, which the in-progress packaged-hardening task is about to decide on without knowing about this test**
-    - File: `test/e2e/smoke/installer.smoke.ts:72`
-    - Category: Integration
-    - Problem: `_electron.launch` drives the packaged executable through `--inspect=0`/`--remote-debugging-port=0`, so it requires the `EnableNodeCliInspectArguments` fuse to stay on. tasks/packaged-hardening.md (in progress by another agent, touching electron-builder.yml) says "decide on EnableNodeCliInspectArguments (the Playwright smoke test `scripts/smoke-packaged.mjs` needs inspect — keep it working or replace it)". It names only the older script, not `test/e2e/smoke`. If that task turns the fuse off, `.taskcheck` will not notice, because `test:smoke` runs only in release.yml on `v*` tags. The breakage would first show when every release build job fails.
-    - Why it matters: A silent cross-task contract that breaks only at release time.
-    - Suggested fix: Record the dependency where the other task will see it. Note in docs/ARCHITECTURE.md (Packaging/fuses or the smoke-test bullet) that `npm run test:smoke` needs `EnableNodeCliInspectArguments` on, and tell the packaged-hardening owner, for example with a task note or a follow-up task. Alternatively, have the smoke test fail with a clear message when the launch times out waiting for the inspector.
+None.
 
 ## P3 Low
 
-- [ ] **CR-4 | The smoke spec re-implements harness fixtures instead of reusing them**
-    - File: `test/e2e/smoke/installer.smoke.ts:56`
-    - Category: Quality
-    - Problem: `userDataDir`, `appOutput`, `window` and the failure-screenshot loop (lines 87-99) copy `test/e2e/harness/fixtures.ts`. That file already exports `screenshotWindows(app, testInfo)` for exactly this purpose. The repository now also has two packaged-app smoke tests with overlapping checks (`apps/desktop/scripts/smoke-packaged.mjs` and `test/e2e/smoke`).
-    - Why it matters: Fixes to failure diagnostics or user-data handling have to be made in two places.
-    - Suggested fix: Import and call `screenshotWindows` from the harness. Optionally extend the harness `test` with an `executablePath` override rather than redefining the fixtures.
+None.
 
 ## Review conclusion
 
-Material issues found; fix before completing the task.
+No material issues found.

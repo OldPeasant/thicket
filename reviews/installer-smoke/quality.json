@@ -1,0 +1,59 @@
+{
+  "schema": 1,
+  "task": "installer-smoke",
+  "reviewed_revision": "d0db3a3c1fdeadbede83f22b2c937cf6a953b648",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/installer-smoke/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/installer-smoke/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/installer-smoke/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P1",
+      "disposition": "fixed",
+      "note": "MongoDB smoke test runs only on Linux or with THICKET_SMOKE_MONGO=1 (Windows runners have Windows containers only); skipped at describe level before the app starts"
+    },
+    {
+      "id": "CR-2",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "NSIS install refuses on Windows outside CI without THICKET_SMOKE_ALLOW_INSTALL=1; uninstaller runs synchronously with _?=<dir>"
+    },
+    {
+      "id": "CR-3",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "packaged-hardening turns off EnableNodeCliInspectArguments; the smoke test now attaches over CDP (--remote-debugging-port) instead of _electron.launch, verified against a fuse-flipped build"
+    },
+    {
+      "id": "CR-4",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "superseded",
+      "note": "fixer reused screenshotWindows, but after the CDP switch there is no ElectronApplication; a small page-based screenshotPages replaces it (second review: moot)"
+    },
+    {
+      "id": "TW-1",
+      "source": "test-writer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "NSIS temp install folder removed when the installer fails or produces no Thicket.exe"
+    },
+    {
+      "id": "TW-2",
+      "source": "test-writer",
+      "severity": "P3",
+      "disposition": "accepted",
+      "note": "CDP helpers (devToolsEndpoint, killTree, appWindow) have no isolated tests; success paths exercised by the real smoke run, failure/Windows paths only in release CI"
+    }
+  ],
+  "validation": [
+    { "command": "npm run test:smoke (Linux AppImage, Podman)", "result": "pass" },
+    { "command": "npm run check", "result": "pass" }
+  ]
+}

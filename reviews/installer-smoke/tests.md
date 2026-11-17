@@ -4,172 +4,170 @@ Date: 2026-11-17
 
 Task: installer-smoke — Release: smoke-test installers in CI
 
-Scope: task commit `eb45f4638be57ba123d913ddfaa5e6ab22dba5b0` on base
-`f285d6e4e863a01d6b870aa598480edfb54a0f2f` (supplied by the parent worker). During testing the
-parent rebased the commit to `77b3b325ad3e3244ec2d085a4e81c8b60073c220` (HEAD);
-`git diff --stat eb45f46 77b3b32 -- test .github package.json docs/ARCHITECTURE.md` is empty, so
-the task's code is identical. Changed files: `test/e2e/smoke/installed-app.ts`,
-`test/e2e/smoke/installer.smoke.ts`, `test/e2e/smoke/playwright.config.ts`, `package.json`
-(script `test:smoke`), `.github/workflows/release.yml` (smoke step per OS), `docs/ARCHITECTURE.md`.
+Scope: second pass on the final code. Base `57ae6e1619eb7fa2d48bc8cc98d0cad136c8b6b2`
+(`git merge-base HEAD origin/main`), measured HEAD `f300594ffc75a418a772d102316fae438a6e9893`.
+Task commits (the `installer-smoke:` commits in `57ae6e16..HEAD`, supplied by the parent):
+`10ee1bb4` (smoke test and CI), `371a9b9f` (helper tests and first reports), `de7470be` (fixer:
+CR-1..CR-4 and TW-1), `f300594f` (attach over CDP instead of `_electron.launch`). Changed files:
+`test/e2e/smoke/installed-app.ts`, `test/e2e/smoke/installer.smoke.ts`,
+`test/e2e/smoke/installed-app.smoke.ts`, `test/e2e/smoke/playwright.config.ts`, `package.json`
+(script `test:smoke`), `.github/workflows/release.yml`, `docs/ARCHITECTURE.md`, plus the
+`reviews/installer-smoke/` reports. Working tree clean at the start of this pass (no uncommitted
+inputs).
 
 Requirements:
-- `tasks/installer-smoke.md` goal and acceptance criteria, plus its recorded assumptions
-  (Windows: NSIS silent install; macOS: arm64 dmg only; Linux: AppImage only, sandbox on,
-  `APPIMAGE_EXTRACT_AND_RUN=1`)
-- `docs/ARCHITECTURE.md` (E2E section "Installer smoke test", "Coverage", "Conventions")
+- `tasks/installer-smoke.md` goal and acceptance criteria, plus its recorded assumptions (NSIS
+  silent install, arm64 dmg only, AppImage only with sandbox and `APPIMAGE_EXTRACT_AND_RUN=1`,
+  attach via `--remote-debugging-port` + `chromium.connectOverCDP` because packaged-hardening turns
+  off the `EnableNodeCliInspectArguments` fuse)
+- `docs/ARCHITECTURE.md` (E2E "Installer smoke test", "Coverage", "Conventions")
+- `reviews/installer-smoke/fixes.md` (what the fixer changed since the first pass)
 - `AGENTS.md`, parent worker instructions
 - Existing convention `test/e2e/harness-helpers.e2e.ts`: helpers under `test/e2e` are tested with
-  Playwright because no Vitest project covers `test/e2e`
+  Playwright, because no Vitest project covers `test/e2e`
 
 ## Test files changed
 
-- `test/e2e/smoke/installed-app.smoke.ts` (new)
-
-Placement: the root `vitest.config.ts` only runs the four workspace projects
-(`apps/desktop`, `packages/contract`, `packages/core`, `packages/backend`); `test/e2e` is in none of
-them, and adding a project would be a configuration change. Following the `harness-helpers.e2e.ts`
-precedent, the helper tests are Playwright tests matched by the smoke config's `*.smoke.ts`, so they
-run with `npm run test:smoke` (locally and in each release CI job). They use plain
-`@playwright/test` (no installer fixture), take < 1 s, and are portable: platform/arch-dependent
-branches of `findInstaller` are exercised by temporarily redefining `process.platform`/`process.arch`;
-tests that use stand-in shell scripts (fake NSIS installer, fake `hdiutil` on `PATH`) or POSIX file
-modes are skipped off Linux / on Windows respectively. All data is fictitious; every temp folder is
-removed in `afterEach`.
+- None in this pass. `test/e2e/smoke/installed-app.smoke.ts` (added in the first pass, extended by
+  the fixer to 29 tests for `mongoSmokeSkipReason`, the Windows install guard, `_?=` uninstall and
+  the temp-folder cleanup on failure) was reviewed and is unchanged by this pass.
 
 ## Tests added or updated
 
-Count: 21
+Count: 0 in this pass (29 helper tests exist in `installed-app.smoke.ts`; 2 app tests in
+`installer.smoke.ts`).
 
-- installerSuffix: maps each OS to its installer; falls back to the AppImage on other platforms;
-  defaults to the current platform
-- findInstaller: newest Linux AppImage by mtime, ignoring .deb/.rpm/.blockmap/.yml/dirs; single
-  installer; Windows picks newest `.exe`, not the zip/blockmap; macOS picks the dmg for this CPU even
-  when the other arch is newer (arm64 and x64); macOS without a dmg for this CPU fails; no installer
-  for this OS fails with the exact hint; missing release folder fails with the same hint
-- installApp: refuses `.deb`/`.rpm`/`.zip`/no suffix/`.AppImage.blockmap`; makes an AppImage 0755 and
-  returns it as the executable, cleanup leaves it; suffix check is case-insensitive
-- installApp NSIS (fictitious installer script): silent install with exactly `/S` and `/D=` set to a
-  fresh `thicket-smoke-install-*` temp folder, executable `Thicket.exe` in that folder, cleanup runs `Uninstall Thicket.exe /S` and removes the folder;
-  cleanup without an uninstaller still removes the folder; no `Thicket.exe` -> error naming what was
-  found; installer exit code != 0 -> rejection
-- installApp dmg (fictitious `hdiutil` on `PATH`): `attach -nobrowse -readonly -mountpoint`
-  with a fresh `thicket-smoke-dmg-*` temp folder and the dmg path, executable
-  `Thicket.app/Contents/MacOS/Thicket` in the mount point, cleanup `detach` of the mount point with
-  `-force` and removes the mount point; no `.app` -> "found: none" error and detach; two `.app`s -> error and
-  detach; mount point removed even when `hdiutil detach` fails
+Why none were added for the new CDP helpers (`devToolsEndpoint`, `killTree`, `appWindow`,
+`appPages`, `screenshotPages` in `installer.smoke.ts`): they are module-private functions inside a
+spec file. Importing a `*.smoke.ts` file from another test file would register its tests (and its
+worker-scoped `installed` fixture) twice, and extracting them into a helper module such as
+`installed-app.ts` is a refactoring of the task's code, which this helper may not do. Their happy
+paths are exercised end to end by every `npm run test:smoke` run (endpoint parsed from stderr, CDP
+attach, `thicket://app` window found, process group terminated; see "Full test execution" and the
+`pgrep` check). Their failure branches are not tested (see Coverage). Recommendation to the parent
+(Low, not a defect): if these helpers should get unit tests, move `devToolsEndpoint` and `killTree`
+into `test/e2e/smoke/installed-app.ts` (or a sibling helper) so `installed-app.smoke.ts` can cover
+"app exits before DevTools listens -> rejects with the app output", "no endpoint within the timeout
+-> rejects", "endpoint split across two stderr chunks -> resolved", and "SIGTERM ignored -> SIGKILL
+after the grace period" with a fictitious stand-in script, like the existing NSIS/hdiutil tests.
 
 ## Requirement coverage
 
 | Requirement | Tests | Command | Result |
 |---|---|---|---|
-| AC1: Smoke test passes locally against the Linux AppImage (welcome screen; on Linux connect to a containerized MongoDB) | `installer.smoke.ts`: "the packaged app starts and shows the welcome screen", "the packaged app connects to a containerized MongoDB" (ran against `apps/desktop/release/thicket-0.0.0-linux-x86_64.AppImage`, the newest, container runtime available so not skipped) | `npm run test:smoke` | Pass (23 passed, incl. both app tests) |
-| AC1 support: the helpers pick the right installer and make it runnable as a user would (per-OS, per-arch, newest, errors) | the 21 tests in `installed-app.smoke.ts` | `npx playwright test -c test/e2e/smoke/playwright.config.ts installed-app.smoke.ts`; again within `npm run test:smoke` | Pass (21/21) |
-| AC2: CI run green on all three OSes | none locally | — | Not run: the release workflow only runs on a pushed `v*` tag on GitHub; helpers may not push, and macOS/Windows cannot run here (Linux host). The real `hdiutil` and NSIS paths are only exercised in CI. |
+| AC1: Smoke test passes locally against the Linux AppImage (welcome screen; on Linux connect to a containerized MongoDB) | `installer.smoke.ts`: "the packaged app starts and shows the welcome screen", "MongoDB › the packaged app connects to a containerized MongoDB" (against `apps/desktop/release/thicket-0.0.0-linux-x86_64.AppImage`, the newest; Podman available, so not skipped) | `npm run test:smoke` | Pass (31 passed in 7.1 s, both app tests passed) |
+| AC1: the app attaches over CDP (works with the inspect fuse off, task assumption) | same two app tests; they now spawn the AppImage with `--remote-debugging-port=0` and `chromium.connectOverCDP` | `npm run test:smoke` | Pass against the shipped AppImage (fuse state as built). The fuse-off variant was verified by the parent against a fuse-flipped `linux-unpacked` copy (2/2); not re-run here |
+| AC1: no app processes left behind (`killTree`) | process check after the smoke run | `pgrep -fa thicket` | Pass: only the agent runner's `git remote-https ... thicket.git` push processes and the pgrep shell itself matched; no AppImage/Electron process. `podman ps` showed no MongoDB container left (only unrelated long-running containers) |
+| AC1 support: helpers pick the right installer, make it runnable, skip Mongo off Linux, guard Windows installs, clean up | the 29 tests in `installed-app.smoke.ts` | `npm run test:smoke` | Pass (29/29) |
+| AC2: CI run green on all three OSes | none locally | — | Not run: the release workflow runs only on a pushed `v*` tag on GitHub; helpers may not push, and macOS/Windows cannot run on this Linux host. Already skipped with this reason in the task file |
 | Project check stays green | existing suites | `npm run check` | Pass |
 
 ## Focused test execution
 
 Command:
 
-`npx playwright test -c test/e2e/smoke/playwright.config.ts installed-app.smoke.ts`
+`npm run test:smoke` (runs the 29 helper tests and the 2 app tests; the smoke config is the focused
+suite for this task)
 
 Result:
 
-Pass (21 passed, 652 ms)
+Pass (31 passed, 7.1 s)
 
 ## Full test execution
 
 Command:
 
-`npm run test:smoke`
+`npm run check` (eslint + prettier, typecheck, Vitest workspace projects, renderer tests)
 
 Result:
 
-Pass (23 passed in 6.0 s; the app tests used
-`apps/desktop/release/thicket-0.0.0-linux-x86_64.AppImage`)
-
-Command:
-
-`npm run check` (lint incl. eslint + prettier over the new file, typecheck, unit tests)
-
-Result:
-
-Pass (Vitest 79 files / 4297 tests; renderer 100 files / 3273 tests)
+Pass (Vitest 82 files / 4345 tests; renderer 100 files / 3273 tests)
 
 ## .taskcheck
 
 Result:
 
-Pass (`.taskcheck` runs `npm run check`, which was run above on the same snapshot)
+Pass (`.taskcheck` runs `npm run check`, run above on HEAD `f300594f`)
 
 ## Bugs found
 
 None that violate the task's acceptance criteria.
 
-Observation (Low, not a requirement violation, no failing test): in `installApp`
-(`test/e2e/smoke/installed-app.ts:98-105`) the NSIS temp install folder is not removed when the
-installer exits non-zero or when no `Thicket.exe` appears, because no `cleanup` is returned on those
-paths. Only matters for a failed smoke run (leftover temp folder on the CI runner). The new tests
-remove those folders themselves. The parent may decide whether it is worth a change.
+Notes for the parent (not production defects, no failing test):
+- `reviews/installer-smoke/fixes.md` CR-4 says the spec imports the harness's `screenshotWindows`;
+  since `f300594f` it uses its own `screenshotPages` (because there is no `ElectronApplication` over
+  CDP). The fixer's report describes the pre-CDP revision; the parent decides whether that needs a
+  note in `quality.json`.
+- `pgrep -fa thicket` also matches the git remote URL (`.../thicket.git`) of the runner's background
+  pushes, so a non-empty result is not by itself a leftover app process.
 
 ## Coverage
 
-Status: unavailable — the project's coverage tooling (Vitest + `@vitest/coverage-v8`, per workspace)
-does not cover `test/e2e`; it is in no Vitest project, and the Playwright smoke config has no
-coverage collection for Node-side code. Measuring it would require a configuration change outside
-the test-writer's authority. No numbers are reported; no repository-wide numbers substituted.
+Status: unavailable — the project's coverage tooling (Vitest + `@vitest/coverage-v8`, per
+workspace) does not cover `test/e2e`: it is in no Vitest project, and the Playwright smoke config
+collects no Node-side coverage. Measuring it would need a configuration change outside the
+test-writer's authority. No numbers are reported; no repository-wide numbers substituted.
 
 Metric: whole-file coverage of task-changed production files — not measured.
 Changed-line coverage: not measured.
 
 Evidence:
 - Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: installer-smoke;
-  base `f285d6e4e863a01d6b870aa598480edfb54a0f2f`; task commit `eb45f46` (supplied by parent), rebased
-  to `77b3b325ad3e3244ec2d085a4e81c8b60073c220` with identical code (empty diff, see Scope).
-- Source/test snapshot identifier (including uncommitted inputs): sha256
-  `installed-app.ts` 00830d6c061ccc7eee22052816e09cb13667ffb53eb763c1ec410e4bb7926a27,
-  `installer.smoke.ts` 4651621db0b6071ff3af70865b387ee067ad6fcba41cb6e9d23c66538f2b1ba2,
+  base `57ae6e1619eb7fa2d48bc8cc98d0cad136c8b6b2`; HEAD
+  `f300594ffc75a418a772d102316fae438a6e9893`; task commits `10ee1bb4`, `371a9b9f`, `de7470be`,
+  `f300594f` (parent-supplied, confirmed with `git log --oneline 57ae6e16..HEAD` and
+  `git diff --stat 57ae6e16 HEAD`).
+- Source/test snapshot identifier (including uncommitted inputs): HEAD `f300594f`, clean tree;
+  sha256 `installed-app.ts` c191243f33e57c284a69a050996c0ec5f99cba6c7b5d4d64d1ff10df5e9425c3,
+  `installer.smoke.ts` f08a8358ecd8046a086f3ddb4d242ca088e3393e565c359370fc05f271ca72c8,
   `playwright.config.ts` 5c3cbc290ee1d5af6d57d178c227340aec24b81bcab71736a7b80f32e0a6e7a0,
-  new `installed-app.smoke.ts` b21b201f2deda6d47ad748fc00a20c956087e24b74061bee53a7877af6cf79b7
-  (uncommitted).
+  `installed-app.smoke.ts` 598cc8e221ee8f0dced9730a2f2d5a9900052a0e7ae085450fbb93b63087fb75.
 - Exact included files; renamed/deleted/excluded files and reasons: would-be scope
   `test/e2e/smoke/installed-app.ts`, `test/e2e/smoke/installer.smoke.ts` (executable code);
-  excluded: `playwright.config.ts`, `package.json` (configuration), `release.yml` (CI workflow,
-  not instrumentable), `docs/ARCHITECTURE.md` (documentation).
+  excluded: `playwright.config.ts`, `package.json` (configuration), `release.yml` (CI workflow, not
+  instrumentable), `docs/ARCHITECTURE.md` (documentation), `installed-app.smoke.ts` (tests).
 - Provider/version, command, working directory, and test selection: none run (see Status).
 - Run start/completion time and exit status: N/A.
 - Generated report paths and report hashes/run identifier: N/A.
-- Evidence outputs are fresh and inputs stayed unchanged: N/A for coverage; test runs above used the
-  snapshot hashed above.
-- Final run after latest test additions and production fixes: yes for tests (no production fixes);
-  coverage N/A.
+- Evidence outputs are fresh and inputs stayed unchanged: N/A for coverage; the test runs above used
+  the snapshot hashed above (this pass changed no files except this report).
+- Final run after latest test additions and production fixes: yes for tests (on `f300594f`, after
+  the fixer and the CDP change); coverage N/A.
 
 | Changed file | Statements | Branches | Functions | Lines |
 |---|---:|---:|---:|---:|
 | `test/e2e/smoke/installed-app.ts` | N/A (not measurable) | N/A | N/A | N/A |
 | `test/e2e/smoke/installer.smoke.ts` | N/A (not measurable) | N/A | N/A | N/A |
 
-Manual branch review of `installed-app.ts` (by reading the code against the tests, not a tool
+Manual branch review (reading the code against the tests and the smoke run, not a tool
 measurement):
 
 | File and uncovered lines/branch locations | Required behavior or risk | Action/test added or reason left uncovered |
 |---|---|---|
-| `installed-app.ts:26-117` all branches of `installerSuffix`, `findInstaller` (incl. darwin arch filter, missing folder `.catch`, newest selection, no-match throw), `installApp` AppImage/dmg/exe/unsupported, `exists` true/false, dmg app-count error + detach `.catch` | Choosing and starting the right installer per OS | Covered by the 21 new tests (dmg/NSIS with stand-in scripts) |
-| `installed-app.ts:103` `readdir(dir).catch(() => [])` when the install folder vanished | Diagnostic message only | Left uncovered: not reachable without the installer deleting its own target |
-| `installed-app.ts:110-111` `.catch` on a failing uninstaller / `rm` | Cleanup must not throw | Left uncovered: best-effort cleanup; low risk |
-| Real `hdiutil` and NSIS behavior, `windowsVerbatimArguments` quoting | macOS/Windows smoke in CI (AC2) | Cannot run on this Linux host; only verifiable by a CI run |
-| `installer.smoke.ts` fixtures (failure screenshots/app output attach, `THICKET_SMOKE_MONGO=1` failure branch, `THICKET_SMOKE_INSTALLER` override) | Diagnostics on failure; CI env handling | Happy path exercised by `npm run test:smoke`; failure branches not exercised (would need a broken app or no container runtime) |
+| `installed-app.ts:29-154` `mongoSmokeSkipReason`, `installerSuffix`, `findInstaller` (darwin arch filter, missing folder, newest, no match), `installApp` AppImage/dmg/exe/unsupported, Windows CI/opt-in guard, NSIS failure cleanup, `_?=` uninstall, dmg app-count error + detach | Choosing and starting the right installer per OS | Covered by the 29 tests in `installed-app.smoke.ts` |
+| `installed-app.ts:130` `readdir(dir).catch(() => [])`; `:146-148` `.catch` on a failing uninstaller | Diagnostic message / best-effort cleanup | Left uncovered: not reachable without the installer deleting its own target; low risk |
+| `installer.smoke.ts:158-191` `devToolsEndpoint`: `onExit` (app exits before DevTools listens) and the timeout branch | Clear failure with the app output instead of a hang | Not tested: private to the spec file (see "Tests added or updated"); happy path runs every smoke run. Extraction recommended if tests are wanted |
+| `installer.smoke.ts:194-215` `killTree`: already-exited early return, `process.kill(-pid)` failure fallback, SIGKILL after 10 s, Windows `taskkill /T /F` | No leftover app processes on CI runners | POSIX SIGTERM path verified by the smoke run + `pgrep`; other branches not exercised (Windows only in CI) |
+| `installer.smoke.ts:142-155` `appWindow` timeout error; `:99-107`, `:124-134` failure screenshots and app-output attachment | Diagnostics on failure | Happy path only; failure branches need a broken app |
+| `installer.smoke.ts:236` `THICKET_SMOKE_MONGO=1` without a container runtime -> failure; `:51-53` `THICKET_SMOKE_INSTALLER` override | CI env handling | Not exercised locally (runtime present, default installer used) |
+| Real `hdiutil`, NSIS install/uninstall, `windowsVerbatimArguments` quoting, `--remote-debugging-port` in the macOS/Windows packaged builds | AC2 | Only verifiable by a CI release run |
 
 ## Unable to test
 
-- AC2 (CI green on Linux x64/arm64, macOS, Windows): requires pushing a `v*` tag to GitHub; not
-  possible for this helper and not on this host. Needs follow-up by the parent (skip with reason or a
-  real CI run).
-- Real macOS `hdiutil` mounting and Windows NSIS silent install/uninstall: only in CI.
-- Coverage numbers: see Coverage (tooling does not cover `test/e2e`).
+- AC2 (CI green on Linux x64/arm64, macOS, Windows): needs a pushed `v*` tag on GitHub; not
+  possible for this helper or on this host. Already skipped with a reason in the task file.
+- The smoke test against a build with `EnableNodeCliInspectArguments` off: no such packaged build in
+  `apps/desktop/release`; the parent verified it on a fuse-flipped copy. Re-verify once
+  packaged-hardening lands (follow-up for the parent / that task).
+- Failure branches of the CDP helpers in `installer.smoke.ts`: not testable without extracting them
+  (a test-only refactoring outside this helper's authority); follow-up optional (Low).
+- Coverage numbers: see Coverage.
 
 ## Summary
 
-Tests added and all validation passed. AC1 passes locally against the Linux AppImage; AC2 could not
-be run here and needs the parent's decision (skip with reason). Coverage is unavailable with the
-existing tooling for `test/e2e`.
+Tests and validation pass on the final revision `f300594f` (`npm run test:smoke` 31/31,
+`npm run check` pass, no leftover app processes). No production defects found. AC2 cannot be run
+here (already skipped with reason). The new CDP helpers are covered only on their happy path by the
+real smoke run; unit tests for their failure branches would need them moved out of the spec file,
+which is left to the parent's decision. Coverage is unavailable with the existing tooling for
+`test/e2e`.
