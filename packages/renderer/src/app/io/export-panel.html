@@ -1,0 +1,93 @@
+<section class="panel" [attr.aria-labelledby]="uid + '-title'" data-testid="export-panel">
+  <header class="head">
+    <h2 class="title" [id]="uid + '-title'">Export documents</h2>
+    <code class="command" data-testid="export-command" [title]="command()">{{ command() }}</code>
+    <button
+      type="button"
+      class="icon-btn close"
+      data-testid="export-close"
+      aria-label="Close export"
+      title="Close"
+      (click)="close()"
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+    </button>
+  </header>
+
+  <div class="options">
+    <fieldset class="choice" [disabled]="running()">
+      <legend>Format</legend>
+      @for (f of formats; track f.value) {
+        <label [title]="f.hint">
+          <input
+            type="radio"
+            [name]="uid + '-format'"
+            [value]="f.value"
+            [checked]="format() === f.value"
+            [attr.data-testid]="'export-format-' + f.value"
+            (change)="setFormat($event)"
+          />
+          {{ f.label }}
+        </label>
+      }
+    </fieldset>
+    <fieldset class="choice" [disabled]="running()">
+      <legend>Extended JSON</legend>
+      @for (m of modes; track m.value) {
+        <label [title]="m.hint">
+          <input
+            type="radio"
+            [name]="uid + '-mode'"
+            [value]="m.value"
+            [checked]="mode() === m.value"
+            [attr.data-testid]="'export-mode-' + m.value"
+            (change)="setMode($event)"
+          />
+          {{ m.label }}
+        </label>
+      }
+    </fieldset>
+    <span class="actions">
+      @if (running()) {
+        <button type="button" class="btn stop" data-testid="export-cancel" (click)="cancel()">
+          Cancel
+        </button>
+      } @else {
+        <button type="button" class="btn run" data-testid="export-start" (click)="start()">
+          Choose file and export
+        </button>
+      }
+    </span>
+  </div>
+
+  <p class="status" role="status" data-testid="export-status" [attr.data-phase]="phase()">
+    @switch (phase()) {
+      @case ('idle') {
+        Exports every document of this query, not only the page shown.
+      }
+      @case ('running') {
+        @if (path(); as p) {
+          Exporting to <span class="path">{{ p }}</span>:
+          <span class="count">{{ processedText() }}</span> documents
+        } @else {
+          Choose where to save the file…
+        }
+      }
+      @case ('done') {
+        Exported
+        <span class="count" data-testid="export-count">{{ processedText() }}</span> documents to
+        <span class="path" data-testid="export-path">{{ path() }}</span>.
+      }
+      @case ('cancelled') {
+        Export cancelled after {{ processedText() }} documents. The partial file was removed.
+      }
+      @case ('error') {}
+    }
+  </p>
+  @if (running()) {
+    <div class="track" aria-hidden="true"><div class="sweep"></div></div>
+  }
+  @if (error(); as e) {
+    <p class="message error" role="alert" data-testid="export-error">{{ e }}</p>
+  }
+</section>

@@ -23,6 +23,8 @@ import {
   handleEditKeys,
 } from '../document';
 import { fromExplorerValue, toExplorerValue } from '../explorer/bson-value.util';
+import { ExportPanel } from '../io/export-panel';
+import { ImportPanel } from '../io/import-panel';
 import { JsonExplorerComponent } from '../explorer/json-explorer.component';
 import { JsonFormComponent } from '../explorer/json-form/json-form.component';
 import { BsonDisplayService } from '../explorer/services/bson-display.service';
@@ -88,6 +90,8 @@ const numberFormat = new Intl.NumberFormat();
     DocumentHeader,
     DraftDocuments,
     RawEditor,
+    ExportPanel,
+    ImportPanel,
   ],
   providers: [
     CollectionResults,
@@ -136,6 +140,10 @@ export class CollectionView {
   );
   protected readonly view = signal<ResultView>('table');
   protected readonly rawFormat = signal<RawFormat>('shell');
+  /** The open import or export panel. */
+  protected readonly ioPanel = signal<'export' | 'import' | null>(null);
+  /** Import is never offered on read-only profiles. */
+  protected readonly readOnly = computed(() => this.safety.readOnly(this.target().profileId)());
 
   /** Reopening the tab gives a new tab object; only a changed namespace runs the query again. */
   protected readonly target = computed(
@@ -410,6 +418,15 @@ export class CollectionView {
   private documentChanged(key: string, doc: string | null): void {
     const index = this.docs().findIndex((d) => d !== null && documentKey(d) === key);
     if (index !== -1) this.results.patchDocument(index, doc);
+  }
+
+  protected toggleIo(panel: 'export' | 'import'): void {
+    this.ioPanel.update((open) => (open === panel ? null : panel));
+  }
+
+  /** An import into this tab's collection shows its documents. */
+  protected imported(coll: string): void {
+    if (coll === this.target().coll) this.results.run(this.results.query());
   }
 
   protected errorId(field: QueryField): string {

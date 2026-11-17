@@ -202,6 +202,29 @@
       </select>
     </label>
 
+    <span class="io">
+      <button
+        type="button"
+        class="btn quiet"
+        data-testid="io-export"
+        [attr.aria-pressed]="ioPanel() === 'export'"
+        (click)="toggleIo('export')"
+      >
+        Export…
+      </button>
+      @if (!readOnly()) {
+        <button
+          type="button"
+          class="btn quiet"
+          data-testid="io-import"
+          [attr.aria-pressed]="ioPanel() === 'import'"
+          (click)="toggleIo('import')"
+        >
+          Import…
+        </button>
+      }
+    </span>
+
     <div class="views" role="group" aria-label="Result view">
       <button
         type="button"
@@ -229,6 +252,25 @@
       </button>
     </div>
   </div>
+
+  @switch (ioPanel()) {
+    @case ('export') {
+      <app-export-panel
+        [target]="target()"
+        [query]="results.query()"
+        (closed)="ioPanel.set(null)"
+      />
+    }
+    @case ('import') {
+      @if (!readOnly()) {
+        <app-import-panel
+          [target]="target()"
+          (closed)="ioPanel.set(null)"
+          (imported)="imported($event.coll)"
+        />
+      }
+    }
+  }
 
   <app-edit-bar [profileId]="target().profileId" />
   <app-draft-documents [profileId]="target().profileId" [uid]="uid + '-drafts'" />

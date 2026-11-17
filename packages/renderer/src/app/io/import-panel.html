@@ -1,0 +1,176 @@
+@if (!readOnly()) {
+  <section class="panel" [attr.aria-labelledby]="uid + '-title'" data-testid="import-panel">
+    <header class="head">
+      <h2 class="title" [id]="uid + '-title'">Import documents</h2>
+      <code class="command" data-testid="import-command"
+        >db.<span class="coll">{{ collName().trim() || '…' }}</span
+        >.insertMany(<span class="file">{{ preview()?.fileName ?? 'file' }}</span
+        >, {{ '{' }} ordered: {{ ordered() }} {{ '}' }})</code
+      >
+      <button
+        type="button"
+        class="icon-btn close"
+        data-testid="import-close"
+        aria-label="Close import"
+        title="Close"
+        (click)="close()"
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+      </button>
+    </header>
+
+    <div class="options">
+      <fieldset class="choice" [disabled]="busy()">
+        <legend>Format</legend>
+        @for (f of formats; track f.value) {
+          <label [title]="f.hint">
+            <input
+              type="radio"
+              [name]="uid + '-format'"
+              [value]="f.value"
+              [checked]="format() === f.value"
+              [attr.data-testid]="'import-format-' + f.value"
+              (change)="setFormat($event)"
+            />
+            {{ f.label }}
+          </label>
+        }
+      </fieldset>
+      <button
+        type="button"
+        class="btn"
+        data-testid="import-choose"
+        [disabled]="busy()"
+        (click)="choose()"
+      >
+        {{ preview() ? 'Choose another file…' : 'Choose file…' }}
+      </button>
+      @if (preview(); as p) {
+        <span class="file-info" data-testid="import-file">
+          <span class="path">{{ p.fileName }}</span> ({{ sizeText() }})
+        </span>
+      }
+    </div>
+
+    @if (preview(); as p) {
+      <div class="options">
+        <label class="field">
+          Into collection
+          <span class="ns">{{ target().db }}.</span>
+          <input
+            type="text"
+            data-testid="import-coll"
+            spellcheck="false"
+            autocomplete="off"
+            [value]="collName()"
+            [disabled]="busy()"
+            (input)="setName($event)"
+            [attr.aria-invalid]="!nameTouched() && nameProblem() ? true : null"
+            [attr.aria-describedby]="!nameTouched() && nameProblem() ? uid + '-name-error' : null"
+          />
+        </label>
+        <label class="check" title="Insert in file order; unordered may be faster">
+          <input
+            type="checkbox"
+            data-testid="import-ordered"
+            [checked]="ordered()"
+            [disabled]="busy()"
+            (change)="setOrdered($event)"
+          />
+          Ordered
+        </label>
+        <label class="check" title="Stop at the first document that fails">
+          <input
+            type="checkbox"
+            data-testid="import-stop-on-error"
+            [checked]="stopOnError()"
+            [disabled]="busy()"
+            (change)="setStopOnError($event)"
+          />
+          Stop on first error
+        </label>
+        <span class="actions">
+          @if (phase() === 'importing') {
+            <button type="button" class="btn stop" data-testid="import-cancel" (click)="cancel()">
+              Cancel
+            </button>
+          } @else {
+            <button
+              type="button"
+              class="btn run"
+              data-testid="import-start"
+              [disabled]="!canImport()"
+              (click)="start()"
+            >
+              Import
+            </button>
+          }
+        </span>
+      </div>
+      @if (!nameTouched() && nameProblem(); as problem) {
+        <p class="message error" role="alert" [id]="uid + '-name-error'">{{ problem }}</p>
+      }
+
+      @if (phase() === 'previewed') {
+        <div class="preview" data-testid="import-preview">
+          <p class="note">
+            First {{ sample().length }} of the {{ p.sample.length }} documents read for the preview:
+          </p>
+          @if (sample().length === 0) {
+            <p class="note">The file has no documents.</p>
+          }
+          @for (doc of sample(); track $index) {
+            <pre class="doc" data-testid="import-sample" tabindex="0">{{ doc }}</pre>
+          }
+        </div>
+      }
+    }
+
+    <p class="status" role="status" data-testid="import-status" [attr.data-phase]="phase()">
+      @switch (phase()) {
+        @case ('idle') {
+          Choose a JSON array or JSON Lines file. You see its first documents before anything is
+          written.
+        }
+        @case ('choosing') {
+          Choose the file to import…
+        }
+        @case ('importing') {
+          Importing: <span class="count">{{ processedText() }}</span> documents read
+          @if (progress().failed) {
+            , {{ failedText() }} failed
+          }
+        }
+        @case ('done') {
+          Imported
+          <span class="count" data-testid="import-count">{{ insertedText() }}</span> documents into
+          {{ target().db }}.{{ collName().trim() }}
+          @if (progress().failed) {
+            ; <span data-testid="import-failed">{{ failedText() }}</span> failed
+          }
+          .
+        }
+        @case ('cancelled') {
+          Import cancelled after {{ processedText() }} documents. Documents already inserted stay.
+        }
+        @case ('previewed') {}
+        @case ('error') {}
+      }
+    </p>
+    @if (busy()) {
+      <div class="track" aria-hidden="true"><div class="sweep"></div></div>
+    }
+    @if (error(); as e) {
+      <p class="message error" role="alert" data-testid="import-error">{{ e }}</p>
+    }
+    @if (progress().errors.length) {
+      <ul class="failures" data-testid="import-failures">
+        @for (f of progress().errors; track f.index) {
+          <li>
+            <span class="line">Line {{ f.index }}</span> {{ f.error.code }}: {{ f.error.message }}
+          </li>
+        }
+      </ul>
+    }
+  </section>
+}

@@ -273,9 +273,15 @@ svg {
   border-radius: 3px;
 }
 
+/* Import / export */
+.io {
+  display: flex;
+  gap: 0.25rem;
+  margin-left: auto;
+}
+
 .views {
   display: flex;
-  margin-left: auto;
   border: 1px solid var(--border);
   border-radius: 4px;
   overflow: hidden;
