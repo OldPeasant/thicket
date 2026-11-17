@@ -281,12 +281,15 @@
   @if (editable && !readOnly()) {
     <div class="grant" data-testid="grant">
       <app-role-input
+        #grantField
         [db]="target().db"
         [known]="knownRoles()"
+        [forRole]="mode() === 'roles'"
+        [clearOnPick]="false"
         [disabled]="busy()"
         [label]="'Grant a role to ' + owner"
         action="Grant"
-        (picked)="grant($event)"
+        (picked)="grant($event, grantField)"
       />
     </div>
   }

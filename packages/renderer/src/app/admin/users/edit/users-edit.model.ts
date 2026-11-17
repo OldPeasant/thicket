@@ -54,11 +54,18 @@ export function roleText(ref: RoleRef, db: string): string {
   return ref.db === db ? ref.role : roleKey(ref);
 }
 
-/** Role suggestions for the role field: the roles of `db` named in `known`, built-in roles. */
-export function roleSuggestions(known: readonly string[], db: string): string[] {
+/**
+ * Role suggestions for the role field: the roles of `db` named in `known`, built-in roles.
+ * `forRole` is set where a custom role gets the roles (its "Inherits from" list, a grant to it):
+ * a role of a database other than `admin` can only inherit roles of its own database, so the
+ * `admin` roles are not offered there.
+ */
+export function roleSuggestions(known: readonly string[], db: string, forRole = false): string[] {
   const local = new Set([...known, ...DATABASE_ROLES]);
   const names = [...local].sort((a, b) => a.localeCompare(b));
-  if (db !== 'admin') return [...names, ...ADMIN_ROLES.map((r) => `${r}@admin`)];
+  if (db !== 'admin') {
+    return forRole ? names : [...names, ...ADMIN_ROLES.map((r) => `${r}@admin`)];
+  }
   return [...new Set([...names, ...ADMIN_ROLES])].sort((a, b) => a.localeCompare(b));
 }
 

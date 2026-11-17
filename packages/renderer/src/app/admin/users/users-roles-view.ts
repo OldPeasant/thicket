@@ -246,9 +246,12 @@ export class UsersRolesView {
     }
   }
 
-  /** Grants `ref` to the selected user or role. */
-  async grant(ref: RoleRef): Promise<void> {
-    await this.grantOrRevoke('admin.grantRoles', ref);
+  /**
+   * Grants `ref` to the selected user or role. `field` (the role field it was typed in) is
+   * emptied only when the grant worked, so a refused role can be corrected.
+   */
+  async grant(ref: RoleRef, field?: RoleInput): Promise<void> {
+    if (await this.grantOrRevoke('admin.grantRoles', ref)) field?.clear();
   }
 
   /** Revokes the directly granted `ref` from the selected user or role. */
@@ -259,35 +262,48 @@ export class UsersRolesView {
   private async grantOrRevoke(
     method: 'admin.grantRoles' | 'admin.revokeRoles',
     ref: RoleRef,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const { profileId, db } = this.target();
     const users = this.mode() === 'users';
     const name = users ? this.user()?.name : this.role()?.name;
-    if (name === undefined) return;
+    if (name === undefined) return false;
     const kind = users ? 'user' : 'role';
     const label = roleText(ref, db);
     const text =
       method === 'admin.grantRoles'
         ? `Granted ${label} to ${name}.`
         : `Revoked ${label} from ${name}.`;
-    await this.change(text, () =>
+    return this.change(text, () =>
       this.guard.run(method, { profileId, db, kind, name, roles: [{ ...ref }] }),
     );
   }
 
-  /** Sends one change, then reads users and roles again; a cancelled dialog changes nothing. */
-  private async change(done: string, send: () => Promise<unknown>): Promise<void> {
-    if (this.busy()) return;
+  /**
+   * Sends one change, then reads users and roles again; a cancelled dialog changes nothing.
+   * Resolves to whether it worked while the tab still shows the same database. When the tab
+   * shows another database by the time the answer comes, nothing is shown: the notice would
+   * describe lists no longer on screen (and switching already read the new ones).
+   */
+  private async change(done: string, send: () => Promise<unknown>): Promise<boolean> {
+    if (this.busy()) return false;
+    const target = this.target();
+    const current = () => {
+      const now = this.target();
+      return now.profileId === target.profileId && now.db === target.db;
+    };
     this.busy.set(true);
     this.notice.set(null);
     try {
       await send();
+      if (!current()) return false;
       this.notice.set({ text: done, error: false });
       await this.reload();
+      return true;
     } catch (error) {
-      if (ApiError.from(error).code !== 'CANCELLED') {
+      if (current() && ApiError.from(error).code !== 'CANCELLED') {
         this.notice.set({ text: describeError(error), error: true });
       }
+      return false;
     } finally {
       this.busy.set(false);
     }

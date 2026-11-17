@@ -99,12 +99,21 @@ export class RoleInput {
   readonly action = input('Add');
   readonly label = input('Role');
   readonly disabled = input(false);
+  /** The roles go to a custom role (outside `admin` only its own database's roles work). */
+  readonly forRole = input(false);
+  /**
+   * Whether picking a role empties the field. Off where the parent sends the role to the server
+   * first: it calls `clear()` once that worked, so a refused role can be corrected.
+   */
+  readonly clearOnPick = input(true);
   readonly picked = output<RoleRef>();
 
   protected readonly listId = `role-suggestions-${nextId++}`;
   protected readonly text = signal('');
   protected readonly error = signal<string | null>(null);
-  protected readonly suggestions = computed(() => roleSuggestions(this.known(), this.db()));
+  protected readonly suggestions = computed(() =>
+    roleSuggestions(this.known(), this.db(), this.forRole()),
+  );
 
   protected add(): void {
     if (this.disabled()) return;
@@ -113,8 +122,14 @@ export class RoleInput {
       this.error.set(parsed.error);
       return;
     }
-    this.text.set('');
+    if (this.clearOnPick()) this.text.set('');
     this.error.set(null);
     this.picked.emit(parsed.value);
+  }
+
+  /** Empties the field. */
+  clear(): void {
+    this.text.set('');
+    this.error.set(null);
   }
 }

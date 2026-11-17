@@ -85,6 +85,16 @@ describe('roleSuggestions', () => {
     expect(list.some((r) => r.includes('@'))).toBe(false);
   });
 
+  it('for a custom role outside admin: only roles of its own database', () => {
+    const list = roleSuggestions(['clerk'], 'shop', true);
+    expect(list).toEqual([...DATABASE_ROLES, 'clerk'].sort((a, b) => a.localeCompare(b)));
+    expect(list.some((r) => r.includes('@'))).toBe(false);
+  });
+
+  it('for a custom role in admin: the admin roles stay', () => {
+    expect(roleSuggestions(['ops'], 'admin', true)).toEqual(roleSuggestions(['ops'], 'admin'));
+  });
+
   it('without known roles suggests the built-in ones', () => {
     expect(roleSuggestions([], 'shop')).toEqual([
       ...[...DATABASE_ROLES].sort((a, b) => a.localeCompare(b)),

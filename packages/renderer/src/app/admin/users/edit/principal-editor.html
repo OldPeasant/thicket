@@ -82,6 +82,7 @@
       <app-role-input
         [db]="db()"
         [known]="known()"
+        [forRole]="!isUser()"
         [label]="isUser() ? 'Add a role' : 'Add a role to inherit from'"
         (picked)="addRole($event)"
       />

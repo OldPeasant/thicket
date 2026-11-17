@@ -725,6 +725,76 @@ describe('UsersRolesView', () => {
       expect(fake.requestsFor('admin.users')).toHaveLength(1);
     });
 
+    const suggestions = () =>
+      [...get('grant').querySelectorAll('datalist option')].map((o) => o.getAttribute('value'));
+
+    it('suggests admin roles when granting to a user, not when granting to a role of shop', async () => {
+      await create();
+      expect(suggestions()).toContain('readAnyDatabase@admin');
+      expect(suggestions()).toContain('clerk');
+      await click('mode-roles');
+      expect(suggestions()).toContain('reader');
+      expect(suggestions().some((s) => s?.includes('@'))).toBe(false);
+    });
+
+    it('a refused grant keeps the typed role; a grant that worked empties the field', async () => {
+      fake.fail('admin.grantRoles', {
+        code: 'SERVER_ERROR',
+        message: 'The server refused the command: Could not find role: nope@shop',
+      });
+      await create();
+      await type('role-input', 'nope');
+      await click('role-add');
+      expect(get('notice').textContent).toContain('Could not find role');
+      expect(get<HTMLInputElement>('role-input').value).toBe('nope');
+      fake.respond('admin.grantRoles', {});
+      await type('role-input', 'reader');
+      await click('role-add');
+      expect(get('notice').textContent).toContain('Granted reader to alice.');
+      expect(get<HTMLInputElement>('role-input').value).toBe('');
+    });
+
+    it('a change answered after the tab moved to another database shows no notice', async () => {
+      let release!: () => void;
+      fake.handle(
+        'admin.grantRoles',
+        () => new Promise((resolve) => (release = () => resolve({}))),
+      );
+      await create();
+      const pending = view.grant({ role: 'reader', db: 'shop' });
+      await settle();
+      fixture.componentRef.setInput('tab', { ...TAB, data: { profileId: 'p1', db: 'crm' } });
+      await settle();
+      release();
+      await pending;
+      await settle();
+      expect(view.notice()).toBeNull();
+      expect(el().querySelector('[data-testid="notice"]')).toBeNull();
+      expect(view.busy()).toBe(false);
+    });
+
+    it('a failure answered after the tab moved to another database shows no error', async () => {
+      let fail!: () => void;
+      fake.handle(
+        'admin.revokeRoles',
+        () =>
+          new Promise((resolve) => {
+            fail = () =>
+              resolve({ error: { code: 'SERVER_ERROR', message: 'Could not find role' } });
+          }),
+      );
+      await create();
+      const pending = view.revoke({ role: 'clerk', db: 'shop' });
+      await settle();
+      fixture.componentRef.setInput('tab', { ...TAB, data: { profileId: 'p1', db: 'crm' } });
+      await settle();
+      fail();
+      await pending;
+      await settle();
+      expect(view.notice()).toBeNull();
+      expect(view.busy()).toBe(false);
+    });
+
     it('a second change while one is pending is ignored', async () => {
       let release!: () => void;
       fake.handle(

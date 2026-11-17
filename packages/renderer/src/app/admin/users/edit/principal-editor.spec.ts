@@ -299,6 +299,20 @@ describe('PrincipalEditor', () => {
       expect(el().querySelector('.role-input [role="alert"]')).toBeNull();
     });
 
+    it('suggests admin roles for a user; a role outside admin gets only its own database roles', async () => {
+      const suggestions = () =>
+        [...el().querySelectorAll('datalist option')].map((o) => o.getAttribute('value'));
+      await create({ kind: 'user', entry: null });
+      expect(suggestions()).toContain('readAnyDatabase@admin');
+      fixture.destroy();
+      await create({ kind: 'role', entry: null });
+      expect(suggestions()).toContain('clerk');
+      expect(suggestions().some((s) => s?.includes('@'))).toBe(false);
+      fixture.destroy();
+      await create({ kind: 'role', entry: null }, 'admin');
+      expect(suggestions()).toContain('readAnyDatabase');
+    });
+
     it('a role added twice is listed once', async () => {
       await create({ kind: 'user', entry: null });
       await addRole('clerk');
