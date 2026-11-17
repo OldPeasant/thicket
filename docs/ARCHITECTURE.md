@@ -247,7 +247,9 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   `IoProgress.index` of an error is the 1-based line where the document starts; the first 100
   errors are kept. `stopOnError` (default true) ends the stream with the first failure's error
   after a last progress event (earlier lines stay inserted); otherwise failed documents are
-  skipped, and an ordered insert continues after the failed one. `end.delivered` is the number of
+  skipped, and an ordered insert continues after the failed one. A broken file structure always
+  stops the same way (earlier documents inserted, last progress, `INVALID_PARAMS` "Line N: …");
+  a failed write to the export file (cannot be created, disk full) answers `INTERNAL`. `end.delivered` is the number of
   documents written (export) or inserted (import). `io.import` is behind the write guard.
 - Write guard (`packages/backend/src/guard/`): `startBackend` wraps every handler of a
   `WRITE_METHODS` method with `guardWrites()`, which loads the profile from main (fresh, per

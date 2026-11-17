@@ -30,7 +30,10 @@ const isSpace = (c: string) =>
   c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\uFEFF';
 
 export interface Scanner {
-  /** Feeds the next chunk; returns the values completed by it. */
+  /**
+   * Feeds the next chunk; returns the values completed by it. A broken structure throws
+   * `ScanError`, after the values completed before it were returned (then by the next call).
+   */
   feed(chunk: string): ScannedValue[];
   /** The file ended; returns the last value, or throws `ScanError` for an unfinished one. */
   end(): ScannedValue[];
@@ -49,8 +52,23 @@ export class JsonScanner implements Scanner {
   /** In a sequence: the current top-level value is a bare scalar (no brackets). */
   private scalar = false;
 
+  /** A structure error found after values of the same chunk: thrown by the next call. */
+  private failure: ScanError | undefined;
+
   feed(chunk: string): ScannedValue[] {
+    if (this.failure) throw this.failure;
     const out: ScannedValue[] = [];
+    try {
+      this.scan(chunk, out);
+    } catch (error) {
+      // The values completed before the broken point still come out; the error follows.
+      if (!(error instanceof ScanError) || out.length === 0) throw error;
+      this.failure = error;
+    }
+    return out;
+  }
+
+  private scan(chunk: string, out: ScannedValue[]): void {
     // Start of the current value's text inside this chunk (-1: none started in this chunk).
     let from = this.parts ? 0 : -1;
     const close = (to: number) => {
@@ -123,7 +141,6 @@ export class JsonScanner implements Scanner {
       if (this.depth === 0 && !this.scalar && this.parts) close(i + 1);
     }
     if (this.parts && from >= 0) this.parts.push(chunk.slice(from));
-    return out;
   }
 
   /** Updates string and depth state for one character outside a string. */
@@ -139,6 +156,7 @@ export class JsonScanner implements Scanner {
   }
 
   end(): ScannedValue[] {
+    if (this.failure) throw this.failure;
     if (this.inString) throw new ScanError('the file ends inside a string', this.line);
     if (this.mode === 'array') throw new ScanError('the file ends before the closing ]', this.line);
     if (this.mode === 'sequence' && this.parts) {

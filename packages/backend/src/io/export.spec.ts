@@ -1,4 +1,5 @@
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdtemp, readdir, readFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -314,6 +315,35 @@ describe('exportToFile', () => {
         new Promise((resolve) => setTimeout(() => resolve('still running after 2 s'), 2000)),
       ]);
       expect(outcome).toMatchObject({ code: 'INTERNAL' });
+    },
+  );
+
+  it.skipIf(!existsSync('/dev/full'))(
+    'rejects INTERNAL and kills the cursor when a write fails between batches (disk full)',
+    { timeout: 3000 },
+    async () => {
+      // /dev/full opens fine but refuses every write with ENOSPC; the getMore answers after the
+      // failed write, so the next batch meets an already destroyed stream.
+      const server = fakeServer([docs(0, 1), docs(1, 1), docs(2, 1)], (cmd) =>
+        'getMore' in cmd
+          ? new Promise<Document>((resolve) =>
+              setTimeout(() => resolve(cursorReply(42, docs(1, 1), false)), 50),
+            )
+          : undefined,
+      );
+      const file = path.join(dir, 'full.jsonl');
+      await symlink('/dev/full', file);
+      const outcome = await Promise.race([
+        exportToFile(server.client, params(), file).then(
+          () => 'resolved',
+          (e: unknown) => e,
+        ),
+        new Promise((resolve) => setTimeout(() => resolve('still running after 2 s'), 2000)),
+      ]);
+      expect(outcome).toMatchObject({ code: 'INTERNAL' });
+      expect((outcome as Error).message).toContain(file);
+      expect(server.sent.some((c) => 'killCursors' in c)).toBe(true);
+      expect(await readdir(dir)).toEqual([]);
     },
   );
 });

@@ -161,7 +161,8 @@ function writeErrorsOf(reply: Document): WriteError[] {
  * {@link MAX_REPORTED_ERRORS}). With `stopOnError` (the default) the import ends at the first
  * failure: documents of earlier lines stay inserted, and the call rejects with that failure's
  * error after a last progress report. A broken file structure (the scanner cannot find where the
- * documents are) always stops the import.
+ * documents are) always stops the import the same way: the documents read before it are
+ * inserted, a last progress is sent, and the call rejects with INVALID_PARAMS naming its line.
  */
 export async function importFile(
   client: ClientLike,
@@ -218,33 +219,48 @@ export async function importFile(
     options.progress?.(snapshot());
   };
 
+  /** Reads the file into batches until its end or a stop; a broken structure throws ScanError. */
+  const readAll = async () => {
+    for await (const value of scanFile(file, format, options.signal)) {
+      processed++;
+      let doc: Document;
+      try {
+        doc = parseImportedDocument(value);
+      } catch (error) {
+        fail(value.line, (error as RpcError).toInfo());
+        if (stop) break;
+        continue;
+      }
+      const size = BSON.calculateObjectSize(doc);
+      if (batch.length > 0 && batchBytes + size > IMPORT_BATCH_BYTES) await flush();
+      if (stop) break;
+      batch.push({ doc, line: value.line });
+      batchBytes += size;
+      if (batch.length >= IMPORT_BATCH_DOCS) await flush();
+      if (stop) break;
+    }
+  };
+
+  // A broken file structure stops the import (whatever stopOnError says), like a stop.
+  let broken: RpcError | undefined;
   try {
     try {
-      for await (const value of scanFile(file, format, options.signal)) {
-        processed++;
-        let doc: Document;
-        try {
-          doc = parseImportedDocument(value);
-        } catch (error) {
-          fail(value.line, (error as RpcError).toInfo());
-          if (stop) break;
-          continue;
-        }
-        const size = BSON.calculateObjectSize(doc);
-        if (batch.length > 0 && batchBytes + size > IMPORT_BATCH_BYTES) await flush();
-        if (stop) break;
-        batch.push({ doc, line: value.line });
-        batchBytes += size;
-        if (batch.length >= IMPORT_BATCH_DOCS) await flush();
-        if (stop) break;
+      try {
+        await readAll();
+      } catch (error) {
+        // Other read errors (the file vanished, CANCELLED) end the import without a flush.
+        if (!(error instanceof ScanError)) throw error;
+        broken = readError(error, file);
       }
-      // Documents read before a failed line are still written (also when the import stops);
-      // an empty flush only sends the final progress.
+      // Documents read before a failed line or a broken structure are still written (also when
+      // the import stops); an empty flush only sends the final progress.
       await flush();
     } catch (error) {
       throw readError(error, file);
     }
-    if (stop) throw stop;
+    // A stop comes from an earlier line than the broken structure: the import ended there.
+    const failure = stop ?? broken;
+    if (failure) throw failure;
     return { ...snapshot(), inserted };
   } finally {
     await op.close();

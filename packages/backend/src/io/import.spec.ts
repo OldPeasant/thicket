@@ -450,12 +450,68 @@ describe('importFile', () => {
     expect((result as Error).message).toMatch(/not acknowledged.*waiting for replication/);
   });
 
-  it('a broken JSON structure stops the import with INVALID_PARAMS (also in continue mode)', async () => {
-    const file = await fileWith('broken.json', '[{"_id":1},\n{"_id":2}');
+  it.each([
+    ['continue mode', { stopOnError: false }],
+    ['stop mode', {}],
+  ] as const)(
+    'a broken JSON structure (%s) inserts the documents read before it, then rejects INVALID_PARAMS',
+    async (_mode, options) => {
+      // The last element has no , or ] after it, so the scanner never completes it.
+      const file = await fileWith('broken.json', '[{"_id":1},\n{"_id":2},\n{"_id":3}');
+      const server = fakeServer();
+      const { result, progress } = await runImport(server.client, file, 'json', options);
+      expect(result).toBeInstanceOf(RpcError);
+      expect(result).toMatchObject({ code: 'INVALID_PARAMS' });
+      expect((result as Error).message).toMatch(/^Line 3: the file ends before the closing \]/);
+      expect(server.inserts.map((i) => texts(i.documents))).toEqual([
+        ['{"_id":{"$numberInt":"1"}}', '{"_id":{"$numberInt":"2"}}'],
+      ]);
+      expect(progress).toEqual([{ processed: 2, failed: 0, errors: [] }]);
+    },
+  );
+
+  it('a broken structure after a full batch keeps the flushed batch and the rest read before it', async () => {
+    const lines = Array.from({ length: IMPORT_BATCH_DOCS + 2 }, (_, k) => `{"_id":${String(k)}}`);
+    const file = await fileWith('broken-late.json', `[${lines.join(',\n')},\n}`);
     const server = fakeServer();
-    const { result } = await runImport(server.client, file, 'json', { stopOnError: false });
+    const { result, progress } = await runImport(server.client, file, 'json', {
+      stopOnError: false,
+    });
     expect(result).toMatchObject({ code: 'INVALID_PARAMS' });
-    expect((result as Error).message).toMatch(/Line 2: the file ends before the closing \]/);
+    expect((result as Error).message).toMatch(
+      new RegExp(`^Line ${String(IMPORT_BATCH_DOCS + 3)}:`),
+    );
+    expect(server.inserts.map((i) => i.documents.length)).toEqual([IMPORT_BATCH_DOCS, 2]);
+    expect(progress.at(-1)).toEqual({ processed: IMPORT_BATCH_DOCS + 2, failed: 0, errors: [] });
+  });
+
+  it('a stop before the broken structure wins (its line comes first)', async () => {
+    const file = await fileWith('dup-broken.json', '[{"_id":1},\n{"_id":1},\n{"_id":2}');
+    const server = fakeServer((documents, ordered) => duplicateAt(documents, 1, ordered));
+    const { result } = await runImport(server.client, file, 'json');
+    expect(result).toMatchObject({ code: 'SERVER_ERROR' });
+    expect((result as Error).message).toMatch(/^Import stopped: Line 2: E11000/);
+    expect(server.inserts).toHaveLength(1);
+  });
+
+  it('a cancel while reading does not write the documents of the unfinished batch', async () => {
+    // About 1 500 documents per 256 KiB read chunk: the first batch fills inside the first
+    // chunk, the cancel arrives just after its insert answered, and the next chunk read sees it.
+    const pad = 'x'.repeat(150);
+    const lines = Array.from({ length: 4000 }, (_, k) => `{"_id":${String(k)},"p":"${pad}"}`);
+    const file = await fileWith('cancel.jsonl', `${lines.join('\n')}\n`);
+    const controller = new AbortController();
+    const server = fakeServer((documents) => {
+      setImmediate(() => controller.abort());
+      return { n: documents.length, ok: 1 };
+    });
+    const { result, progress } = await runImport(server.client, file, 'jsonl', {
+      signal: controller.signal,
+    });
+    expect(result).toMatchObject({ code: 'CANCELLED' });
+    expect(server.inserts.map((i) => i.documents.length)).toEqual([IMPORT_BATCH_DOCS]);
+    // Only the progress of the written batch: no final flush, no final progress.
+    expect(progress).toEqual([{ processed: IMPORT_BATCH_DOCS, failed: 0, errors: [] }]);
   });
 
   it('a file that no longer exists answers NOT_FOUND', async () => {

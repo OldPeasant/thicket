@@ -55,27 +55,48 @@ export function exportCommand(p: ExportParams): Document {
   return cmd;
 }
 
-/** Writes `text`, waiting for `drain` when the stream's buffer is full (back pressure). */
+/** The error of a stream that failed or was closed, if it did (it then writes nothing more). */
+function brokenStream(stream: WriteStream): Error | undefined {
+  if (stream.errored) return stream.errored;
+  if (stream.destroyed) return new Error('the file was closed');
+  return undefined;
+}
+
+/**
+ * Writes `text`, waiting for `drain` when the stream's buffer is full (back pressure). Rejects at
+ * once when the stream already failed: a destroyed stream emits neither `drain` nor `error` again.
+ */
 function write(stream: WriteStream, text: string): Promise<void> {
+  const broken = brokenStream(stream);
+  if (broken) return Promise.reject(broken);
   if (stream.write(text)) return Promise.resolve();
   return new Promise((resolve, reject) => {
-    const onDrain = () => {
-      stream.off('error', onError);
-      resolve();
-    };
-    const onError = (error: Error) => {
+    const done = (error?: Error) => {
       stream.off('drain', onDrain);
-      reject(error);
+      stream.off('error', onError);
+      stream.off('close', onClose);
+      if (error) reject(error);
+      else resolve();
     };
+    const onDrain = () => done();
+    const onError = (error: Error) => done(error);
+    const onClose = () => done(brokenStream(stream) ?? new Error('the file was closed'));
     stream.once('drain', onDrain);
     stream.once('error', onError);
+    stream.once('close', onClose);
   });
 }
 
+/** Ends the stream; rejects when it failed (also when the file could not be opened). */
 function finish(stream: WriteStream): Promise<void> {
+  const broken = brokenStream(stream);
+  if (broken) return Promise.reject(broken);
   return new Promise((resolve, reject) => {
-    stream.once('error', reject);
-    stream.end(() => resolve());
+    stream.end((error?: Error | null) => {
+      const failed = error ?? brokenStream(stream);
+      if (failed) reject(failed);
+      else resolve();
+    });
   });
 }
 

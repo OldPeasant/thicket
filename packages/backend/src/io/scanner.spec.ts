@@ -113,6 +113,17 @@ describe('JsonScanner: one array of documents', () => {
     expect(scanError(json, ['[{"a":1}]\n\nx']).line).toBe(3);
   });
 
+  it('returns the values completed before a broken point, then throws on the next call', () => {
+    const scanner = new JsonScanner();
+    expect(scanner.feed('[{"a":1},\n{"b":2},\n}')).toEqual([
+      { text: '{"a":1}', line: 1 },
+      { text: '{"b":2}', line: 2 },
+    ]);
+    expect(() => scanner.feed('{"c":3}]')).toThrow(/^Line 3: unexpected \}/);
+    expect(() => scanner.end()).toThrow(/^Line 3: unexpected \}/);
+    expect(scanError(json, ['[{"a":1},\n}']).message).toBe('Line 2: unexpected }');
+  });
+
   it('refuses a missing value before a comma', () => {
     expect(scanError(json, ['[,{"a":1}]']).message).toMatch(/missing value before ,/);
     const error = scanError(json, ['[{"a":1},\n,{"b":2}]']);
