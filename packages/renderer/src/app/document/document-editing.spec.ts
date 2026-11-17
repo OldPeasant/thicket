@@ -3,6 +3,7 @@ import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import type { Request } from '@thicket/contract';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ApiError } from '../api/api-error';
 import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
 import { CollectionView } from '../collection/collection-view';
 import { EditModeService } from '../explorer/services/edit-mode.service';
@@ -591,6 +592,24 @@ describe('Editing documents in a collection tab', () => {
         expect(q('conflict-merge')).toBeNull();
       });
 
+      it('stays closed when the deleted conflict changes in place to a readable version', async () => {
+        // The conflict entry is replaced, not removed: only the closing effect clears the merge.
+        await conflict();
+        await startMerge('{ _id: 1, total: 15, qty: 77 }');
+        fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: null } });
+        await click('conflict-merge-save');
+        expect(text('conflict-title')).toBe('Deleted on the server since you loaded it');
+
+        await conflictAgain('19');
+        expect(updates()).toHaveLength(3);
+        expect(text('conflict-title')).toBe('Changed on the server since you loaded it');
+        expectResolutions();
+        await click('conflict-merge');
+        const area = get<HTMLTextAreaElement>('conflict-merge-text');
+        expect(area.value).toContain('total: 19');
+        expect(area.value).not.toContain('qty: 77');
+      });
+
       it('closes when Save merged finds a server version it cannot read', async () => {
         await conflict();
         await startMerge('{ _id: 1, total: 15, qty: 77 }');
@@ -602,6 +621,109 @@ describe('Editing documents in a collection tab', () => {
         expect(q('conflict-merge-text')).toBeNull();
         expect(q('conflict-merge-save')).toBeNull();
         expect(text('conflict-keep-server')).toBe('Keep server version');
+      });
+
+      it('does not show an earlier merge syntax error on a later conflict', async () => {
+        await conflict();
+        await startMerge('{ _id: 1, total: ');
+        await click('conflict-merge-save');
+        expect(q('conflict-merge-error')).not.toBeNull();
+        expect(updates()).toHaveLength(1);
+        await click('doc-revert', docItem(0));
+        expect(q('conflict-view')).toBeNull();
+
+        await conflictAgain('19');
+        expectResolutions();
+        await click('conflict-merge');
+        expect(q('conflict-merge-error')).toBeNull();
+        const area = get<HTMLTextAreaElement>('conflict-merge-text');
+        expect(area.getAttribute('aria-invalid')).toBeNull();
+        expect(area.value).toContain('total: 19');
+        expect(area.value).not.toBe('{ _id: 1, total: ');
+      });
+
+      describe('with a second conflict on another document', () => {
+        const ID1 = '{"$numberInt":"1"}';
+        const ID2 = '{"$numberInt":"2"}';
+        const section = (id: string) => {
+          const found = el().querySelector<HTMLElement>(
+            `[data-testid="conflict-view"][data-key='${id}']`,
+          );
+          if (found === null) throw new Error(`no conflict view for ${id}`);
+          return found;
+        };
+        const merged = '{ _id: 1, total: 15, qty: 77 }';
+
+        /** Conflicts on order 1 (server total 99) and order 2 (server total 98), merging order 1. */
+        const twoConflictsMergingFirst = async () => {
+          fake.handle('docs.update', (params) => {
+            const id = (params as { id: string }).id;
+            const current = id === ID1 ? orderText(1, 99, 1) : orderText(2, 98, 2);
+            throw new ApiError({ code: 'CONFLICT', message: 'x', detail: { current } });
+          });
+          await typeInto(0, 'total', '15');
+          await typeInto(1, 'total', '25');
+          await click('edit-save');
+          await click('doc-save', docItem(1));
+          fake.respond('docs.update', { modified: true });
+          expect(
+            [...el().querySelectorAll<HTMLElement>('[data-testid="conflict-view"]')].map(
+              (v) => v.dataset['key'],
+            ),
+          ).toEqual([ID1, ID2]);
+          await click('conflict-merge', section(ID1));
+          const area = get<HTMLTextAreaElement>('conflict-merge-text', section(ID1));
+          area.value = merged;
+          area.dispatchEvent(new Event('input'));
+          await settle();
+        };
+        /** The merge editor of order 1 is still open with the typed text and saves it. */
+        const expectMergeKeptAndSaves = async () => {
+          expect(el().querySelectorAll('[data-testid="conflict-view"]')).toHaveLength(1);
+          expect(get<HTMLTextAreaElement>('conflict-merge-text', section(ID1)).value).toBe(merged);
+          expect(q('conflict-merge-save', section(ID1))).not.toBeNull();
+          await click('conflict-merge-save', section(ID1));
+          expect(updates().at(-1)).toMatchObject({
+            id: ID1,
+            update: '{"$set":{"total":{"$numberInt":"15"},"qty":{"$numberInt":"77"}}}',
+            expected: '{"total":{"$eq":{"$numberInt":"99"}},"qty":{"$eq":{"$numberInt":"1"}}}',
+          });
+          expect(q('conflict-view')).toBeNull();
+        };
+
+        it('keeps the open editor and its text when the other document is reverted', async () => {
+          await twoConflictsMergingFirst();
+          await click('doc-revert', docItem(1));
+          await expectMergeKeptAndSaves();
+        });
+
+        it('keeps the open editor and its text when the other conflict keeps the server version', async () => {
+          await twoConflictsMergingFirst();
+          fake.respond('docs.get', { doc: orderText(2, 98, 2), sliced: [] });
+          await click('conflict-keep-server', section(ID2));
+          expect(input(1, 'total').value).toBe('98');
+          await expectMergeKeptAndSaves();
+        });
+
+        it('keeps the open editor and its text when the other conflict is overwritten', async () => {
+          await twoConflictsMergingFirst();
+          await click('conflict-overwrite', section(ID2));
+          expect(updates().at(-1)).toMatchObject({ id: ID2 });
+          await expectMergeKeptAndSaves();
+        });
+
+        it('keeps the open editor when the other conflict finds its document deleted', async () => {
+          await twoConflictsMergingFirst();
+          fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: null } });
+          await click('conflict-overwrite', section(ID2));
+          fake.respond('docs.update', { modified: true });
+          expect(text('conflict-title', section(ID2))).toBe(
+            'Deleted on the server since you loaded it',
+          );
+          expect(get<HTMLTextAreaElement>('conflict-merge-text', section(ID1)).value).toBe(merged);
+          await click('conflict-keep-server', section(ID2));
+          await expectMergeKeptAndSaves();
+        });
       });
     });
 
