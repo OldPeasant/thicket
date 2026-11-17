@@ -34,6 +34,10 @@ artifactName: thicket-${version}-${os}-${arch}.${ext}
 # writes the hash into Info.plist / the exe resources); Linux ignores that fuse. With
 # --inspect off, Playwright's Electron driver cannot attach to a packaged build: the smoke test
 # (scripts/smoke-packaged.mjs) uses the Chromium DevTools protocol of the renderer instead.
+# Residual risk (accepted): no fuse controls Chromium's --remote-debugging-port, so the packaged
+# app still accepts it. Anyone able to launch the binary with arguments can attach over CDP and
+# drive the renderer (including the preload's thicket.request against saved connections).
+# Refusing it in packaged builds is a possible follow-up, not part of this hardening.
 electronFuses:
   runAsNode: false
   enableNodeOptionsEnvironmentVariable: false

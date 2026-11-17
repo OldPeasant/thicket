@@ -165,9 +165,11 @@ try {
   child.stderr.on('data', (chunk) => output.push(chunk.toString()));
   browser = await chromium.connectOverCDP(await devToolsUrl(child), { timeout: TIMEOUT });
   const context = browser.contexts()[0] ?? (await browser.waitForEvent('context'));
-  const page =
-    context.pages().find((p) => p.url().startsWith('thicket://')) ??
-    (await context.waitForEvent('page', { timeout: TIMEOUT }));
+  // The app has one window. Its target can still be on the initial blank document (main creates
+  // the BrowserWindow before loadURL), so wait for the navigation away from about: before the load
+  // state and the pings; a wrong origin is then reported by the URL check below, not a timeout.
+  const page = context.pages()[0] ?? (await context.waitForEvent('page', { timeout: TIMEOUT }));
+  await page.waitForURL((url) => url.protocol !== 'about:', { timeout: TIMEOUT });
   await page.waitForLoadState('load');
   // Runs in the renderer, where the preload exposes `thicket` on the window.
   const call = (request) => page.evaluate((r) => globalThis.thicket.request(r), request);
