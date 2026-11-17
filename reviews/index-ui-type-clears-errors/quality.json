@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "task": "index-ui-type-clears-errors",
+  "reviewed_revision": "0cfdcc05971efae3b4c703af5bfac174ae1e0578",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/index-ui-type-clears-errors/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/index-ui-type-clears-errors/review.md"},
+    "fixer": {"status": "not_required", "reason": "test-writer and code-reviewer reported no findings"}
+  },
+  "fixes_required": false,
+  "findings": [],
+  "validation": [
+    {"command": "cd packages/renderer && npx ng test --include='src/app/indexes/index-create-form.spec.ts'", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}
