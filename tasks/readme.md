@@ -7,7 +7,7 @@ touches: [README.md,docs/user]
 quality: exempt
 quality_reason: documentation only
 prio: 2
-lease_until: 2026-11-17T04:44:31Z
+lease_until: 2026-11-17T04:45:50Z
 ---
 ## Goal
 README with features, screenshots (both styles), install per OS including Gatekeeper and SmartScreen instructions for unsigned builds, build-from-source, contributing; trademark note.
