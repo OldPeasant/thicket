@@ -400,7 +400,10 @@ describe('idx.stats for a user without the indexStats privilege (server with acc
       serverSelectionTimeoutMS: 30_000,
     });
     try {
-      await root.db('allowed').collection('items').insertMany([{ n: 1 }, { n: 2 }]);
+      await root
+        .db('allowed')
+        .collection('items')
+        .insertMany([{ n: 1 }, { n: 2 }]);
       await root.db('allowed').collection('items').createIndex({ n: 1 });
       await root.db('allowed').command({
         createUser: 'reader',

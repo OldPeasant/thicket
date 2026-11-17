@@ -96,7 +96,8 @@ export async function indexStatistics(
       {}) as Document;
     for (const [name, value] of Object.entries(sizes)) {
       const bytes = toNumber(value);
-      if (bytes !== undefined && Number.isFinite(bytes) && bytes > 0) entry(name).sizeBytes += bytes;
+      if (bytes !== undefined && Number.isFinite(bytes) && bytes > 0)
+        entry(name).sizeBytes += bytes;
       else entry(name);
     }
   }
