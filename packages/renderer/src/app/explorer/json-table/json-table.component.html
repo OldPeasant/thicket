@@ -184,6 +184,19 @@
         @if (orientation === 'h') {
           <thead>
             <tr>
+              @if (selectable) {
+                <th class="corner row-select">
+                  <input
+                    type="checkbox"
+                    data-testid="row-select-all"
+                    aria-label="Select all rows"
+                    [checked]="allRowsSelected"
+                    [indeterminate]="someRowsSelected"
+                    (click)="$event.stopPropagation()"
+                    (change)="selectAllRows($event)"
+                  />
+                </th>
+              }
               @for (k of visibleArrayKeys; track k) {
                 <th
                   [attr.data-col-key]="colKey(k)"
@@ -205,7 +218,19 @@
           </thead>
           <tbody>
             @for (i of visibleArrayIndices; track i) {
-              <tr>
+              <tr [class.selected]="selectable && isRowSelected(i)">
+                @if (selectable) {
+                  <td class="row-select">
+                    <input
+                      type="checkbox"
+                      data-testid="row-select"
+                      [attr.aria-label]="'Select row ' + (i + 1)"
+                      [checked]="isRowSelected(i)"
+                      (click)="$event.stopPropagation()"
+                      (change)="selectRow(i, $event)"
+                    />
+                  </td>
+                }
                 @for (k of visibleArrayKeys; track k) {
                   <td>
                     @if ($first && rowProblemTitle(i); as title) {

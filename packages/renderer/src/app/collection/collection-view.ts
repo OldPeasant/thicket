@@ -42,6 +42,7 @@ import {
   type SchemaParams,
 } from '../schema-analysis';
 import { BulkPanel } from './bulk/bulk-panel';
+import { MultiEdit, MultiEditPanel, type SelectedDocument } from './multi-edit';
 import { QueryHistory, QueryHistoryMenu } from './history';
 import { ImportPanel } from '../io/import-panel';
 import { JsonExplorerComponent } from '../explorer/json-explorer.component';
@@ -60,6 +61,7 @@ import { NumberDefaultService } from '../explorer/services/number-default.servic
 import { PanelService } from '../explorer/services/panel.service';
 import { ArraySliceService, type SliceSource } from '../explorer/services/array-slice.service';
 import { PageService } from '../explorer/services/page.service';
+import { RowSelectionService } from '../explorer/services/row-selection.service';
 import { SchemaService } from '../explorer/services/schema.service';
 import { TableOrientationService } from '../explorer/services/table-orientation.service';
 import { WorkspaceService, type WorkspaceTab } from '../layout/workspace.service';
@@ -120,6 +122,7 @@ const numberFormat = new Intl.NumberFormat();
     ExplainPanel,
     SchemaPanel,
     BulkPanel,
+    MultiEditPanel,
     QueryHistoryMenu,
   ],
   providers: [
@@ -127,6 +130,8 @@ const numberFormat = new Intl.NumberFormat();
     QueryHistory,
     DocumentEdits,
     DocumentActions,
+    MultiEdit,
+    RowSelectionService,
     BsonDisplayService,
     CollapseService,
     ColumnSyncService,
@@ -153,6 +158,9 @@ export class CollectionView {
   protected readonly results = inject(CollectionResults);
   protected readonly edits = inject(DocumentEdits);
   protected readonly actions = inject(DocumentActions);
+  private readonly multiEdit = inject(MultiEdit);
+  /** Rows selected in the table (edit mode) to edit a field across them. */
+  protected readonly rowSelection = inject(RowSelectionService);
   private readonly editMode = inject(EditModeService);
   private readonly numbers = inject(NumberDefaultService);
   private readonly safety = inject(ProfileSafetyService);
@@ -242,6 +250,20 @@ export class CollectionView {
       doc === null ? null : this.treeOf(doc, loaded[i] ?? null, sliced?.[i]),
     );
   });
+  /** The selected rows' documents as loaded, for `MultiEditPanel`. */
+  protected readonly selectedDocs = computed<readonly SelectedDocument[]>(() => {
+    const docs = this.docs();
+    const selected: SelectedDocument[] = [];
+    for (const i of this.rowSelection.selected()) {
+      const doc = docs[i];
+      if (doc) selected.push({ doc, partial: this.isPartial(i) });
+    }
+    return selected;
+  });
+  /** The `_id`s of the page's rows, in order: a different list ends the row selection. */
+  private readonly pageKeys = computed(
+    () => this.docs().map((d) => (d === null ? '' : (documentKey(d) ?? ''))).join('\u0000'),
+  );
   protected readonly rawText = computed(() => {
     const page = this.results.page();
     if (page === null) return '';
@@ -373,6 +395,12 @@ export class CollectionView {
           slicedOf: (key) => this.slicedOf(key),
           documentChanged: (key, doc, sliced) => this.documentChanged(key, doc, sliced),
         });
+        this.multiEdit.setHost({
+          ...target,
+          projection: () => this.results.query().projection,
+          slicedOf: (key) => this.slicedOf(key),
+          documentChanged: (key, doc, sliced) => this.documentChanged(key, doc, sliced),
+        });
         void this.history.load(target);
         this.execute(false);
       });
@@ -385,6 +413,25 @@ export class CollectionView {
         // A read-only profile removes the bulk panel: it reports no more about its write.
         if (readOnly) this.bulkWriting.set(false);
       });
+    });
+    // Rows can be selected in the table while editing (edit a field across them); a page with
+    // other documents (paging, a new query) starts with none selected.
+    effect(() => {
+      this.rowSelection.enabled.set(
+        this.view() === 'table' && this.editMode.enabled() && !this.readOnly(),
+      );
+    });
+    effect(() => {
+      const enabled = this.rowSelection.enabled();
+      untracked(() => {
+        if (!enabled) this.rowSelection.clear();
+      });
+    });
+    let keys: string | null = null;
+    effect(() => {
+      const next = this.pageKeys();
+      if (keys !== null && next !== keys) untracked(() => this.rowSelection.clear());
+      keys = next;
     });
     // The table view shows one row per document: the root table (path '') starts horizontal
     // (the explorer's default is one row per field). The user can still flip it.

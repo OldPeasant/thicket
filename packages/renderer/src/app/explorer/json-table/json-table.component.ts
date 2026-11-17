@@ -5,6 +5,7 @@ import { FilterService } from '../services/filter.service';
 import { NodeVisibilityService } from '../services/node-visibility.service';
 import { CollapseService } from '../services/collapse.service';
 import { PageService } from '../services/page.service';
+import { RowSelectionService } from '../services/row-selection.service';
 import { NestedPageSizeService } from '../services/nested-page-size.service';
 import {
   ArraySliceService,
@@ -80,6 +81,37 @@ export class JsonTableComponent implements OnInit {
   private slices = inject(ArraySliceService);
   private collapse = inject(CollapseService);
   private schema = inject(SchemaService);
+  private rowSelection = inject(RowSelectionService, { optional: true });
+
+  // The root table of records gets a checkbox column when the host provides
+  // row selection and turns it on (collection tab: edit a field across rows).
+  get selectable(): boolean {
+    return this.path === '' && this.rowSelection !== null && this.rowSelection.enabled();
+  }
+
+  isRowSelected(index: number): boolean {
+    return this.rowSelection?.isSelected(index) ?? false;
+  }
+
+  selectRow(index: number, event: Event): void {
+    event.stopPropagation();
+    this.rowSelection?.toggle(index, (event.target as HTMLInputElement).checked);
+  }
+
+  get allRowsSelected(): boolean {
+    const n = this.arr.length;
+    return n > 0 && (this.rowSelection?.count() ?? 0) === n;
+  }
+
+  get someRowsSelected(): boolean {
+    const c = this.rowSelection?.count() ?? 0;
+    return c > 0 && c < this.arr.length;
+  }
+
+  selectAllRows(event: Event): void {
+    event.stopPropagation();
+    this.rowSelection?.setAll(this.arr.length, (event.target as HTMLInputElement).checked);
+  }
 
   // Expanding a node by hand shows everything below it, whatever the filter
   // would otherwise hide there.

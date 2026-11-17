@@ -402,3 +402,22 @@ table th.dim {
   font-weight: 400;
   font-style: italic;
 }
+
+/* Row selection of the root table (collection tab: edit a field across rows). */
+th.row-select,
+td.row-select {
+  width: 1px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+td.row-select input,
+th.row-select input {
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+tr.selected > td {
+  background: var(--accent-bg);
+}

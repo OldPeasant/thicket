@@ -1,0 +1,78 @@
+/*
+ * Edit a field across selected rows: a strip above the table, edged in the accent like the other
+ * collection panels. The selected count leads; field, action and value read left to right as the
+ * operation ("status set to "shipped""). Colors only from the theme tokens.
+ */
+.multi-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  padding: 0.4rem 0.75rem 0.5rem;
+  background: var(--accent-bg);
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+}
+
+.edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.title {
+  margin: 0;
+  font-size: inherit;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.label {
+  color: var(--text-muted);
+}
+
+input,
+select {
+  padding: 0.2rem 0.4rem;
+  font: inherit;
+  font-family: var(--font-mono);
+  color: var(--text);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+input[data-testid='multi-edit-field'] {
+  width: 14rem;
+}
+
+input.value {
+  flex: 1 1 14rem;
+  min-width: 10rem;
+}
+
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.message p {
+  margin: 0;
+}
+
+.problems {
+  margin: 0.25rem 0 0;
+  padding-left: 1.25rem;
+  color: var(--danger-text);
+}
+
+.problems code {
+  font-family: var(--font-mono);
+}

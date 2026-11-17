@@ -1,0 +1,81 @@
+<section
+  class="multi-edit"
+  data-testid="multi-edit"
+  [attr.aria-labelledby]="uid + '-title'"
+  [attr.aria-busy]="multi.busy()"
+>
+  <h2 class="title" [id]="uid + '-title'" data-testid="multi-edit-count">{{ countText() }}</h2>
+  <form class="edit" (submit)="$event.preventDefault(); save()">
+    <label class="field">
+      <span class="label">Field</span>
+      <input
+        type="text"
+        data-testid="multi-edit-field"
+        placeholder="status or address.city"
+        spellcheck="false"
+        autocomplete="off"
+        [value]="path()"
+        [disabled]="multi.busy()"
+        (input)="setPath($event)"
+      />
+    </label>
+    <select
+      data-testid="multi-edit-action"
+      aria-label="Change"
+      [value]="action()"
+      [disabled]="multi.busy()"
+      (change)="setAction($event)"
+    >
+      <option value="set">set to</option>
+      <option value="unset">remove</option>
+    </select>
+    @if (action() === 'set') {
+      <input
+        type="text"
+        class="value"
+        data-testid="multi-edit-value"
+        aria-label="Value in shell syntax"
+        placeholder='"shipped", 42, ISODate("2026-01-01")'
+        spellcheck="false"
+        autocomplete="off"
+        [value]="valueText()"
+        [disabled]="multi.busy()"
+        (input)="setValue($event)"
+      />
+    }
+    <button type="submit" class="btn primary" data-testid="multi-edit-save" [disabled]="multi.busy()">
+      {{ multi.busy() ? 'Saving…' : saveLabel() }}
+    </button>
+    <button
+      type="button"
+      class="btn quiet"
+      data-testid="multi-edit-clear"
+      [disabled]="multi.busy()"
+      (click)="cleared.emit()"
+    >
+      Clear selection
+    </button>
+  </form>
+  @if (error(); as e) {
+    <p class="message error" data-testid="multi-edit-error" role="alert">{{ e }}</p>
+  }
+  @if (result(); as r) {
+    <div class="message" data-testid="multi-edit-result" role="status">
+      <p data-testid="multi-edit-summary">{{ summary() }}</p>
+      @if (r.conflicts.length > 0 || r.failed.length > 0) {
+        <ul class="problems">
+          @for (c of r.conflicts; track $index) {
+            <li data-testid="multi-edit-conflict">
+              <code>{{ c.label }}</code> {{ c.reason }}
+            </li>
+          }
+          @for (f of r.failed; track $index) {
+            <li data-testid="multi-edit-failed">
+              <code>{{ f.label }}</code> {{ f.reason }}
+            </li>
+          }
+        </ul>
+      }
+    </div>
+  }
+</section>

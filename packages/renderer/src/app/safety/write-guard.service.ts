@@ -125,6 +125,48 @@ export class WriteGuard {
     return { ...plain, confirmed: true };
   }
 
+  /**
+   * `approve` for several writes of one kind saved together (e.g. one field edited across
+   * selected rows): one read-only check and at most one confirm dialog for all of them, which
+   * shows the document count (`count` defaults to the number of writes) and the operations (the
+   * first `BATCH_SHOWN`, then how many more). Resolves with the params to send, in order.
+   */
+  async approveAll<M extends WriteMethodName>(
+    method: M,
+    paramsList: readonly GuardedParams<M>[],
+    options: WriteOptions = {},
+  ): Promise<ParamsOf<M>[]> {
+    const first = paramsList[0];
+    if (first === undefined) return [];
+    const profileId = (first as { profileId: string }).profileId;
+    if (paramsList.some((p) => (p as { profileId: string }).profileId !== profileId)) {
+      throw new Error('WriteGuard.approveAll: all writes must go to the same profile');
+    }
+    const { signal, ...describe } = options;
+    if (this.profiles.readOnly(profileId)()) {
+      const name = this.profiles.get(profileId)?.name ?? 'This connection';
+      throw new ApiError({ code: 'READ_ONLY', message: `${name} is read-only.` });
+    }
+    const plain = paramsList.map((params) => {
+      const copy = { ...params } as ParamsOf<M> & { confirmed?: unknown };
+      delete copy.confirmed;
+      return copy as ParamsOf<M>;
+    });
+    if (!describe.alwaysConfirm && !this.needsConfirmation(method, profileId)) return plain;
+    if (signal?.aborted) throw writeCancelled();
+    const request = this.request(method, plain[0] as ParamsOf<M>, {
+      count: plain.length,
+      ...describe,
+    });
+    const shown = plain.slice(0, BATCH_SHOWN).map((p) => describeWrite(method, p));
+    const more = plain.length - shown.length;
+    if (more > 0) shown.push(`// … and ${formatCount(more)} more`);
+    request.operation = shown.join('\n');
+    const ok = await this.confirmer.confirm(request, signal);
+    if (!ok || signal?.aborted) throw writeCancelled();
+    return plain.map((p) => ({ ...p, confirmed: true }));
+  }
+
   private request<M extends WriteMethodName>(
     method: M,
     params: ParamsOf<M>,
@@ -157,6 +199,9 @@ export class WriteGuard {
     return request;
   }
 }
+
+/** How many operations of a batch the confirm dialog lists (`WriteGuard.approveAll`). */
+export const BATCH_SHOWN = 10;
 
 /** "Affects 12 431 documents." */
 export function affects(count: number): string {
