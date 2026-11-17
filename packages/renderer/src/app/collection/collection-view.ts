@@ -142,8 +142,6 @@ export class CollectionView {
   protected readonly rawFormat = signal<RawFormat>('shell');
   /** The open import or export panel. */
   protected readonly ioPanel = signal<'export' | 'import' | null>(null);
-  /** Import is never offered on read-only profiles. */
-  protected readonly readOnly = computed(() => this.safety.readOnly(this.target().profileId)());
 
   /** Reopening the tab gives a new tab object; only a changed namespace runs the query again. */
   protected readonly target = computed(
