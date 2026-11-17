@@ -146,6 +146,17 @@ export function describeWrite<M extends WriteMethodName>(method: M, params: Para
       const suffix = options.length ? `, { ${options.join(', ')} }` : '';
       return `// Import the chosen file\n${coll(p.db, p.coll)}.insertMany(<file documents>${suffix})`;
     }
+    case 'gridfs.upload': {
+      const bucket = `${database(p.db)}.getGridFSBucket({ bucketName: ${str(p['bucket'] as string)} })`;
+      const name = p['filename'] === undefined ? '<file name>' : str(p['filename'] as string);
+      return `// Upload the chosen file\n${bucket}.openUploadStream(${name})`;
+    }
+    case 'gridfs.delete':
+      return call(
+        `${database(p.db)}.getGridFSBucket({ bucketName: ${str(p['bucket'] as string)} })`,
+        'delete',
+        [shell(p['id'] as string, 0)],
+      );
     default:
       return `// ${method}\n${JSON.stringify(params, null, 2)}`;
   }

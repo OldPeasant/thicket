@@ -459,6 +459,11 @@ export class SidebarTree {
           run: () => this.tree.openUsers(profileId, db),
         },
         {
+          id: 'gridfs',
+          label: 'GridFS files',
+          run: () => this.tree.openGridfs(profileId, db),
+        },
+        {
           id: 'create-coll',
           label: 'Create collection…',
           write: true,

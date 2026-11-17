@@ -1,0 +1,155 @@
+<section class="gridfs" [attr.aria-label]="'GridFS files of ' + target().db">
+  <header class="head">
+    <span class="code call" [title]="call()" data-testid="gridfs-call">{{ call() }}</span>
+    <label class="field">
+      <span>Bucket</span>
+      <select
+        data-testid="gridfs-bucket"
+        [value]="bucket()"
+        (change)="selectBucket($any($event.target).value)"
+      >
+        @for (name of bucketNames(); track name) {
+          <option [value]="name" [selected]="name === bucket()">{{ name }}</option>
+        }
+      </select>
+    </label>
+    <label class="field grow">
+      <span class="sr-only">Filter by name</span>
+      <input
+        type="search"
+        placeholder="Filter by name"
+        data-testid="gridfs-filter"
+        [value]="nameFilter()"
+        (input)="setFilter($any($event.target).value)"
+      />
+    </label>
+    <div class="actions">
+      <button type="button" class="btn quiet" data-testid="gridfs-refresh" (click)="reload()">
+        Refresh
+      </button>
+      <button
+        type="button"
+        class="btn primary"
+        data-testid="gridfs-upload"
+        [appWriteControl]="target().profileId"
+        [disabledWhen]="transfer() !== null"
+        (click)="upload()"
+      >
+        Upload file…
+      </button>
+    </div>
+  </header>
+
+  @if (transfer(); as t) {
+    <div class="transfer" data-testid="gridfs-transfer" [attr.data-kind]="t.kind">
+      <div class="transfer-line">
+        <span class="transfer-label">
+          {{ t.kind === 'upload' ? 'Uploading' : 'Downloading' }}
+          <span class="name">{{ t.name }}</span>
+        </span>
+        <span class="transfer-bytes" data-testid="gridfs-transfer-bytes"
+          >{{ formatBytes(t.bytes) }} of {{ formatBytes(t.totalBytes) }}</span
+        >
+        <button
+          type="button"
+          class="btn small"
+          data-testid="gridfs-transfer-cancel"
+          (click)="cancelTransfer()"
+        >
+          Cancel
+        </button>
+      </div>
+      <div
+        class="bar"
+        role="progressbar"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        [attr.aria-valuenow]="percent()"
+        [attr.aria-label]="(t.kind === 'upload' ? 'Upload of ' : 'Download of ') + t.name"
+      >
+        <span class="fill" [style.width.%]="percent()"></span>
+      </div>
+    </div>
+  }
+
+  <div class="body">
+    @if (message(); as m) {
+      <p
+        class="message"
+        [class.error]="m.error"
+        [attr.role]="m.error ? 'alert' : 'status'"
+        data-testid="gridfs-message"
+      >
+        {{ m.text }}
+      </p>
+    }
+
+    @if (loadError(); as e) {
+      <p class="message error" role="alert" data-testid="gridfs-load-error">{{ e }}</p>
+    }
+
+    @if (fileList(); as list) {
+      @if (list.length === 0) {
+        <p class="empty" data-testid="gridfs-empty">
+          @if (nameFilter().trim() !== '') {
+            No file in {{ bucket() }} has “{{ nameFilter().trim() }}” in its name.
+          } @else {
+            {{ bucket() }} has no files yet. Upload one to start the bucket.
+          }
+        </p>
+      } @else {
+        <p class="count" data-testid="gridfs-count">
+          @if (list.length < total()) {
+            Newest {{ list.length }} of {{ total() }} files
+          } @else {
+            {{ total() }} {{ total() === 1 ? 'file' : 'files' }}
+          }
+        </p>
+        <table class="list" data-testid="gridfs-files">
+          <thead>
+            <tr>
+              <th scope="col">Name</th>
+              <th scope="col">Type</th>
+              <th scope="col" class="num">Size</th>
+              <th scope="col">Uploaded</th>
+              <th scope="col"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (file of list; track file.id) {
+              <tr data-testid="gridfs-row" [attr.data-name]="file.filename">
+                <th scope="row" class="name" [title]="file.id">{{ file.filename }}</th>
+                <td class="muted">{{ file.contentType ?? '' }}</td>
+                <td class="num" [title]="file.length + ' bytes'">{{ formatBytes(file.length) }}</td>
+                <td class="muted date">{{ formatDate(file.uploadDate) }}</td>
+                <td class="row-actions">
+                  <button
+                    type="button"
+                    class="btn small"
+                    data-testid="gridfs-download"
+                    [disabled]="transfer() !== null"
+                    (click)="download(file)"
+                  >
+                    Download…
+                  </button>
+                  <button
+                    type="button"
+                    class="btn small danger"
+                    data-testid="gridfs-delete"
+                    [appWriteControl]="target().profileId"
+                    [disabledWhen]="deleting() !== null"
+                    (click)="remove(file)"
+                  >
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      }
+    } @else if (!loadError()) {
+      <p class="note" role="status">Loading files…</p>
+    }
+  </div>
+</section>

@@ -10,6 +10,7 @@ import {
 
 import { currentOpTabId, type CurrentOpTabData } from '../admin/currentop/currentop-view';
 import { usersTabId, type UsersTabData } from '../admin/users/users-roles-view';
+import { gridfsTabId, type GridfsTabData } from '../gridfs/gridfs.model';
 import { ApiError, describeError } from '../api/api-error';
 import { ApiService } from '../api/api.service';
 import { type ShellTabData, shellTabId } from '../console/shell-console';
@@ -413,6 +414,20 @@ export class SidebarTreeService {
       id: usersTabId(profileId, db),
       kind: 'users',
       title: `${db} users`,
+      detail: `${profile?.name ?? profileId} / ${db}`,
+      production: profile?.production === true,
+      data: { ...data },
+    });
+  }
+
+  /** Opens (or selects) the GridFS tab of a database. */
+  openGridfs(profileId: string, db: string): void {
+    const profile = this.profile(profileId);
+    const data: GridfsTabData = { profileId, db };
+    this.workspace.open({
+      id: gridfsTabId(profileId, db),
+      kind: 'gridfs',
+      title: `${db} files`,
       detail: `${profile?.name ?? profileId} / ${db}`,
       production: profile?.production === true,
       data: { ...data },

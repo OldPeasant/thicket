@@ -761,6 +761,23 @@ Contract layout (`packages/contract/src/`):
   `test/e2e/explain.e2e.ts` (demo step 9; the test creates the index with `idx.create` over the
   bridge, not through the Indexes tab).
 
+## GridFS (`packages/backend/src/gridfs`, `packages/renderer/src/app/gridfs`)
+- Backend `gridfsHandlers` (contract `gridfs.ts`) through the driver's `GridFSBucket` on the
+  connection's `Db` (`driverDb`): `gridfs.buckets` (every `<name>.files` collection, `fs` first,
+  estimated counts), `gridfs.files` (newest first, `nameContains` as an escaped case-insensitive
+  regex, at most `MAX_GRIDFS_FILES`, `total`; read without BSON promotion so any `_id` type comes
+  back as canonical EJSON; `contentType` or `metadata.contentType`), `gridfs.download` (the file
+  must exist before the save dialog opens) and `gridfs.upload` (open dialog; write guard first)
+  stream `GridfsProgress` (bytes, at least every `GRIDFS_PROGRESS_BYTES` = 1 MiB, and a last
+  event; an upload's last event carries `fileId`). A cancel or `conn.close` stops them: a partial
+  download file is removed, a partial upload's chunks and files document are deleted.
+  `gridfs.delete` removes the files document and its chunks (`deleted: false` when there was no
+  files document). Int tests `test/integration/gridfs.int.spec.ts` (20 MB round trip by SHA-256).
+- Renderer: tab kind `gridfs`, id `gridfsTabId(profileId, db)`, opened by "GridFS files"
+  (`menu-gridfs`) in the sidebar's database menu. Bucket select, name filter, Upload (through
+  `WriteGuard.approve`, then `ApiService.stream`), per-file Download and Delete (`alwaysConfirm`);
+  one transfer at a time with a progress bar and Cancel. e2e: `test/e2e/gridfs.e2e.ts`.
+
 ## Validator tab (`packages/renderer/src/app/validator`)
 - Backend: `packages/backend/src/browse/validator` (`validatorHandlers`): `coll.validator.get`
   (`listCollections` options; level/action default `strict`/`error`, `{}` counts as none),
