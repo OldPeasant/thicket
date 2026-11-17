@@ -10,6 +10,7 @@ import {
   RpcError,
   connHandlers,
   serve,
+  streamChanges,
   watchHandlers,
 } from '@thicket/backend';
 import {
@@ -295,6 +296,78 @@ describe('admin.watch on a replica set', () => {
     });
     const end = await until(() => outcome(streamId), 'the end of the stream');
     expect(end).toMatchObject({ kind: 'error', payload: { code: 'SERVER_ERROR' } });
+  });
+});
+
+describe('streamChanges cursor cleanup on a replica set', () => {
+  // A collection of its own, so cursors of the other tests' streams never count here.
+  const ns = { db: DB, coll: `killed_${run}` };
+
+  /** Change stream cursors on `ns` the server still holds (idle or in a running getMore). */
+  const serverCursors = () =>
+    direct
+      .db('admin')
+      .aggregate([
+        { $currentOp: { idleCursors: true, allUsers: true } },
+        { $match: { ns: `${ns.db}.${ns.coll}`, cursor: { $exists: true } } },
+      ])
+      .toArray();
+
+  /** Waits until the server holds no cursor on `ns` (killCursors runs in the background). */
+  async function noCursorsLeft(): Promise<void> {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      if ((await serverCursors()).length === 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error(`cursors left: ${JSON.stringify(await serverCursors())}`);
+  }
+
+  let client: MongoClient;
+  beforeAll(async () => {
+    client = await MongoClient.connect(mongo.mongo8rs.uri, { monitorCommands: true });
+    await direct.db(ns.db).createCollection(ns.coll);
+  });
+  afterAll(async () => {
+    await client.close();
+  });
+
+  it('kills the cursor after a cancel while a getMore waits', async () => {
+    const controller = new AbortController();
+    const got: string[] = [];
+    const done = streamChanges(client, ns, (e) => got.push(e), controller.signal).catch(
+      (error: unknown) => error,
+    );
+    const deadline = Date.now() + 15_000;
+    while (got.length === 0 && Date.now() < deadline) {
+      await direct.db(ns.db).collection(ns.coll).insertOne({ x: 1 });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    expect(got.length).toBeGreaterThan(0);
+    expect(await serverCursors()).toHaveLength(1);
+    controller.abort();
+    expect(await done).toMatchObject({ code: 'CANCELLED' });
+    await noCursorsLeft();
+  });
+
+  it('kills the cursor after a cancel while the opening aggregate is in flight', async () => {
+    for (let i = 0; i < 3; i++) {
+      const controller = new AbortController();
+      // Abort as soon as the aggregate goes out, before the server has answered it.
+      const onStart = (event: { commandName: string }) => {
+        if (event.commandName === 'aggregate') controller.abort();
+      };
+      client.on('commandStarted', onStart);
+      try {
+        const done = streamChanges(client, ns, () => undefined, controller.signal).catch(
+          (error: unknown) => error,
+        );
+        expect(await done).toMatchObject({ code: 'CANCELLED' });
+      } finally {
+        client.off('commandStarted', onStart);
+      }
+    }
+    await noCursorsLeft();
   });
 });
 

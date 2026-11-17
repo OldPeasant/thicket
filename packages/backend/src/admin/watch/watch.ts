@@ -4,13 +4,20 @@ import type { Document } from 'mongodb';
 
 import { parsePipeline } from '../../agg/agg';
 import { canonical, decodeBatch, isOpenCursor, RAW, toBrowseError } from '../../browse/browse';
-import { abortable, topologyOf, type ClientLike } from '../../connections/manager';
+import {
+  abortable,
+  topologyOf,
+  type ClientLike,
+  type CursorLike,
+  type DbLike,
+} from '../../connections/manager';
 import { RpcError } from '../../server/rpc';
 
 /**
  * Change streams (`admin.watch`, SPEC M6 "Could"): a `$changeStream` aggregation on the primary
- * (raw commands, so documents keep their exact BSON types) and a `getMore` loop that waits up to
- * {@link WATCH_AWAIT_MS} per round. Events go out one by one in server order, as canonical EJSON.
+ * (a raw driver cursor, so documents keep their exact BSON types and every `getMore` reaches the
+ * server that opened the stream) and a `getMore` loop that waits up to {@link WATCH_AWAIT_MS} per
+ * round. Events go out one by one in server order, as canonical EJSON.
  * Change streams need a replica set or a sharded cluster: a standalone server is refused with
  * `UNSUPPORTED` before the stream opens ({@link assertWatchable}).
  */
@@ -85,9 +92,13 @@ function cancelled(): RpcError {
 }
 
 /**
- * Runs the change stream until `signal` aborts (then `CANCELLED`, after killing the cursor) or
+ * Runs the change stream until `signal` aborts (then `CANCELLED`, after closing the cursor) or
  * the server ends it (an `invalidate` event, e.g. the watched collection was dropped: resolves
  * with the delivered count). Each event is passed to `send` as canonical EJSON, in order.
+ *
+ * With a driver (`runCursorCommand`) the stream is a driver cursor on the primary, so every
+ * `getMore` and the final `killCursors` reach the server (mongos, load-balanced connection) that
+ * opened it. Test fakes without it get plain commands.
  */
 export async function streamChanges(
   client: ClientLike,
@@ -97,28 +108,101 @@ export async function streamChanges(
 ): Promise<number> {
   const { db: dbName, command } = watchCommand(params);
   const db = client.db(dbName);
-  const run = async (cmd: Document): Promise<Document> => {
-    try {
-      return await abortable(db.command(cmd, RAW), signal);
-    } catch (error) {
-      if (signal.aborted) throw cancelled();
-      throw toWatchError(error);
-    }
-  };
-  const cursorOf = (reply: Document): Document => (reply['cursor'] ?? {}) as Document;
-  const collection =
-    typeof command['aggregate'] === 'string' ? command['aggregate'] : '$cmd.aggregate';
-
   let delivered = 0;
-  let reply = await run(command);
-  let cursor = cursorOf(reply);
-  let id: unknown = cursor['id'];
   const deliver = (batch: unknown) => {
     for (const event of decodeBatch(batch)) {
       send(canonical(event));
       delivered += 1;
     }
   };
+  if (db.runCursorCommand) {
+    await streamWithCursor(db.runCursorCommand(command, { raw: true }), deliver, signal);
+  } else {
+    await streamWithCommands(db, command, deliver, signal);
+  }
+  return delivered;
+}
+
+/** The batch of one round of a driver cursor (one `tryNext`: the command or one `getMore`). */
+async function nextBatch(cursor: CursorLike): Promise<unknown[]> {
+  if (!cursor.tryNext) {
+    // Fakes only: the driver's `hasNext` loops over the empty batches of a change stream.
+    return (await cursor.hasNext()) ? cursor.readBufferedDocuments() : [];
+  }
+  const first: unknown = await cursor.tryNext();
+  return first === null || first === undefined ? [] : [first, ...cursor.readBufferedDocuments()];
+}
+
+/**
+ * The stream as a driver cursor, one round at a time, so an abort is seen between rounds. A
+ * cancel while a round is in flight answers `CANCELLED` at once; the cursor is closed once that
+ * round has settled (at most {@link WATCH_AWAIT_MS} for a `getMore`). That way a cursor the
+ * opening `aggregate` was still creating is killed too: the driver does not kill a cursor that is
+ * closed during its first command.
+ */
+async function streamWithCursor(
+  cursor: CursorLike,
+  deliver: (batch: unknown) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  cursor.setMaxTimeMS?.(WATCH_AWAIT_MS);
+  const close = () => cursor.close().catch(() => undefined);
+  let round: Promise<unknown[]> | undefined;
+  try {
+    do {
+      if (signal.aborted) throw cancelled();
+      round = nextBatch(cursor);
+      let batch: unknown[];
+      try {
+        batch = await abortable(round, signal);
+      } catch (error) {
+        if (signal.aborted) throw cancelled();
+        throw toWatchError(error);
+      }
+      round = undefined;
+      deliver(batch);
+    } while (isOpenCursor(cursor.id));
+  } finally {
+    // A round still in flight (cancelled): close once it settles, so its cursor is killed too.
+    if (round) void round.then(close, close);
+    else await close();
+  }
+}
+
+/** The stream as plain commands (`aggregate`, `getMore`, `killCursors`), for fakes. */
+async function streamWithCommands(
+  db: DbLike,
+  command: Document,
+  deliver: (batch: unknown) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  const cursorOf = (reply: Document): Document => (reply['cursor'] ?? {}) as Document;
+  const collection =
+    typeof command['aggregate'] === 'string' ? command['aggregate'] : '$cmd.aggregate';
+  const kill = async (id: unknown) => {
+    if (!isOpenCursor(id)) return;
+    await db.command({ killCursors: collection, cursors: [id] }, RAW).catch(() => undefined);
+  };
+  const run = async (cmd: Document): Promise<Document> => {
+    const sent = db.command(cmd, RAW);
+    try {
+      return await abortable(sent, signal);
+    } catch (error) {
+      if (!signal.aborted) throw toWatchError(error);
+      if (cmd === command) {
+        // Cancelled while the stream was opening: kill the cursor it opens anyway.
+        void sent.then(
+          (reply) => kill(cursorOf(reply)['id']),
+          () => undefined,
+        );
+      }
+      throw cancelled();
+    }
+  };
+
+  let reply = await run(command);
+  let cursor = cursorOf(reply);
+  let id: unknown = cursor['id'];
   try {
     deliver(cursor['firstBatch']);
     while (isOpenCursor(id)) {
@@ -128,10 +212,7 @@ export async function streamChanges(
       id = cursor['id'];
       deliver(cursor['nextBatch']);
     }
-    return delivered;
   } finally {
-    if (isOpenCursor(id)) {
-      await db.command({ killCursors: collection, cursors: [id] }, RAW).catch(() => undefined);
-    }
+    await kill(id);
   }
 }

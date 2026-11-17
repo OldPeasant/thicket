@@ -1,7 +1,13 @@
-import { BSON, MongoServerError, type Document, type RunCommandOptions } from 'mongodb';
+import {
+  BSON,
+  MongoServerError,
+  type Document,
+  type RunCommandOptions,
+  type RunCursorCommandOptions,
+} from 'mongodb';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ClientLike } from '../../connections/manager';
+import type { ClientLike, CursorLike } from '../../connections/manager';
 import { RAW } from '../../browse/browse';
 import {
   assertWatchable,
@@ -360,17 +366,42 @@ describe('streamChanges', () => {
     expect(sent.map(commandName)).toEqual(['aggregate', 'killCursors']);
   });
 
-  it('a cancel before the aggregate answers ends CANCELLED without a cursor to kill', async () => {
+  it('a cancel before the aggregate answers ends CANCELLED and kills the cursor it opens late', async () => {
     const pending = deferred<Document>();
-    const { client, sent } = fakeClient(() => pending.promise);
+    const { client, sent } = fakeClient((_db, command) =>
+      'aggregate' in command ? pending.promise : { ok: 1 },
+    );
     const controller = new AbortController();
-    const running = streamChanges(client, collParams, () => undefined, controller.signal);
+    const events: string[] = [];
+    const running = streamChanges(client, collParams, (e) => events.push(e), controller.signal);
     await vi.waitFor(() => expect(sent).toHaveLength(1));
     controller.abort();
     await expect(running).rejects.toMatchObject({ code: 'CANCELLED' });
-    pending.resolve(first(8, [event(1)]));
-    await Promise.resolve();
     expect(sent.map(commandName)).toEqual(['aggregate']);
+    pending.resolve(first(8, [event(1)]));
+    await vi.waitFor(() => expect(sent).toHaveLength(2));
+    expect(sent[1]).toEqual({
+      db: 'shop',
+      command: { killCursors: 'orders', cursors: [8] },
+      options: RAW,
+    });
+    expect(events).toEqual([]);
+  });
+
+  it('a cancel before the aggregate answers kills nothing when the cursor is closed or the aggregate fails', async () => {
+    for (const settle of ['closed', 'failed'] as const) {
+      const pending = deferred<Document>();
+      const { client, sent } = fakeClient(() => pending.promise);
+      const controller = new AbortController();
+      const running = streamChanges(client, collParams, () => undefined, controller.signal);
+      await vi.waitFor(() => expect(sent).toHaveLength(1));
+      controller.abort();
+      await expect(running).rejects.toMatchObject({ code: 'CANCELLED' });
+      if (settle === 'closed') pending.resolve(first(0, [event(1)]));
+      else pending.reject(serverError(13, 'Unauthorized'));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(sent.map(commandName)).toEqual(['aggregate']);
+    }
   });
 
   it('a failing killCursors does not hide the cancel', async () => {
@@ -448,5 +479,258 @@ describe('streamChanges', () => {
       streamChanges(client, { coll: 'orders' }, () => undefined, new AbortController().signal),
     ).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
     expect(sent).toEqual([]);
+  });
+});
+
+/** One round of a driver cursor: the batch and the cursor id the server answered with. */
+interface Round {
+  docs: unknown[];
+  id: unknown;
+}
+
+/**
+ * A client whose databases have `runCursorCommand`: each `tryNext` takes the next scripted round
+ * (a value, a promise or an error), like the driver's `RunCommandCursor`. `calls` logs what the
+ * code did with the cursor; plain `command`s land in `commands`.
+ */
+function cursorClient(
+  rounds: (Round | Promise<Round> | Error)[],
+  options: { tryNext?: boolean; closeFails?: boolean } = {},
+) {
+  const calls: string[] = [];
+  const commands: Document[] = [];
+  const opened: { db: string; command: Document; options: RunCursorCommandOptions | undefined }[] =
+    [];
+  let id: unknown;
+  let buffer: unknown[] = [];
+  const round = async (): Promise<void> => {
+    const next = rounds.shift();
+    if (next === undefined) throw new Error('no more rounds scripted');
+    if (next instanceof Error) throw next;
+    const answer = await next;
+    id = answer.id;
+    buffer = [...answer.docs];
+  };
+  const cursor: CursorLike = {
+    get id() {
+      return id;
+    },
+    hasNext: async () => {
+      calls.push('hasNext');
+      if (buffer.length === 0) await round();
+      return buffer.length > 0;
+    },
+    readBufferedDocuments: () => buffer.splice(0),
+    setComment: () => undefined,
+    setBatchSize: () => undefined,
+    setMaxTimeMS: (ms: number) => calls.push(`setMaxTimeMS ${ms}`),
+    close: () => {
+      calls.push('close');
+      return options.closeFails === true
+        ? Promise.reject(new Error('connection reset'))
+        : Promise.resolve();
+    },
+  };
+  if (options.tryNext !== false) {
+    cursor.tryNext = async () => {
+      calls.push('tryNext');
+      if (buffer.length === 0) await round();
+      return buffer.shift() ?? null;
+    };
+  }
+  const client: ClientLike = {
+    connect: () => Promise.resolve(),
+    close: () => Promise.resolve(),
+    db: (db) => ({
+      command: (command) => {
+        commands.push(command);
+        return Promise.resolve({ ok: 1 });
+      },
+      runCursorCommand: (command, opts) => {
+        opened.push({ db, command, options: opts });
+        return cursor;
+      },
+    }),
+  };
+  return { client, calls, commands, opened };
+}
+
+describe('streamChanges with a driver cursor (runCursorCommand)', () => {
+  const collParams = { db: 'shop', coll: 'orders' };
+  const long = (n: number) => BSON.Long.fromNumber(n);
+  const raw = (doc: Document) => BSON.serialize(doc);
+
+  it('runs the stream as one pinned raw cursor on the primary, round by round, in order', async () => {
+    const { client, calls, commands, opened } = cursorClient([
+      { docs: [raw(event(1))], id: long(77) },
+      { docs: [], id: long(77) },
+      { docs: [raw(event(2, 'update')), raw(event(3))], id: long(77) },
+      // invalidate: the server closes the cursor.
+      { docs: [raw(event(4, 'delete')), raw(event(5, 'invalidate'))], id: long(0) },
+    ]);
+    const events: string[] = [];
+    const delivered = await streamChanges(
+      client,
+      collParams,
+      (e) => events.push(e),
+      new AbortController().signal,
+    );
+    expect(delivered).toBe(5);
+    expect(
+      events.map(parse).map((e) => [e['operationType'], (e['_id'] as Document)['_data']]),
+    ).toEqual([
+      ['insert', 'token-1'],
+      ['update', 'token-2'],
+      ['insert', 'token-3'],
+      ['delete', 'token-4'],
+      ['invalidate', 'token-5'],
+    ]);
+    // Raw batches and no read preference (the primary); the getMores and the kill go through
+    // the cursor (pinned to its server), never as separate commands.
+    expect(opened).toEqual([
+      { db: 'shop', command: watchCommand(collParams).command, options: { raw: true } },
+    ]);
+    expect(commands).toEqual([]);
+    expect(calls).toEqual([
+      `setMaxTimeMS ${WATCH_AWAIT_MS}`,
+      'tryNext',
+      'tryNext',
+      'tryNext',
+      'tryNext',
+      'close',
+    ]);
+  });
+
+  it('decodes raw BSON batches losslessly as canonical EJSON', async () => {
+    const doc = raw({
+      _id: { _data: 'token-1' },
+      operationType: 'insert',
+      fullDocument: { big: BSON.Long.fromString('9007199254740993'), n: new BSON.Int32(1) },
+    });
+    const { client } = cursorClient([{ docs: [doc], id: long(0) }]);
+    const events: string[] = [];
+    await streamChanges(client, collParams, (e) => events.push(e), new AbortController().signal);
+    const full = JSON.parse(events[0] ?? '{}') as { fullDocument: Record<string, unknown> };
+    expect(full.fullDocument).toEqual({
+      big: { $numberLong: '9007199254740993' },
+      n: { $numberInt: '1' },
+    });
+  });
+
+  it('cancel while a getMore waits ends CANCELLED at once and closes the cursor after that round', async () => {
+    const pending = deferred<Round>();
+    const { client, calls } = cursorClient([{ docs: [event(1)], id: long(42) }, pending.promise]);
+    const controller = new AbortController();
+    const events: string[] = [];
+    const running = streamChanges(client, collParams, (e) => events.push(e), controller.signal);
+    await vi.waitFor(() => expect(calls.filter((c) => c === 'tryNext')).toHaveLength(2));
+    controller.abort();
+    await expect(running).rejects.toMatchObject({
+      code: 'CANCELLED',
+      message: 'The operation was cancelled',
+    });
+    expect(calls).not.toContain('close');
+    // The abandoned getMore answers late: nothing more is delivered, then the cursor is closed.
+    pending.resolve({ docs: [event(2)], id: long(42) });
+    await vi.waitFor(() => expect(calls.at(-1)).toBe('close'));
+    expect(events).toHaveLength(1);
+  });
+
+  it('a cancel while the opening aggregate is in flight closes the cursor once it opened', async () => {
+    const pending = deferred<Round>();
+    const { client, calls } = cursorClient([pending.promise]);
+    const controller = new AbortController();
+    const events: string[] = [];
+    const running = streamChanges(client, collParams, (e) => events.push(e), controller.signal);
+    await vi.waitFor(() => expect(calls).toContain('tryNext'));
+    controller.abort();
+    await expect(running).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(calls).not.toContain('close');
+    pending.resolve({ docs: [event(1)], id: long(8) });
+    await vi.waitFor(() => expect(calls.at(-1)).toBe('close'));
+    expect(events).toEqual([]);
+  });
+
+  it('a cancelled round that then fails still closes the cursor', async () => {
+    const pending = deferred<Round>();
+    const { client, calls } = cursorClient([pending.promise]);
+    const controller = new AbortController();
+    const running = streamChanges(client, collParams, () => undefined, controller.signal);
+    await vi.waitFor(() => expect(calls).toContain('tryNext'));
+    controller.abort();
+    await expect(running).rejects.toMatchObject({ code: 'CANCELLED' });
+    pending.reject(new Error('connection reset'));
+    await vi.waitFor(() => expect(calls.at(-1)).toBe('close'));
+  });
+
+  it('an already aborted signal runs no command', async () => {
+    const { client, calls } = cursorClient([{ docs: [event(1)], id: long(1) }]);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      streamChanges(client, collParams, () => undefined, controller.signal),
+    ).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(calls).not.toContain('tryNext');
+  });
+
+  it('a signal aborted between rounds stops before the next getMore and closes the cursor', async () => {
+    const controller = new AbortController();
+    const { client, calls } = cursorClient([{ docs: [event(1)], id: long(3) }]);
+    const running = streamChanges(client, collParams, () => controller.abort(), controller.signal);
+    await expect(running).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(calls).toEqual([`setMaxTimeMS ${WATCH_AWAIT_MS}`, 'tryNext', 'close']);
+  });
+
+  it("maps the server's $changeStream refusal to UNSUPPORTED needsReplicaSet", async () => {
+    const { client, calls } = cursorClient([serverError(40573, 'Location40573')]);
+    await expect(
+      streamChanges(client, collParams, () => undefined, new AbortController().signal),
+    ).rejects.toMatchObject({
+      code: 'UNSUPPORTED',
+      message: NEEDS_REPLICA_SET_MESSAGE,
+      detail: { reason: 'needsReplicaSet' },
+    });
+    expect(calls.at(-1)).toBe('close');
+  });
+
+  it('a failing getMore ends the stream with the mapped error and closes the cursor', async () => {
+    const { client, calls } = cursorClient([
+      { docs: [event(1)], id: long(6) },
+      serverError(286, 'ChangeStreamHistoryLost', 'history lost'),
+    ]);
+    const events: string[] = [];
+    await expect(
+      streamChanges(client, collParams, (e) => events.push(e), new AbortController().signal),
+    ).rejects.toMatchObject({
+      code: 'SERVER_ERROR',
+      detail: { serverCode: 286, codeName: 'ChangeStreamHistoryLost' },
+    });
+    expect(events).toHaveLength(1);
+    expect(calls.at(-1)).toBe('close');
+  });
+
+  it('a failing close does not hide the result', async () => {
+    const { client, calls } = cursorClient([{ docs: [event(1)], id: long(0) }], {
+      closeFails: true,
+    });
+    await expect(
+      streamChanges(client, collParams, () => undefined, new AbortController().signal),
+    ).resolves.toBe(1);
+    expect(calls.at(-1)).toBe('close');
+  });
+
+  it('falls back to hasNext for cursors without tryNext', async () => {
+    const { client, calls } = cursorClient(
+      [
+        { docs: [event(1), event(2)], id: long(5) },
+        { docs: [event(3)], id: long(0) },
+      ],
+      { tryNext: false },
+    );
+    const events: string[] = [];
+    await expect(
+      streamChanges(client, collParams, (e) => events.push(e), new AbortController().signal),
+    ).resolves.toBe(3);
+    expect(calls.filter((c) => c === 'hasNext')).toHaveLength(2);
   });
 });

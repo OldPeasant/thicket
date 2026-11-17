@@ -685,9 +685,12 @@ Contract layout (`packages/contract/src/`):
   `UNSUPPORTED`, detail `{ reason: 'needsReplicaSet' }` (the request fails, no stream; server code
   40573 maps the same way). Then a raw `aggregate` with `$changeStream` (deployment:
   `allChangesForCluster` on `admin`; database: `aggregate: 1`) on the primary, the user's stages
-  after it, and a `getMore` loop (`maxTimeMS` 1 s) with `RAW` options, so events are lossless
-  canonical EJSON, one `{ event }` per data event in server order. Cancel or `conn.close` kills the
-  cursor and ends `CANCELLED`; an `invalidate` (drop/rename of the watched namespace) ends the
+  after it, run as one raw driver cursor (`db.runCursorCommand(..., { raw: true })`, one `tryNext`
+  per round, `maxTimeMS` 1 s per `getMore`), so every `getMore` and the `killCursors` reach the
+  server (mongos, load-balanced connection) that opened the stream and events are lossless
+  canonical EJSON, one `{ event }` per data event in server order. Cancel or `conn.close` ends
+  `CANCELLED` at once and closes the cursor once the round in flight settles (also a cursor the
+  opening `aggregate` was still creating); an `invalidate` (drop/rename of the watched namespace) ends the
   stream (`end`). No automatic resume after errors. Int tests
   `test/integration/change-streams.int.spec.ts` (`mongo8rs`, `mongo8` for the standalone).
 - Renderer: starts on open (`fullDocument: 'updateLookup'` by default, a checkbox restarts without
