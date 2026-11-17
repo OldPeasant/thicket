@@ -16,3 +16,4 @@ Indexes tab per collection: list with stats, create dialog with all options, dro
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-17 04:09+0100 by dell26/agent-1): Indexes is its own workspace tab (kind indexes, opened with 'Indexes…' on the collection tab, like Aggregate…), not a sub-tab inside the collection view: matches the aggregation pattern and keeps collection-view changes small. The create dialog is an inline panel at the top of the tab.
