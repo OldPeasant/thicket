@@ -100,6 +100,17 @@ describe('isInputComplete edge cases', () => {
     ['x = a / b / (c', false],
     ['x = (a) / 2 / (3)', true],
     ['/{/.test(s)', true],
+    // Round 2: more regex-literal shapes.
+    ['x = /[\\]/(]/.test(s)', true], // escaped `]` keeps the class open over `/` and `(`
+    ['x = /a/gi; f(', false], // flags are consumed, the bracket after them counts
+    ['x = /a/ // (', true], // a line comment after a regex
+    ['x = /a(\n(', false], // an unterminated regex ends at its line
+    ['x = /a([{', true], // ... or at the end of the input: it runs, mongosh reports it
+    ['x =\n  /(/', true], // whitespace and line breaks do not count as the last character
+    ['x = /* c */ /(/', true], // neither does a block comment
+    ['x = [/]/]', true], // a regex right after `[`
+    ['a = b\n/ (c', false], // after an identifier, `/` divides
+    ['f() / 2 // (', true], // division then a line comment
   ])('%j -> %s', (code, expected) => {
     expect(isInputComplete(code)).toBe(expected);
   });

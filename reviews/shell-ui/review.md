@@ -2,33 +2,42 @@
 
 Date: 2026-11-17
 
-Task: shell-ui - M4: mongosh console
+Task: shell-ui - M4: mongosh console (round 2, final revision)
 
-Scope: `git diff 17f4bd0..HEAD` excluding `tasks/` (commits 81c88fa, f9c9726); committed changes only, working tree clean
+Scope: `git diff 944f76d..HEAD` excluding `tasks/` and `reviews/` (commits 977cdd1, edecbd7, 317fb7c, e962c42). Only committed changes; the working tree is clean.
 
 Requirements:
-- tasks/shell-ui.md acceptance criteria and recorded assumptions (history in memory, one tab per connection, Enter/Shift+Enter/Ctrl+Enter, one plain-text switch)
-- SPEC.md section 2 demo step 11, M0 theme tokens, M4 "Shell"
+- tasks/shell-ui.md acceptance criteria and recorded assumptions (history kept in memory, one tab per connection, Enter/Shift+Enter/Ctrl+Enter, one plain-text switch)
+- SPEC.md demo step 11, M0 theme tokens, M4 "Shell"
 - docs/ARCHITECTURE.md, docs/mongosh.md, packages/contract/src/shell.ts
-- backend behavior in packages/backend/src/shell/ (context only, not reviewed)
+- packages/backend/src/shell/split.ts (used to check the regex heuristic, not reviewed)
 - AGENTS.md, docs/QUALITY.md
+- Round 1 review (CR-1..CR-5) and reviews/shell-ui/fixes.md
 
 Git range:
 - Branch: main
-- HEAD: f9c972687f8bb69b797c37c94f07edd999a0675b
-- Base/start: 17f4bd01fce62c1c2fe17dde7672d91aabb5b574
-- Commits reviewed: 2
+- HEAD: e962c42895d90d9ac1fa0b5a268643976ab0141e
+- Base/start: 944f76ddb91c9c188a353bd9944070a1ddc4c99d
+- Commits reviewed: 4
 
-Summary: 0 P0, 0 P1, 1 P2, 4 P3
+Summary: 0 P0, 0 P1, 0 P2, 1 P3
 
-What was checked and found sound:
-- Session lifecycle: `openSeq` plus the `closed` flag close a late `shell.open` answer after a reopen or after destroy; destroy unsubscribes the eval stream, aborts completion and closes an open session; tabs stay mounted while hidden (`app-shell.ts` `[hidden]`), so switching tabs keeps the session.
-- Stop/Ctrl+C unsubscribe the stream, and `ApiService.stream` then cancels it on the server, which interrupts the backend run. The backend queues the next eval behind the interrupt.
-- Completion answers are dropped when the input changed or a newer request aborted them, and CANCELLED is not shown.
-- Every CSS value is a `var(--...)` token. The tokens used (`--production*`, `--readonly*`, `--accent-*`, `--bg-*`, `--shadow-pop`, ...) are defined in all four `data-style` x `data-theme` blocks of `theme/tokens.css`. No hard-coded colors.
-- Results render through the read-only explorer with per-result services, and text is interpolated (no innerHTML). There are no security concerns in scope.
-- Contract use matches `shell.ts` (params, `cursor`, `db` output kind, NOT_FOUND for a lost session).
-- Acceptance criteria are covered: `test/e2e/shell.e2e.ts` runs `db.orders.countDocuments()` against the real backend and Mongo fixture. `shell-console.spec.ts` covers history navigation (draft, oldest bound, multi-line caret), the completion popup (single/multi, arrows, Enter, Escape, mouse, empty) and the read-only banner. Evidence is not yet recorded with `tasks.py verify` (both criteria still unticked); the parent worker has to record it.
+## Status of round 1 findings
+
+- **CR-1 (P2), completion applied at a moved caret: fixed.** `complete()` stores the requested `{ code, cursor }` in `completionAt` (`shell-console.ts:413`). `choose()` applies the completion at that stored cursor and closes the list when the text changed (`:430-440`). `onCaret` runs on `keyup`, `click` and `select` (`shell-console.html:120-122`) and closes the list when the caret, the selection or the text differs (`:446-453`). `closeCompletions()` clears the stored position. The single-completion path also uses the requested cursor (`:409`). The keys the list doesn't handle (ArrowLeft/Right, Home, End) fall through and then close the list on keyup. A caret move with no event still gives the correct text. The specs at `shell-console.spec.ts:598-648` cover keyup, click, a move with no event, and a keyup that leaves the caret in place.
+- **CR-2 (P3), regex literals: fixed.** `isInputComplete` now tracks the last significant character and skips regex literals (`console-input.ts:47-51`, `:69-97`). It uses the same `regexMayStart` set as the backend splitter (`split.ts:177-179`), so the frontend and backend agree on where an input ends. Escapes, `[...]` classes, flags and an unterminated literal at a line end are handled. The table cases (`console-input.spec.ts:95-102`) cover both examples from round 1, division, and a leading regex.
+- **CR-3 (P3), reopen button out of view: fixed.** The `shell-failed` alert now sits between the transcript and the input row, outside the scroll container (`shell-console.html:84-92`), and uses only danger tokens (`shell-console.css:167-176`). The spec asserts that the transcript does not contain it.
+- **CR-4 (P3), ARIA: fixed.** `aria-controls` is `null` while the list is closed (`shell-console.html:110`). `aria-live` is no longer on the transcript, and a visually hidden `role="status"` region announces a summary (`:93-95`). The new live region has a small gap, see CR-1 below.
+- **CR-5 (P3), tests and e2e path: fixed.** The lifecycle specs exist: late open after destroy, an older open overtaken by a newer one, an older failure after a newer success, and Ctrl+C with and without a selection (`shell-console.spec.ts:363-391`, `:662-747`). The e2e now opens the console from the connection menu and runs `use shell_e2e` then `db.orders.countDocuments()` (`test/e2e/shell.e2e.ts:87-100`). The read-only test keeps the database-menu path.
+
+What was re-checked across the whole task and found sound:
+- Session lifecycle: `openSeq` and `closed` close late `shell.open` answers. Destroy cancels the eval stream and any completion and closes the session. On NOT_FOUND the session moves to `failed` and can be reopened. History stays across a reopen.
+- Stop and Ctrl+C unsubscribe the stream, so a stopped run can't be written by later output. A second run can't start while one is running.
+- Completion: stale answers are dropped (aborted, or the input changed), and CANCELLED is not shown.
+- CSS uses only `var(--...)` tokens, with no hard-coded colors. The production accent comes from the tab flag or the profile, and the read-only banner from `ProfileSafetyService`.
+- Results render in the read-only explorer, each with its own services. All text is interpolated, never inserted as HTML. There are no security concerns in scope.
+- Contract use matches `packages/contract/src/shell.ts`.
+- Acceptance criteria: the e2e covers demo step 11 against the real backend and the Mongo fixture. `shell-console.spec.ts` covers history navigation, the completion popup and the read-only banner. Both criteria are still unticked in `tasks/shell-ui.md`. The parent worker still has to record the evidence with `tasks.py verify`.
 
 ## P0 Critical
 
@@ -40,43 +49,19 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | Open completion list is applied at a caret that moved since the request, corrupting the input**
-    - File: `packages/renderer/src/app/console/shell-console.ts:340` (also `:287`, `:401-406`)
-    - Category: Correctness
-    - Problem: `completionKey` only handles ArrowUp/ArrowDown/Enter/Tab/Escape. ArrowLeft/ArrowRight/Home/End, or a click inside the textarea, move the caret without an `input` or `blur` event, so the list stays open. `choose()` then calls `applyCompletion(el.value, el.selectionStart, completion)` with the new caret. mongosh completions contain the whole input up to the caret where they were requested (`db.or` -> `db.orders`), so the result is wrong. For example, `db.or`, Tab (list `db.orders`, `db.orgs`), ArrowLeft, Enter gives `db.ordersr` because `applyCompletion("db.or", 4, "db.orders")` keeps the trailing `r`.
-    - Why it matters: Normal editing keys silently corrupt the user's code. In a shell that can write to production data, a mangled command may still parse and do something unintended.
-    - Suggested fix: Store the `code` and `cursor` the completions were requested for, together with the list. Apply at that stored cursor, or close the list on any caret move (close on keys other than the handled ones, and on `click`/`selectionchange`). Add a spec for "caret moved, then Enter".
+None.
 
 ## P3 Low
 
-- [ ] **CR-2 | Regex literals with brackets or `//` keep Enter from running the input**
-    - File: `packages/renderer/src/app/console/console-input.ts:18-45`
-    - Category: Correctness
-    - Problem: `isInputComplete` doesn't recognise regex literals. `db.c.find({ name: /^\(/ })` leaves `(` on the stack. `db.c.find({ p: /\// })` treats `//` as a line comment and drops the closing `})`. In both cases Enter inserts a newline instead of running.
-    - Why it matters: Regex filters are common in mongosh. The user gets a newline and no feedback. Ctrl/Cmd+Enter works, so this is not blocking.
-    - Suggested fix: Treat `/` as the start of a regex literal when the previous non-space token is an operator, `(`, `,`, `:`, `[`, `{`, `=`, `!`, `&`, `|`, `?` or the start of input, and skip to the closing unescaped `/` (honouring `[...]` classes). Add the two cases above to the `it.each` table.
-
-- [ ] **CR-3 | "Open new session" ends up out of view after the backend loses the session**
-    - File: `packages/renderer/src/app/console/shell-console.html:48-55` (with `shell-console.ts:174-178`, `:237-243`)
+- [ ] **CR-1 | The live region stays silent when a run ends with the same summary as the previous run**
+    - File: `packages/renderer/src/app/console/shell-console.ts:296` (with `:165`, `shell-console.html:93-95`)
     - Category: Quality
-    - Problem: The `failed` block, with the only reopen button, renders at the top of the transcript, before the runs. On NOT_FOUND the transcript auto-scrolls to the newest run and the input is disabled. In any transcript taller than the viewport, the recovery action is scrolled away and the user sees a disabled input.
-    - Why it matters: Recovery after a backend restart is possible but hard to find.
-    - Suggested fix: Render the failure/reopen note after the runs, or next to the input row, while the state is `failed`. Or scroll it into view when the state becomes `failed`.
-
-- [ ] **CR-4 | Combobox/live-region ARIA details**
-    - File: `packages/renderer/src/app/console/shell-console.html:107` and `:43`
-    - Category: Quality
-    - Problem: `aria-controls` always points to `<uid>-completions`, but that listbox exists only while completions are open, so most of the time it references a missing id (flagged by axe `aria-valid-attr-value`). Also, `aria-live="polite"` sits on the whole transcript, including the explorer tables, so a screen reader reads the full rendered document grid of every result.
-    - Why it matters: These are accessibility defects in a keyboard-centric component that the task asked to make a combobox.
-    - Suggested fix: Bind `[attr.aria-controls]` to `null` while the list is closed. Move the live region to a small element that announces a summary (for example "Result: Cursor, 3 documents", errors, prints) instead of the whole transcript.
-
-- [ ] **CR-5 | Session race paths and Ctrl+C have no tests; e2e opens the shell from the database, not the connection**
-    - File: `packages/renderer/src/app/console/shell-console.spec.ts:330-335`; `test/e2e/shell.e2e.ts:49-50`
-    - Category: Tests
-    - Problem: No spec covers destroying the console while `shell.open` is pending, which should close the late session (`shell-console.ts:193-197`). No spec covers a reopen whose older open answers late, or Ctrl+C stopping a run (`:328-336`). SPEC demo step 11 says "open the mongosh console on the connection", but the e2e uses the database item's "Open shell", so the connection menu entry (`sidebar-tree.ts:412-417`) is never exercised.
-    - Why it matters: These are the regression-prone lifecycle paths the design relies on. A leaked backend session (a worker plus a `MongoClient`) would go unnoticed.
-    - Suggested fix: Add specs with a deferred `shell.open` (destroy before it resolves, then expect `shell.close` for the late id) and a Ctrl+C keydown while running (expect a cancel). In the e2e, open the shell from the connection node's menu, or add a short second path for it.
+    - Problem: `finishRun` calls `this.announcement.set(announce(finished))`. Angular signals compare with `Object.is`, so setting the same string again changes nothing. The DOM text of the `role="status"` region stays the same, and a screen reader announces nothing. Repeated runs often have the same summary. For example, `db.orders.countDocuments()` run twice gives "Run finished" both times (a scalar has no `type`). Any two cursor queries give "Run finished: Cursor", and the same error twice gives the same text. The second and later runs are then silent.
+    - Why it matters: The fix for round 1 CR-4 made this region the only way a screen-reader user learns that a run ended. Without it, they can't tell whether a repeated command ran.
+    - Suggested fix: Make every announcement differ, for example by clearing the region before setting the new text (set `''`, then set the summary after a microtask or the next render), or by adding the run number (`Run 12 finished: Cursor`). Add a spec that runs the same input twice and expects the region to update.
 
 ## Review conclusion
 
-Material issues found; fix before completing the task. CR-1 (P2) can corrupt shell input and should be fixed. CR-2 to CR-5 are low-priority improvements.
+Round 2: all five round 1 findings (CR-1..CR-5) are fixed correctly and fully. The only new finding is a P3 accessibility gap in the new live region (CR-1 above). It doesn't affect an acceptance criterion and doesn't block completion.
+
+No material issues found.

@@ -5,7 +5,15 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
 import type { WorkspaceTab } from '../layout/workspace.service';
 import { ProfileSafetyService } from '../safety/profile-safety.service';
-import { ShellConsole, shellTabId, showOutput, TRANSCRIPT_LIMIT } from './shell-console';
+import {
+  announce,
+  type Run,
+  ShellConsole,
+  shellTabId,
+  type ShownOutput,
+  showOutput,
+  TRANSCRIPT_LIMIT,
+} from './shell-console';
 
 const TAB: WorkspaceTab = {
   id: shellTabId('p1'),
@@ -352,6 +360,25 @@ describe('ShellConsole', () => {
     expect(get('shell-announce').textContent?.trim()).toBe('Run stopped');
   });
 
+  it('shows an open failure outside the transcript, without the starting note', async () => {
+    fake.fail('shell.open', { code: 'NOT_CONNECTED', message: 'not connected' });
+    await create();
+    expect(get('shell-failed').getAttribute('role')).toBe('alert');
+    expect(get('shell-transcript').contains(get('shell-failed'))).toBe(false);
+    expect(q('shell-opening')).toBeNull();
+    expect(get('shell-announce').textContent?.trim()).toBe('');
+  });
+
+  it('announces a run error that is not a lost session, and keeps the session', async () => {
+    await create();
+    await type('db.orders.drop()');
+    await key('Enter');
+    fake.failStream('st1', { code: 'SERVER_ERROR', message: 'not authorized on shop' });
+    await settle();
+    expect(get('shell-announce').textContent).toMatch(/^\s*Run failed: .*not authorized on shop/s);
+    expect(q('shell-failed')).toBeNull();
+  });
+
   it('closes the session when the tab goes away', async () => {
     await create();
     fixture.destroy();
@@ -647,6 +674,71 @@ describe('ShellConsole', () => {
       expect(input().value).toBe('db.orgs');
     });
 
+    it('closes the popup when a selection is made inside the input', async () => {
+      fake.respond('shell.complete', { completions: ['db.orders', 'db.orgs'] });
+      await create();
+      await type('db.or');
+      await key('Tab');
+      expect(q('shell-completions')).not.toBeNull();
+      // Shift+ArrowLeft / a drag: the selection no longer is the requested caret.
+      input().setSelectionRange(4, 5);
+      input().dispatchEvent(new Event('select', { bubbles: true }));
+      await settle();
+      expect(q('shell-completions')).toBeNull();
+      expect(input().getAttribute('aria-expanded')).toBe('false');
+      expect(input().value).toBe('db.or');
+    });
+
+    it('a click on an option applies it at the requested caret, not a moved one', async () => {
+      fake.respond('shell.complete', { completions: ['db.orders', 'db.orgs'] });
+      await create();
+      await type('db.or()', 5);
+      await key('Tab');
+      input().setSelectionRange(1, 1); // moved without a caret event
+      const option = all('shell-completion')[1] as HTMLElement;
+      const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+      option.dispatchEvent(down);
+      await settle();
+      expect(down.defaultPrevented).toBe(true); // the input keeps the focus
+      expect(input().value).toBe('db.orgs()');
+      expect(input().selectionStart).toBe('db.orgs'.length);
+      expect(q('shell-completions')).toBeNull();
+    });
+
+    it('closes the list without applying when the input text changed behind it', async () => {
+      fake.respond('shell.complete', { completions: ['db.orders', 'db.orgs'] });
+      await create();
+      await type('db.or');
+      await key('Tab');
+      // The value changes without an input event (e.g. a programmatic edit).
+      input().value = 'db.x';
+      const enter = await key('Enter');
+      expect(enter.defaultPrevented).toBe(true);
+      expect(q('shell-completions')).toBeNull();
+      expect(input().value).toBe('db.x');
+      expect(evals()).toEqual([]);
+    });
+
+    it('Escape closes the list and drops aria-controls and the active option', async () => {
+      fake.respond('shell.complete', { completions: ['db.orders', 'db.orgs'] });
+      await create();
+      await type('db.or');
+      await key('Tab');
+      expect(input().getAttribute('aria-expanded')).toBe('true');
+      expect(input().getAttribute('aria-activedescendant')).toMatch(/-completion-0$/);
+      const listId = input().getAttribute('aria-controls');
+      expect(listId).not.toBeNull();
+      expect(get('shell-completions').id).toBe(listId);
+      await key('Escape');
+      expect(q('shell-completions')).toBeNull();
+      expect(input().hasAttribute('aria-controls')).toBe(false);
+      expect(input().hasAttribute('aria-activedescendant')).toBe(false);
+      // A later caret event with no list open changes nothing.
+      input().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await settle();
+      expect(input().value).toBe('db.or');
+    });
+
     it('closes the popup when the input loses focus', async () => {
       fake.respond('shell.complete', { completions: ['db.orders', 'db.ordersArchive'] });
       await create();
@@ -756,6 +848,49 @@ describe('ShellConsole', () => {
       expect(el().classList.contains('production')).toBe(true);
       expect(q('shell-production')).not.toBeNull();
     });
+  });
+});
+
+describe('announce', () => {
+  const run = (state: Run['state'], outputs: ShownOutput[]): Run => ({
+    id: 1,
+    prompt: 'shop>',
+    code: 'x',
+    outputs,
+    state,
+  });
+
+  it('says a stopped run stopped, whatever it printed', () => {
+    expect(announce(run('stopped', [{ kind: 'error', text: 'boom' }]))).toBe('Run stopped');
+  });
+
+  it('reads the first error, even after a result', () => {
+    expect(
+      announce(
+        run('done', [
+          { kind: 'result', type: 'Document', text: '{}' },
+          { kind: 'error', text: 'first' },
+          { kind: 'error', text: 'second' },
+        ]),
+      ),
+    ).toBe('Run failed: first');
+  });
+
+  it('cuts a long error at 200 characters', () => {
+    const exact = 'e'.repeat(200);
+    expect(announce(run('done', [{ kind: 'error', text: exact }]))).toBe(`Run failed: ${exact}`);
+    expect(announce(run('done', [{ kind: 'error', text: `${exact}tail` }]))).toBe(
+      `Run failed: ${exact}…`,
+    );
+  });
+
+  it('names the result type when there is one', () => {
+    expect(announce(run('done', [{ kind: 'result', type: 'Cursor', text: '[]' }]))).toBe(
+      'Run finished: Cursor',
+    );
+    expect(announce(run('done', [{ kind: 'result', text: '1' }]))).toBe('Run finished');
+    expect(announce(run('done', [{ kind: 'print', text: 'hi' }]))).toBe('Run finished');
+    expect(announce(run('done', []))).toBe('Run finished');
   });
 });
 
