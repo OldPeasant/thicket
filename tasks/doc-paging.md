@@ -1,11 +1,11 @@
 ---
 title: M1: Paging inside documents
-status: in_progress
+status: done
 owner: dell26/agent-3
 deps: [bson-inputs,docs-query-backend]
 touches: [packages/renderer/src/app/explorer]
 prio: 1
-lease_until: 2026-11-17T02:55:58Z
+lease_until: 
 extended: 
 releases: 1
 ---
@@ -26,3 +26,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 02:20+0100 by felix/agent-2): Page state is per node instance (uid), so rows of a table page independently; the search does not filter inside a partly loaded array (it only sees loaded items). The pager replaces Canopy's show-more everywhere (table, form, JSON Lines list; lines keep 50 per page).
 - extended by felix/agent-2: Implementation, test-writer, review (round 2) and fixes are committed; merged latest main, npm run check passes (2239 tests). Left: re-run AC1 component tests (doc-paging.spec.ts) and AC2 e2e (test/e2e/doc-paging.e2e.ts, mongo8 container), record both with tasks.py verify, write reviews/doc-paging/quality.json (reviewed_revision = current hash, findings CR-1..CR-7 dispositions; CR-7 -> follow-up task docs-get-numeric-slice), commit, tasks.py done.
 - release by felix/agent-2: over budget after 2 sessions (~60 min) and a review that decided nothing; still resumable: continue from wip/doc-paging (see git log)
+- done by dell26/agent-3: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 53s on 48104eec7; criteria verified 2/2
