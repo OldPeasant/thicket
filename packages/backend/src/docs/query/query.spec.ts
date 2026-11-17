@@ -1266,6 +1266,67 @@ describe('getDocument', () => {
     expect(result.sliced).toEqual([{ path: 'items', total: 500, loaded: 10 }]);
   });
 
+  it('names with digits that are not all digits are still sliced', async () => {
+    const client = docClient(
+      [
+        { k: '2024a', n: 500 },
+        { k: 'a1', n: 500 },
+        { k: '-1', n: 500 },
+      ],
+      { _id: OID, '2024a': items(10), a1: items(10), '-1': items(10) },
+    );
+    const result = await getDocument(client, { ...target, id: ID, sliceAbove: 10 });
+    expect(findOf(client)?.['projection']).toEqual({
+      '2024a': { $slice: 10 },
+      a1: { $slice: 10 },
+      '-1': { $slice: 10 },
+    });
+    expect(result.sliced).toEqual([
+      { path: '2024a', total: 500, loaded: 10 },
+      { path: 'a1', total: 500, loaded: 10 },
+      { path: '-1', total: 500, loaded: 10 },
+    ]);
+  });
+
+  it('inclusion projection: an included all-digit array stays whole and included', async () => {
+    const client = docClient(
+      [
+        { k: '2024', n: 500 },
+        { k: 'items', n: 500 },
+      ],
+      { _id: OID, '2024': items(500), items: items(10) },
+    );
+    const result = await getDocument(client, {
+      ...target,
+      id: ID,
+      sliceAbove: 10,
+      projection: '{"2024":{"$numberInt":"1"},"items":{"$numberInt":"1"}}',
+    });
+    expect(findOf(client)?.['projection']).toEqual({
+      '2024': 1,
+      items: { $cond: [{ $isArray: '$items' }, { $slice: ['$items', 10] }, '$items'] },
+    });
+    expect(result.sliced).toEqual([{ path: 'items', total: 500, loaded: 10 }]);
+  });
+
+  it('exclusion projection: an unmentioned all-digit array is not sliced', async () => {
+    const client = docClient(
+      [
+        { k: '2024', n: 500 },
+        { k: 'items', n: 500 },
+      ],
+      { _id: OID, '2024': items(500), items: items(10) },
+    );
+    const result = await getDocument(client, {
+      ...target,
+      id: ID,
+      sliceAbove: 10,
+      projection: '{"secret":{"$numberInt":"0"}}',
+    });
+    expect(findOf(client)?.['projection']).toEqual({ secret: 0, items: { $slice: 10 } });
+    expect(result.sliced).toEqual([{ path: 'items', total: 500, loaded: 10 }]);
+  });
+
   it('matches the id literally, also when it looks like a query operator', async () => {
     const client = docClient([], { _id: { $ne: null } });
     await getDocument(client, { ...target, id: '{"$ne":null}', sliceAbove: 10 });
