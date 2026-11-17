@@ -6,6 +6,7 @@ deps: []
 touches: [packages/backend/src/ssh,packages/backend/src/io/bson,packages/backend/src/auth/oidc]
 prio: 1
 lease_until: 2026-11-17T17:57:39Z
+extended: dell26/agent-2
 ---
 ## Goal
 The `check` workflow has been red on Windows and macOS since 2026-11-17 ~03:00 (last green run: 43992628723 at 5f7e0f7b; all three OSes passed). Linux passes. Failing in run 44117990016 (main at 83a1d6e6):
@@ -27,3 +28,4 @@ Fix the code where Windows behaviour is wrong for users (e.g. paths), and the te
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 17:31+0100 by dell26/agent-2): gh is refused in this agent's environment (needs approval), so CI logs are read from the task description and verification of the CI run relies on the runner backing up wip/ci-windows-macos; fixes are based on code reading for the listed failures
 - ASSUMPTION (2026-11-17 17:33+0100 by dell26/agent-2): SSH agent on Windows: SSH_AUTH_SOCK now wins when set (lets users point at the Windows OpenSSH agent named pipe or a Cygwin agent), else Pageant as before, so the product never reports no-agent on Windows. Not switching the default to the OpenSSH pipe because the UI documents Pageant
+- extended by dell26/agent-2: All original Windows/macOS failures fixed: CI run 44138150602 at 707d1ee3 is green on ubuntu+windows. Left: macOS fails 1 test from main (release-native-modules): apps/desktop/src/build/native-addons.spec.ts:260 'fails the build for an unlisted addon given as an entry point' expects /var/folders/... but esbuild reports /private/var/... (macOS tmpdir symlink) -> test-only fix: fs.realpathSync the mkdtemp dir. Then rerun test-writer+code-reviewer, update quality.json, wait for green check on wip/ci-windows-macos (gh run list -R OldPeasant/thicket -w check -b wip/ci-windows-macos), verify criterion 1 with run id, done.
