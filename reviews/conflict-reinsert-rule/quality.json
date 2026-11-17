@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "task": "conflict-reinsert-rule",
+  "reviewed_revision": "0076d8f3bc63c15ced093d2b44d482e278a254fd",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/conflict-reinsert-rule/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/conflict-reinsert-rule/review.md"},
+    "fixer": {"status": "not_required", "reason": "fixer not required: code-reviewer reported 0 findings and test-writer found no production bugs"}
+  },
+  "fixes_required": false,
+  "findings": [],
+  "validation": [
+    {"command": "cd packages/renderer && npx ng test --include src/app/document/document-actions.service.spec.ts --include src/app/document/conflict/conflict-view.spec.ts", "result": "pass"},
+    {"command": "cd packages/renderer && npx ng test --include src/app/document --include src/app/collection", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}
