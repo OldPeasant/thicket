@@ -18,3 +18,4 @@ Fix the P3 findings deferred from io-advanced (reviews/io-advanced/review.md CR-
 
 ## Notes
 See SPEC.md, docs/ARCHITECTURE.md and reviews/io-advanced/review.md.
+- ASSUMPTION (2026-11-17 07:23+0100 by dell26/agent-2): CSV export of field names containing a dot: a top-level dotted key is its own column (valueAt reads the literal key first); a top-level document colliding with such a key in the same document, or a nested document holding a dotted key, is written whole as one Extended JSON column instead of being flattened. No value is lost; a document flattened elsewhere may then also appear whole in that column (duplicate, not loss). CSV import still treats dots as nesting.
