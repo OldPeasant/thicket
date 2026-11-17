@@ -2,6 +2,7 @@ import { join } from 'node:path';
 
 import { BROADCAST_STREAMS, methods, type Event, type Profile } from '@thicket/contract';
 
+import { usersHandlers } from '../admin/users';
 import { aggHandlers } from '../agg';
 import { OidcAuthenticator } from '../auth/oidc';
 import { browseHandlers } from '../browse';
@@ -136,6 +137,7 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
       ...aggHandlers(connections),
       ...shellHandlers(connections, shells),
       ...indexHandlers(connections),
+      ...usersHandlers(connections),
       // File dialogs can stay open as long as the user likes: no timeout.
       ...ioHandlers(
         connections,

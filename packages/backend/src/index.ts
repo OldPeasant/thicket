@@ -1,6 +1,7 @@
 /** Name of this workspace. */
 export const WORKSPACE = '@thicket/backend';
 
+export * from './admin/users';
 export * from './agg';
 export {
   DEFAULT_REDIRECT_URI,
