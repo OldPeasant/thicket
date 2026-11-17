@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "task": "io-basic-ui",
+  "reviewed_revision": "37e36475e5414f7b63a43aa7c631b1f64dfe6fec",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/io-basic-ui/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/io-basic-ui/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/io-basic-ui/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "TW-1",
+      "source": "test-writer",
+      "severity": "Low",
+      "disposition": "fixed",
+      "note": "pending import confirmation not withdrawn when the panel closes or the profile turns read-only"
+    },
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "a finished import could be repeated with the same file by one more click"
+    },
+    {
+      "id": "CR-2",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "tab results not refreshed after a cancelled or failed import"
+    },
+    {
+      "id": "CR-3",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "command preview did not quote collection names that are not JS identifiers"
+    },
+    {
+      "id": "CR-4",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "export header followed a query run after the export started"
+    }
+  ],
+  "validation": [
+    {
+      "command": "cd packages/renderer && npx ng test --include='src/app/io/**/*.spec.ts' --include='src/app/collection/collection-view.spec.ts'",
+      "result": "pass"
+    },
+    { "command": "npm run test:e2e -- test/e2e/io.e2e.ts", "result": "pass" },
+    { "command": "sh -c \"$(head -1 .taskcheck)\" (npm run check)", "result": "pass" }
+  ]
+}
