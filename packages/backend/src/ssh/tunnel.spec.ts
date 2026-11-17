@@ -17,6 +17,7 @@ import { RpcError } from '../server/rpc';
 import { describeHostKey, hostPattern, KnownHosts } from './known-hosts';
 import { generateTestKeyPair } from './testing';
 import {
+  defaultSshAgent,
   openSshTunnel,
   toSshError,
   type HostKeyQuestion,
@@ -484,13 +485,28 @@ describe('openSshTunnel: authentication', () => {
     expect(unreadable.message).toBe(`Cannot read the SSH private key file ${missing} (ENOENT)`);
   });
 
-  it('agent method without an agent → SSH_ERROR naming SSH_AUTH_SOCK', async () => {
-    vi.stubEnv('SSH_AUTH_SOCK', '');
-    cleanups.push(() => void vi.unstubAllEnvs());
-    const { env } = environment(freshKnownHosts());
-    const error = await failure(openSshTunnel(settings(1, { method: 'agent' }), {}, env));
-    expect(error).toMatchObject({ code: 'SSH_ERROR', detail: { reason: 'authentication' } });
-    expect(error.message).toMatch(/No SSH agent is running/);
+  // Windows never has "no agent": without SSH_AUTH_SOCK it falls back to Pageant (the test assumed
+  // Unix; the product was also wrong there, ignoring SSH_AUTH_SOCK, see defaultSshAgent below).
+  it.skipIf(process.platform === 'win32')(
+    'agent method without an agent → SSH_ERROR naming SSH_AUTH_SOCK',
+    async () => {
+      vi.stubEnv('SSH_AUTH_SOCK', '');
+      cleanups.push(() => void vi.unstubAllEnvs());
+      const { env } = environment(freshKnownHosts());
+      const error = await failure(openSshTunnel(settings(1, { method: 'agent' }), {}, env));
+      expect(error).toMatchObject({ code: 'SSH_ERROR', detail: { reason: 'authentication' } });
+      expect(error.message).toMatch(/No SSH agent is running \(SSH_AUTH_SOCK is not set\)/);
+    },
+  );
+
+  it('defaultSshAgent: SSH_AUTH_SOCK wins on every OS; else Pageant on Windows, none elsewhere', () => {
+    const pipe = '\\\\.\\pipe\\openssh-ssh-agent';
+    expect(defaultSshAgent('win32', pipe)).toBe(pipe);
+    expect(defaultSshAgent('win32', undefined)).toBe('pageant');
+    expect(defaultSshAgent('win32', '')).toBe('pageant');
+    expect(defaultSshAgent('linux', '/run/agent.sock')).toBe('/run/agent.sock');
+    expect(defaultSshAgent('darwin', undefined)).toBeUndefined();
+    expect(defaultSshAgent('linux', '')).toBeUndefined();
   });
 
   it.skipIf(process.platform === 'win32')(

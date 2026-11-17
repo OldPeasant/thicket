@@ -415,18 +415,24 @@ describe('authCodeFlow', () => {
   });
 
   it('ignores a redirect with another state, another path or method; the right one still counts', async () => {
-    const answers: { status: number; text: string }[] = [];
-    const { opts } = options(async (url) => {
+    const answers: { status: number | 'closed'; text: string }[] = [];
+    const { opts, background } = options(async (url) => {
       answers.push(await redirectBack(url, { code: 'forged', state: 'not-the-state' }));
       answers.push(await redirectBack(url, { code: 'forged' }, '/elsewhere'));
       const redirect = new URL(new URL(url).searchParams.get('redirect_uri') ?? '');
       answers.push({ status: (await fetch(redirect, { method: 'POST' })).status, text: '' });
       answers.push(await redirectBack(url, { code: 'code-1' }));
-      // After the answer the receiver takes no further redirect.
-      answers.push(await redirectBack(url, { code: 'late' }));
+      // After the answer the receiver takes no further redirect. The flow closes the receiver as
+      // soon as the token arrived, which may be before or after this request (only the test was
+      // wrong: on Windows and macOS the close usually wins, so the request finds no listener).
+      answers.push(
+        await redirectBack(url, { code: 'late' }).catch(() => ({ status: 'closed' as const, text: '' })),
+      );
     });
     await expect(authCodeFlow(meta, opts)).resolves.toMatchObject({ accessToken: 'at-code' });
-    expect(answers.map((a) => a.status)).toEqual([400, 404, 404, 200, 404]);
+    await Promise.all(background);
+    expect(answers.slice(0, 4).map((a) => a.status)).toEqual([400, 404, 404, 200]);
+    expect([404, 'closed']).toContain(answers[4]?.status);
     expect(answers[0]?.text).toContain('does not belong');
     expect(idp.to('/token').map((r) => r.form['code'])).toEqual(['code-1']);
   });

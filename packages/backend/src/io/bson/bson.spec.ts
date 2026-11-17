@@ -186,7 +186,9 @@ describe('metadataPath', () => {
     ['/dumps/orders.dat', '/dumps/orders.dat.metadata.json'],
     ['orders.bson', 'orders.metadata.json'],
   ])('%s -> %s', (file, expected) => {
-    expect(metadataPath(file)).toBe(expected);
+    // Only the test was wrong on Windows: the product returns a native path there (`\dumps\...`),
+    // which is right for the file system, so compare against the native form of the expectation.
+    expect(metadataPath(file)).toBe(path.normalize(expected));
   });
 });
 

@@ -27,7 +27,7 @@ export interface SshEnvironment {
   confirmHostKey: ConfirmHostKey;
   /**
    * The SSH agent for `method: 'agent'`: a socket path, `pageant`, or an agent object (tests).
-   * Defaults to `SSH_AUTH_SOCK` (`pageant` on Windows).
+   * Defaults to `SSH_AUTH_SOCK`, else `pageant` on Windows (see `defaultSshAgent`).
    */
   agent?: string | BaseAgent;
   log?: (message: string) => void;
@@ -377,10 +377,8 @@ async function authConfig(
       return passphrase === undefined ? { privateKey } : { privateKey, passphrase };
     }
     case 'agent': {
-      const agent =
-        env.agent ??
-        (process.platform === 'win32' ? 'pageant' : (process.env['SSH_AUTH_SOCK'] ?? undefined));
-      if (agent === undefined || agent === '') {
+      const agent = env.agent ?? defaultSshAgent(process.platform, process.env['SSH_AUTH_SOCK']);
+      if (agent === undefined) {
         throw new RpcError(
           'SSH_ERROR',
           'No SSH agent is running (SSH_AUTH_SOCK is not set): start one or choose another method',
@@ -390,6 +388,20 @@ async function authConfig(
       return { agent };
     }
   }
+}
+
+/**
+ * The agent `method: 'agent'` uses when the environment names none: `SSH_AUTH_SOCK` when it is
+ * set, which on Windows also lets a user pick the Windows OpenSSH agent
+ * (`\\.\pipe\openssh-ssh-agent`) or a Cygwin/Git Bash agent. Otherwise Pageant on Windows (it has
+ * no socket variable to check, ssh2 finds its window itself), and none elsewhere.
+ */
+export function defaultSshAgent(
+  platform: NodeJS.Platform,
+  authSock: string | undefined,
+): string | undefined {
+  if (authSock !== undefined && authSock !== '') return authSock;
+  return platform === 'win32' ? 'pageant' : undefined;
 }
 
 /** ssh2's errors as `SSH_ERROR` with a readable message (no secrets: ssh2 never puts them there). */

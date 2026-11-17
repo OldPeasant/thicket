@@ -255,7 +255,13 @@ describe('KnownHosts.trust', () => {
     await writeFile(blocker, 'not a folder');
     const hosts = new KnownHosts(join(blocker, 'known_hosts'));
     await expect(hosts.trust('bastion.example.test', 22, wireKey())).rejects.toThrow();
-    await expect(hosts.check('bastion.example.test', 22, wireKey())).rejects.toThrow(/ENOTDIR/);
+    if (process.platform === 'win32') {
+      // Only the test assumed Unix: Windows reports a path below a file as missing (ENOENT, not
+      // ENOTDIR), so there is no known_hosts file to read and the host is simply unknown.
+      expect(await hosts.check('bastion.example.test', 22, wireKey())).toBe('unknown');
+    } else {
+      await expect(hosts.check('bastion.example.test', 22, wireKey())).rejects.toThrow(/ENOTDIR/);
+    }
 
     // The folder becomes writable: the same instance writes again (the failure did not stick).
     await rm(blocker);
