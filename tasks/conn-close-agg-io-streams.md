@@ -1,11 +1,11 @@
 ---
 title: conn.close cancels agg.run and io.export/import streams before closing the client
-status: in_progress
+status: done
 owner: dell26/agent-1
 deps: [conn-close-streams]
 touches: [packages/backend/src/agg/handlers.ts,packages/backend/src/io/handlers.ts]
 prio: 2
-lease_until: 2026-11-17T04:30:19Z
+lease_until: 
 ---
 ## Goal
 Contract `conn.close` cancels the profile's streams. conn-close-streams added
@@ -22,3 +22,4 @@ removal) runs before the driver client closes (review CR-2 of conn-close-streams
 ## Notes
 See test/integration/docs-query.int.spec.ts "conn.close during a running find" (counts the
 backend's own killOp commands via monitorCommands).
+- done by dell26/agent-1: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 50s on d65c7b3eb; criteria verified 2/2
