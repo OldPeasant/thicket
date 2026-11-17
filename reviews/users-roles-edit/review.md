@@ -4,28 +4,37 @@ Date: 2026-11-17
 
 Task: users-roles-edit - M6 (Could): Edit users and roles
 
-Scope: task commits 73d5b210..62f28d1f on main (`git diff 85488c85..62f28d1f`); committed changes only. Later test-only work by the test-writer (e.g. the untracked `packages/backend/src/admin/users/edit/edit.spec.ts`) is excluded.
+Scope: final committed task code, `git diff 27adc3ab..2b0b7e60` (commits 77bdb590, 7d9d52ce, 8b97c739, 2ba37069, 678055ee, 2b0b7e60), with focus on the fix commit 2b0b7e60 for the findings of the previous review. Committed changes only; uncommitted working-tree changes (another helper's tests, and an in-progress rebase by the parent worker) were not reviewed. All code was read from the commit objects, not from the working tree.
 
 Requirements:
 - tasks/users-roles-edit.md (goal, 2 acceptance criteria, 4 recorded assumptions)
-- SPEC.md M6 ("Could: Users and roles: create, edit, drop, grant/revoke"), M1 safety (write guard, confirm dialog), section 4/6 contract notes
+- SPEC.md M6 ("Could: Users and roles: create, edit, drop, grant/revoke") and M1 safety (write guard, confirm dialog)
 - docs/ARCHITECTURE.md "Users and roles"
-- docs/QUALITY.md (report format), AGENTS.md (project notes: theme tokens, no secrets)
+- docs/QUALITY.md (report format), AGENTS.md (project notes)
+- reviews/users-roles-edit/fixes.md (dispositions of the previous CR-1 to CR-4)
 
 Git range:
 - Branch: main
-- HEAD: 62f28d1fad6d959cb86f555ce17aa20555465829
-- Base/start: 85488c85ce4e3c3d58d1206680174650c6168515
-- Commits reviewed: 4 (73d5b210, a6dc0967, 6bea914e, 62f28d1f)
+- HEAD: 2b0b7e60d10d665a817a2b0505f28438ef2f326c
+- Base/start: 27adc3abd4885ca9a8f0496a7abc21d3a21853d1
+- Commits reviewed: 6
 
-Summary: 0 P0, 0 P1, 1 P2, 3 P3
+Summary: 0 P0, 0 P1, 0 P2, 1 P3
 
-## What was checked
+## Previous findings
 
-- Contract (`packages/contract/src/admin.ts`): 8 write methods, all `write: 'always'`, strict params, `roleRef` as `{ role, db }`, privileges and custom data as EJSON text; `index.spec.ts` / `methods.spec.ts` samples and `EXPECTED_WRITES` updated; the `roleRef` exemption in the EJSON doc-field walk matches the recorded assumption.
-- Backend (`packages/backend/src/admin/users/edit/*`, `server/backend.ts`): one command per method on the primary in `db` via `runCommand` (no read preference); handlers are registered inside `guardWrites`, so read-only profiles get `READ_ONLY` and production profiles need `confirmed` (covered by the integration test). Password goes only into the command; `toBrowseError` redacts driver messages; no logging of params. `$external` password rules and empty-update rejection are correct.
-- Renderer: `describeWrite` cases for all 8 methods show the password only as the hidden marker (`HIDDEN_PASSWORD`, operation.ts:30, 160, 167); drops use `alwaysConfirm`; every button uses `appWriteControl` and the grant field is hidden on read-only profiles; built-in roles get no change/drop/grant/revoke controls; `saving`/`busy` guard double submits; editor sends only changed fields and `{}` when custom data is emptied (per assumption); signals/effects (`untracked` reset on subject change) and templates are consistent; CSS uses only theme tokens that exist in the renderer (`--accent`, `--danger-*`, `--bg-input`, ...), no hard-coded colors.
-- Tests: integration `test/integration/users-edit.int.spec.ts` covers every operation (create/update/drop user and role, grant/revoke to user and to role), password sign-in, no password echo in errors, and the guard (read-only, production). e2e `test/e2e/users-edit.e2e.ts` creates a user, grants `read` and connects as that user through the UI against an `--auth` MongoDB 8 container. At review time no criterion evidence was recorded yet (`tasks.py verify users-roles-edit` shows both unticked); that is for the parent to record after running them, not a finding.
+- CR-1 (tests for the confirm text and the editor diff): resolved. `packages/renderer/src/app/safety/operation.spec.ts` covers the 8 `describeWrite` branches and asserts `pwd: "<hidden>"` and the absence of the password for `admin.createUser`/`admin.updateUser`; `users-edit.model.spec.ts` and `principal-editor.spec.ts` (commit 678055ee) cover the helpers and the change diff.
+- CR-2 (admin role suggestions for custom roles outside `admin`): resolved. `roleSuggestions(known, db, forRole)` drops the `@admin` suggestions when `forRole` is set outside `admin` (`users-edit.model.ts:63`); the editor passes `!isUser()` and the detail grant field passes `mode() === 'roles'`. Same-database built-in roles (read, readWrite, ...) are still suggested, which MongoDB allows. Covered by model, editor and view tests.
+- CR-3 (typed role cleared before the grant succeeds): resolved. `RoleInput` has `clearOnPick` (default true, editor unchanged) and `clear()`; the grant field sets `clearOnPick=false`, and a refused grant keeps the text (view test "a refused grant keeps the typed role"). The field is disabled while `busy()`, so no double grant.
+- CR-4 (stale notice after the tab switched database): resolved. `change()` captures the target and sets neither the success nor the error notice, nor reloads, when the target changed (`users-roles-view.ts:287-310`); `busy` is always reset in `finally`. Two view tests cover success and failure answered after the switch. `saved()` is correctly left as is: it is synchronous up to the notice and the target switch closes the editor.
+
+## What was checked in the fix commit
+
+- `change()`/`grantOrRevoke()` now return `Promise<boolean>`; every early return yields `false`, and `drop()`/`revoke()` ignore the result as before. A cancelled confirm dialog returns `false` without a notice (unchanged behavior).
+- Target comparison uses the same profileId/db equality as the `target` computed, so switching A -> B -> A before the answer still shows the notice for A, which matches the lists on screen.
+- No new state owners, no layer changes, no new dependencies; template bindings (`#grantField`, `[forRole]`, `[clearOnPick]`) match the component inputs.
+- Backend, contract and guard code are unchanged since the previous review; re-read `edit.ts`, `handlers.ts`, `admin.ts` contract additions and `operation.ts`/`write-guard.service.ts` additions: password only goes into the command and is rendered as the hidden marker; all 8 methods are `write: 'always'` and registered behind the guard.
+- Criterion evidence: `python tasks.py verify users-roles-edit` shows both criteria still unticked. Nothing is claimed yet, so this is not a finding; the parent must run the integration and e2e suites and record them before `done`.
 
 ## P0 Critical
 
@@ -37,36 +46,17 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | Confirm-dialog text of the new writes (password hiding) and the editor's change diff are untested**
-    - File: `packages/renderer/src/app/safety/operation.ts:158` (and `packages/renderer/src/app/admin/users/edit/principal-editor.ts:156`, `packages/renderer/src/app/admin/users/edit/users-edit.model.ts:1`)
-    - Category: Tests
-    - Problem: `operation.spec.ts` has no case for any of the 8 new `describeWrite` branches; nothing asserts that `admin.createUser` / `admin.updateUser` render `pwd` as the hidden marker and never the password value (the view spec only checks the `dropUser` operation text, on a non-production profile where create/update show no dialog). The "Change user" path of `PrincipalEditor` (password-only change, roles diff, emptied custom data sending `{}`, "nothing changed" closing without a request) and the pure helpers in `users-edit.model.ts` (`parseRoleRef` with `@`, `parsePrivileges` validation, `sameRoles`) have no unit tests in the reviewed scope.
-    - Why it matters: never displaying the password in the confirm dialog is an explicit safety rule of the task (recorded assumption); a regression in `describeWrite` (e.g. printing `p.password`) would pass the whole suite. The update diff decides what replaces server state (roles are replaced wholesale), so a bug there silently changes a user's roles.
-    - Suggested fix: add `operation.spec.ts` cases for all 8 methods, including one asserting the output for `createUser`/`updateUser` with a password contains the marker and not the password; add a view/editor spec for "Change user" on a production profile (confirm shown, password hidden, only changed fields sent, `{}` for emptied custom data, no request when nothing changed); add unit tests for `users-edit.model.ts`.
+None.
 
 ## P3 Low
 
-- [ ] **CR-2 | Role suggestions offer roles the server refuses for custom roles outside `admin`**
-    - File: `packages/renderer/src/app/admin/users/edit/users-edit.model.ts:61`
-    - Category: Correctness
-    - Problem: `roleSuggestions` always appends `ADMIN_ROLES` as `name@admin` for non-admin databases, and the same `RoleInput` is used for a role's "Inherits from" list and for granting to a role. MongoDB only lets a role defined in a database other than `admin` inherit roles of its own database, so these suggestions always fail with a server error there.
-    - Why it matters: the UI suggests choices that cannot work; the error is shown, so no damage, only friction.
-    - Suggested fix: pass the subject kind to `RoleInput` / `roleSuggestions` and offer only same-database roles when granting to (or editing) a role in a non-admin database.
-
-- [ ] **CR-3 | Typed role is cleared before the grant succeeds**
-    - File: `packages/renderer/src/app/admin/users/edit/role-input.ts:116`
-    - Category: Quality
-    - Problem: `add()` clears `text` and emits immediately; in the detail view the emit triggers an async `admin.grantRoles` (`users-roles-view.ts:273`). If the server refuses (unknown role, typo, wrong database), the notice shows the error but the input is already empty.
-    - Why it matters: the user must retype the role to correct a typo; minor usability issue.
-    - Suggested fix: clear the field only after the parent reports success (e.g. a `reset()` method or an input signal), or keep the text when the grant fails.
-
-- [ ] **CR-4 | A change finishing after the tab switched database shows a stale notice**
-    - File: `packages/renderer/src/app/admin/users/users-roles-view.ts:285`
-    - Category: Correctness
-    - Problem: the target effect clears `notice` and `editing` when the tab's profile/db changes, but a `change()` (grant, revoke, drop) or `saved()` already awaiting the server sets its success/error notice afterwards, e.g. "Granted read to carl." over the lists of the new database.
-    - Why it matters: misleading status line in a rare sequence; data is not affected (the reload reads the new target).
-    - Suggested fix: capture the target at the start of `change()`/`saved()` and skip setting the notice when it no longer equals `this.target()`.
+- [ ] **CR-1 | The "grant that worked empties the field" test does not exercise `RoleInput.clear()`**
+    - File: `packages/renderer/src/app/admin/users/users-roles-view.ts:254` (test in `packages/renderer/src/app/admin/users/users-roles-view.spec.ts`, "a refused grant keeps the typed role; a grant that worked empties the field")
+    - Category: Tests
+    - Problem: after a successful grant, `change()` awaits `reload()`, which sets `users` to `loading`; the template (`users-roles-view.html:86-158`) then replaces the user detail with "Loading users…", destroying the grant field. `field?.clear()` runs afterwards on the destroyed instance, and the recreated field starts empty anyway. The test's final assertion (`role-input` value is `''`) would therefore pass even if `grant()` never called `clear()`.
+    - Why it matters: the success half of the CR-3 fix is not actually verified; if the reload later stops re-rendering the detail (e.g. keeping the old list while loading), a regression that leaves the text in the field would go unnoticed. Behavior today is correct.
+    - Suggested fix: add a direct test that `grant(ref, field)` calls `field.clear()` only on success (e.g. a spy on a `RoleInput`-like object), or assert on a `RoleInput` instance that survives the reload; alternatively document that the reload recreates the field and drop the `clear()` call.
 
 ## Review conclusion
 
-Material issues found; fix before completing the task. No P0/P1 defects: the contract, backend, guard integration and UI meet the acceptance criteria as implemented. CR-1 (missing tests for the password-hiding confirm text and the change diff) should be addressed or explicitly dispositioned; CR-2 to CR-4 are low-priority improvements.
+No material issues found. The previous findings CR-1 to CR-4 are resolved in the reviewed code; the remaining P3 is an optional test-strength improvement. The parent must still record evidence for both acceptance criteria (integration suite and the e2e flow against the `--auth` MongoDB container) before running `done`.

@@ -795,6 +795,99 @@ describe('UsersRolesView', () => {
       expect(view.busy()).toBe(false);
     });
 
+    it('a grant cancelled in the confirm dialog keeps the typed role; confirming empties it', async () => {
+      TestBed.inject(ProfileSafetyService).set({
+        id: 'p1',
+        name: 'Prod',
+        readOnly: false,
+        production: true,
+      });
+      fake.respond('admin.grantRoles', {});
+      await create();
+      const confirm = TestBed.inject(ConfirmService);
+      await type('role-input', 'reader');
+      await click('role-add');
+      expect(confirm.current()?.operation).toBe(
+        'db.getSiblingDB("shop").grantRolesToUser("alice", [{ role: "reader", db: "shop" }])',
+      );
+      confirm.answer(false);
+      await settle();
+      expect(sent('admin.grantRoles')).toEqual([]);
+      expect(el().querySelector('[data-testid="notice"]')).toBeNull();
+      expect(get<HTMLInputElement>('role-input').value).toBe('reader');
+      expect(view.busy()).toBe(false);
+      await click('role-add');
+      confirm.answer(true);
+      await settle();
+      expect(sent('admin.grantRoles')).toHaveLength(1);
+      expect(get('notice').textContent).toContain('Granted reader to alice.');
+      expect(get<HTMLInputElement>('role-input').value).toBe('');
+    });
+
+    it('a change answered after the tab moved reads nothing again and keeps the new lists', async () => {
+      let release!: () => void;
+      fake.handle('admin.dropUser', () => new Promise((resolve) => (release = () => resolve({}))));
+      await create();
+      const pending = view.drop();
+      await settle();
+      TestBed.inject(ConfirmService).answer(true);
+      await settle();
+      expect(sent('admin.dropUser')).toHaveLength(1);
+      fixture.componentRef.setInput('tab', { ...TAB, data: { profileId: 'p1', db: 'crm' } });
+      await settle();
+      expect(sent('admin.users').map((p) => p['db'])).toEqual(['shop', 'crm']);
+      release();
+      await pending;
+      await settle();
+      expect(sent('admin.users').map((p) => p['db'])).toEqual(['shop', 'crm']);
+      expect(rolesParams().map((p) => p['db'])).toEqual(['shop', 'crm']);
+      expect(view.notice()).toBeNull();
+      expect(view.users().state).toBe('loaded');
+    });
+
+    it('a save reported after the form was closed shows nothing and reads nothing again', async () => {
+      await create();
+      await click('create');
+      view.closeEditor();
+      await view.saved('carl');
+      await settle();
+      expect(view.notice()).toBeNull();
+      expect(fake.requestsFor('admin.users')).toHaveLength(1);
+    });
+
+    it('choosing the mode already shown keeps an open form', async () => {
+      await create();
+      await click('create');
+      await type('editor-name', 'carl');
+      await click('mode-users');
+      expect(all('principal-editor')).toHaveLength(1);
+      expect(get<HTMLInputElement>('editor-name').value).toBe('carl');
+    });
+
+    it('with nothing selected, grant, revoke and drop send nothing', async () => {
+      fake.respond('admin.users', { users: [] });
+      fake.handle('admin.roles', () => ({ roles: [] }));
+      await create();
+      await view.grant({ role: 'read', db: 'shop' });
+      await view.revoke({ role: 'read', db: 'shop' });
+      await view.drop();
+      view.edit();
+      expect(view.editing()).toBeNull();
+      view.setMode('roles');
+      await settle();
+      await view.grant({ role: 'read', db: 'shop' });
+      await view.drop();
+      view.edit();
+      await settle();
+      expect(fake.requestsFor('admin.grantRoles')).toHaveLength(0);
+      expect(fake.requestsFor('admin.revokeRoles')).toHaveLength(0);
+      expect(fake.requestsFor('admin.dropUser')).toHaveLength(0);
+      expect(fake.requestsFor('admin.dropRole')).toHaveLength(0);
+      expect(TestBed.inject(ConfirmService).current()).toBeNull();
+      expect(view.editing()).toBeNull();
+      expect(view.notice()).toBeNull();
+    });
+
     it('a second change while one is pending is ignored', async () => {
       let release!: () => void;
       fake.handle(
