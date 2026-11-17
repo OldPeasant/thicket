@@ -1,11 +1,11 @@
 ---
 title: M2: SSH tunnels
-status: in_progress
+status: done
 owner: dell26/agent-2
 deps: [conn-manager]
 touches: [packages/backend/src/ssh,test/integration/fixtures/ssh]
 prio: 2
-lease_until: 2026-11-17T02:29:14Z
+lease_until: 
 extended: 
 releases: 1
 ---
@@ -30,3 +30,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 02:03+0100 by felix/agent-1): Integration sshd image: lscr.io/linuxserver/openssh-server:latest with AllowTcpForwarding switched on via sshd_config.d (image default is off).
 - extended by felix/agent-1: Implementation, fixes (CR-1..CR-7), tests report and re-review (0 P0-P2, 1 P3) are committed; merged origin/main at 239b60c (manager.spec.ts conflict resolved, npm run check passes). Left: re-run npm run test:int -- ssh on the merged code, record verify for AC1-3, write reviews/ssh-tunnel/quality.json (reviewed_revision = c9a83ed-equivalent, P3 disposition), commit, tasks.py done.
 - release by felix/agent-1: over budget after 2 sessions (~60 min) and a review that decided nothing; still resumable: continue from wip/ssh-tunnel (see git log)
+- done by dell26/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 46s on 8bc86162c; criteria verified 3/3
