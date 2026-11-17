@@ -1,0 +1,42 @@
+{
+  "task": "raw-editor",
+  "reviewed_revision": "49f7c9c434211efcdbc180f41497efe3dceccf10",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/raw-editor/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/raw-editor/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/raw-editor/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "reused editor (list tracked by index) kept another document's unapplied text; RawEditor now reloads text and clears error when doc()'s _id changes (1cb45a9), with specs"
+    },
+    {
+      "id": "CR-2",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "accepted",
+      "note": "Ctrl+Z inside the editor after it switched to another document can bring back the previous document's text; Apply refuses it (_id differs), so no wrong edit can be recorded; not worth another change cycle"
+    }
+  ],
+  "validation": [
+    {
+      "command": "cd packages/renderer && npx ng test --include='src/app/raw-editor/**/*.spec.ts'",
+      "result": "pass",
+      "note": "4 files, 331 tests"
+    },
+    {
+      "command": "npx eslint packages/renderer/src packages/core/src",
+      "result": "pass"
+    },
+    {
+      "command": "npm run check",
+      "result": "pass",
+      "note": "root 3160 tests, renderer 1932 tests, lint and typecheck clean"
+    }
+  ]
+}

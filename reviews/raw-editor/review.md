@@ -4,7 +4,7 @@ Date: 2026-11-17
 
 Task: raw-editor - M1: Raw editor in shell syntax and EJSON
 
-Scope: Second pass on the final revision. The task's own commits on top of base 60c8625c are 8c61ad5 (implementation), 278d8ae (test-writer specs and the first review) and 1cb45a9 (CR-1 fix). `git diff 60c8625c..HEAD -- . ':!tasks' ':!reviews'` also contains the io-basic-backend commits (apps/desktop dialogs, packages/backend/src/io, packages/contract, test/integration/io.int.spec.ts), which were merged to main from another task. They are out of scope and were not reviewed. In scope: `packages/renderer/src/app/raw-editor/*`, `packages/renderer/src/app/collection/collection-view.{ts,html,css}`, the `eslint.config.mjs` no-eval block, the CodeMirror dependencies in `packages/renderer/package.json` / `package-lock.json`, and the raw-editor section of `docs/ARCHITECTURE.md`. Only committed changes were reviewed, and the working tree was clean.
+Scope: Final pass on revision 49f7c9c. The task's own commits on top of base 60c8625c are 8c61ad5 (implementation), 278d8ae (test-writer specs and the first review), 1cb45a9 (CR-1 fix) and 49f7c9c (second test-writer pass). Production code has not changed since 1cb45a9: `git diff 1cb45a9..49f7c9c -- . ':!reviews'` touches only `raw-editor.spec.ts` (+56) and `raw-editor-collection.spec.ts` (+21). This pass reviews those spec additions and re-checks the earlier conclusions at HEAD. `git diff 60c8625c..HEAD` also contains io-basic-backend commits, which were merged to main from another task. They are out of scope and were not reviewed. In scope for the whole task: `packages/renderer/src/app/raw-editor/*`, `packages/renderer/src/app/collection/collection-view.{ts,html,css}`, the `eslint.config.mjs` no-eval block, the CodeMirror dependencies in `packages/renderer/package.json` / `package-lock.json`, and the raw-editor section of `docs/ARCHITECTURE.md`. Only committed changes were reviewed, and the working tree was clean.
 
 Requirements:
 - tasks/raw-editor.md acceptance criteria and recorded assumptions
@@ -12,57 +12,41 @@ Requirements:
 - docs/ARCHITECTURE.md
 - docs/QUALITY.md (report contract)
 - AGENTS.md
-- reviews/raw-editor/fixes.md (the CR-1 fix to verify)
+- reviews/raw-editor/fixes.md (the CR-1 fix)
 
 Git range:
 - Branch: main
-- HEAD: 1cb45a93e9d767dfb59d35289e282f3cc5f6c557
+- HEAD: 49f7c9c434211efcdbc180f41497efe3dceccf10
 - Base/start: 60c8625c067dfcc3a145ef6e54293ea0b6662c9d
-- Commits reviewed: 3 (8c61ad5, 278d8ae, 1cb45a9)
+- Commits reviewed: 4 (8c61ad5, 278d8ae, 1cb45a9, 49f7c9c)
 
 Summary: 0 P0, 0 P1, 0 P2, 1 P3
 
 Commands and limits:
-- I read the diff and the full current `raw-editor.ts`, the regression spec added in 1cb45a9, the collection-view changes, and `documentKey`/`idOf` in `document/edit-session.ts`.
-- I could not run tests in this session because the command was denied. For test results I rely on fixes.md: 327 raw-editor tests passed, and `npm run check` and `.taskcheck` passed. The parent should confirm these on HEAD.
+- `git show 49f7c9c -- packages` and `git diff 1cb45a9..HEAD --stat -- . ':!reviews'`: the change is spec-only.
+- I read the follow effect, `apply()` and `setText` in `raw-editor.ts` at HEAD, the spec helpers, and the document-list template and raw-toggle state in `collection-view.{ts,html}`.
+- `cd packages/renderer && npx ng test --include='src/app/raw-editor/**/*.spec.ts'` at HEAD -> 4 files, 331 tests passed (2.1 s). I could not repeat the run in a loop because the command was denied, so flakiness was judged by reading the code (below). I did not run the full `npm run check`. The parent must run it as part of `.taskcheck`.
 
-## Status of the previous finding CR-1
+## Review of the spec changes in 49f7c9c
 
-CR-1 is fixed. The finding was that a reused raw editor kept another document's unapplied text. The fix is in `raw-editor.ts:188-211`:
-- The follow effect now tracks `doc()` as well as `shown()`.
-- It remembers the document's identity: `documentKey(doc)`, or the object itself when the document has no `_id`.
-- When the identity changes, it resets the baseline and the text to the new document and clears the error and its diagnostics.
-- The first run (`owner === undefined`) takes the normal path.
-- A new object with the same `_id`, as after a re-query, has the same `documentKey` string, so its unapplied text is still kept, as before.
-- The format is kept, which is reasonable because it is a view preference.
+`raw-editor.spec.ts`:
+- `keeps the chosen format when another document comes in` (line 417): this test switches to EJSON, makes the text dirty, then switches `doc` to another `_id`. It asserts that the EJSON toggle stays pressed, `format()` is `ejson`, the text is the new document in EJSON, and the dirty marker is gone. It then applies EJSON text for the new document and checks that `edits.current(other)` is updated while `edits.current(DOC)` is unchanged. This exercises the `otherDocument` branch (`raw-editor.ts:197`) together with `printRaw(shown, this.format())`, and the `_id` guard in `apply()`. The assertions match the production behavior.
+- `shows the unsaved edits of a document that comes in` (line 438): this test seeds a session edit for the other document, makes the current text dirty, and then switches. It asserts that the editor shows the edited version of the incoming document (via `shown()`), not its stored one, and that the editor is not dirty. The test is correct, and it covers that a switch uses the session state.
+- `shows another document without _id instead of the unapplied text of the previous one` (line 453): this test covers the object-identity fallback (`documentKey(doc) ?? doc`) in two directions: from a document without `_id` to another one, and from a document without `_id` to one with an `_id`. It asserts the text, the dirty marker, the `raw-no-id` notice and `edits.modified() === false`. The test is correct.
 
-The guard in `apply()` that compares `documentKey` with `doc()` is unchanged, so a stale text can still never be applied to another document.
+`raw-editor-collection.spec.ts`:
+- `shows each row's own document, not another's unapplied text, when the rows change order` (line 165): the document list uses `@for (...; track $index)`, and the raw toggles are stored by `_id` key (`collection-view.ts:236-258`). After the rows are reordered, both rows still show an editor, and Angular reuses the row-0 `RawEditor` instance with a different `doc` input. So this is a real end-to-end test of the CR-1 scenario in the collection tab. It asserts the text of both rows, that row 0 is not dirty and has no error, and that no change was counted.
+- The last assertion, `not.toMatch(/[1-9] change/)`, is a loose way to say that the edit bar shows no changes. In this scenario at most one unapplied text exists and nothing is applied, so the assertion cannot give a false pass here. Not reported.
 
-The regression spec at `raw-editor.spec.ts:390-415` covers both branches:
-- a different `_id` resets the text, `dirty()`, the error and the diagnostics, and disables Apply;
-- the same `_id` keeps the unapplied text, and the edit session stays unmodified.
+Flakiness: the new tests use the same `whenStable()` / `settle()` helpers as the existing specs. The fake `docs.find` answers on `setTimeout(0)`, and `settle()` drains five macrotask turns. The tests use no wall-clock timing, randomness or shared state between tests. I found no flakiness risk.
 
-The fix is only tracked through the `doc` input. A document without `_id` gets object identity, so a re-query would reset its text. This is harmless: such a document cannot be applied, and the collection view disables the Raw toggle for it (`collection-view.html`, `[disabled]="key(loaded) === null"`).
+## Earlier conclusions re-checked at HEAD
 
-No regressions found:
-- The new `this.doc()` read adds no extra triggers in practice, because `shown()` already depends on `doc()`.
-- The `setText` call in the reset branch dispatches with the `External` annotation, so the update listener does not clear or re-set the error out of order.
-- When there is no error, `showError(null)` returns early, and in that case there are no diagnostics to clear.
-
-## Acceptance criteria (re-checked on the final revision)
-
-1. **Component tests (toggle preserves content; syntax error at line/column; apply updates the model).**
-   - `raw-editor.spec.ts` covers:
-     - format round trips, unapplied text kept across the toggle, and unreadable text not switched;
-     - shell and EJSON syntax errors with line/column, the diagnostic range, `aria-invalid`/`aria-describedby`, and the cursor moved to the error;
-     - Apply through `DocumentEdits.edit`, including partial documents, undo/redo, a refused changed or missing `_id`, and read-only.
-   - `raw-editor-collection.spec.ts` covers the integration in the collection tab, up to the Save diff.
-   - `raw-text.spec.ts` covers the parse/print/describe helpers.
-   - The criterion is met by the code. Its run evidence must be recorded by the parent with `tasks.py verify`.
-2. **No `eval`/`new Function` in the editor's bundle path.**
-   - `no-eval.spec.ts` walks the real import graph from `raw-editor/index.ts`, through CodeMirror, Lezer, core and `bson`. It has a positive control and a pattern self-test.
-   - ESLint `no-eval`/`no-implied-eval`/`no-new-func` add a source-level guard.
-   - The fix adds no new imports, so the graph is unchanged.
+- CR-1 (a reused editor kept another document's unapplied text) stays fixed. The production code is identical to 1cb45a9. The fix is the identity-tracking follow effect at `raw-editor.ts:188-211`, and the 49f7c9c specs now also cover it through the collection tab, the format preference, session edits and documents without `_id`.
+- The guard in `apply()` that compares `documentKey` with `doc()` is unchanged.
+- Acceptance criterion 1 (toggle preserves content, syntax error at line/column, apply updates the model) is covered by `raw-editor.spec.ts`, `raw-editor-collection.spec.ts` and `raw-text.spec.ts`. All of these passed in the run above.
+- Acceptance criterion 2 (no `eval`/`new Function` in the editor's bundle path) is covered by `no-eval.spec.ts`, which walks the real import graph, and by the ESLint `no-eval`/`no-implied-eval`/`no-new-func` rules. No imports changed since the last review.
+- The parent must record its own run evidence for both criteria with `tasks.py verify`.
 
 ## P0 Critical
 
@@ -81,9 +65,9 @@ None.
 - [ ] **CR-2 | Undo after the editor switches to another document brings back the previous document's text**
     - File: `packages/renderer/src/app/raw-editor/raw-editor.ts:197-201` (with `setText` at `raw-editor.ts:301-311`)
     - Category: Correctness
-    - Problem: `setText` replaces the content with a normal transaction that only carries the `External` annotation. It does not set `Transaction.addToHistory.of(false)`, and it does not reset the history. So the replacement made in the new "other document" branch is recorded in CodeMirror's undo history. If the user presses Ctrl+Z in the reused editor after the list switched it to document B, the text from document A comes back, marked "Not applied". Apply then refuses it with "The _id of a document cannot be changed". No data is at risk, because the `_id` guard in `apply()` holds. But this partly brings back the CR-1 situation through the keyboard. Undo after the editor follows an edit of the same document is fine and arguably intended. The problem is the switch to another document.
-    - Suggested fix: In the other-document branch, keep the replacement out of the history or start a fresh history. For example, dispatch it with `Transaction.addToHistory.of(false)` (which still leaves older entries reachable), or rebuild the state with `view.setState(...)` and the same extensions. Optionally, extend the regression spec to press undo after the switch.
+    - Problem: `setText` replaces the content with a normal transaction that only carries the `External` annotation. It does not set `Transaction.addToHistory.of(false)`, and it does not reset the history. So the replacement made in the "other document" branch is recorded in CodeMirror's undo history. If the user presses Ctrl+Z in a reused editor after it switched to document B, document A's text comes back, marked "Not applied". Apply then refuses it with "The _id of a document cannot be changed". No data is at risk, because the `_id` guard in `apply()` holds. The parent has accepted this as non-blocking. It is still open at 49f7c9c, and none of the new specs press undo after a switch.
+    - Suggested fix: In the other-document branch, keep the replacement out of the history or start a fresh history. For example, dispatch it with `Transaction.addToHistory.of(false)`, or rebuild the state with `view.setState(...)` and the same extensions. Optionally, add an undo step after the switch to the regression spec.
 
 ## Review conclusion
 
-No material issues found. CR-1 is fixed correctly and the fix introduces no regressions. Both acceptance criteria are met by the code and its tests. The remaining P3 (CR-2) is a minor, non-blocking edge case. Test runs could not be repeated in this review session, so the parent must record its own run evidence.
+No material issues found. The spec additions in 49f7c9c are correct, test what their names claim (the collection-tab test really reuses an editor instance for another document), and show no flakiness risk. The raw-editor specs pass at HEAD (331 tests). The earlier conclusions still hold, because the production code is unchanged since 1cb45a9. The only remaining finding is the P3 CR-2, which the parent accepted as non-blocking.
