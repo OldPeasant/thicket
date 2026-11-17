@@ -348,6 +348,112 @@ describe('CollectionView query history and favorites', () => {
     expect(document.activeElement).toBe(get('history-toggle'));
     el().remove();
   });
+
+  it('is a disclosure button, not a menu button', () => {
+    const toggle = get('history-toggle');
+    expect(toggle.hasAttribute('aria-haspopup')).toBe(false);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.getAttribute('aria-controls')).toMatch(/^query-history-\d+$/);
+  });
+
+  it('picking a query returns focus to the History button', async () => {
+    document.body.appendChild(el());
+    type('query-filter', '{ a: 1 }');
+    click('query-run');
+    await settle();
+    click('history-toggle');
+    await settle();
+    all('history-entry')[0]?.focus();
+    all('history-entry')[0]?.click();
+    await settle();
+    expect(q('history-panel')).toBeNull();
+    expect(document.activeElement).toBe(get('history-toggle'));
+    el().remove();
+  });
+
+  it('deleting a favorite focuses the next favorite, or the name field when none is left', async () => {
+    const saved = (id: string, name: string): FavoriteQuery => ({
+      id,
+      name,
+      query: { filter: `{ ${name}: 1 }`, projection: '', sort: '', collation: '', limit: '' },
+      at: '',
+    });
+    favorites = [saved('f1', 'A'), saved('f2', 'B'), saved('f3', 'C')];
+    fixture.componentRef.setInput('tab', { ...TAB, data: { ...TAB.data, coll: 'users' } });
+    await settle();
+    document.body.appendChild(el());
+    click('history-toggle');
+    await settle();
+
+    // The first: the next one (B) takes its place.
+    all('history-favorite-delete')[0]?.focus();
+    all('history-favorite-delete')[0]?.click();
+    await settle();
+    expect(all('history-favorite').map((b) => b.textContent)).toEqual([
+      expect.stringContaining('B'),
+      expect.stringContaining('C'),
+    ]);
+    expect(document.activeElement).toBe(all('history-favorite')[0]);
+
+    // The last: the one before it.
+    all('history-favorite-delete')[1]?.click();
+    await settle();
+    expect(document.activeElement).toBe(all('history-favorite')[0]);
+
+    // None left: the name field.
+    all('history-favorite-delete')[0]?.click();
+    await settle();
+    expect(all('history-favorite')).toHaveLength(0);
+    expect(document.activeElement).toBe(get('history-favorite-name'));
+    el().remove();
+  });
+
+  it('a failed delete leaves the favorite and the focus where they are', async () => {
+    favorites = [
+      {
+        id: 'f1',
+        name: 'A',
+        query: { filter: '{}', projection: '', sort: '', collation: '', limit: '' },
+        at: '',
+      },
+    ];
+    fixture.componentRef.setInput('tab', { ...TAB, data: { ...TAB.data, coll: 'users' } });
+    await settle();
+    fake.fail('history.deleteFavorite', { code: 'INTERNAL', message: 'busy' });
+    document.body.appendChild(el());
+    click('history-toggle');
+    await settle();
+    const remove = get('history-favorite-delete');
+    remove.focus();
+    remove.click();
+    await settle();
+    expect(all('history-favorite')).toHaveLength(1);
+    expect(document.activeElement).toBe(remove);
+    el().remove();
+  });
+
+  it('a press outside closes the panel; a press inside keeps it open', async () => {
+    document.body.appendChild(el());
+    click('history-toggle');
+    await settle();
+    get('history-favorite-name').dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    get('history-toggle').dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    await settle();
+    expect(q('history-panel')).not.toBeNull();
+
+    // The query bar is outside the History component.
+    get('query-filter').dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    await settle();
+    expect(q('history-panel')).toBeNull();
+    expect(get('history-toggle').getAttribute('aria-expanded')).toBe('false');
+
+    // The toggle still opens it again (its own pointerdown is inside).
+    get('history-toggle').dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    click('history-toggle');
+    await settle();
+    expect(q('history-panel')).not.toBeNull();
+    el().remove();
+  });
 });
 
 describe('describeQuery', () => {

@@ -42,12 +42,18 @@ export interface HistoryStoreOptions {
   limit?: number;
 }
 
+/**
+ * A stored query: like the contract's `savedQuery`, but unknown fields (written by a newer version)
+ * are dropped instead of making the whole file invalid.
+ */
+const storedQuery = z.object(savedQuerySchema.shape);
+
 const historyFile = z.object({
   version: z.number().int().min(1),
   profileId: z.string(),
   db: z.string(),
   coll: z.string(),
-  entries: z.array(z.object({ query: savedQuerySchema, at: z.string() })),
+  entries: z.array(z.object({ query: storedQuery, at: z.string() })),
 });
 
 const storedFavorite = z.object({
@@ -56,7 +62,7 @@ const storedFavorite = z.object({
   db: z.string(),
   coll: z.string(),
   name: z.string().min(1),
-  query: savedQuerySchema,
+  query: storedQuery,
   at: z.string(),
 });
 
@@ -120,6 +126,7 @@ export function historyFileName(key: CollectionKey): string {
  * Files are read lazily and cached. Writes are atomic (`<file>.tmp`, flushed, renamed) and every
  * operation is serialized. A file that is not valid JSON in the expected layout is renamed to
  * `<file>.corrupt-<time>` and treated as empty; a file that cannot be read fails the operation.
+ * Unknown fields (from a newer version) are ignored, and dropped when the file is next written.
  */
 export class HistoryStore {
   private readonly dir: string;
@@ -157,6 +164,14 @@ export class HistoryStore {
   /** The collection's favorites, sorted by name. */
   favoritesOf(key: CollectionKey): Promise<FavoriteQuery[]> {
     return this.serialized(async () => this.publicFavorites(await this.loadFavorites(), key));
+  }
+
+  /** The collection's history and favorites, read in one operation (a consistent snapshot). */
+  list(key: CollectionKey): Promise<{ entries: HistoryEntry[]; favorites: FavoriteQuery[] }> {
+    return this.serialized(async () => ({
+      entries: [...(await this.loadHistory(key))],
+      favorites: this.publicFavorites(await this.loadFavorites(), key),
+    }));
   }
 
   /** Records a run query at the top of the history; returns the history. */

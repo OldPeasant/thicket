@@ -27,6 +27,10 @@ function copy(query: SavedQuery): SavedQuery {
 export class QueryHistory {
   private readonly api = inject(ApiService);
   private target: HistoryTarget | null = null;
+  /** Number of the last request sent; answers are applied only if newer than what a list shows. */
+  private sent = 0;
+  private entriesSeq = 0;
+  private favoritesSeq = 0;
 
   /** Recent queries, newest first. */
   readonly entries = signal<readonly HistoryEntry[]>([]);
@@ -42,10 +46,11 @@ export class QueryHistory {
     this.favorites.set([]);
     this.error.set(null);
     await this.call(target, async () => {
+      const seq = ++this.sent;
       const { entries, favorites } = await this.api.request('history.list', { ...target });
       return () => {
-        this.entries.set(entries);
-        this.favorites.set(favorites);
+        this.setEntries(seq, entries);
+        this.setFavorites(seq, favorites);
       };
     });
   }
@@ -55,8 +60,9 @@ export class QueryHistory {
     const target = this.target;
     if (target === null) return;
     await this.call(target, async () => {
+      const seq = ++this.sent;
       const { entries } = await this.api.request('history.add', { ...target, query: copy(query) });
-      return () => this.entries.set(entries);
+      return () => this.setEntries(seq, entries);
     });
   }
 
@@ -65,12 +71,13 @@ export class QueryHistory {
     const target = this.target;
     if (target === null) return false;
     return this.call(target, async () => {
+      const seq = ++this.sent;
       const { favorites } = await this.api.request('history.saveFavorite', {
         ...target,
         name,
         query: copy(query),
       });
-      return () => this.favorites.set(favorites);
+      return () => this.setFavorites(seq, favorites);
     });
   }
 
@@ -78,8 +85,9 @@ export class QueryHistory {
     const target = this.target;
     if (target === null) return;
     await this.call(target, async () => {
+      const seq = ++this.sent;
       const { favorites } = await this.api.request('history.deleteFavorite', { ...target, id });
-      return () => this.favorites.set(favorites);
+      return () => this.setFavorites(seq, favorites);
     });
   }
 
@@ -87,9 +95,26 @@ export class QueryHistory {
     const target = this.target;
     if (target === null) return;
     await this.call(target, async () => {
+      const seq = ++this.sent;
       const { entries } = await this.api.request('history.clear', { ...target });
-      return () => this.entries.set(entries);
+      return () => this.setEntries(seq, entries);
     });
+  }
+
+  /**
+   * Main answers in request order, but an answer older than the one a list shows (e.g. a slow
+   * `history.list` after a `history.add` sent later) must not replace it.
+   */
+  private setEntries(seq: number, entries: readonly HistoryEntry[]): void {
+    if (seq <= this.entriesSeq) return;
+    this.entriesSeq = seq;
+    this.entries.set(entries);
+  }
+
+  private setFavorites(seq: number, favorites: readonly FavoriteQuery[]): void {
+    if (seq <= this.favoritesSeq) return;
+    this.favoritesSeq = seq;
+    this.favorites.set(favorites);
   }
 
   /** Runs a request; applies its answer only while `target` is still shown. */

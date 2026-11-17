@@ -4,7 +4,6 @@
   class="btn quiet toggle"
   data-testid="history-toggle"
   title="Recent and favorite queries of this collection"
-  aria-haspopup="true"
   [attr.aria-expanded]="open()"
   [attr.aria-controls]="uid"
   (click)="toggle()"
@@ -22,6 +21,7 @@
     <!-- Not a <form>: the panel is inside the query bar's form. -->
     <div class="save" role="group" aria-label="Save as favorite">
       <input
+        #nameInput
         class="name"
         data-testid="history-favorite-name"
         aria-label="Favorite name"
@@ -54,9 +54,10 @@
       </p>
     } @else {
       <ul class="list" data-testid="history-favorites">
-        @for (f of history.favorites(); track f.id) {
+        @for (f of history.favorites(); track f.id; let i = $index) {
           <li class="item">
             <button
+              #favoritePick
               type="button"
               class="pick"
               data-testid="history-favorite"
@@ -72,7 +73,7 @@
               data-testid="history-favorite-delete"
               [attr.aria-label]="'Delete favorite ' + f.name"
               title="Delete favorite"
-              (click)="remove(f.id)"
+              (click)="remove(f.id, i)"
             >
               ×
             </button>

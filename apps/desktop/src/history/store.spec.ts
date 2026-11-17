@@ -278,6 +278,65 @@ describe('HistoryStore', () => {
     expect(await call('history.clear', ORDERS)).toEqual({ entries: [] });
   });
 
+  it('answers history.list from the state before an add sent after it', async () => {
+    const handlers = historyHandlers(open());
+    const call = (method: string, params: unknown) =>
+      (handlers[method] as (p: unknown) => Promise<unknown>)(params);
+    await call('history.saveFavorite', { ...ORDERS, name: 'Fav', query: query('{ f: 1 }') });
+    const order: string[] = [];
+    const list = call('history.list', ORDERS).then((result) => {
+      order.push('list');
+      return result;
+    });
+    const add = call('history.add', { ...ORDERS, query: query('{ a: 1 }') }).then((result) => {
+      order.push('add');
+      return result;
+    });
+    expect(await list).toEqual({
+      entries: [],
+      favorites: [{ id: 'f1', name: 'Fav', query: query('{ f: 1 }'), at: expect.any(String) }],
+    });
+    expect(await add).toEqual({ entries: [{ query: query('{ a: 1 }'), at: expect.any(String) }] });
+    expect(order).toEqual(['list', 'add']);
+  });
+
+  it('reads files with unknown extra fields (from a newer version) without moving them aside', async () => {
+    await mkdir(path.join(dir, 'history'));
+    const historyPath = path.join(dir, 'history', historyFileName(ORDERS));
+    await writeFile(
+      historyPath,
+      JSON.stringify({
+        version: 2,
+        ...ORDERS,
+        pinned: true,
+        entries: [{ query: { ...query('{ a: 1 }'), hint: '{ a: 1 }' }, at: 'x', runs: 3 }],
+      }),
+    );
+    await writeFile(
+      path.join(dir, 'favorites.json'),
+      JSON.stringify({
+        version: 2,
+        favorites: [
+          {
+            id: 'f9',
+            ...ORDERS,
+            name: 'New',
+            query: { ...query('{ f: 1 }'), hint: '{ f: 1 }' },
+            at: 'y',
+            color: 'red',
+          },
+        ],
+      }),
+    );
+    const store = open();
+    expect(await store.list(ORDERS)).toEqual({
+      entries: [{ query: query('{ a: 1 }'), at: 'x' }],
+      favorites: [{ id: 'f9', name: 'New', query: query('{ f: 1 }'), at: 'y' }],
+    });
+    expect((await readdir(dir)).filter((name) => name.includes('corrupt'))).toEqual([]);
+    expect(await readdir(path.join(dir, 'history'))).toEqual([historyFileName(ORDERS)]);
+  });
+
   describe('edge cases', () => {
     /** The real file system, with the given operations replaced. */
     const patched = (overrides: Partial<HistoryFs>): HistoryFs => ({

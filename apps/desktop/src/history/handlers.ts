@@ -13,8 +13,9 @@ export function historyHandlers(store: HistoryStore): Record<string, Handler> {
     'history.list': async (
       params: ParsedParamsOf<'history.list'>,
     ): Promise<ResultOf<'history.list'>> => {
-      const key = keyOf(params);
-      return { entries: await store.history(key), favorites: await store.favoritesOf(key) };
+      // One store operation, so the answer reflects the state when the request arrived, before
+      // any later `history.add` (answers come back in request order).
+      return store.list(keyOf(params));
     },
     'history.add': async (
       params: ParsedParamsOf<'history.add'>,

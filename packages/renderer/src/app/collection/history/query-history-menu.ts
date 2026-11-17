@@ -2,12 +2,15 @@ import {
   ChangeDetectionStrategy,
   Component,
   ElementRef,
+  Injector,
+  afterNextRender,
   computed,
   inject,
   input,
   output,
   signal,
   viewChild,
+  viewChildren,
 } from '@angular/core';
 import { MAX_FAVORITE_NAME_LENGTH, type SavedQuery } from '@thicket/contract';
 
@@ -37,7 +40,10 @@ let nextUid = 0;
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './query-history-menu.html',
   styleUrl: './query-history-menu.css',
-  host: { '(keydown.escape)': 'closeAndFocus($event)' },
+  host: {
+    '(keydown.escape)': 'closeAndFocus($event)',
+    '(document:pointerdown)': 'closeOnOutside($event)',
+  },
 })
 export class QueryHistoryMenu {
   /** What the query bar holds now (saved as a favorite). */
@@ -46,6 +52,8 @@ export class QueryHistoryMenu {
   readonly apply = output<SavedQuery>();
 
   protected readonly history = inject(QueryHistory);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly injector = inject(Injector);
   protected readonly open = signal(false);
   protected readonly name = signal('');
   protected readonly saving = signal(false);
@@ -60,6 +68,8 @@ export class QueryHistoryMenu {
   });
 
   private readonly toggleButton = viewChild<ElementRef<HTMLButtonElement>>('toggleButton');
+  private readonly nameInput = viewChild<ElementRef<HTMLInputElement>>('nameInput');
+  private readonly favoriteButtons = viewChildren<ElementRef<HTMLButtonElement>>('favoritePick');
 
   protected time(at: string): string {
     const date = new Date(at);
@@ -77,8 +87,18 @@ export class QueryHistoryMenu {
     this.toggleButton()?.nativeElement.focus();
   }
 
+  /** A press outside the button and its panel closes the panel (like any dropdown). */
+  protected closeOnOutside(event: Event): void {
+    if (!this.open()) return;
+    const target = event.target;
+    if (target instanceof Node && this.host.nativeElement.contains(target)) return;
+    this.open.set(false);
+  }
+
   protected pick(query: SavedQuery): void {
     this.open.set(false);
+    // The picked button leaves the DOM: keep keyboard focus on the History button.
+    this.toggleButton()?.nativeElement.focus();
     this.apply.emit({ ...query });
   }
 
@@ -99,8 +119,20 @@ export class QueryHistoryMenu {
     }
   }
 
-  protected remove(id: string): void {
-    void this.history.deleteFavorite(id);
+  protected async remove(id: string, index: number): Promise<void> {
+    await this.history.deleteFavorite(id);
+    // Failed (the favorite and its focused button are still there) or the panel was closed.
+    if (!this.open() || this.history.favorites().some((f) => f.id === id)) return;
+    // The focused delete button left the DOM: focus the next favorite (or the one before it, if
+    // the last was deleted), or the name field when no favorite is left.
+    afterNextRender(
+      () => {
+        const buttons = this.favoriteButtons();
+        const next = buttons[Math.min(index, buttons.length - 1)] ?? this.nameInput();
+        next?.nativeElement.focus();
+      },
+      { injector: this.injector },
+    );
   }
 
   protected clear(): void {

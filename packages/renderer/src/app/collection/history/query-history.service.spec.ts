@@ -175,6 +175,17 @@ describe('QueryHistory', () => {
     expect(history.entries()).toEqual([entry('{ ran: 1 }')]);
   });
 
+  it('keeps a favorite saved while the list was pending, and still applies the list entries', async () => {
+    const lists = queue('history.list');
+    fake.handle('history.saveFavorite', () => ({ favorites: [favorite('f1', 'A')] }));
+    const loading = history.load(ORDERS);
+    expect(await history.saveFavorite('A', query('{ A: 1 }'))).toBe(true);
+    lists[0]?.resolve({ entries: [entry('{ old: 1 }')], favorites: [] });
+    await loading;
+    expect(history.favorites()).toEqual([favorite('f1', 'A')]);
+    expect(history.entries()).toEqual([entry('{ old: 1 }')]);
+  });
+
   it('shows a failed request and clears the error on the next success', async () => {
     fake.fail('history.list', { code: 'INTERNAL', message: 'could not read history' });
     await history.load(ORDERS);
