@@ -55,12 +55,12 @@
   "validation": [
     {
       "command": "npm run test:e2e -- shell",
-      "result": "pass (2 passed, demo step 11 and read-only banner)"
+      "result": "pass"
     },
     {
       "command": "cd packages/renderer && npx ng test --include='src/app/console/**/*.spec.ts' --include='src/app/sidebar/**/*.spec.ts'",
-      "result": "pass (297 passed)"
+      "result": "pass"
     },
-    { "command": "npm run check", "result": "pass (root 4038, renderer 2774 tests; lint, typecheck)" }
+    { "command": "npm run check", "result": "pass" }
   ]
 }
