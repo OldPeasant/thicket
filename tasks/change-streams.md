@@ -11,7 +11,8 @@ lease_until: 2026-11-17T07:37:07Z
 Watch a collection or database (replica set only) with a live event list; open the changed document.
 
 ## Acceptance criteria
-- [ ] Integration test: insert/update/delete events received in order
+- [x] Integration test: insert/update/delete events received in order
+  - verified (2026-11-17 08:19+0100 by felix/agent-1): npx vitest run --config test/integration/vitest.config.ts test/integration/change-streams.int.spec.ts (Podman, mongo8rs replica-set fixture) -> 10 passed, incl. 'receives insert, update and delete events of a collection in order' (order, documentKeys, clusterTime order) and cursor-pinning/cleanup tests
 - [ ] Standalone server shows a clear 'needs replica set' message (test)
 
 ## Notes
