@@ -27,15 +27,19 @@ import {
  *        the OS keychain; mark the connection production; connect.
  *        -> welcome "New connection", paste the URI into the Connection string tab; the form tab
  *           shows host, port, user, TLS + CA file, replica set; the password is not in
- *           connections.json, secrets.bin was written and does not hold it in plain text;"Production" checked; Test connection
- *           succeeds; Save; connect from the sidebar; the shell shows the production accent.
+ *           connections.json, secrets.bin was written and does not hold it in plain text;
+ *           "Production" checked (scrolled into view, own screenshot); Test connection succeeds;
+ *           Save; connect from the sidebar; the shell shows the production accent.
  * [x] 3. Sidebar shows databases and collections (with document counts and sizes); open `orders`.
  *        -> `shop` and `orders` in the tree, "Stats" shows "40,000 docs, …"; click opens the tab.
  * [x] 4. Table, one row per document, 50 per page; page 3 of ~40 000 one click away; filter
  *        `{status: "open", total: {$gt: 100}}` and a sort; results update.
- *        -> 50 table rows, "~40,000", "of ~800"; page field 3 -> rows 101–150; filter + sort
- *           `{total: -1}` -> only open orders, totals above 100 in descending
- *           order, the first document is the largest open order.
+ *        -> 50 table rows, "~40,000", "of ~800", the demo document is not on page 1 (it has the
+ *           largest `_id`, so it is last in default order); page field 3 -> rows 101–150
+ *           (screenshot); filter + sort `{total: -1}` -> back on page 1, only open orders, totals
+ *           above 100 in descending order, the first document is the demo document (the largest
+ *           open total); "Count exactly" equals the driver's countDocuments for the same filter,
+ *           which is below the number of open orders (proves `total: {$gt: 100}`).
  * [x] 5. Open a document: nested `items` (2 000 subdocuments) pages inside the document; `_id`
  *        ObjectId, `createdAt` Date, `total` Decimal128.
  *        -> list view, first document: "1–100 of 2,000 items", Next -> "101–200 …"; type badges
@@ -78,8 +82,12 @@ interface Order {
   reviewed?: string;
 }
 
-/** The demo document: open, the largest total, 2 000 items. */
-const DEMO_ID = new ObjectId();
+/**
+ * The demo document: open, the largest total, 2 000 items. Its `_id` is generated in `seed()` after
+ * all other orders, so it is the largest `_id` and last in default (`_id`) order: being first after
+ * the step-4 sort proves the sort.
+ */
+let DEMO_ID: ObjectId;
 
 let server: E2EMongo | undefined;
 let unavailable: string | undefined;
@@ -130,6 +138,8 @@ async function seed(mongo: E2EMongo): Promise<void> {
       });
       if (batch.length === 5_000) await c.insertMany(batch.splice(0));
     }
+    if (batch.length > 0) await c.insertMany(batch.splice(0));
+    DEMO_ID = new ObjectId();
     batch.push({
       _id: DEMO_ID,
       status: 'open',
@@ -142,6 +152,12 @@ async function seed(mongo: E2EMongo): Promise<void> {
       })),
     });
     await c.insertMany(batch);
+    const last = await c
+      .find({}, { projection: { _id: 1 } })
+      .sort({ _id: -1 })
+      .limit(1)
+      .next();
+    if (!last?._id.equals(DEMO_ID)) throw new Error('the demo document must have the largest _id');
   });
 }
 
@@ -237,7 +253,11 @@ test('M1 demo, steps 2–7, against a TLS replica set', async ({ window, userDat
     await expect(window.getByTestId('field-replica-set')).toHaveValue('rs0');
     await expect(window.getByTestId('uri-preview')).not.toContainText(user.password);
 
-    await window.getByTestId('field-production').check();
+    const production = window.getByTestId('field-production');
+    await production.check();
+    await expect(production).toBeChecked();
+    await production.scrollIntoViewIfNeeded();
+    await shot(window, 'step-2-production.png');
     await window.getByTestId('secret-saved').check();
     await window.getByTestId('test-connection').click();
     await expect(window.getByTestId('test-ok')).toContainText('Connected in', { timeout: 30_000 });
@@ -282,13 +302,22 @@ test('M1 demo, steps 2–7, against a TLS replica set', async ({ window, userDat
     await expect(
       window.locator('app-json-explorer .json-output > app-json-table > .tw > table > tbody > tr'),
     ).toHaveCount(50);
-    await shot(window, 'step-4-table.png');
+    // Default order is `_id`: the demo document (largest `_id`) is not on page 1.
+    const raw = window.getByTestId('raw-text');
+    await window.getByTestId('view-raw').click();
+    await expect(raw).toContainText('ObjectId("');
+    await expect(raw).not.toContainText(DEMO_ID.toHexString());
+    await window.getByTestId('view-table').click();
 
     // Page 3 by its number in the page field (Next twice gets there too).
     await window.getByTestId('pager-page').fill('3');
     await window.getByTestId('pager-page').press('Enter');
     await expect(rows).toContainText(/^101–150 of ~40,000/);
     await expect(window.getByTestId('pager-page')).toHaveValue('3');
+    await expect(
+      window.locator('app-json-explorer .json-output > app-json-table > .tw > table > tbody > tr'),
+    ).toHaveCount(50);
+    await shot(window, 'step-4-table.png');
 
     await window.getByTestId('query-filter').fill('{status: "open", total: {$gt: 100}}');
     await window.getByTestId('query-sort').fill('{total: -1}');
@@ -297,7 +326,6 @@ test('M1 demo, steps 2–7, against a TLS replica set', async ({ window, userDat
     await expect(rows).toHaveText('1–50');
     await expect(window.getByTestId('pager-page')).toHaveValue('1');
     await window.getByTestId('view-raw').click();
-    const raw = window.getByTestId('raw-text');
     await expect(raw).toContainText(`ObjectId("${DEMO_ID.toHexString()}")`);
     const text = (await raw.textContent()) ?? '';
     expect(text).not.toMatch(/status: "(paid|shipped|cancelled)"/);
@@ -310,6 +338,24 @@ test('M1 demo, steps 2–7, against a TLS replica set', async ({ window, userDat
     expect(totals.length).toBeGreaterThan(1);
     expect(totals.every((t) => t > 100)).toBe(true);
     expect(totals).toEqual([...totals].sort((a, b) => b - a));
+
+    // The whole filter, `total > 100` included: the exact count equals the driver's count for the
+    // same filter, which is below the number of open orders.
+    const [expected, open] = await withOrders(mongo, (c) =>
+      Promise.all([
+        c.countDocuments({ status: 'open', total: { $gt: Decimal128.fromString('100') } }),
+        c.countDocuments({ status: 'open' }),
+      ]),
+    );
+    expect(expected).toBeLessThan(open);
+    await window.getByTestId('pager-count').click();
+    await expect(rows).toContainText(`of ${expected.toLocaleString('en-US')} documents`);
+    // Counting keeps page 1 with the demo document first (steps 5–7 rely on it).
+    await expect(rows).toContainText(/^1–50 /);
+    await expect(window.getByTestId('pager-page')).toHaveValue('1');
+    expect(/ObjectId\("([0-9a-f]{24})"\)/.exec((await raw.textContent()) ?? '')?.[1]).toBe(
+      DEMO_ID.toHexString(),
+    );
     await shot(window, 'step-4-filter-sort.png');
   });
 
