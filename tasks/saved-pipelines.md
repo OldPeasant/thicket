@@ -13,7 +13,8 @@ SPEC M3 "save pipelines": the aggregation builder (agg-ui, `packages/renderer/sr
 ## Acceptance criteria
 - [x] Unit tests for the store (missing/corrupt file, atomic write) and contract samples
   - verified (2026-11-17 05:56+0100 by dell26/agent-2): npx vitest run apps/desktop/src/pipelines packages/contract at 7724ccb -> 856 passed (store: missing file, 10 corrupt variants moved to .corrupt-<time>, EACCES unreadable never overwritten, newer version read-only, tmp+flush+rename atomic write, failed rename keeps old file, stale temp removed; contract valid/invalid param+result samples for pipelines.list/save/rename/delete)
-- [ ] Component test: save a pipeline with a disabled stage, reopen it in a new builder tab: same stages and enabled flags
+- [x] Component test: save a pipeline with a disabled stage, reopen it in a new builder tab: same stages and enabled flags
+  - verified (2026-11-17 05:56+0100 by dell26/agent-2): cd packages/renderer && npx ng test --include src/app/aggregation at 7724ccb -> 129 passed, incl. 'saves a pipeline with a disabled stage and reopens it in a new builder tab' (fixture destroyed, new AggregationView, Open -> same parsed stages and enabled flags [true,false,true]; Run skips the disabled stage)
 
 ## Notes
 - ASSUMPTION (2026-11-17 05:40+0100 by dell26/agent-2): Saved pipelines are per collection = profileId+db+coll (same scope as query favorites in query-history), not per db.coll across profiles; names unique per collection ignoring case; Save under a taken name replaces that pipeline (keeps its id), Rename to a taken name answers CONFLICT.
