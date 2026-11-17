@@ -15,6 +15,8 @@ import { ApiError, ApiService, describeError } from '../api';
 import { generateObjectId } from '../explorer/bson-input.util';
 import { WriteGuard } from '../safety/write-guard.service';
 import { DocumentEdits, documentKey, idOf, pendingSave } from './edit-session';
+import { SaveHistory } from './history';
+import { applyUpdate } from './history/apply-update';
 
 /** The collection the documents belong to, and how the view shows them. */
 export interface DocumentHost {
@@ -99,6 +101,8 @@ export class DocumentActions {
   private readonly draftList = signal<readonly DraftDocument[]>([]);
   private readonly conflictMap = signal<ReadonlyMap<string, SaveConflict>>(new Map());
   private readonly messageState = signal<ActionMessage | null>(null);
+  /** The pre-save version of each document's last save ("Undo last save"). */
+  private readonly saveHistory = new SaveHistory();
 
   readonly drafts = this.draftList.asReadonly();
   /** A write is running. */
@@ -129,15 +133,72 @@ export class DocumentActions {
     const entry = this.edits.get(key);
     if (entry === undefined || this.isBusy(key)) return false;
     const sent = entry.current;
+    const partial = this.isPartial(key);
     // What was sent is the new baseline; edits made since then stay unsaved.
     return this.send(
       key,
       entry.original,
       sent,
-      this.isPartial(key),
-      () => this.edits.rebase(key, sent),
+      partial,
+      () => {
+        this.edits.rebase(key, sent);
+        this.recordSave(key, entry.original, sent, partial, entry.hidesSubFields);
+      },
       entry.hidesSubFields ? entry.original : undefined,
     );
+  }
+
+  /**
+   * Whether the last save of the document under `key` can be undone (reactive): it was saved in
+   * this tab and not undone or deleted since.
+   */
+  canUndoSave(key: string): boolean {
+    return this.saveHistory.has(key);
+  }
+
+  /**
+   * "Undo last save": writes the version from before the document's last save back, as the
+   * minimal diff from the saved version with the saved version's values as the conflict check (as
+   * Save does). When the document changed on the server since, nothing is overwritten: the
+   * message says so and the undo is no longer offered. Refused while the document has unsaved
+   * edits (Save or Revert them first). Resolves with true when the old version was written.
+   */
+  async undoSave(key: string): Promise<boolean> {
+    this.requireHost();
+    const last = this.saveHistory.get(key);
+    if (last === undefined || this.isBusy(key)) return false;
+    if (this.edits.isModified(key)) {
+      this.messageState.set({ kind: 'error', text: UNDO_WITH_EDITS_REFUSED });
+      return false;
+    }
+    return this.send(
+      key,
+      last.after,
+      last.before,
+      last.partial,
+      () => this.saveHistory.drop(key),
+      last.hidesSubFields ? last.after : undefined,
+      {
+        failure: 'Not undone',
+        done: (id) => `Undid the last save of ${label(id)}.`,
+        refused: 'Not undone',
+        keepOrder: true,
+        onConflict: () => {
+          this.saveHistory.drop(key);
+          this.messageState.set({ kind: 'error', text: UNDO_CONFLICT });
+        },
+      },
+    );
+  }
+
+  private recordSave(
+    key: string,
+    before: BsonDocument,
+    after: BsonDocument,
+    partial: boolean,
+    hidesSubFields: boolean,
+  ): void {
+    this.saveHistory.record({ key, before, after, partial, hidesSubFields });
   }
 
   /** Saves every edited document, one after the other; stops at the first that isn't saved. */
@@ -317,13 +378,17 @@ export class DocumentActions {
       await this.keepServer(key);
       return true;
     }
+    const hidesSubFields = entry?.hidesSubFields ?? false;
     return this.send(
       key,
       base,
       local,
       partial,
-      saved,
-      entry?.hidesSubFields ? entry.original : undefined,
+      () => {
+        saved();
+        this.recordSave(key, base, local, partial, hidesSubFields);
+      },
+      hidesSubFields ? entry?.original : undefined,
     );
   }
 
@@ -342,11 +407,12 @@ export class DocumentActions {
     partial: boolean,
     saved: () => void,
     loaded?: BsonDocument,
+    options: SendOptions = SAVE_OPTIONS,
   ): Promise<boolean> {
     const host = this.requireHost();
     const pending = pendingSave({ original, current });
     if (!pending.ok) {
-      this.messageState.set({ kind: 'error', text: `Not saved: ${pending.error}` });
+      this.messageState.set({ kind: 'error', text: `${options.refused}: ${pending.error}` });
       return false;
     }
     const id = idOf(original);
@@ -357,19 +423,20 @@ export class DocumentActions {
       coll: host.coll,
       id: stringifyEJson(id),
     };
-    const diff = pending.diff;
+    const diff = options.keepOrder && !partial ? keepingOrder(pending.diff, original, current) : pending.diff;
     if (
       partial &&
       (overwritesHiddenData(diff, original) ||
         (loaded !== undefined && unsetsUnloaded(diff, loaded)))
     ) {
+      const text = host.projection() !== undefined ? PROJECTION_REFUSED : PARTIAL_REFUSED;
       this.messageState.set({
         kind: 'error',
-        text: host.projection() !== undefined ? PROJECTION_REFUSED : PARTIAL_REFUSED,
+        text: `${options.refused}: ${text}`,
       });
       return false;
     }
-    return this.write('Not saved', key, async () => {
+    const write = async () => {
       if (diff.kind === 'update') {
         await this.guard.run('docs.update', {
           ...base,
@@ -384,10 +451,11 @@ export class DocumentActions {
         });
       }
       this.dropConflict(key);
-      this.messageState.set({ kind: 'info', text: `Saved ${label(id)}.` });
+      this.messageState.set({ kind: 'info', text: options.done(id) });
       await this.readBack(key, base.id, current);
       saved();
-    });
+    };
+    return this.write(options.failure, key, write, options.onConflict);
   }
 
   /** Deletes the loaded document `doc` after the confirm dialog; its unsaved edits go too. */
@@ -405,6 +473,7 @@ export class DocumentActions {
       });
       this.edits.discard(key);
       this.dropConflict(key);
+      this.saveHistory.drop(key);
       this.messageState.set({
         kind: 'info',
         text: deleted ? `Deleted ${label(id)}.` : `${label(id)} was already deleted.`,
@@ -459,15 +528,22 @@ export class DocumentActions {
 
   /**
    * Runs a write for `key`; failures become the message, starting with `failure` ("Not saved"), and
-   * a cancelled dialog says nothing.
+   * a cancelled dialog says nothing. `onConflict` replaces the conflict handling (a conflict entry
+   * for the conflict view) when the server refused the write because the document changed.
    */
-  private async write(failure: string, key: string, body: () => Promise<void>): Promise<boolean> {
+  private async write(
+    failure: string,
+    key: string,
+    body: () => Promise<void>,
+    onConflict?: () => void,
+  ): Promise<boolean> {
     this.busyKeys.update((set) => new Set(set).add(key));
     try {
       await body();
       return true;
     } catch (error) {
-      await this.failed(failure, key, error);
+      if (onConflict !== undefined && ApiError.from(error).code === 'CONFLICT') onConflict();
+      else await this.failed(failure, key, error);
       return false;
     } finally {
       this.busyKeys.update((set) => {
@@ -580,13 +656,58 @@ export class DocumentActions {
   }
 }
 
+/** How `send` writes and words its messages: a save, or an undo of the last save. */
+interface SendOptions {
+  /** Starts the message of a failed write ("Not saved"). */
+  readonly failure: string;
+  /** Starts the message of a write refused before sending. */
+  readonly refused: string;
+  /** The message once written. */
+  readonly done: (id: BsonValue) => string;
+  /** Handles a conflict instead of the conflict view (see `write`). */
+  readonly onConflict?: () => void;
+  /**
+   * The server must end up with `current` in its field order (an undo restores a version): when
+   * the update would leave fields in another order (MongoDB appends a field it adds), the whole
+   * document is replaced instead, with the same conflict check. Never for a partial document.
+   */
+  readonly keepOrder?: boolean;
+}
+
+/**
+ * `diff` as a replace of the whole document `current` when applying its update to `original`
+ * would not give `current` with its field order; otherwise `diff` as it is.
+ */
+function keepingOrder(
+  diff: Exclude<DocumentDiff, { readonly kind: 'none' }>,
+  original: BsonDocument,
+  current: BsonDocument,
+): Exclude<DocumentDiff, { readonly kind: 'none' }> {
+  if (diff.kind !== 'update' || bsonEquals(applyUpdate(original, diff.ops), current)) return diff;
+  const { expected, filter, changedFields } = diff;
+  return { kind: 'replace', replacement: current, expected, filter, changedFields };
+}
+
+const SAVE_OPTIONS: SendOptions = {
+  failure: 'Not saved',
+  refused: 'Not saved',
+  done: (id) => `Saved ${label(id)}.`,
+};
+
+const UNDO_WITH_EDITS_REFUSED =
+  'Not undone: this document has unsaved edits. Save or revert them first.';
+
+const UNDO_CONFLICT =
+  'Not undone: the document was changed on the server since the save. Nothing was overwritten; ' +
+  'run the query again to see the current version.';
+
 const PROJECTION_REFUSED =
-  'Not saved: with a projection active, this edit would replace data the projection hides. ' +
+  'with a projection active, this edit would replace data the projection hides. ' +
   'Clear the projection and edit again.';
 
 /** The same refusal for a document loaded only partly without a projection active now. */
 const PARTIAL_REFUSED =
-  'Not saved: this document was loaded only partly (with a projection, or a large document whose ' +
+  'this document was loaded only partly (with a projection, or a large document whose ' +
   'long arrays are read page by page), and this edit would replace data that was not loaded. ' +
   'Edit single values instead, or run the query without a projection and edit again.';
 

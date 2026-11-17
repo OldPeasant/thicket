@@ -10,7 +10,7 @@ import { DocumentEdits, documentKey, idOf } from './edit-session';
 
 /**
  * The head of one document in the document list: its `_id`, the modified marker with the change
- * count, and Save / Revert / Clone / Delete for this document.
+ * count, and Save / Revert / Undo last save / Clone / Delete for this document.
  */
 @Component({
   selector: 'app-document-header',
@@ -48,6 +48,23 @@ import { DocumentEdits, documentKey, idOf } from './edit-session';
             (click)="save()"
           >
             Save
+          </button>
+        }
+        @if (canUndoSave()) {
+          <button
+            type="button"
+            class="btn quiet"
+            data-testid="doc-undo-save"
+            [title]="
+              modified()
+                ? 'Save or revert your edits first'
+                : 'Write back the version from before the last save'
+            "
+            [appWriteControl]="profileId()"
+            [disabledWhen]="busy() || modified()"
+            (click)="undoSave()"
+          >
+            Undo last save
           </button>
         }
         <button
@@ -131,6 +148,10 @@ export class DocumentHeader {
     const key = this.key();
     return key !== null && this.actions.conflicts().has(key);
   });
+  protected readonly canUndoSave = computed(() => {
+    const key = this.key();
+    return key !== null && this.actions.canUndoSave(key);
+  });
   protected readonly busy = computed(() => {
     const key = this.key();
     return key !== null && this.actions.isBusy(key);
@@ -144,6 +165,11 @@ export class DocumentHeader {
   protected revert(): void {
     const key = this.key();
     if (key !== null) this.actions.revert(key);
+  }
+
+  protected undoSave(): void {
+    const key = this.key();
+    if (key !== null) void this.actions.undoSave(key);
   }
 
   protected clone(): void {
