@@ -818,7 +818,19 @@ Windows: run `.taskcheck` and npm scripts from Git for Windows' bash (TFP runs t
 - `npm run test:e2e` builds the renderer and the Electron bundles, then runs Playwright Test
   (`@playwright/test`, `playwright.config.ts`) on `test/e2e/**/*.e2e.ts`, one worker. On Linux run it
   under `xvfb-run -a`; without a display the harness passes `--ozone-platform=headless`
-  (`THICKET_TEST_HEADLESS=1` forces that). Not part of `npm run check` (type-checked and linted by it).
+  (`THICKET_TEST_HEADLESS=1` forces that) and `--ozone-override-screen-size=1920,1080`: the headless
+  backend's default screen is 1×1 px, which shrinks the window to 1×1, so clicks miss and nothing
+  is painted. `apps/desktop/test/helpers.ts` (`npm run test:electron`) uses the same switches.
+  Not part of `npm run check` (type-checked and linted by it).
+- Screenshots: always `await screenshot(electronApp, window | locator, path)` from the harness,
+  never `page.screenshot()` / `locator.screenshot()`. Why: on headless Linux Chromium only paints
+  when asked, so Playwright's screenshot (which waits for a new frame) could hang until its timeout
+  after a click switched the view, and `webContents.capturePage()` alone returned the view from
+  before the click. The helper makes sure the window has a real size, asks for a repaint, takes
+  Playwright's screenshot (5 s timeout) and, if that times out, falls back to
+  `capturePageWithRepaint()` (main process: `invalidate()`, wait 400 ms, `capturePage()`, three
+  times, keep the last). `test/e2e/screenshot.e2e.ts` checks it with DISPLAY/WAYLAND_DISPLAY unset:
+  after each view switch the PNG shows a marker colour drawn after the switch.
 - Import `test`/`expect` from `test/e2e/harness`. Fixtures: `userDataDir` (a fresh temp folder per
   test, passed as `THICKET_USER_DATA`, deleted afterwards), `appEnv` (option), `electronApp`, `window`
   (first window), `appOutput`, and `mongo` (the int-harness fixture named by the worker option
