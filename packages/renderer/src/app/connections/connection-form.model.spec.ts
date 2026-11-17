@@ -682,5 +682,64 @@ describe('connection-form.model', () => {
     it('stripUriSecrets reports nothing for a clean model', () => {
       expect(stripUriSecrets(emptyConnectionModel())).toEqual([]);
     });
+
+    it('stripUriSecrets removes a lower-case AWS_SESSION_TOKEN and an emptied property map', () => {
+      const model = emptyConnectionModel();
+      model.auth.mechanismProperties = { aws_session_token: PW };
+      expect(stripUriSecrets(model)).toEqual(['authMechanismProperties aws_session_token']);
+      expect(model.auth.mechanismProperties).toBeUndefined();
+      expect(JSON.stringify(model)).not.toContain(PW);
+    });
+
+    it('stripUriSecrets keeps the other mechanism properties', () => {
+      const model = emptyConnectionModel();
+      model.auth.mechanismProperties = { AWS_SESSION_TOKEN: PW, SERVICE_NAME: 'mongodb' };
+      stripUriSecrets(model);
+      expect(model.auth.mechanismProperties).toEqual({ SERVICE_NAME: 'mongodb' });
+    });
+
+    it('stripUriSecrets cleans unparsed options in extra, keeping what is not secret', () => {
+      const model = emptyConnectionModel();
+      model.extra = {
+        AuthMechanismProperties: [
+          `AWS_SESSION_TOKEN:${PW}`,
+          `SERVICE_NAME:a,aws_session_token:${PW}`,
+        ],
+        tlsCertificateKeyFilePassword: [PW, `${PW}2`],
+        ProxyPassword: PW,
+        unrelatedOption: 'kept',
+      };
+      expect(stripUriSecrets(model).sort()).toEqual([
+        'authMechanismProperties',
+        'proxyPassword',
+        'tlsCertificateKeyFilePassword',
+      ]);
+      expect(model.extra).toEqual({
+        AuthMechanismProperties: 'SERVICE_NAME:a',
+        unrelatedOption: 'kept',
+      });
+    });
+
+    it('stripUriSecrets removes an unparsed authMechanismProperties that holds only the token', () => {
+      const model = emptyConnectionModel();
+      model.extra = { authMechanismProperties: `AWS_SESSION_TOKEN:${PW}` };
+      expect(stripUriSecrets(model)).toEqual(['authMechanismProperties']);
+      expect(model.extra).toEqual({});
+    });
+
+    it('stripUriSecrets leaves an unparsed authMechanismProperties without secrets alone', () => {
+      const model = emptyConnectionModel();
+      model.extra = { authMechanismProperties: ['SERVICE_NAME:a', 'CANONICALIZE_HOST_NAME:true'] };
+      expect(stripUriSecrets(model)).toEqual([]);
+      expect(model.extra).toEqual({
+        authMechanismProperties: ['SERVICE_NAME:a', 'CANONICALIZE_HOST_NAME:true'],
+      });
+    });
+
+    it('the connection-string tab never shows a secret option a model still holds in extra', () => {
+      const state = withState({ name: 'S' });
+      state.model.extra = { proxyPassword: PW };
+      expect(uriOf(state)).not.toContain(PW);
+    });
   });
 });

@@ -643,6 +643,149 @@ describe('ConnectionEditor', () => {
       expect(el.querySelector('[data-testid="save-error"]')).toBeNull();
       expect(must<HTMLButtonElement>('save').disabled).toBe(false);
     });
+
+    it('a Save that fails after switching to another profile shows no error on the new one', async () => {
+      fake.handle('profiles.get', ({ profileId }) => ({
+        profile: saved({ id: profileId, name: `Name ${profileId}` }),
+        storedSecrets: [],
+      }));
+      let release: (() => void) | undefined;
+      fake.handle(
+        'profiles.save',
+        () =>
+          new Promise((resolve) => {
+            release = () =>
+              resolve({ error: { code: 'INTERNAL', message: 'store locked (fictitious)' } });
+          }),
+      );
+      await start('p1');
+      await click('save');
+      fixture.componentRef.setInput('id', 'p2');
+      await settle();
+      release?.();
+      await settle();
+      expect(must<HTMLInputElement>('field-name').value).toBe('Name p2');
+      expect(el.querySelector('[data-testid="save-error"]')).toBeNull();
+      expect(must<HTMLButtonElement>('save').disabled).toBe(false);
+    });
+
+    it('a failed setSecret on an existing profile stays on its page; a retry stores the password', async () => {
+      fake.fail('profiles.setSecret', {
+        code: 'INTERNAL',
+        message: 'keychain locked (fictitious)',
+      });
+      await start('p1');
+      const router = TestBed.inject(Router);
+      const urlBefore = router.url;
+      await input(must('field-password'), 'rotated-pw');
+      await click('save');
+      expect(text('save-error')).toContain('Saved, but the password could not be stored');
+      expect(el.querySelector('[data-testid="saved-notice"]')).toBeNull();
+      expect(must<HTMLInputElement>('field-password').value).toBe('rotated-pw');
+
+      fake.respond('profiles.setSecret', { secureStorage: true });
+      await click('save');
+      expect(
+        fake
+          .requestsFor('profiles.save')
+          .map((r) => (r.params as { profile: ProfileDraft }).profile.id),
+      ).toEqual(['p1', 'p1']);
+      expect(fake.requestsFor('profiles.setSecret').map((r) => r.params)).toEqual([
+        { profileId: 'p1', kind: 'password', value: 'rotated-pw' },
+        { profileId: 'p1', kind: 'password', value: 'rotated-pw' },
+      ]);
+      expect(el.querySelector('[data-testid="save-error"]')).toBeNull();
+      expect(must('saved-notice')).toBeTruthy();
+      expect(must<HTMLInputElement>('field-password').value).toBe('');
+      expect(router.url).toBe(urlBefore);
+    });
+
+    for (const outcome of ['succeeds', 'fails'] as const) {
+      it(`a password store that ${outcome} after switching profiles leaves the new profile alone`, async () => {
+        fake.handle('profiles.get', ({ profileId }) => ({
+          profile: saved({ id: profileId, name: `Name ${profileId}` }),
+          storedSecrets: [],
+        }));
+        let release: (() => void) | undefined;
+        fake.handle(
+          'profiles.setSecret',
+          () =>
+            new Promise((resolve) => {
+              release = () =>
+                resolve(
+                  outcome === 'succeeds'
+                    ? { secureStorage: true }
+                    : { error: { code: 'INTERNAL', message: 'keychain locked (fictitious)' } },
+                );
+            }),
+        );
+        await start('p1');
+        await input(must('field-password'), 'rotated-pw');
+        await click('save');
+        expect(release).toBeDefined();
+        fixture.componentRef.setInput('id', 'p2');
+        await settle();
+        release?.();
+        await settle();
+        expect(must<HTMLInputElement>('field-name').value).toBe('Name p2');
+        expect(must<HTMLInputElement>('field-password').value).toBe('');
+        // p2 has no stored password: the p1 store must not mark one as saved.
+        expect(must<HTMLInputElement>('field-password').placeholder).not.toContain('Saved');
+        expect(el.querySelector('[data-testid="save-error"]')).toBeNull();
+        expect(el.querySelector('[data-testid="saved-notice"]')).toBeNull();
+        expect(must<HTMLButtonElement>('save').disabled).toBe(false);
+      });
+    }
+
+    it('edits made while the password is being stored are kept when Save finishes', async () => {
+      let release: (() => void) | undefined;
+      fake.handle(
+        'profiles.setSecret',
+        () =>
+          new Promise((resolve) => {
+            release = () => resolve({ secureStorage: true });
+          }),
+      );
+      await start('p1');
+      await input(must('field-password'), 'rotated-pw');
+      await click('save');
+      expect(release).toBeDefined();
+      await input(must('field-name'), 'Edited meanwhile');
+      release?.();
+      await settle();
+      expect(must<HTMLInputElement>('field-name').value).toBe('Edited meanwhile');
+      expect(savedDraft().name).toBe('Orders');
+      expect(fake.requestsFor('profiles.setSecret').map((r) => r.params)).toEqual([
+        { profileId: 'p1', kind: 'password', value: 'rotated-pw' },
+      ]);
+      expect(el.querySelector('[data-testid="save-error"]')).toBeNull();
+    });
+
+    it('a saved profile holding a secret option loads without it and says it is not stored', async () => {
+      stored = saved({
+        connectionString:
+          'mongodb://alice@db1.example:27017/?authMechanism=SCRAM-SHA-256' +
+          `&proxyHost=socks.example&proxyPassword=${SECRET}`,
+      });
+      await start('p1');
+      expect(text('dropped-secrets')).toContain('proxyPassword');
+      expect(text('uri-preview')).not.toContain(SECRET);
+      expect(text('uri-preview')).toContain('proxyHost=socks.example');
+      await click('tab-uri');
+      expect(must<HTMLTextAreaElement>('field-uri').value).not.toContain(SECRET);
+
+      await click('save');
+      expect(JSON.stringify(savedDraft())).not.toContain(SECRET);
+      // The note stays after saving: the secret is gone from the profile now.
+      expect(text('dropped-secrets')).toContain('proxyPassword');
+
+      await input(
+        must('field-uri'),
+        'mongodb://alice@db1.example:27017/?authMechanism=SCRAM-SHA-256',
+      );
+      await click('tab-form');
+      expect(el.querySelector('[data-testid="dropped-secrets"]')).toBeNull();
+    });
   });
 
   it('problems block saving and testing', async () => {

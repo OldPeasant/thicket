@@ -4,26 +4,35 @@ Date: 2026-11-17
 
 Task: connection-ui - M1: Connection editor and manager
 
-Scope: committed changes of the task, `git diff a59b2e2..f4164af -- packages test docs` (connection editor, manager page, pure form model, SharedArrayBuffer stub + main.ts, sidebar entry points, routes/navigation/app.config, core `./uri` export, angular.json, e2e specs, architecture notes). The untracked `packages/renderer/src/app/connections/connection-form.model.spec.ts` present in the working tree (test-writer work in progress) is not part of the reviewed scope.
+Scope: second review pass of the committed task changes, `git diff 9d2524478e7bf26f37e1ec73ebb4f721753be056..dd51ff0 -- packages test docs` (task commits b36d7dd, 123af50, a4388a3, 8ca68f6, dd51ff0), with a focus on whether the earlier findings CR-1..CR-6 are fixed and on the fix commit dd51ff0 (stripUriSecrets/mask, the save() order and generation guard, the setSecret failure path, the e2e secrets.bin control). On local main these commits were rebased as c0c0d72..5aa43a1. `git diff dd51ff0 5aa43a1` shows changes only in `tasks/`, so the code is the same. Uncommitted test-writer files are not part of this review.
 
 Requirements:
-- tasks/connection-ui.md (goal, 3 acceptance criteria, 6 recorded assumptions)
-- SPEC.md M1 "Connections" and the theme requirement (tokens only, no hard-coded colors)
-- docs/ARCHITECTURE.md "Connection editor", "Sidebar tree"; contract `packages/contract/src/profiles.ts`
-- backend `packages/backend/src/connections/options.ts` and `manager.ts`, desktop `apps/desktop/src/profiles/store.ts` (integration)
-- docs/QUALITY.md (report contract)
+- tasks/connection-ui.md (goal, 3 acceptance criteria, recorded assumptions including the 01:11 one on dropped secret URI options)
+- SPEC.md M1 "Connections" (secrets only in the OS keychain, masked URIs, theme tokens)
+- docs/ARCHITECTURE.md "Connection editor"
+- reviews/connection-ui/review.md (first pass, CR-1..CR-6), reviews/connection-ui/fixes.md
+- core `packages/core/src/uri/mask.ts`, route config `packages/renderer/src/app/app.routes.ts`
 
 Git range:
 - Branch: main
-- HEAD: f4164af
-- Base/start: a59b2e2d5d8739329eef5c13bb945385b053b9ed
-- Commits reviewed: 3 (dba5cf8, d1dd886, f4164af)
+- HEAD: 26608b8 (code identical to dd51ff0)
+- Base/start: 9d2524478e7bf26f37e1ec73ebb4f721753be056
+- Commits reviewed: 5 (b36d7dd, 123af50, a4388a3, 8ca68f6, dd51ff0)
 
 Commands run:
-- `cd packages/renderer && npx ng test --watch=false --include='src/app/connections/connection-editor.spec.ts' --include='src/shared-array-buffer-stub.spec.ts'` -> 2 files, 15 tests passed
-- Same command including the untracked test-writer spec `connection-form.model.spec.ts` -> 1 failed (it asserts that a profile draft built from a URI with `proxyPassword` / `tlsCertificateKeyFilePassword` contains no secret; it does, see CR-1), 60 passed
+- `cd packages/renderer && npx ng test --watch=false --include='src/app/connections/connection-editor.spec.ts' --include='src/app/connections/connection-form.model.spec.ts' --include='src/app/connections/connections-page.spec.ts'` -> 3 files, 112 tests passed
+- `python tasks.py verify connection-ui` -> no criterion has recorded evidence yet. This is expected before `done`, and the parent worker must record it.
 
-Summary: 0 P0, 1 P1, 3 P2, 2 P3
+Summary: 0 P0, 0 P1, 1 P2, 0 P3
+
+## Status of the earlier findings
+
+- CR-1 (secret URI options saved and shown unmasked): resolved. `stripUriSecrets` removes `proxy.password`, `tls.certificateKeyFilePassword`, `AWS_SESSION_TOKEN` in `auth.mechanismProperties` (case-insensitive), and the same keys when core leaves them in `extra` (repeated or invalid values, including the raw `authMechanismProperties` string). Other properties such as `SERVICE_NAME` are kept. It runs in `applyConnectionString`, in `editorStateFromProfile`, and again in `uriModel`, so every saved draft, `conn.test` draft and preview is stripped. `connectionStringText` also passes its output through core `mask()`. The editor and model specs check save, test, preview and the URI tab for each key. The note does not echo any secret value. It lists only option names.
+- CR-2 (duplicate profile after a failed setSecret): resolved. After `profiles.save` succeeds, the editor adopts the saved profile (id, `loadedDraft`, safety registration, sidebar reload) before it calls `setSecret`. A failure shows "Saved, but the password could not be stored", and the typed password stays in the field. A retry sends `id: 'new-id'`, and navigation now depends on `this.id() === undefined`, so the retry still navigates. A spec covers this.
+- CR-3 (Save not tied to the current load): partly resolved. A profile switch inside the same editor instance is now guarded by `loadGeneration`, and a spec covers it. The new-profile navigation case that the first review also named is still open. See CR-1 below.
+- CR-4 (no model or manager tests): resolved. `connection-form.model.spec.ts` and `connections-page.spec.ts` are committed (8ca68f6, dd51ff0) and pass.
+- CR-5 (weak secrets.bin evidence): resolved. The ask-each-time e2e first saves a `saved`-mode control profile, asserts that no `no-keychain` note is shown, and asserts that `secrets.bin` now exists and differs from its earlier content. That file is the baseline for the "unchanged" checks. The new save order sets the "Saved" notice only after `setSecret` returns, so the read after `saved-notice` is not racy.
+- CR-6 (no h1 in the ready editor): resolved. The heading is now an `h1` inside a `div`, and a spec checks it.
 
 ## P0 Critical
 
@@ -31,63 +40,28 @@ None.
 
 ## P1 High
 
-- [ ] **CR-1 | Secrets in URI query options (proxyPassword, tlsCertificateKeyFilePassword, authMechanismProperties tokens) are written into connections.json and shown unmasked**
-    - File: `packages/renderer/src/app/connections/connection-form.model.ts:164` (`uriModel`), `:276` (`profileDraftFromState` -> `toConnectionString(model)`), `:180` (`connectionStringText`)
-    - Category: Security
-    - Problem: `uriModel()` removes only `model.password`. Core's `ConnectionUriModel` also carries `proxy.password` (`proxyPassword`), `tls.certificateKeyFilePassword` (`tlsCertificateKeyFilePassword`) and `auth.mechanismProperties` (which may hold `AWS_SESSION_TOKEN`), and `toConnectionString()` serializes all of them (`packages/core/src/uri/convert.ts:219-222`, `:309-312`). A URI pasted into the Connection string tab such as `mongodb://alice@h/?proxyHost=p&proxyUsername=u&proxyPassword=...` therefore ends up verbatim in `draft.connectionString`. The contract's guard `hasPassword()` (`packages/contract/src/profiles.ts:50`) only checks the userinfo, and `ProfilesStore.save` accepts it, so the secret is persisted in plain text in `connections.json` (and sent in `conn.test` drafts). `connectionStringText()` also prints these values unmasked in the URI preview strip and the URI tab, although core offers `mask()` for exactly these keys. The untracked test-writer spec reproduces it: the saved draft contained `tlsCertificateKeyFilePassword=fictitious-Pa55&...&proxyPassword=fictitious-Pa55`.
-    - Why it matters: SPEC M1 "Secrets (passwords, key passphrases, tokens) only in the OS keychain ... profiles without secrets in connections.json"; SPEC line 267 "logs and error messages mask passwords in URIs". The editor's own doc claims `profileDraftFromState` "Never contains the password".
-    - Suggested fix: in `uriModel()` (or before building the saved/tested draft) strip `proxy.password`, `tls.certificateKeyFilePassword` and secret `mechanismProperties` entries; either move them into the matching secret kinds (`proxyPassword`, `tlsKeyPassphrase`, ...) via `profiles.setSecret` on Save, like the user password, or refuse them with an editor problem. Render the preview/URI tab with these values masked. Add a model/component test for each key.
+None.
 
 ## P2 Medium
 
-- [ ] **CR-2 | New profile: a failed setSecret after a successful profiles.save leaves the editor without the new id, so retrying Save creates a duplicate profile**
-    - File: `packages/renderer/src/app/connections/connection-editor.ts:499-536`
+- [ ] **CR-1 | Leaving a new profile while its Save runs still navigates the user back to the saved profile**
+    - File: `packages/renderer/src/app/connections/connection-editor.ts:560-566` (navigation), `:152` (destroy hook), `:498-499` (generation capture)
     - Category: Correctness
-    - Problem: `save()` first awaits `profiles.save` (profile created, id assigned by main), then `profiles.setSecret`. If `setSecret` throws (keychain locked/failing, `SecretStorageUnavailableError`), the catch only sets `saveError`; `state` keeps `id: undefined`, `loadedDraft` stays stale and no navigation happens. Pressing Save again sends a draft without `id`, so main creates a second profile. The sidebar is not reloaded either, so the first copy is invisible until the next reload.
-    - Why it matters: double profiles on a recoverable error path; the user cannot tell the profile was already created.
-    - Suggested fix: after `profiles.save` succeeds, adopt the returned profile (id, `loadedDraft`, safety registration, `reloadProfiles`) before calling `setSecret`, and report a setSecret failure as "saved, but the password could not be stored"; add a test with a failing `profiles.setSecret`.
-
-- [ ] **CR-3 | A Save answer is not tied to the current load: switching profiles while Save runs shows the old profile under the new route**
-    - File: `packages/renderer/src/app/connections/connection-editor.ts:515-534`
-    - Category: Correctness
-    - Problem: `loadProfile()` guards its answers with `loadGeneration`, and aborts a running test, but `save()` does not check the generation after its awaits. If the route switches to another profile (same editor instance via `withComponentInputBinding`, e.g. the sidebar's "Edit connection…" on another connection) while Save is in flight, the finishing save sets `state` to the previously edited profile A while `id()` is B (or, if B's load finishes later, the order decides what is shown). Editing and saving then writes to A under B's URL. For a new profile it also `router.navigate`s back to the new profile's page after the user already left.
-    - Why it matters: out-of-order async results can make the user edit the wrong profile.
-    - Suggested fix: capture `loadGeneration` at the start of `save()` and skip the state/notice/navigation updates when it changed (still reload the sidebar); add a spec that switches `id` while `profiles.save` is pending.
-
-- [ ] **CR-4 | The pure form model and the manager page have no committed tests**
-    - File: `packages/renderer/src/app/connections/connection-form.model.ts`, `packages/renderer/src/app/connections/connections-page.ts`
-    - Category: Tests
-    - Problem: the committed specs cover the editor component only. The model's precedence rules (`editorStateFromProfile`: profile fields win over URI options; mechanism mapping incl. non-form mechanisms such as MONGODB-X509/PLAIN), `profileDraftFromState` mirroring (TLS key file kept only with a certificate file, read preference tags, write concern, timeouts, proxy, SSH) and `hostSummary`/`folderNames`, plus `groupByFolder` and delete (disconnect, close tabs) on the manager page, have no tests. CR-1 is exactly the kind of defect such tests catch (the untracked test-writer spec already found it).
-    - Why it matters: this is the mapping the backend's `clientConfig` consumes; regressions there change what the driver connects with.
-    - Suggested fix: commit model unit tests and a `ConnectionsPage` spec (grouping order, delete confirm closes the profile's tabs and reloads the sidebar, duplicate navigates to the copy).
+    - Problem: the generation guard only detects a switch inside the same component instance. `connections/new` and `connections/:id` are separate route configs (`app.routes.ts:38`, `:52`), so leaving `/connections/new` (for example through the sidebar's "Edit connection…" on another profile, "Manage connections", or any other page) destroys the editor. The destroy hook only aborts a running test and does not bump `loadGeneration`. When the pending `profiles.save` (and `setSecret`) of the destroyed instance resolves, `current()` is still true and `this.id()` is still `undefined`. It then calls `router.navigate(['/connections', profile.id], { replaceUrl: true })`, which replaces the page the user moved to with the new profile's editor. The first review named this case ("For a new profile it also `router.navigate`s back to the new profile's page after the user already left"). The added spec only switches the `id` input on the same instance, so it does not cover this case.
+    - Why it matters: an out-of-order async result overrides the user's newer navigation. With a slow keychain or IPC, the user can end up editing a different profile than the one they opened.
+    - Suggested fix: mark the instance destroyed in the `DestroyRef` callback, for example by `++this.loadGeneration` or a `destroyed` flag that `current()` checks, and skip the state, notice and navigation updates (keep the sidebar reload and safety registration). Add a spec that destroys the fixture, or navigates the router away from `/connections/new`, while `profiles.save` is pending, and asserts that the URL does not change afterwards.
 
 ## P3 Low
 
-- [ ] **CR-5 | The ask-each-time e2e does not show that secrets.bin would change at all in this environment**
-    - File: `test/e2e/connections.e2e.ts:106-143`
-    - Category: Tests
-    - Problem: "secrets.bin unchanged" is asserted against `before`, which is likely `null`, and no test in the file saves a password in `saved` mode (in the e2e environment the default is probably `ask` because the keychain is weak or unavailable). The assertion cannot fail if the secret store cannot write in this setup, so it does not prove the ask path skips a write that would otherwise happen.
-    - Why it matters: criterion 3 evidence is weaker than it reads.
-    - Suggested fix: add a control step (a `saved`-mode profile with a password, asserting secrets.bin changes) or assert the reported storage level; record the storage level in the verify evidence.
-
-- [ ] **CR-6 | The ready editor has no level-1 heading**
-    - File: `packages/renderer/src/app/connections/connection-editor.html:40-41`
-    - Category: Quality
-    - Problem: in the loading and error states the page heading is an `h1` element (`data-testid="page-heading"`), but in the ready state the heading text is a `span` while the sections use `h2` elements. Screen-reader heading navigation lands on h2 groups without a page heading. (Tabs themselves are fine: roving tabindex, arrow keys, `aria-selected`/`aria-controls`.)
-    - Why it matters: minor accessibility inconsistency with the other pages.
-    - Suggested fix: make the "New connection"/"Edit connection" line an `h1` (visually styled as now).
+None.
 
 ## Checked without findings
 
-- Password never in the saved `connectionString` or in `connections.json` for the userinfo password (model `uriModel(state, undefined)`, contract `hasPassword` guard, component and e2e assertions); `setSecret` only for `saved` with a typed password.
-- Mode switches on an existing profile: `ProfilesStore.save` deletes the stored password when `secretMode` stops being `saved` (`apps/desktop/src/profiles/store.ts:262-269`); the editor updates `storedSecrets` accordingly.
-- `conn.test`: `{ profileId }` only while the loaded draft is unchanged and no password typed; otherwise a draft with `id` plus the typed password; the backend's `matchesSaved` keeps stored secrets away from a changed target, and ask mode drops a stored password (`manager.ts:278`).
-- Profile fields vs URI vs `clientConfig`: the form mirrors auth, TLS, read preference/tags, write concern, app name, timeouts and proxy into profile fields, which `clientConfig` passes as driver options; SSH and `tls.keyFile` are kept from the loaded profile.
-- Editor load: generation counter drops stale `profiles.get` answers; a running test is aborted on profile switch and on destroy; CANCELLED returns to idle.
-- SharedArrayBuffer stub: installed only when the global is missing; `webidl-conversions` calls the getters inside try/catch, so the throwing getters mean "not shared"; construction throws; bson detects buffers via `toStringTag`, unaffected.
-- Theme: every `var(--...)` used in the new CSS is defined in the token sets (or locally: `--profile-color`, `--swatch`, `--spine`); the only literal colors are the `PROFILE_COLORS` presets (recorded assumption).
-- Routes: `connections/new` and `connections/import/compass` precede `connections/:id`; lazy loading keeps `whatwg-url` out of the initial bundle.
-- Acceptance-criteria evidence: `python tasks.py verify connection-ui` shows none recorded yet; the parent must still record it (criteria 2 and 3 require running the e2e against the mongo fixture).
+- `stripUriSecrets` mutates only the clone in `uriModel` and the freshly parsed models in `applyConnectionString` and `editorStateFromProfile`. It never mutates the shared state. When nothing was dropped, `droppedSecrets` is removed from the state, so a later clean paste clears the note.
+- `save()`: `saving` blocks double submits for the whole save plus setSecret. Every exit path, including a profile switch and both failure branches, resets `saving` in `finally`. `profiles.save` errors are reported only for the current load. Edits made while `setSecret` runs are kept (`s === pending` check). The sidebar reload and safety registration also happen when the user switched profiles.
+- Mode switches on an existing profile: `storedSecrets` drops `password` when the mode is no longer `saved`. When the save is for a stale load, the guard prevents updates to the new profile's `storedSecrets`.
+- Masking: `connectionStringText` masks the userinfo password (`MASK`) and, through core `mask()`, any secret query option that might still be present. No secret value appears in the `dropped-secrets` note, in errors, or in test fixtures (the fixtures use fictitious values, and the e2e passwords are generated at run time).
+- Theme: the fix adds only `.where-heading` CSS, which inherits font and color and adds no literal colors.
 
 ## Review conclusion
 
