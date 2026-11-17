@@ -867,6 +867,138 @@ describe('AppShell', () => {
       ]);
     });
 
+    /** Dispatches a pointer event on `target` (default: the document itself, outside the shell). */
+    const onDocument = (
+      type: string,
+      clientX: number,
+      id = 1,
+      target: EventTarget = document,
+    ): void => {
+      const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX });
+      Object.defineProperty(event, 'pointerId', { value: id });
+      target.dispatchEvent(event);
+    };
+
+    it('a cancel off the splitter keeps the last move, not the cancel position', async () => {
+      await start();
+      await settle();
+      pointer('pointerdown', 500);
+      onDocument('pointermove', 450);
+      onDocument('pointercancel', 0);
+      await settle();
+      expect(width()).toBe('250px');
+      expect(fake.requestsFor('app.settings.set').map((r) => r.params)).toEqual([
+        { settings: { sidebarWidth: 250 } },
+      ]);
+      // The cancel ended the drag.
+      onDocument('pointermove', 600);
+      onDocument('pointerup', 600);
+      await settle();
+      expect(width()).toBe('250px');
+      expect(fake.requestsFor('app.settings.set')).toHaveLength(1);
+    });
+
+    it('a cancel without moves saves nothing', async () => {
+      await start();
+      await settle();
+      pointer('pointerdown', 500);
+      onDocument('pointercancel', 900);
+      await settle();
+      expect(width()).toBe('300px');
+      expect(fake.requestsFor('app.settings.set')).toHaveLength(0);
+    });
+
+    it("ignores another pointer's moves, release and cancel on the document", async () => {
+      await start();
+      await settle();
+      pointer('pointerdown', 500);
+      onDocument('pointermove', 700, 2);
+      onDocument('pointerup', 700, 2);
+      onDocument('pointercancel', 700, 2);
+      await settle();
+      expect(width()).toBe('300px');
+      expect(fake.requestsFor('app.settings.set')).toHaveLength(0);
+      // The dragging pointer is still dragging.
+      onDocument('pointermove', 530);
+      await settle();
+      expect(width()).toBe('330px');
+      onDocument('pointerup', 535);
+      await settle();
+      expect(stored.sidebarWidth).toBe(335);
+      expect(fake.requestsFor('app.settings.set')).toHaveLength(1);
+    });
+
+    it('a release on the document itself (outside the shell) ends the drag, clamped', async () => {
+      await start();
+      await settle();
+      pointer('pointerdown', 500);
+      onDocument('pointerup', 5000);
+      await settle();
+      expect(width()).toBe('560px');
+      expect(stored.sidebarWidth).toBe(560);
+    });
+
+    it('a second drag starts from the width the first one saved', async () => {
+      await start();
+      await settle();
+      pointer('pointerdown', 500);
+      onDocument('pointermove', 560);
+      onDocument('pointerup', 560);
+      await settle();
+      expect(stored.sidebarWidth).toBe(360);
+      // The splitter now sits further right; the second drag measures from its own start.
+      pointer('pointerdown', 660);
+      onDocument('pointermove', 620);
+      await settle();
+      expect(width()).toBe('320px');
+      onDocument('pointerup', 600);
+      await settle();
+      expect(width()).toBe('300px');
+      expect(fake.requestsFor('app.settings.set').map((r) => r.params)).toEqual([
+        { settings: { sidebarWidth: 360 } },
+        { settings: { sidebarWidth: 300 } },
+      ]);
+    });
+
+    it('pointer events on the document without a splitter press change nothing', async () => {
+      await start();
+      await settle();
+      const other = must(el.querySelector<HTMLElement>('[data-testid="workspace"]'));
+      onDocument('pointerdown', 500, 1, other);
+      onDocument('pointermove', 600, 1, other);
+      onDocument('pointerup', 600, 1, other);
+      onDocument('pointercancel', 600);
+      await settle();
+      expect(width()).toBe('300px');
+      expect(fake.requestsFor('app.settings.set')).toHaveLength(0);
+    });
+
+    it('a secondary-button press leaves document moves and releases without effect', async () => {
+      await start();
+      await settle();
+      pointer('pointerdown', 500, { button: 2 });
+      onDocument('pointermove', 600);
+      onDocument('pointerup', 600);
+      await settle();
+      expect(width()).toBe('300px');
+      expect(fake.requestsFor('app.settings.set')).toHaveLength(0);
+    });
+
+    it('stops listening on the document once the shell is destroyed', async () => {
+      await start();
+      await settle();
+      pointer('pointerdown', 500);
+      onDocument('pointermove', 540);
+      await settle();
+      const service = TestBed.inject(SidebarWidthService);
+      expect(service.width()).toBe(340);
+      harness.fixture.destroy();
+      onDocument('pointermove', 600);
+      onDocument('pointerup', 600);
+      expect(service.width()).toBe(340);
+      expect(fake.requestsFor('app.settings.set')).toHaveLength(0);
+    });
+
     it('a click on the splitter without moving saves nothing', async () => {
       await start();
       pointer('pointerdown', 500);
