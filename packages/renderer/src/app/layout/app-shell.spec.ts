@@ -227,6 +227,49 @@ describe('AppShell', () => {
       expect(el.querySelector('app-confirm-dialog')).not.toBeNull();
     });
 
+    it('shows the update notice for a newer release without blocking the window (test-writer)', async () => {
+      fake.respond('app.checkForUpdate', {
+        current: '0.2.0',
+        latest: '0.3.0',
+        updateAvailable: true,
+        url: 'https://github.com/OldPeasant/thicket/releases/tag/v0.3.0',
+      });
+      await start();
+      ['a', 'b'].forEach((id) => ws.open(tab(id)));
+      await vi.waitFor(() => expect(fake.requestsFor('app.checkForUpdate')).toHaveLength(1));
+      await settle();
+      const host = must(el.querySelector<HTMLElement>('app-update-notice'));
+      await vi.waitFor(() => {
+        harness.fixture.detectChanges();
+        expect(host.querySelector('[data-testid="update-notice"]')).not.toBeNull();
+      });
+      expect(host.textContent).toContain('Thicket 0.3.0 is available.');
+      // Non-modal: nothing is inert and shortcuts keep working.
+      expect(host.hasAttribute('inert')).toBe(false);
+      expect(must(el.querySelector('.work')).hasAttribute('inert')).toBe(false);
+      key({ key: 'w', ctrlKey: true });
+      await settle();
+      expect(tabIds()).toEqual(['a']);
+
+      // Behind a modal dialog the notice is inert like the rest of the window.
+      const confirm = TestBed.inject(ConfirmService);
+      const answer = confirm.confirm({ title: 'Delete', operation: 'op', confirmLabel: 'Delete' });
+      await settle();
+      expect(host.hasAttribute('inert')).toBe(true);
+      confirm.answer(false);
+      await answer;
+      await settle();
+      expect(host.hasAttribute('inert')).toBe(false);
+    });
+
+    it('shows no update notice when the check is unavailable (test-writer)', async () => {
+      // No handler for app.checkForUpdate: the fake answers UNKNOWN_METHOD.
+      await start();
+      await settle();
+      expect(el.querySelector('app-update-notice')).not.toBeNull();
+      expect(el.querySelector('[data-testid="update-notice"]')).toBeNull();
+    });
+
     it('while the confirm dialog is open, the rest of the window is inert and shortcuts do nothing', async () => {
       await start();
       ['a', 'b', 'c'].forEach((id) => ws.open(tab(id)));

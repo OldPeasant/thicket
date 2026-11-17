@@ -21,6 +21,7 @@ import { ProfilesStore } from '../profiles';
 import { SecretsStore } from '../secrets';
 import { FakeSafeStorage } from '../secrets/testing';
 import { DEFAULT_SETTINGS, SettingsStore } from '../settings/store';
+import { UpdateChecker, type FetchLike } from '../update';
 import { Broadcaster } from './broadcast';
 import { mainHandlers, privilegedHandlers } from './handlers';
 
@@ -200,6 +201,78 @@ describe('main handlers with a HistoryStore (task query-history)', () => {
     });
     if (list?.ok) expect(parseResult('history.list', list.result).ok).toBe(true);
     expect((await readdir(dir)).sort()).toEqual(['favorites.json', 'history']);
+  });
+});
+
+describe('main handlers with an UpdateChecker (task update-notice, test-writer)', () => {
+  const RELEASE_PAGE = 'https://github.com/OldPeasant/thicket/releases/tag/v0.3.0';
+  /** A fake GitHub releases API (fictitious entries) counting its requests. */
+  const github = () =>
+    vi.fn<FetchLike>(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve([
+            { tag_name: 'v0.3.0', html_url: RELEASE_PAGE, draft: false, prerelease: false },
+          ]),
+      }),
+    );
+  const serveWindow = (updates: UpdateChecker) => {
+    const port = fakePort();
+    serve(port, {
+      table: methods,
+      route: 'main',
+      handlers: mainHandlers({ ...deps('0.2.0'), updates }),
+    });
+    return port;
+  };
+
+  it('serves app.checkForUpdate only when updates are given, routed to main, never privileged', () => {
+    expect(Object.keys(mainHandlers(deps('1')))).not.toContain('app.checkForUpdate');
+    const updates = new UpdateChecker({ current: '0.2.0', enabled: () => true, fetch: github() });
+    expect(Object.keys(mainHandlers({ ...deps('1'), updates }))).toContain('app.checkForUpdate');
+    expect(route('app.checkForUpdate')).toBe('main');
+    expect(Object.keys(privilegedHandlers({ secrets: emptyStore() }))).not.toContain(
+      'app.checkForUpdate',
+    );
+  });
+
+  it('answers app.checkForUpdate over a window port within the contract', async () => {
+    const fetch = github();
+    const port = serveWindow(new UpdateChecker({ current: '0.2.0', enabled: () => true, fetch }));
+    port.push({ id: 'u1', method: 'app.checkForUpdate', params: {} });
+    await vi.waitFor(() => expect(port.sent).toHaveLength(1));
+    const [answer] = port.sent;
+    expect(answer).toEqual({
+      id: 'u1',
+      ok: true,
+      result: { current: '0.2.0', latest: '0.3.0', updateAvailable: true, url: RELEASE_PAGE },
+    });
+    if (answer?.ok) expect(parseResult('app.checkForUpdate', answer.result).ok).toBe(true);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('with the setting off answers "no update" over the port and makes no request', async () => {
+    const fetch = github();
+    const port = serveWindow(new UpdateChecker({ current: '0.2.0', enabled: () => false, fetch }));
+    port.push({ id: 'off', method: 'app.checkForUpdate', params: {} });
+    await vi.waitFor(() => expect(port.sent).toHaveLength(1));
+    expect(port.sent[0]).toEqual({
+      id: 'off',
+      ok: true,
+      result: { current: '0.2.0', latest: null, updateAvailable: false, url: null },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('refuses unexpected params without asking GitHub', async () => {
+    const fetch = github();
+    const port = serveWindow(new UpdateChecker({ current: '0.2.0', enabled: () => true, fetch }));
+    port.push({ id: 'bad', method: 'app.checkForUpdate', params: { force: true } });
+    await vi.waitFor(() => expect(port.sent).toHaveLength(1));
+    expect(port.sent[0]).toMatchObject({ id: 'bad', ok: false, error: { code: 'INVALID_PARAMS' } });
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
 

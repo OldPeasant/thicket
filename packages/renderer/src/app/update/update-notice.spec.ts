@@ -155,6 +155,68 @@ describe('UpdateNoticeService', () => {
     expect(service.available()?.version).toBe('0.4.0');
   });
 
+  it('a failed daily check keeps the notice shown before (test-writer)', async () => {
+    const service = await start();
+    fake.fail('app.checkForUpdate', { code: 'INTERNAL', message: 'main unavailable' });
+    await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS);
+    await settle();
+    expect(checks()).toBe(2);
+    expect(service.available()?.version).toBe('0.3.0');
+  });
+
+  it('a later "no update" answer hides the notice (test-writer)', async () => {
+    const service = await start();
+    answer = () => SAME;
+    await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS);
+    await settle();
+    expect(service.available()).toBeNull();
+  });
+
+  it('shows nothing for an answer without a version or link (test-writer)', async () => {
+    answer = () => ({ ...NEWER, url: null });
+    const service = await start();
+    expect(service.available()).toBeNull();
+    answer = () => ({ ...NEWER, latest: null });
+    await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS);
+    await settle();
+    expect(checks()).toBe(2);
+    expect(service.available()).toBeNull();
+  });
+
+  it('dismiss without a notice changes nothing, a later update still shows (test-writer)', async () => {
+    answer = () => SAME;
+    const service = await start();
+    service.dismiss();
+    answer = () => NEWER;
+    await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS);
+    await settle();
+    expect(service.available()?.version).toBe('0.3.0');
+  });
+
+  it('init() again does not start a second check or timer (test-writer)', async () => {
+    const service = await start();
+    await service.init();
+    await settle();
+    expect(checks()).toBe(1);
+    await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS);
+    expect(checks()).toBe(2);
+  });
+
+  it('stops the daily check once its injector is destroyed (test-writer)', async () => {
+    await start();
+    expect(checks()).toBe(1);
+    TestBed.resetTestingModule();
+    await vi.advanceTimersByTimeAsync(3 * UPDATE_CHECK_INTERVAL_MS);
+    expect(checks()).toBe(1);
+  });
+
+  it('a settings broadcast that repeats "on" does not check again (test-writer)', async () => {
+    await start();
+    broadcast({ checkForUpdates: true });
+    await settle();
+    expect(checks()).toBe(1);
+  });
+
   it('shows nothing without the desktop bridge settings', async () => {
     fake.fail('app.settings.get', { code: 'INTERNAL', message: 'main unavailable' });
     const service = await start();
