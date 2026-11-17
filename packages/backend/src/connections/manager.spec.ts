@@ -1,7 +1,8 @@
 import type { ConnStatus, Profile, ProfileDraft } from '@thicket/contract';
-import type { Document, MongoClientOptions } from 'mongodb';
+import type { Document, MongoClientOptions, OIDCCallbackFunction } from 'mongodb';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { OidcAuthenticator, OidcTarget } from '../auth/oidc';
 import { RpcError } from '../server/rpc';
 import { KnownHosts, type SshTunnel } from '../ssh';
 import {
@@ -78,6 +79,8 @@ interface SetupOptions {
   clients?: FakeClient[];
   /** Enables SSH tunnels with this opener. */
   openTunnel?: NonNullable<ConnectionManagerDeps['openTunnel']>;
+  /** MONGODB-OIDC sign-in (tests pass a fake authenticator). */
+  oidc?: ConnectionManagerDeps['oidc'];
 }
 
 function setup(options: SetupOptions = {}) {
@@ -109,6 +112,7 @@ function setup(options: SetupOptions = {}) {
     },
     log: (message) => logs.push(message),
     now: () => (clock += 7),
+    ...(options.oidc ? { oidc: options.oidc } : {}),
     ...(options.openTunnel
       ? {
           openTunnel: options.openTunnel,
@@ -1965,5 +1969,183 @@ describe('ConnectionManager.cancelOnClose (edge cases)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('ConnectionManager: MONGODB-OIDC (task oidc-auth)', () => {
+  /** Fictitious token cache, as main's secrets.get returns the `oidcTokens` secret. */
+  const STORED_TOKENS = '{"v":1,"issuer":"https://idp.example.test","fictitious":"oidc-cache-7"}';
+
+  function oidcProfile(id: string, oidcFlow?: 'auto' | 'authCode' | 'deviceCode'): Profile {
+    return savedProfile(id, {
+      auth: { mechanism: 'MONGODB-OIDC', secretMode: 'none', ...(oidcFlow ? { oidcFlow } : {}) },
+    });
+  }
+
+  /** A stand-in authenticator: records each target and hands out a distinct callback. */
+  function fakeOidc() {
+    const targets: OidcTarget[] = [];
+    const callbacks: OIDCCallbackFunction[] = [];
+    const callbackFor = vi.fn((target: OidcTarget) => {
+      targets.push(target);
+      const callback: OIDCCallbackFunction = () => Promise.resolve({ accessToken: 'x' });
+      callbacks.push(callback);
+      return callback;
+    });
+    return {
+      callbackFor,
+      targets,
+      callbacks,
+      oidc: { callbackFor } as unknown as OidcAuthenticator,
+    };
+  }
+
+  it('an OIDC profile without an authenticator is UNSUPPORTED (open and test), no client', async () => {
+    const { manager, created } = setup({
+      profiles: { p1: oidcProfile('p1') },
+      secrets: { p1: null },
+    });
+    expect((await rejection(manager.open('p1', undefined))).code).toBe('UNSUPPORTED');
+    expect((await rejection(manager.test({ profileId: 'p1' }, undefined))).code).toBe(
+      'UNSUPPORTED',
+    );
+    expect(created).toEqual([]);
+  });
+
+  it('open passes profile id, name, flow, stored tokens and an abort signal to the callback', async () => {
+    const fake = fakeOidc();
+    const { manager, created } = setup({
+      profiles: { p1: oidcProfile('p1', 'deviceCode') },
+      secrets: { p1: { oidcTokens: STORED_TOKENS } },
+      oidc: fake.oidc,
+    });
+    await manager.open('p1', undefined);
+    expect(fake.targets).toEqual([
+      {
+        profileId: 'p1',
+        profileName: 'Profile p1',
+        flow: 'deviceCode',
+        stored: STORED_TOKENS,
+        signal: expect.any(AbortSignal) as AbortSignal,
+      },
+    ]);
+    expect(created[0]?.options).toMatchObject({
+      authMechanism: 'MONGODB-OIDC',
+      authSource: '$external',
+    });
+    expect(created[0]?.options.authMechanismProperties?.OIDC_HUMAN_CALLBACK).toBe(
+      fake.callbacks[0],
+    );
+    await manager.close('p1');
+  });
+
+  it('without a flow or stored tokens the target has neither', async () => {
+    const fake = fakeOidc();
+    const { manager } = setup({
+      profiles: { p1: oidcProfile('p1') },
+      secrets: { p1: null },
+      oidc: fake.oidc,
+    });
+    await manager.open('p1', undefined);
+    expect(fake.targets[0]).not.toHaveProperty('flow');
+    expect(fake.targets[0]).not.toHaveProperty('stored');
+    expect(fake.targets[0]).toMatchObject({ profileId: 'p1' });
+    await manager.close('p1');
+  });
+
+  it('closing a connect in progress aborts the sign-in signal', async () => {
+    const fake = fakeOidc();
+    const gate = deferred();
+    const client = fakeClient(() => gate.promise);
+    const { manager } = setup({
+      profiles: { p1: oidcProfile('p1') },
+      secrets: { p1: null },
+      clients: [client],
+      oidc: fake.oidc,
+    });
+    const opening = manager.open('p1', undefined);
+    await vi.waitFor(() => expect(client.connect).toHaveBeenCalled());
+    const signal = fake.targets[0]?.signal;
+    expect(signal?.aborted).toBe(false);
+    await manager.close('p1');
+    expect(signal?.aborted).toBe(true);
+    gate.resolve();
+    expect((await rejection(opening)).code).toBe('CANCELLED');
+  });
+
+  it("test of a saved profile passes its id, stored tokens and the caller's signal", async () => {
+    const fake = fakeOidc();
+    const { manager } = setup({
+      profiles: { p1: oidcProfile('p1') },
+      secrets: { p1: { oidcTokens: STORED_TOKENS } },
+      oidc: fake.oidc,
+    });
+    const abort = new AbortController();
+    await manager.test({ profileId: 'p1' }, undefined, abort.signal);
+    expect(fake.targets[0]).toMatchObject({ profileId: 'p1', stored: STORED_TOKENS });
+    expect(fake.targets[0]?.signal).toBe(abort.signal);
+  });
+
+  it('test of an unsaved draft caches nothing: no profile id, no stored tokens, no signal', async () => {
+    const fake = fakeOidc();
+    const { manager, loadSecrets } = setup({ oidc: fake.oidc });
+    const draft: ProfileDraft = { ...oidcProfile('p1'), name: 'Draft' };
+    delete draft.id;
+    await manager.test({ profile: draft }, undefined);
+    expect(loadSecrets).not.toHaveBeenCalled();
+    expect(fake.targets).toEqual([{ profileName: 'Draft' }]);
+  });
+
+  it('a draft equal to its saved profile gets that profile id and its stored tokens', async () => {
+    const fake = fakeOidc();
+    const { manager } = setup({
+      profiles: { p1: oidcProfile('p1') },
+      secrets: { p1: { oidcTokens: STORED_TOKENS } },
+      oidc: fake.oidc,
+    });
+    await manager.test({ profile: { ...oidcProfile('p1'), name: 'Renamed' } }, undefined);
+    expect(fake.targets[0]).toMatchObject({
+      profileId: 'p1',
+      profileName: 'Renamed',
+      stored: STORED_TOKENS,
+    });
+  });
+
+  it('a draft with an id but another connection string gets neither id nor tokens', async () => {
+    const fake = fakeOidc();
+    const { manager } = setup({
+      profiles: { p1: oidcProfile('p1') },
+      secrets: { p1: { oidcTokens: STORED_TOKENS } },
+      oidc: fake.oidc,
+    });
+    await manager.test(
+      { profile: { ...oidcProfile('p1'), connectionString: 'mongodb://other.example.test' } },
+      undefined,
+    );
+    expect(fake.targets[0]).not.toHaveProperty('profileId');
+    expect(fake.targets[0]).not.toHaveProperty('stored');
+  });
+
+  it('non-OIDC profiles never ask the authenticator', async () => {
+    const fake = fakeOidc();
+    const { manager } = setup({ oidc: fake.oidc });
+    await manager.open('p1', undefined);
+    await manager.test({ profileId: 'p2' }, undefined);
+    expect(fake.callbackFor).not.toHaveBeenCalled();
+    await manager.close('p1');
+  });
+
+  it('the stored token cache never reaches the log lines', async () => {
+    const fake = fakeOidc();
+    const client = fakeClient(() => Promise.reject(new Error(`failed with ${STORED_TOKENS}`)));
+    const { manager, logs } = setup({
+      profiles: { p1: oidcProfile('p1') },
+      secrets: { p1: { oidcTokens: STORED_TOKENS } },
+      clients: [client],
+      oidc: fake.oidc,
+    });
+    await rejection(manager.open('p1', undefined));
+    expect(logs.length).toBeGreaterThan(0);
+    expect(logs.join('\n')).not.toContain('oidc-cache-7');
   });
 });

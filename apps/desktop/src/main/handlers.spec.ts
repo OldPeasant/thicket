@@ -373,6 +373,76 @@ describe('the privileged port with native dialogs', () => {
   });
 });
 
+describe('the privileged port with OIDC (task oidc-auth)', () => {
+  const oidc = { openExternal: vi.fn(() => Promise.resolve()) };
+
+  it('serves oidc.openBrowser / oidc.saveTokens only when oidc deps are given', () => {
+    const without = Object.keys(privilegedHandlers({ secrets: emptyStore() }));
+    const withOidc = Object.keys(privilegedHandlers({ secrets: emptyStore(), oidc }));
+    expect(without).not.toContain('oidc.openBrowser');
+    expect(without).not.toContain('oidc.saveTokens');
+    // Adding OIDC only adds its two methods; nothing is replaced or lost.
+    expect(withOidc.sort()).toEqual([...without, 'oidc.openBrowser', 'oidc.saveTokens'].sort());
+    for (const name of withOidc) expect(Object.hasOwn(privilegedMethods, name)).toBe(true);
+  });
+
+  it('keeps profiles.forConnect and the dialogs next to oidc.*', () => {
+    const secrets = emptyStore();
+    const profiles = new ProfilesStore({ file: '/nonexistent/thicket-test/c.json', secrets });
+    const dialogs = {
+      showSaveDialog: vi.fn(() => Promise.resolve({ canceled: true, filePath: '' })),
+      showOpenDialog: vi.fn(() => Promise.resolve({ canceled: true, filePaths: [] })),
+    };
+    expect(Object.keys(privilegedHandlers({ secrets, profiles, dialogs, oidc }))).toEqual(
+      expect.arrayContaining([
+        'profiles.forConnect',
+        'dialog.saveFile',
+        'oidc.openBrowser',
+        'oidc.saveTokens',
+      ]),
+    );
+  });
+
+  it('oidc.saveTokens uses the given secrets store', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'thicket-main-oidc-'));
+    try {
+      const secrets = new SecretsStore({
+        file: path.join(dir, 'secrets.bin'),
+        safeStorage: new FakeSafeStorage(),
+        platform: 'linux',
+      });
+      const handlers = privilegedHandlers({ secrets, oidc });
+      const result: unknown = await handlers['oidc.saveTokens']?.(
+        { profileId: 'p1', tokens: '{"fictitious":true}' } as never,
+        ctx,
+      );
+      expect(result).toEqual({ saved: true });
+      expect(await secrets.get('p1')).toEqual({ oidcTokens: '{"fictitious":true}' });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('oidc.* is never answered over a window port, even if mixed into its handlers', async () => {
+    const window = fakePort();
+    serve(window, {
+      table: methods,
+      route: 'main',
+      handlers: {
+        ...mainHandlers(deps('1')),
+        ...privilegedHandlers({ secrets: emptyStore(), oidc }),
+      },
+    });
+    window.push({ id: 'o', method: 'oidc.openBrowser', params: { url: 'https://a.example.test' } });
+    window.push({ id: 's', method: 'oidc.saveTokens', params: { profileId: 'p', tokens: 'x' } });
+    await vi.waitFor(() => expect(window.sent).toHaveLength(2));
+    for (const answer of window.sent) {
+      expect(answer).toMatchObject({ ok: false, error: { code: 'UNKNOWN_METHOD' } });
+    }
+    expect(oidc.openExternal).not.toHaveBeenCalled();
+  });
+});
+
 describe('app.settings handlers', () => {
   const SETTINGS: Settings = {
     style: 'business',
