@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "task": "io-basic-backend",
+  "reviewed_revision": "85deb3bba895ca8a07f1cc2caddcf6cd64d725d2",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/io-basic-backend/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/io-basic-backend/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/io-basic-backend/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "TW-1", "source": "test-writer", "severity": "High", "disposition": "fixed",
+     "note": "export resolved although the file could not be created; now rejects INTERNAL naming the file"},
+    {"id": "TW-2", "source": "test-writer", "severity": "High", "disposition": "fixed",
+     "note": "export hung when the file stream failed before a write; now rejects and kills the cursor"},
+    {"id": "TW-3", "source": "test-writer", "severity": "Medium", "disposition": "fixed",
+     "note": "broken file structure lost the pending batch and final progress; now flushed before INVALID_PARAMS"},
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "per-value size cap MAX_VALUE_CHARS in both scanners"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "stop mode ends with the earliest failed line, errors ordered by line"},
+    {"id": "CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "dialog abort signal not forwarded and csvFields ignored for JSON exports; non-blocking, fits CSV/dialog work in io-advanced; recorded as assumption"},
+    {"id": "FX-1", "source": "fixer", "severity": "P3", "disposition": "fixed",
+     "note": "export now waits for the file stream to close before removing a partial file (flaky cancel test)"}
+  ],
+  "validation": [
+    {"command": "npx vitest run --root packages/backend src/io (5 repeats, by test-writer)", "result": "pass"},
+    {"command": "npm run test:int -- io.int (Podman MongoDB)", "result": "pass"},
+    {"command": "npm run check", "result": "pass"},
+    {"command": "sh .taskcheck", "result": "pass"}
+  ]
+}
