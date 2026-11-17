@@ -2,7 +2,12 @@ import type { Handler } from '@thicket/backend';
 import type { ParsedParamsOf, ResultOf, Settings } from '@thicket/contract';
 
 import { dialogHandlers, type NativeDialogs } from '../dialogs';
-import { profileForConnectHandler, profilesHandlers, type ProfilesStore } from '../profiles';
+import {
+  importExportHandlers,
+  profileForConnectHandler,
+  profilesHandlers,
+  type ProfilesStore,
+} from '../profiles';
 import { secretsGetHandler, secretsHandlers, type SecretsStore } from '../secrets';
 
 /** What the settings handlers need from the `SettingsStore`. */
@@ -18,6 +23,8 @@ export interface MainHandlerDeps {
   settings?: SettingsAccess;
   /** Serves `profiles.list/get/save/delete/duplicate` when given. */
   profiles?: ProfilesStore;
+  /** With `profiles`: serves `profiles.importCompass/importUris/export` (native file dialogs). */
+  dialogs?: NativeDialogs;
 }
 
 /** Handlers of the main-routed contract methods implemented so far. */
@@ -27,6 +34,13 @@ export function mainHandlers(deps: MainHandlerDeps): Record<string, Handler> {
     'app.ping': (): ResultOf<'app.ping'> => ({ process: 'main', version: deps.version }),
     ...secrets,
     ...(deps.profiles ? profilesHandlers(deps.profiles, secrets) : {}),
+    ...(deps.profiles && deps.dialogs
+      ? importExportHandlers({
+          profiles: deps.profiles,
+          secrets: deps.secrets,
+          dialogs: deps.dialogs,
+        })
+      : {}),
   };
   const store = deps.settings;
   if (store) {

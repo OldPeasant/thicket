@@ -31,6 +31,7 @@
   "devDependencies": {
     "@thicket/backend": "0.0.0",
     "@thicket/contract": "0.0.0",
+    "@thicket/core": "0.0.0",
     "electron": "45.3.3",
     "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",

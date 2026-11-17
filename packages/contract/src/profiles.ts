@@ -172,7 +172,10 @@ export type ProfileDraft = z.infer<typeof profileDraft>;
 /** Result of the import methods. */
 export const importResult = z.object({
   imported: z.array(profile),
+  /** Entries that were not imported, and why. */
   skipped: z.array(z.object({ source: z.string(), reason: z.string() })),
+  /** Imported entries with something left out (e.g. credentials encrypted with a passphrase). */
+  notices: z.array(z.object({ source: z.string(), reason: z.string() })).optional(),
 });
 
 /**
