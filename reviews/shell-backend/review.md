@@ -2,38 +2,56 @@
 
 Date: 2026-11-17
 
-Task: shell-backend - M4: mongosh host in the backend (round 2)
+Task: shell-backend - M4: mongosh host in the backend (round 3, final review for the whole task)
 
-Scope: `git diff 00b7787..20ff545` (committed changes only, `package-lock.json` checked for the mongosh packages only), with special attention to the fix commit 20ff545 (`split.ts` comment handling, `host.ts` restart/exit logic, `runtime.ts` exit/quit). Reviewed revision: 20ff545112c87b030baae9c943ad088db4973637. Uncommitted spec-file edits in the working tree (another helper) are out of scope.
+Scope: all task commits `git diff 735b36d..02d12f9` (committed changes only, `package-lock.json` checked for the mongosh packages only), with special attention to the round-3 fix commit 02d12f9 (CR-5, `split.ts` argument pattern). Reviewed revision: 02d12f9070f8e5b061be5f3f32a9a8d794037dc7. The working tree was clean when reviewed.
 
 Requirements:
-- tasks/shell-backend.md acceptance criteria and recorded assumptions (including the 03:07 exit/quit assumption)
+- tasks/shell-backend.md acceptance criteria and recorded assumptions (including the exit/quit assumption)
 - SPEC.md (M4 Shell, IPC section)
 - docs/mongosh.md
 - docs/ARCHITECTURE.md
 - packages/contract (shell.* methods, ShellOutput)
 - AGENTS.md
-- round-1 reports: reviews/shell-backend/review.md (previous version), tests.md, fixes.md
+- earlier rounds: reviews/shell-backend/review.md (round 2), tests.md, fixes.md (round 3)
 
 Git range:
 - Branch: main
-- HEAD: 2708094b5afff8f523c451cf96f3c0829f978343 (rebased copy of the task commits; `git diff 20ff545 HEAD` over `packages/backend/src/shell`, `packages/backend/src/server`, `connections/manager.ts` and `apps/desktop/scripts/build.mjs` is empty, so the reviewed code is identical)
-- Base/start: 00b77872e6a71c850815fba8de4d22045dff09e7
-- Commits reviewed: 3 (1b7bc07 implementation, 723b4b0 tests + round-1 review, 20ff545 fixes)
+- HEAD: 02d12f9070f8e5b061be5f3f32a9a8d794037dc7
+- Base/start: 735b36d36aa2edab5c72fc2c7dda7f749f430509 (`git merge-base HEAD origin/main`)
+- Commits reviewed: 5 (2f0b3d7 implementation, 6339ca9 tests + round-1 review, 2708094 round-1 fixes, 92c9fb1 round-2 tests + review, 02d12f9 CR-5 fix)
 
-Summary: 0 P0, 0 P1, 0 P2, 1 P3
+Summary: 0 P0, 0 P1, 0 P2, 0 P3
 
-## Round-1 findings
+## Changes since round 2
 
-- CR-1 (host lifecycle untested): resolved. `host.spec.ts` at 20ff545 uses a fake `WorkerLike` for queueing, cancel while queued, cooperative interrupt, grace-timeout restart, crash during and between evaluations, cancelled and failed restarts, close during eval/queue/restart, closeProfile/closeAll; `shell.int.spec.ts` covers `closeProfile` through `conn.close`.
-- CR-2 (exit/quit close the client): resolved. `ShellRuntime.evaluateAll` answers an `exit`/`quit` command piece with `EXIT_TEXT`; the context's `exit`/`quit` are replaced after `state.setCtx` (which is only called in the constructor, `shell-instance-state.js:134`), so `exit()` throws before anything is closed. Verified the remaining path through mongosh's evaluator (`shell-evaluator.js:39-49` dispatches any piece whose first token is `exit`/`quit` to `shellApi.exit(...argv)`): every such piece the splitter does not catch has at least one string argument, and `ShellApi.exit` rejects it in `assertArgsDefinedType` before `instanceState.close()` (`shell-api.js:233-235`), so the client is not closed.
-- CR-3 (completion after a restart): resolved. `complete` runs `ensureWorker`; restarts are shared via `session.restarting`, the notice is kept in `session.notice` for the next evaluation, and an aborted completion only stops waiting (`abortable` attaches handlers, no unhandled rejection; `restarting.then(clear, clear)` also handles it).
-- CR-4 (queued evals of a closed session start workers): resolved. `runEval` throws `NOT_FOUND` first when `session.closed`; `restart` checks `closed` before and after `startWorker`.
+`git diff --stat 2708094 02d12f9 -- . ':!reviews' ':!tasks'` touches only `host.spec.ts`, `split.spec.ts`, `test/integration/shell.int.spec.ts` (round-2 tests in 92c9fb1, test files only) and `split.ts` (5 lines, 02d12f9). The only production change since the round-2 review is the `COMMAND` regex and its doc comment in `packages/backend/src/shell/split.ts:83-90`. All other production code (`host.ts`, `runtime.ts`, `worker.ts`, `output.ts`, `handlers.ts`, server/connections wiring, `build.mjs`) is unchanged, so the round-2 conclusions for it still hold.
 
-Additional checks of the fix commit:
-- Restart state machine (`host.ts:328-356`): traced eval-started restart aborted by its signal (session stays dead with the original `dead` object, notice preserved), completion and eval sharing one restart, close during restart (replacement terminated, `NOT_FOUND`), crash during eval (`told` suppresses the duplicate notice), crash while idle (notice on next eval), interrupt timeout (`RESTARTED_TEXT` on next eval). No stale-worker message leaks: `attach` ignores messages and exits of replaced workers.
-- AC1 to AC3 remain covered by `test/integration/shell.int.spec.ts` (`use test; db.c.insertOne({a:1}); db.c.find()` EJSON, `while(true){}` interrupt under 2 s, `complete('db.c.fi')`). Note: this reviewer could not execute tests in this session (command execution beyond read-only inspection was denied); the run results come from fixes.md and must be confirmed by the parent worker's own `verify` evidence.
-- No secrets, no new dependencies in the fix commit; build externals and mongosh package versions unchanged from round 1.
+## Round-1 and round-2 findings
+
+- CR-1 (host lifecycle untested): resolved in round 2; further strengthened by the round-2 `host.spec.ts` additions.
+- CR-2 (exit/quit close the client): resolved in round 2; unchanged.
+- CR-3 (completion after a restart): resolved in round 2; unchanged.
+- CR-4 (queued evals of a closed session start workers): resolved in round 2; unchanged.
+- CR-5 (comment glued to a command argument swallows the following lines): resolved in 02d12f9. Details below.
+
+## Review of the CR-5 fix (02d12f9)
+
+- The argument pattern changed from `(?!\/[/*])[^\s;]+` to `(?:(?!\/[/*])[^\s;])+`, so no position inside an argument may start `//` or `/*`; the existing trailing-comment branch then takes the comment and group 1 (the command text passed to mongosh) excludes it.
+- Traced and probed with the committed regex (node, read-only):
+  - `use test// c` -> `use test`; `use test/* a */ /* b */;` -> `use test`; `use test/**/` -> `use test`; `use a/b//c` -> `use a/b`.
+  - A single `/` stays in the argument: `use a/b` -> `use a/b`, `show dbs /` -> `show dbs /` (then rejected by the argument check in `commandAt`, as before).
+  - Command-word lookahead `(?=$|[\s;]|\/[/*])` is unchanged: `it/x` is still not a command, `it//x` still is.
+  - `use a/*b` (an unclosed block comment glued to an argument) no longer matches and goes to mongosh as JavaScript, where `/*` really does open a comment; acceptable and consistent with how an unclosed comment after whitespace was already handled.
+  - No backtracking blow-up: arguments are whitespace-free and separated by mandatory whitespace, so the nested quantifier is unambiguous; a 40 000-character `use a a a ...!` line is rejected in under 1 ms. Matching is still limited to the current line (`commandAt` slices to `lineEnd`).
+- Statement-start detection, string/template/regex/comment skipping in `splitShellInput` and the argument-count/identifier checks in `commandAt` are untouched.
+- The six new `split.spec.ts` cases cover the reported inputs (`use test// c\ndb.c.find()`, `show dbs//x`, `show dbs/* x */`, `use test/* c */\nx`, `show profile 5//last\nx`) and the single-slash regression guard (`use a/b\nx`); all pre-existing split cases are unchanged and pass.
+
+## Verification run by this reviewer
+
+- `npx vitest run packages/backend/src/shell` at 02d12f9 (clean working tree) -> 4 files, 165 tests passed.
+- Integration tests (`test/integration/shell.int.spec.ts`, Podman) were not run by this reviewer; fixes.md reports `npx vitest run --config test/integration/vitest.config.ts shell` -> 16 passed. AC1 to AC3 (`use test; db.c.insertOne({a:1}); db.c.find()` as EJSON, `while(true){}` interrupted under 2 s, `complete('db.c.fi')`) remain covered there; the parent worker's `tasks.py verify` evidence must come from its own run.
+- No secrets, no new dependencies in the round-3 commit.
 
 ## P0 Critical
 
@@ -49,15 +67,10 @@ None.
 
 ## P3 Low
 
-- [ ] **CR-5 | A comment glued to a command argument still swallows the following lines**
-    - File: `packages/backend/src/shell/split.ts:89`
-    - Category: Correctness
-    - Problem: the TW-1 fix recognises a comment directly after the command word (`it//x`) or after whitespace (`use test // c`), but the argument pattern `[^\s;]+` greedily includes a `//` or `/*` that follows an argument without a space. `use test// c\ndb.c.find()` yields the arguments `test//` and `c`, so `commandAt` rejects it and the whole input becomes one JS piece; mongosh's evaluator then runs `use("test//", "c", "db.c.find()")` and the find is silently dropped (same symptom as TW-1). `show dbs//x` is accepted as `show("dbs//x")` and fails as an unknown show command. Not covered by `split.spec.ts` (only space-separated comments and `it//more` are tested).
-    - Why it matters: an uncommon but valid way of commenting a command line silently loses the following input, the exact behavior the fix was meant to remove.
-    - Suggested fix: exclude `//` and `/*` from inside an argument (for example `(?:(?!\/[/*])[^\s;])+`) so the comment branch takes them, and add `use test// c\ndb.c.find()` and `show dbs/* x */` cases to `split.spec.ts`.
+None open. CR-5 (P3) from round 2 is resolved in 02d12f9 as described above.
 
 ## Review conclusion
 
 No material issues found.
 
-All four round-1 findings are resolved in 20ff545, the restart/exit changes hold up under the traced concurrency paths, and the acceptance criteria remain covered by integration tests. CR-5 is a low-priority edge case the parent worker may fix or accept.
+All round-1 findings (CR-1 to CR-4) remain resolved, the round-2 finding CR-5 is fixed correctly without regressions in the splitter, the only production change since round 2 is the `split.ts` regex, and the shell unit suite passes at 02d12f9.

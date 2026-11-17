@@ -214,6 +214,19 @@ describe('shell.eval', () => {
     expect(results(outcome).at(-1)?.text).toBe(DB);
   });
 
+  it('a comment glued to a command argument is a comment: the next lines run (CR-5)', async () => {
+    const { sessionId: own } = await backend.call('shell.open', { profileId: PROFILE.id });
+    const outcome = await backend.evaluate(own, `use ${DB}// c\ndb.getName()`);
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.outputs.filter((o) => o.kind === 'error')).toEqual([]);
+    expect(results(outcome).map((r) => r.text)).toEqual([`switched to db ${DB}`, DB]);
+    // `show dbs/* x */` runs `show dbs`, not `show("dbs/*", ...)`.
+    const shown = await backend.evaluate(own, 'show dbs/* x */');
+    expect(shown.outputs.filter((o) => o.kind === 'error')).toEqual([]);
+    expect(results(shown).at(-1)?.text).toContain('admin');
+    await backend.call('shell.close', { sessionId: own });
+  });
+
   it('exit / quit / exit() are refused and leave the session working', async () => {
     const { sessionId: own } = await backend.call('shell.open', { profileId: PROFILE.id, db: DB });
     const exited = await backend.evaluate(own, 'exit');

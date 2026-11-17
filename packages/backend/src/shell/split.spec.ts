@@ -154,6 +154,69 @@ describe('splitShellInput', () => {
     expect(splitShellInput(input)).toEqual(pieces);
   });
 
+  it.each([
+    // CR-5: commands without arguments with a glued comment.
+    ['quit/* now */', ['quit']],
+    ['exit//bye\n1', ['exit', '\n1']],
+    ['it/**/\nx', ['it', '\nx']],
+    // `show profile` (one argument) and a glued comment.
+    ['show profile//x\ny', ['show profile', '\ny']],
+    // Two glued block comments in a row.
+    ['show dbs/*a*//*b*/\nx', ['show dbs', '\nx']],
+    // A `/` inside the argument and a glued comment after it.
+    ['use a/b// c\nx', ['use a/b', '\nx']],
+    ['show a/b/c', ['show a/b/c']],
+    ['use a*/b', ['use a*/b']],
+    // A trailing `/` stays in the argument; the `;` still ends the command.
+    ['use a/;x', ['use a/', 'x']],
+    // The comment starts at the first `//`: `a/// c` is `a` and the comment `/// c`.
+    ['use a/// c\nx', ['use a', '\nx']],
+    // A glued comment, then `;` after the comment's end.
+    ['show profile 5/*a*/;x', ['show profile 5', 'x']],
+    // After JavaScript at a statement start.
+    ['x = 1; use t//c\ny', ['x = 1;', 'use t', '\ny']],
+    // A comment after the `;` belongs to the next (JavaScript) piece, as with a space before it.
+    ['use t;//c\nx', ['use t', '//c\nx']],
+  ])('CR-5 glued comments end the argument: %j', (input, pieces) => {
+    expect(splitShellInput(input)).toEqual(pieces);
+  });
+
+  it.each([
+    // Code after a glued block comment on the line is not a command form.
+    'use a/*b*/c',
+    // A glued block comment that does not end on the line.
+    'use a/*',
+    'use a/*/b',
+    // `//` inside a quoted argument: the argument is not an identifier, so not a command.
+    'use "a//b"',
+    // A command-like text inside a string or after a JavaScript line comment.
+    'print("use t// c")',
+    'db.c.find() // use t//x',
+    // An argument starting with `/` is not an identifier.
+    'use /x',
+  ])('CR-5 not a command: %j', (input) => {
+    expect(splitShellInput(input)).toEqual([input]);
+  });
+
+  it.each([
+    ['many glued slashes', `use ${'a/'.repeat(20000)} x =`],
+    ['many arguments then a bracket', `use ${'ab '.repeat(20000)}(`],
+    ['only slashes', `show ${'/'.repeat(40000)}`],
+    // TW-2: a run of block comments followed by code. The lazy `.*?` of the block-comment branch
+    // can also span several comments, so a failing match tries every grouping (2^n). Kept at 28
+    // comments so the test ends (a few seconds) while it fails; a linear match takes < 1 ms.
+    ['28 block comments then code', `use a${' /**/'.repeat(28)} x`],
+    ['28 glued block comments then code', `use a${'/**/'.repeat(28)} x`],
+  ])(
+    'a long non-command line is rejected quickly (no catastrophic backtracking): %s',
+    (_, input) => {
+      const started = performance.now();
+      expect(splitShellInput(input)).toEqual([input]);
+      // Generous bound: linear matching takes milliseconds.
+      expect(performance.now() - started).toBeLessThan(1000);
+    },
+  );
+
   it('a command with a trailing comment between JavaScript lines splits into three pieces', () => {
     expect(splitShellInput('var a = 1\nuse test // switch\na + 1')).toEqual([
       'var a = 1\n',
