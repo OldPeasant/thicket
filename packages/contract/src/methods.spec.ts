@@ -72,6 +72,15 @@ const SETTINGS = {
   schemaSampleSize: 1000,
   sidebarWidth: 260,
 };
+const QUERY = {
+  filter: '{ status: "open" }',
+  projection: '',
+  sort: '',
+  collation: '',
+  limit: '10',
+};
+const AT = '2026-01-02T03:04:05.000Z';
+const FAVORITE = { id: 'f1', name: 'Open orders', query: QUERY, at: AT };
 const INDEX = {
   name: 'status_1',
   key: '{"status":{"$numberInt":"1"}}',
@@ -315,6 +324,17 @@ const RESULTS: { [M in MethodName]: { valid: ResultOf<M>; invalid: unknown } } =
     invalid: { saved: { ...SAVED_PIPELINE, name: '' } },
   },
   'pipelines.delete': { valid: {}, invalid: null },
+  'history.list': {
+    valid: { entries: [{ query: QUERY, at: AT }], favorites: [FAVORITE] },
+    invalid: { entries: [{ query: { filter: '{}' }, at: AT }], favorites: [] },
+  },
+  'history.add': { valid: { entries: [] }, invalid: { entries: [{ at: AT }] } },
+  'history.clear': { valid: { entries: [] }, invalid: { entries: null } },
+  'history.saveFavorite': {
+    valid: { favorites: [FAVORITE] },
+    invalid: { favorites: [{ id: 'f1' }] },
+  },
+  'history.deleteFavorite': { valid: { favorites: [] }, invalid: {} },
 
   'app.settings.get': {
     valid: { settings: SETTINGS },

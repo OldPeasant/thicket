@@ -80,6 +80,7 @@
       />
       <span class="code">)</span>
       <span class="actions">
+        <app-query-history-menu [current]="text()" (apply)="applyQuery($event)" />
         <button type="button" class="btn quiet" data-testid="query-reset" (click)="reset()">
           Reset
         </button>

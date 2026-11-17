@@ -203,7 +203,8 @@ Import / export (basic)
   SmartScreen warnings.
 - **Should** "Update available" notice that checks GitHub releases (no silent auto-update: macOS
   auto-update needs a signed app).
-- **Could** Signing and notarization later (Apple Developer account; SignPath for Windows).
+- **Should** Windows signing via the SignPath Foundation (free for open source).
+- **Could** macOS signing and notarization later (Apple Developer account).
 
 ## 4. API contract (renderer ↔ backend)
 

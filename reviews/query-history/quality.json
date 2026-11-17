@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "task": "query-history",
+  "reviewed_revision": "e3701a6ff6705783d6312f72dfd07f3d2ab05b58",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/query-history/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/query-history/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/query-history/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "TW-1", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "late history.list answer overwrote a newer history.add; store.list in one serialized op + renderer sequence numbers"},
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "focus after pick / favorite delete"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "aria-haspopup removed"},
+    {"id": "CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "outside pointerdown closes the panel"},
+    {"id": "CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "store files parsed leniently (unknown keys stripped)"}
+  ],
+  "validation": [
+    {"command": "npx vitest run apps/desktop/src/history", "result": "pass"},
+    {"command": "cd packages/renderer && npx ng test --watch=false --include src/app/collection/history", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}

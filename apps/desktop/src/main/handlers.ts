@@ -2,6 +2,7 @@ import type { Handler } from '@thicket/backend';
 import type { ParsedParamsOf, ResultOf, Settings } from '@thicket/contract';
 
 import { dialogHandlers, type NativeDialogs } from '../dialogs';
+import { historyHandlers, type HistoryStore } from '../history';
 import { oidcHandlers, type OidcMainDeps } from '../oidc';
 import { pipelinesHandlers, type PipelinesStore } from '../pipelines';
 import {
@@ -29,6 +30,8 @@ export interface MainHandlerDeps {
   dialogs?: NativeDialogs;
   /** Serves `pipelines.list/save/rename/delete` when given. */
   pipelines?: PipelinesStore;
+  /** Serves `history.*` (query history and favorites) when given. */
+  history?: HistoryStore;
   /** Diagnostics of the handlers (e.g. an imported secret that could not be saved). */
   log?: (message: string) => void;
 }
@@ -49,6 +52,7 @@ export function mainHandlers(deps: MainHandlerDeps): Record<string, Handler> {
         })
       : {}),
     ...(deps.pipelines ? pipelinesHandlers(deps.pipelines) : {}),
+    ...(deps.history ? historyHandlers(deps.history) : {}),
   };
   const store = deps.settings;
   if (store) {

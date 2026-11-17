@@ -5,7 +5,7 @@ owner: felix/agent-1
 deps: [x509-proxy,conn-close-streams,validator]
 touches: [packages/backend/src/docs,packages/backend/src/browse]
 prio: 2
-lease_until: 2026-11-17T04:55:45Z
+lease_until: 2026-11-17T05:05:50Z
 ---
 ## Goal
 `x509-proxy` sets the profile's read preference (+ tags) and write concern as the driver client's
@@ -30,3 +30,4 @@ See SPEC.md and docs/ARCHITECTURE.md ("Connections").
 - ASSUMPTION (2026-11-17 05:35+0100 by felix/agent-1): Schema/index/user commands (create, drop, rename, collMod, createIndexes, usersInfo) stay on the primary without the profile write concern; only document writes (docs.*, io.import) carry it. Reads tied to a write (previewMany, expectedCount check, conflict detail) read from the primary.
 - ASSUMPTION (2026-11-17 05:35+0100 by felix/agent-1): Aggregations (agg.run incl. $out/$merge, agg.explain) and io.export follow the read preference too, since they go through Operation; $out/$merge on a secondary needs MongoDB 5.0+.
 - ASSUMPTION (2026-11-17 05:35+0100 by felix/agent-1): ClientLike test fakes without db().runCursorCommand fall back to plain getMore commands (with the read preference) instead of rewriting every existing fake; real MongoClients always use the pinned driver cursor.
+- ASSUMPTION (2026-11-17 05:50+0100 by felix/agent-1): agg.run with $out/$merge (packages/backend/src/agg, outside this task's touches) still writes without the profile write concern; only document writes (docs.*, io.import) carry it (review CR-2).

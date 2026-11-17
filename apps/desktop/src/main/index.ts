@@ -29,6 +29,7 @@ import type { NativeDialogs } from '../dialogs';
 import { PipelinesStore } from '../pipelines';
 import { ProfilesStore } from '../profiles';
 import { SecretsStore } from '../secrets';
+import { HistoryStore } from '../history';
 import { SettingsStore } from '../settings/store';
 import { BackendHost } from './backend-host';
 import { Broadcaster } from './broadcast';
@@ -121,6 +122,17 @@ function pipelinesStore(): PipelinesStore {
   return pipelines;
 }
 
+/** `history/` and `favorites.json` in `userData` (query history and favorite queries). */
+let history: HistoryStore | undefined;
+
+function historyStore(): HistoryStore {
+  history ??= new HistoryStore({
+    dir: app.getPath('userData'),
+    log: (message) => log(`history: ${message}`),
+  });
+  return history;
+}
+
 /** File dialogs for the backend (io.*), attached to the focused window (or any window). */
 const nativeDialogs: NativeDialogs = {
   showSaveDialog: (options) => {
@@ -187,6 +199,7 @@ function createWindow(settings: SettingsStore): void {
       profiles: profilesStore(),
       dialogs: nativeDialogs,
       pipelines: pipelinesStore(),
+      history: historyStore(),
       log: (message) => log(`profiles: ${message}`),
     }),
     broadcaster,

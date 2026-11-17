@@ -256,6 +256,40 @@ const SAMPLES: { [M in MethodName]: { valid: ParamsOf<M>; invalid: unknown } } =
     invalid: { pipelineId: 'pl-1', name: 'x'.repeat(201) },
   },
   'pipelines.delete': { valid: { pipelineId: 'pl-1' }, invalid: { pipelineId: '' } },
+  'history.list': {
+    valid: { profileId: P, db: 'shop', coll: 'orders' },
+    invalid: { profileId: P },
+  },
+  'history.add': {
+    valid: {
+      profileId: P,
+      db: 'shop',
+      coll: 'orders',
+      query: { filter: '{ a: 1 }', projection: '', sort: '', collation: '', limit: '' },
+    },
+    invalid: { profileId: P, db: 'shop', coll: 'orders', query: { filter: '{}' } },
+  },
+  'history.clear': { valid: { profileId: P, db: 'shop', coll: 'orders' }, invalid: { db: 'shop' } },
+  'history.saveFavorite': {
+    valid: {
+      profileId: P,
+      db: 'shop',
+      coll: 'orders',
+      name: 'Open orders',
+      query: { filter: '{ status: "open" }', projection: '', sort: '', collation: '', limit: '' },
+    },
+    invalid: {
+      profileId: P,
+      db: 'shop',
+      coll: 'orders',
+      name: '   ',
+      query: { filter: '', projection: '', sort: '', collation: '', limit: '' },
+    },
+  },
+  'history.deleteFavorite': {
+    valid: { profileId: P, db: 'shop', coll: 'orders', id: 'f1' },
+    invalid: { profileId: P, db: 'shop', coll: 'orders', id: '' },
+  },
 
   'app.ping': { valid: {}, invalid: { echo: 1 } },
   'app.settings.get': { valid: {}, invalid: { key: 'style' } },
@@ -307,6 +341,7 @@ describe('method table', () => {
         'conn',
         'db',
         'docs',
+        'history',
         'idx',
         'io',
         'pipelines',
@@ -569,9 +604,10 @@ describe('documents travel as EJSON text', () => {
     const def = table[name];
     if (!def) throw new Error(name);
     const findings: Finding[] = [];
-    // profiles.* and app.* carry no server data; their `id`/`value`/`current` are plain strings.
+    // profiles.*, history.* and app.* carry no server data; their `id`/`value`/`current` are plain
+    // strings, and history's `filter`/`sort`/... are the query bar's shell-syntax text as typed.
     // Only the doc-field name rule is relaxed for them: free-form values are still rejected.
-    const local = name.startsWith('profiles.') || name.startsWith('app.');
+    const local = ['profiles.', 'history.', 'app.'].some((prefix) => name.startsWith(prefix));
     const run = (schema: z.ZodType, path: string) => walk(schema, path, false, findings, local);
     run(def.params, 'params');
     run(def.result, 'result');
@@ -636,12 +672,12 @@ describe('writes', () => {
 });
 
 describe('route', () => {
-  it('sends profiles.*, pipelines.* and app.* to main, the rest to the backend', () => {
+  it('sends profiles.*, history.*, pipelines.* and app.* to main, the rest to the backend', () => {
     for (const name of METHOD_NAMES) {
       const group = name.split('.')[0] ?? '';
       expect([name, route(name)]).toEqual([
         name,
-        ['profiles', 'pipelines', 'app'].includes(group) ? 'main' : 'backend',
+        ['profiles', 'history', 'pipelines', 'app'].includes(group) ? 'main' : 'backend',
       ]);
     }
   });
