@@ -1,10 +1,11 @@
 ---
 title: Shell opening during conn.close/tunnel loss outlives the connection
-status: todo
-owner:
+status: in_progress
+owner: dell26/agent-3
 deps: [shell-backend]
 touches: [packages/backend/src/shell]
 prio: 2
+lease_until: 2026-11-17T05:07:38Z
 ---
 ## Goal
 `shell.open` reads the connection's config, waits for the worker to connect, and only then registers
