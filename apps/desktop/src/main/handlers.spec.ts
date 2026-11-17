@@ -312,6 +312,20 @@ describe('main handlers with a ProfilesStore', () => {
       expect(byId.get('c1')).toMatchObject({ ok: true, result: null });
       expect(byId.get('e1')).toMatchObject({ ok: true, result: { path: null, exported: 0 } });
     });
+
+    it('passes its log to the import (a secret that cannot be saved is logged)', async () => {
+      const { secrets, profiles } = stores();
+      vi.spyOn(secrets, 'set').mockRejectedValue(new Error('disk full'));
+      const log = vi.fn();
+      const handlers = mainHandlers({ version: '1', secrets, profiles, dialogs, log });
+      const result = await handlers['profiles.importUris']?.(
+        { uris: ['mongodb://alice:fictitious-pw@db.example.test/'] } as never,
+        ctx,
+      );
+      expect(result).toMatchObject({ imported: [{ auth: { secretMode: 'ask' } }] });
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('could not save the password'));
+      expect(JSON.stringify(log.mock.calls)).not.toContain('fictitious-pw');
+    });
   });
 
   describe('together with a settings store', () => {

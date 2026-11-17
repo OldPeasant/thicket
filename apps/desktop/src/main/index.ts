@@ -168,6 +168,7 @@ function createWindow(settings: SettingsStore): void {
       settings,
       profiles: profilesStore(),
       dialogs: nativeDialogs,
+      log: (message) => log(`profiles: ${message}`),
     }),
     broadcaster,
     log,

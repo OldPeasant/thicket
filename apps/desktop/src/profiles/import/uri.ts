@@ -113,6 +113,22 @@ export function uriWithoutSecrets(uri: string): string {
   }
 }
 
+/**
+ * Takes every secret (password, `proxyPassword`, `tlsCertificateKeyFilePassword`,
+ * `AWS_SESSION_TOKEN`) out of a connection string and reports the kinds that were removed. The
+ * string is returned unchanged when it holds none. Throws `ConnectionStringError` for an invalid
+ * URI (its message never contains the password).
+ */
+export function stripUriSecrets(uri: string): { uri: string; removed: SecretKind[] } {
+  const model = parseConnectionString(uri);
+  const { password, others } = takeSecrets(model);
+  const removed: SecretKind[] = [
+    ...(password !== undefined ? (['password'] as const) : []),
+    ...others.map((s) => s.kind),
+  ];
+  return removed.length === 0 ? { uri, removed } : { uri: toConnectionString(model), removed };
+}
+
 /** `host:port, host2` (SRV: the host name) as a default profile name. */
 export function defaultName(model: ConnectionUriModel): string {
   return model.hosts

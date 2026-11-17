@@ -1,7 +1,12 @@
-import { profileDraft, type ProfileDraft } from '@thicket/contract';
+import { profileDraft, type ProfileDraft, type SecretKind } from '@thicket/contract';
 import { mask } from '@thicket/core/uri';
 
-import { profileFromUri, type ImportedConnection, type ImportedSecret } from './uri';
+import {
+  profileFromUri,
+  stripUriSecrets,
+  type ImportedConnection,
+  type ImportedSecret,
+} from './uri';
 
 /** One connection of an import file, ready to be saved. */
 export interface ImportEntry extends ImportedConnection {
@@ -86,7 +91,8 @@ function colorOf(value: unknown): string | undefined {
   const color = str(value);
   if (color === undefined) return undefined;
   if (/^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(color)) return color;
-  return COMPASS_COLORS[color];
+  // Own keys only: `constructor`, `__proto__`, ... are not colors.
+  return Object.hasOwn(COMPASS_COLORS, color) ? COMPASS_COLORS[color] : undefined;
 }
 
 function messageOf(error: unknown): string {
@@ -180,6 +186,14 @@ function parseCompass(file: Record<string, unknown>): ParsedImportFile {
   return result;
 }
 
+/** How the secrets a connection string can hold are named in it. */
+const URI_SECRET_OPTIONS: Partial<Record<SecretKind, string>> = {
+  password: 'password',
+  proxyPassword: 'proxyPassword',
+  tlsKeyPassphrase: 'tlsCertificateKeyFilePassword',
+  awsSessionToken: 'AWS_SESSION_TOKEN',
+};
+
 function parseThicket(file: Record<string, unknown>): ParsedImportFile {
   if (file['version'] !== 1)
     throw new ImportFileError(`Unsupported Thicket export version ${String(file['version'])}`);
@@ -200,8 +214,27 @@ function parseThicket(file: Record<string, unknown>): ParsedImportFile {
       });
       return;
     }
-    const draft: ProfileDraft = { ...parsed.data };
+    const draft: ProfileDraft = structuredClone(parsed.data);
     delete draft.id;
+    // A shared file is untrusted: secrets in its connection string are dropped, never stored.
+    let stripped: { uri: string; removed: SecretKind[] };
+    try {
+      stripped = stripUriSecrets(draft.connectionString);
+    } catch (error) {
+      result.skipped.push({ source, reason: messageOf(error) });
+      return;
+    }
+    draft.connectionString = stripped.uri;
+    if (stripped.removed.length > 0) {
+      result.notices.push({
+        source,
+        reason:
+          `${stripped.removed.map((kind) => URI_SECRET_OPTIONS[kind] ?? kind).join(', ')} ` +
+          'removed from the connection string and not imported; enter it when connecting',
+      });
+    }
+    // The import stores no secret for it, so a saved one has to be asked for.
+    if (draft.auth?.secretMode === 'saved') draft.auth.secretMode = 'ask';
     result.entries.push({ source, draft, secrets: [] });
   });
   return result;

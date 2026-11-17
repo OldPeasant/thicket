@@ -848,6 +848,66 @@ describe('parseImportFile (Thicket export)', () => {
     expect(JSON.stringify(parsed.skipped)).not.toContain('fake-leaked-pw');
   });
 
+  it('strips secret URI options from a shared file and says so (CR-1)', () => {
+    const parsed = parseImportFile(
+      thicket([
+        {
+          name: 'Shared',
+          connectionString:
+            'mongodb://a.test/?proxyHost=s.test&proxyUsername=p&proxyPassword=fake-proxy-pw' +
+            '&tls=true&tlsCertificateKeyFile=/k.pem&tlsCertificateKeyFilePassword=fake-key-pw' +
+            '&authMechanism=MONGODB-AWS' +
+            '&authMechanismProperties=AWS_SESSION_TOKEN:fake-session-token',
+          readOnly: false,
+          production: false,
+        },
+        {
+          name: 'Clean',
+          connectionString: 'mongodb://b.test/?appName=x',
+          readOnly: false,
+          production: false,
+        },
+      ]),
+    );
+    const text = JSON.stringify(parsed);
+    for (const secret of ['fake-proxy-pw', 'fake-key-pw', 'fake-session-token'])
+      expect(text).not.toContain(secret);
+    expect(parsed.entries.map((e) => e.secrets)).toEqual([[], []]);
+    const shared = parsed.entries[0]?.draft.connectionString ?? '';
+    expect(shared).toContain('proxyHost=s.test');
+    expect(shared).not.toMatch(/proxyPassword|tlsCertificateKeyFilePassword|AWS_SESSION_TOKEN/i);
+    // A string without secrets is kept exactly as written.
+    expect(parsed.entries[1]?.draft.connectionString).toBe('mongodb://b.test/?appName=x');
+    expect(parsed.notices).toHaveLength(1);
+    expect(parsed.notices[0]?.source).toBe('Shared');
+    expect(parsed.notices[0]?.reason).toMatch(
+      /proxyPassword, tlsCertificateKeyFilePassword, AWS_SESSION_TOKEN removed/,
+    );
+  });
+
+  it('imports secretMode saved as ask: no secret is stored for it (CR-2)', () => {
+    const parsed = parseImportFile(
+      thicket([
+        {
+          name: 'Saved',
+          connectionString: 'mongodb://alice@a.test',
+          readOnly: false,
+          production: false,
+          auth: { mechanism: 'SCRAM-SHA-256', username: 'alice', secretMode: 'saved' },
+        },
+        {
+          name: 'None',
+          connectionString: 'mongodb://b.test',
+          readOnly: false,
+          production: false,
+          auth: { mechanism: 'MONGODB-X509', secretMode: 'none' },
+        },
+      ]),
+    );
+    expect(parsed.entries.map((e) => e.draft.auth?.secretMode)).toEqual(['ask', 'none']);
+    expect(parsed.entries.map((e) => e.secrets)).toEqual([[], []]);
+  });
+
   it('refuses other versions and a missing profiles list', () => {
     expect(() => parseImportFile(thicket([], 2))).toThrow(/Thicket export version 2/);
     expect(() => parseImportFile(thicket([], { $numberInt: '1' }))).toThrow(ImportFileError);
@@ -978,6 +1038,45 @@ describe('importExportHandlers (edge cases)', () => {
       ['B', undefined],
     ]);
     expect(profiles.profiles).toHaveLength(2);
+  });
+
+  it('profiles.importCompass reads a Thicket file: strips secrets, skips invalid entries (CR-5)', async () => {
+    const file = JSON.stringify({
+      type: 'Thicket Connections',
+      version: 1,
+      profiles: [
+        {
+          id: 'old',
+          name: 'Shared',
+          connectionString: 'mongodb://alice@a.test/?proxyHost=s.test&proxyPassword=fake-proxy-pw',
+          readOnly: false,
+          production: false,
+          auth: { mechanism: 'SCRAM-SHA-256', username: 'alice', secretMode: 'saved' },
+        },
+        { name: 'Broken', readOnly: false, production: false },
+      ],
+    });
+    const { profiles, secrets, call } = setup({ file });
+    const result = await call('profiles.importCompass');
+    expect(parseResult('profiles.importCompass', result).ok).toBe(true);
+    const { imported, skipped, notices } = result as {
+      imported: Profile[];
+      skipped: { source: string }[];
+      notices: { source: string }[];
+    };
+    expect(imported.map((p) => [p.id, p.name, p.auth?.secretMode])).toEqual([
+      ['id1', 'Shared', 'ask'],
+    ]);
+    expect(skipped.map((s) => s.source)).toEqual(['Broken']);
+    expect(notices.map((n) => n.source)).toEqual(['Shared']);
+    expect(secrets.stored).toEqual([]);
+    expect(JSON.stringify([result, profiles.profiles])).not.toContain('fake-proxy-pw');
+
+    const readOnly = setup({ file });
+    readOnly.profiles.save = () => Promise.reject(new ProfilesReadOnlyError(99));
+    await expect(readOnly.call('profiles.importCompass')).rejects.toSatisfy(
+      (e) => e instanceof RpcError && e.code === 'UNSUPPORTED',
+    );
   });
 
   it('does not ask the keychain when no entry has a secret', async () => {

@@ -25,6 +25,8 @@ export interface MainHandlerDeps {
   profiles?: ProfilesStore;
   /** With `profiles`: serves `profiles.importCompass/importUris/export` (native file dialogs). */
   dialogs?: NativeDialogs;
+  /** Diagnostics of the handlers (e.g. an imported secret that could not be saved). */
+  log?: (message: string) => void;
 }
 
 /** Handlers of the main-routed contract methods implemented so far. */
@@ -39,6 +41,7 @@ export function mainHandlers(deps: MainHandlerDeps): Record<string, Handler> {
           profiles: deps.profiles,
           secrets: deps.secrets,
           dialogs: deps.dialogs,
+          ...(deps.log ? { log: deps.log } : {}),
         })
       : {}),
   };
