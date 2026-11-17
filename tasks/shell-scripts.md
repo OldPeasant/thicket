@@ -1,10 +1,11 @@
 ---
 title: M4 (Should): Run a script file in the shell
-status: todo
-owner:
+status: in_progress
+owner: dell26/agent-3
 deps: [shell-ui]
 touches: [packages/renderer/src/app/console/scripts]
 prio: 3
+lease_until: 2026-11-17T06:02:47Z
 ---
 ## Goal
 Choose a .js/.mongodb file and run it in the current shell with progress and output.
