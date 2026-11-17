@@ -423,7 +423,8 @@ export class DocumentActions {
       coll: host.coll,
       id: stringifyEJson(id),
     };
-    const diff = options.keepOrder && !partial ? keepingOrder(pending.diff, original, current) : pending.diff;
+    const diff =
+      options.keepOrder && !partial ? keepingOrder(pending.diff, original, current) : pending.diff;
     if (
       partial &&
       (overwritesHiddenData(diff, original) ||

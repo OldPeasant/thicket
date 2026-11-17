@@ -198,7 +198,10 @@ describe('Undo last save', () => {
   it('undoes only the last save of the document', async () => {
     await saveAs('{"_id":{"$numberInt":"1"},"status":"open","total":{"$numberInt":"15"}}');
     const first = server.stored as BsonDocument;
-    edits.edit(first, doc('{"_id":{"$numberInt":"1"},"status":"paid","total":{"$numberInt":"15"}}'));
+    edits.edit(
+      first,
+      doc('{"_id":{"$numberInt":"1"},"status":"paid","total":{"$numberInt":"15"}}'),
+    );
     expect(await actions.save(ID)).toBe(true);
 
     expect(await actions.undoSave(ID)).toBe(true);
@@ -266,7 +269,10 @@ describe('Undo last save', () => {
   it('is offered after a conflict Overwrite, and undoes it back to the server version', async () => {
     server.set('total', { type: 'int', value: 20 });
     const serverVersion = server.stored as BsonDocument;
-    edits.edit(doc(ORIGINAL), doc('{"_id":{"$numberInt":"1"},"status":"open","total":{"$numberInt":"15"}}'));
+    edits.edit(
+      doc(ORIGINAL),
+      doc('{"_id":{"$numberInt":"1"},"status":"open","total":{"$numberInt":"15"}}'),
+    );
     expect(await actions.save(ID)).toBe(false);
     expect(actions.conflicts().has(ID)).toBe(true);
     expect(actions.canUndoSave(ID)).toBe(false);
