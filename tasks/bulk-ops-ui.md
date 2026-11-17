@@ -1,10 +1,11 @@
 ---
 title: M3: Bulk update and delete from the query bar
-status: todo
-owner:
+status: in_progress
+owner: dell26/agent-3
 deps: [doc-edit-save,safety-ui]
 touches: [packages/renderer/src/app/collection/bulk]
 prio: 2
+lease_until: 2026-11-17T04:11:36Z
 ---
 ## Goal
 updateMany (update document in shell syntax) and deleteMany for the current filter with preview (count + sample) and confirmation; type-to-confirm above 1 000 documents.
