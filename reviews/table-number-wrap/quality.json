@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "task": "table-number-wrap",
+  "reviewed_revision": "25e528a9aee1c614c3da3dd31f399235ead32d07",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/table-number-wrap/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/table-number-wrap/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/table-number-wrap/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1 (round 1)", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "scalar values longer than 60ch (long DBPointer) overflowed the cell; .val.bson.scalar now has max-width: none"},
+    {"id": "TW-1 (round 1)", "source": "test-writer", "severity": "Low", "disposition": "fixed",
+     "note": "same edge case as CR-1 (max-width 60ch with nowrap)"},
+    {"id": "CR-1 (round 3)", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "e2e overflow check comment overstates that it guards the long-DBPointer case (unreachable from a real server, see tests.md); the component specs guard it; test-only wording, not worth another review cycle"},
+    {"id": "CR-2 (round 3)", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "e2e measures before document.fonts.ready; possible flakiness only, not observed (3 runs passed); test-only"}
+  ],
+  "validation": [
+    {"command": "cd packages/renderer && npx ng test --include='src/app/explorer/editable-value/**/*.spec.ts' --include='src/app/explorer/json-table/**/*.spec.ts'", "result": "pass"},
+    {"command": "npm run test:e2e -- test/e2e/table-number-wrap.e2e.ts", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}
