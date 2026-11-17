@@ -76,13 +76,31 @@ class OneDocServer {
 
   private matches(current: BsonDocument, expected: BsonDocument): boolean {
     return expected.fields.every(({ key, value }) => {
+      if (key === '$expr') return current.fields.length === this.fieldCount(value);
       const field = current.fields.find((f) => f.key === key);
       if (value.type !== 'object') throw new Error(`unsupported check ${key}`);
       const check = value.fields[0];
       if (check?.key === '$eq') return field !== undefined && bsonEquals(field.value, check.value);
       if (check?.key === '$exists') return field === undefined;
+      if (check?.key === '$type' && check.value.type === 'string') {
+        return field?.value.type === check.value.value;
+      }
       throw new Error(`unsupported check ${check?.key}`);
     });
+  }
+
+  /**
+   * The count of `{$eq: [{$size: {$objectToArray: '$$ROOT'}}, n]}`, the only `$expr` the undo
+   * sends (the server document must have exactly n fields).
+   */
+  private fieldCount(expr: BsonValue): number {
+    const text = stringifyEJson(expr);
+    const match =
+      /^\{"\$eq":\[\{"\$size":\{"\$objectToArray":"\$\$ROOT"\}\},\{"\$numberInt":"(\d+)"\}\]\}$/.exec(
+        text,
+      );
+    if (match === null) throw new Error(`unsupported $expr ${text}`);
+    return Number(match[1]);
   }
 
   private apply(current: BsonDocument, update: BsonDocument): BsonDocument {
@@ -180,11 +198,14 @@ describe('Undo last save', () => {
     expect(updates()).toHaveLength(1);
     const undo = replaces()[0];
     expect(undo?.['doc']).toBe(ORIGINAL);
-    // The undo's conflict check is the saved values of the changed fields.
+    // A replace writes every field, so its conflict check is the whole saved version: every
+    // field's saved value and exactly its number of fields (_id is in the filter anyway).
     expect(JSON.parse(undo?.['expected'] as string)).toEqual({
-      status: { $exists: false },
       total: { $eq: { $numberInt: '15' } },
       note: { $eq: 'rush' },
+      $expr: {
+        $eq: [{ $size: { $objectToArray: '$$ROOT' } }, { $numberInt: '3' }],
+      },
     });
     expect(actions.message()).toEqual({ kind: 'info', text: 'Undid the last save of 1.' });
     // The page shows the server's version, read back.
@@ -299,5 +320,215 @@ describe('Undo last save', () => {
     // status (hidden by the projection) was never touched.
     expect(bsonEquals(server.stored as BsonDocument, doc(ORIGINAL))).toBe(true);
     expect(updates()[1]?.['update']).toBe('{"$set":{"total":{"$numberInt":"10"}}}');
+  });
+
+  // Added by the test-writer (undo-last-save).
+
+  it('undoes a save made under a projection that hides sub-fields, touching only the saved field', async () => {
+    projection = '{"total":{"$numberInt":"1"},"addr.city":{"$numberInt":"1"}}';
+    const shown = doc('{"_id":{"$numberInt":"1"},"total":{"$numberInt":"10"}}');
+    edits.edit(shown, doc('{"_id":{"$numberInt":"1"},"total":{"$numberInt":"15"}}'), true, true);
+    expect(await actions.save(ID)).toBe(true);
+    expect(actions.canUndoSave(ID)).toBe(true);
+
+    expect(await actions.undoSave(ID)).toBe(true);
+
+    expect(bsonEquals(server.stored as BsonDocument, doc(ORIGINAL))).toBe(true);
+    expect(updates()[1]).toMatchObject({
+      update: '{"$set":{"total":{"$numberInt":"10"}}}',
+      expected: '{"total":{"$eq":{"$numberInt":"15"}}}',
+    });
+    expect(replaces()).toHaveLength(0);
+  });
+
+  it('is offered after Merge manually, and undoes it back to the server version', async () => {
+    server.set('total', { type: 'int', value: 20 });
+    const serverVersion = server.stored as BsonDocument;
+    edits.edit(
+      doc(ORIGINAL),
+      doc('{"_id":{"$numberInt":"1"},"status":"paid","total":{"$numberInt":"15"}}'),
+    );
+    expect(await actions.save(ID)).toBe(false);
+    expect(actions.conflicts().has(ID)).toBe(true);
+    expect(actions.canUndoSave(ID)).toBe(false);
+
+    const merged = doc('{"_id":{"$numberInt":"1"},"status":"paid","total":{"$numberInt":"20"}}');
+    expect(await actions.saveMerged(ID, merged)).toBe(true);
+    expect(bsonEquals(server.stored as BsonDocument, merged)).toBe(true);
+    expect(actions.canUndoSave(ID)).toBe(true);
+
+    expect(await actions.undoSave(ID)).toBe(true);
+    expect(bsonEquals(server.stored as BsonDocument, serverVersion)).toBe(true);
+    expect(actions.canUndoSave(ID)).toBe(false);
+  });
+
+  it('a cancelled production confirm writes nothing and keeps the undo', async () => {
+    await saveAs('{"_id":{"$numberInt":"1"},"status":"open","total":{"$numberInt":"15"}}');
+    const saved = stringifyEJson(server.stored as BsonDocument);
+    TestBed.inject(ProfileSafetyService).set({
+      id: 'p1',
+      name: 'Prod',
+      readOnly: false,
+      production: true,
+    });
+    vi.mocked(TestBed.inject(ConfirmService).confirm).mockImplementation((request) => {
+      confirms.push(request);
+      return Promise.resolve(false);
+    });
+
+    expect(await actions.undoSave(ID)).toBe(false);
+
+    expect(confirms).toHaveLength(1);
+    expect(updates()).toHaveLength(1);
+    expect(stringifyEJson(server.stored as BsonDocument)).toBe(saved);
+    expect(actions.message()).toBeNull();
+    expect(actions.canUndoSave(ID)).toBe(true);
+    expect(actions.busy()).toBe(false);
+  });
+
+  it('a failed write (not a conflict) says Not undone and keeps the undo for a retry', async () => {
+    await saveAs('{"_id":{"$numberInt":"1"},"status":"open","total":{"$numberInt":"15"}}');
+    fake.fail('docs.update', { code: 'NOT_CONNECTED', message: 'Not connected to Local.' });
+
+    expect(await actions.undoSave(ID)).toBe(false);
+
+    expect(actions.message()?.kind).toBe('error');
+    expect(actions.message()?.text).toMatch(/^Not undone: /);
+    expect(actions.conflicts().size).toBe(0);
+    expect(actions.canUndoSave(ID)).toBe(true);
+    expect(actions.busy()).toBe(false);
+
+    server.install(fake);
+    expect(await actions.undoSave(ID)).toBe(true);
+    expect(bsonEquals(server.stored as BsonDocument, doc(ORIGINAL))).toBe(true);
+  });
+
+  it('runs one undo at a time: a second click while it is running sends nothing', async () => {
+    await saveAs('{"_id":{"$numberInt":"1"},"status":"open","total":{"$numberInt":"15"}}');
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    fake.handle('docs.update', async () => {
+      await gate;
+      server.stored = doc(ORIGINAL);
+      return { modified: true };
+    });
+
+    const first = actions.undoSave(ID);
+    await Promise.resolve();
+    expect(actions.isBusy(ID)).toBe(true);
+    expect(await actions.undoSave(ID)).toBe(false);
+    release();
+    expect(await first).toBe(true);
+
+    expect(updates()).toHaveLength(2);
+    expect(actions.canUndoSave(ID)).toBe(false);
+  });
+
+  it('restores a field removed from the end with the minimal $set (the order already matches)', async () => {
+    await saveAs('{"_id":{"$numberInt":"1"},"status":"open"}');
+
+    expect(await actions.undoSave(ID)).toBe(true);
+
+    expect(stringifyEJson(server.stored as BsonDocument)).toBe(ORIGINAL);
+    expect(replaces()).toHaveLength(0);
+    expect(updates()[1]).toMatchObject({
+      update: '{"$set":{"total":{"$numberInt":"10"}}}',
+      expected: '{"total":{"$exists":false}}',
+    });
+  });
+
+  it('restores a removed nested field in its place by replacing the whole document', async () => {
+    const nested =
+      '{"_id":{"$numberInt":"1"},"addr":{"city":"Springfield","zip":"12345"},"status":"open"}';
+    server.stored = doc(nested);
+    edits.edit(
+      doc(nested),
+      doc('{"_id":{"$numberInt":"1"},"addr":{"zip":"12345"},"status":"open"}'),
+    );
+    // The fake server applies top-level paths only, so the save is checked by what was sent.
+    fake.handle('docs.update', (p) => {
+      expect(p.update).toBe('{"$unset":{"addr.city":""}}');
+      server.stored = doc('{"_id":{"$numberInt":"1"},"addr":{"zip":"12345"},"status":"open"}');
+      return { modified: true };
+    });
+    expect(await actions.save(ID)).toBe(true);
+    server.install(fake);
+
+    expect(await actions.undoSave(ID)).toBe(true);
+
+    // $set addr.city would append city after zip: only a replace gives the original order.
+    expect(stringifyEJson(server.stored as BsonDocument)).toBe(nested);
+    expect(replaces()[0]?.['doc']).toBe(nested);
+  });
+
+  // TW-1: the replace path (keepOrder) writes the whole pre-save document, but its conflict check
+  // covers only the fields the save changed. A field changed on the server since the save, that
+  // the save did not touch, is silently overwritten with its pre-save value.
+  it('reports a conflict instead of replacing over a server change to a field the save did not touch', async () => {
+    // The save removed status only; the undo needs a replace to put status back before total.
+    await saveAs('{"_id":{"$numberInt":"1"},"total":{"$numberInt":"10"}}');
+    // Another client changes total, which the save did not touch, so the undo's conflict check
+    // (status: {$exists: false}) does not cover it.
+    server.set('total', { type: 'int', value: 20 });
+    const changedOnServer = stringifyEJson(server.stored as BsonDocument);
+
+    await actions.undoSave(ID);
+
+    // The newer server change must not be overwritten.
+    expect(stringifyEJson(server.stored as BsonDocument)).toBe(changedOnServer);
+    expect(actions.message()?.text).toMatch(/^Not undone: /);
+  });
+
+  // Fixer (CR-1/TW-1): the replace path checks the whole saved version.
+  it('reports a conflict instead of replacing over a field added on the server since the save', async () => {
+    // The save removed status only; the undo needs a replace to put status back before total.
+    await saveAs('{"_id":{"$numberInt":"1"},"total":{"$numberInt":"10"}}');
+    server.set('extra', { type: 'string', value: 'added by another client' });
+    const changedOnServer = stringifyEJson(server.stored as BsonDocument);
+
+    expect(await actions.undoSave(ID)).toBe(false);
+
+    // The new field is not dropped by a replace.
+    expect(stringifyEJson(server.stored as BsonDocument)).toBe(changedOnServer);
+    expect(actions.message()?.text).toMatch(/^Not undone: the document was changed on the server/);
+    expect(actions.canUndoSave(ID)).toBe(false);
+  });
+
+  it('checks a saved null by type on the replace path, and restores the original', async () => {
+    const withNull =
+      '{"_id":{"$numberInt":"1"},"status":"open","note":null,"total":{"$numberInt":"10"}}';
+    server.stored = doc(withNull);
+    edits.edit(
+      doc(withNull),
+      doc('{"_id":{"$numberInt":"1"},"note":null,"total":{"$numberInt":"10"}}'),
+    );
+    expect(await actions.save(ID)).toBe(true);
+
+    expect(await actions.undoSave(ID)).toBe(true);
+
+    expect(stringifyEJson(server.stored as BsonDocument)).toBe(withNull);
+    expect(JSON.parse(replaces()[0]?.['expected'] as string)).toMatchObject({
+      note: { $type: 'null' },
+      total: { $eq: { $numberInt: '10' } },
+    });
+  });
+
+  it('falls back to the minimal update when a field name cannot be checked by a query path', async () => {
+    const dotted = '{"_id":{"$numberInt":"1"},"status":"open","a.b":{"$numberInt":"1"}}';
+    server.stored = doc(dotted);
+    edits.edit(doc(dotted), doc('{"_id":{"$numberInt":"1"},"a.b":{"$numberInt":"1"}}'));
+    expect(await actions.save(ID)).toBe(true);
+
+    expect(await actions.undoSave(ID)).toBe(true);
+
+    // No whole-document check is possible for "a.b": no replace, status is appended instead.
+    expect(replaces()).toHaveLength(0);
+    expect(updates()[1]).toMatchObject({
+      update: '{"$set":{"status":"open"}}',
+      expected: '{"status":{"$exists":false}}',
+    });
+    expect(stringifyEJson(server.stored as BsonDocument)).toBe(
+      '{"_id":{"$numberInt":"1"},"a.b":{"$numberInt":"1"},"status":"open"}',
+    );
   });
 });

@@ -1,14 +1,18 @@
 import { computed, inject, Injectable, signal } from '@angular/core';
 import { type ConflictDetail, conflictDetail, type SlicedArray } from '@thicket/contract';
 import {
+  arr,
   type BsonDocument,
   type BsonField,
   type BsonValue,
+  doc as bsonDoc,
+  int32,
   parseEJson,
   parseEJsonDocument,
+  str,
   stringifyEJson,
 } from '@thicket/core/bson';
-import { bsonEquals, type DocumentDiff } from '@thicket/core/diff';
+import { bsonEquals, type DocumentDiff, isAddressableKey } from '@thicket/core/diff';
 import { printShellSyntax } from '@thicket/core/shellsyntax';
 
 import { ApiError, ApiService, describeError } from '../api';
@@ -159,8 +163,9 @@ export class DocumentActions {
   /**
    * "Undo last save": writes the version from before the document's last save back, as the
    * minimal diff from the saved version with the saved version's values as the conflict check (as
-   * Save does). When the document changed on the server since, nothing is overwritten: the
-   * message says so and the undo is no longer offered. Refused while the document has unsaved
+   * Save does; when only a replace restores the field order, the check covers the whole saved
+   * version, see `keepingOrder`). When the document changed on the server since, nothing is
+   * overwritten: the message says so and the undo is no longer offered. Refused while the document has unsaved
    * edits (Save or Revert them first). Resolves with true when the old version was written.
    */
   async undoSave(key: string): Promise<boolean> {
@@ -183,6 +188,7 @@ export class DocumentActions {
         done: (id) => `Undid the last save of ${label(id)}.`,
         refused: 'Not undone',
         keepOrder: true,
+        partialRefused: UNDO_PARTIAL_REFUSED,
         onConflict: () => {
           this.saveHistory.drop(key);
           this.messageState.set({ kind: 'error', text: UNDO_CONFLICT });
@@ -433,7 +439,7 @@ export class DocumentActions {
       const text = host.projection() !== undefined ? PROJECTION_REFUSED : PARTIAL_REFUSED;
       this.messageState.set({
         kind: 'error',
-        text: `${options.refused}: ${text}`,
+        text: options.partialRefused ?? `${options.refused}: ${text}`,
       });
       return false;
     }
@@ -670,23 +676,76 @@ interface SendOptions {
   /**
    * The server must end up with `current` in its field order (an undo restores a version): when
    * the update would leave fields in another order (MongoDB appends a field it adds), the whole
-   * document is replaced instead, with the same conflict check. Never for a partial document.
+   * document is replaced instead, checked against the whole saved version (see `keepingOrder`).
+   * Never for a partial document.
    */
   readonly keepOrder?: boolean;
+  /** The whole refusal text when a partial document's write would replace unloaded data. */
+  readonly partialRefused?: string;
 }
 
 /**
  * `diff` as a replace of the whole document `current` when applying its update to `original`
- * would not give `current` with its field order; otherwise `diff` as it is.
+ * would not give `current` with its field order; otherwise `diff` as it is. A replace writes
+ * every field, so its conflict check covers the whole version the save wrote (every top-level
+ * field and the field count): any change on the server since then conflicts. When that check
+ * can't be built (`wholeDocumentCheck`), the update stays the minimal one (the order may differ).
  */
 function keepingOrder(
   diff: Exclude<DocumentDiff, { readonly kind: 'none' }>,
   original: BsonDocument,
   current: BsonDocument,
 ): Exclude<DocumentDiff, { readonly kind: 'none' }> {
-  if (diff.kind !== 'update' || bsonEquals(applyUpdate(original, diff.ops), current)) return diff;
-  const { expected, filter, changedFields } = diff;
-  return { kind: 'replace', replacement: current, expected, filter, changedFields };
+  if (diff.kind === 'update' && bsonEquals(applyUpdate(original, diff.ops), current)) return diff;
+  const expected = wholeDocumentCheck(savedVersion(current, original));
+  if (expected === null) return diff;
+  const id = diff.filter.fields.find((f) => f.key === '_id');
+  const filter: BsonDocument = {
+    type: 'object',
+    fields: [...(id ? [id] : []), ...expected.fields],
+  };
+  return {
+    kind: 'replace',
+    replacement: current,
+    expected,
+    filter,
+    changedFields: diff.changedFields,
+  };
+}
+
+/**
+ * The document on the server after a save of `after` over `before`: `after`, except that an
+ * update put the fields it added last in their parent (as MongoDB does).
+ */
+function savedVersion(before: BsonDocument, after: BsonDocument): BsonDocument {
+  const save = pendingSave({ original: before, current: after });
+  return save.ok && save.diff.kind === 'update' ? applyUpdate(before, save.diff.ops) : after;
+}
+
+/**
+ * A conflict check (a query fragment, as `expected`) that matches only a document equal to
+ * `saved`: every top-level field but `_id` (which the filter matches anyway) with its value
+ * (null and BSON undefined by `$type`, as the diff checks them), and exactly as many fields.
+ * `null` when it can't be built safely: repeated keys, or a field name that is not a query path.
+ */
+function wholeDocumentCheck(saved: BsonDocument): BsonDocument | null {
+  const keys = saved.fields.map((f) => f.key);
+  if (new Set(keys).size !== keys.length || !keys.every(isAddressableKey)) return null;
+  const checks: BsonField[] = saved.fields
+    .filter((f) => f.key !== '_id')
+    .map(({ key, value }) => ({
+      key,
+      value: bsonDoc([
+        value.type === 'null' || value.type === 'undefined'
+          ? { key: '$type', value: str(value.type) }
+          : { key: '$eq', value },
+      ]),
+    }));
+  const size = bsonDoc([
+    { key: '$size', value: bsonDoc([{ key: '$objectToArray', value: str('$$ROOT') }]) },
+  ]);
+  const fieldCount = bsonDoc([{ key: '$eq', value: arr([size, int32(keys.length)]) }]);
+  return bsonDoc([...checks, { key: '$expr', value: fieldCount }]);
 }
 
 const SAVE_OPTIONS: SendOptions = {
@@ -701,6 +760,11 @@ const UNDO_WITH_EDITS_REFUSED =
 const UNDO_CONFLICT =
   'Not undone: the document was changed on the server since the save. Nothing was overwritten; ' +
   'run the query again to see the current version.';
+
+/** Undo's refusal under a projection or for a partly loaded document (no edit to redo). */
+const UNDO_PARTIAL_REFUSED =
+  'Not undone: this document was loaded only partly, so restoring the old version could change ' +
+  'data that was not loaded.';
 
 const PROJECTION_REFUSED =
   'with a projection active, this edit would replace data the projection hides. ' +

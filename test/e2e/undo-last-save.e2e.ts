@@ -173,3 +173,65 @@ test('Undo last save reports a conflict instead of overwriting a newer server ch
     0,
   );
 });
+
+/** Deletes the top-level field `key` of the first document with its "Delete key" button and saves. */
+async function removeFieldAndSave(window: Page, key: string): Promise<void> {
+  await window
+    .getByTestId('result-doc')
+    .first()
+    .locator(`.field[data-node$=".${key}"] .del-btn`)
+    .first()
+    .click();
+  await expect(window.getByTestId('edit-count')).toHaveText('1 change');
+  await window.getByTestId('edit-save').click();
+  await expect(window.getByTestId('edit-message')).toHaveText('Saved 1.');
+}
+
+// Added by the test-writer: a save that removes a field. MongoDB appends a field that $set adds
+// back, so only the replace path restores the original field order.
+test('Undo last save of a removed field restores it in its original place', async ({
+  window,
+  mongo,
+}) => {
+  test.setTimeout(90_000);
+  const coll = 'orders_undo_removed';
+  await seed(mongo.uri, coll);
+  const original = await storedText(mongo.uri, coll, 1);
+  await window.setViewportSize({ width: 1400, height: 900 });
+  await saveProfile(window, mongo.uri);
+  await openCollection(window, coll);
+
+  await removeFieldAndSave(window, 'status');
+  const saved = await withColl(mongo.uri, coll, (c) => c.findOne({ _id: 1 }));
+  expect(saved).not.toHaveProperty('status');
+
+  await window.getByTestId('result-doc').first().getByTestId('doc-undo-save').click();
+  await expect(window.getByTestId('edit-message')).toHaveText('Undid the last save of 1.');
+  // Same fields, types and order (status before total again).
+  expect(await storedText(mongo.uri, coll, 1)).toBe(original);
+});
+
+// Added by the test-writer, TW-1: the undo of a field removal replaces the whole document, but
+// its conflict check covers only the removed field, so a newer server change to another field
+// would be overwritten. Expected (acceptance criterion 2): a conflict, nothing overwritten.
+test('Undo last save of a removed field does not overwrite a newer change to another field', async ({
+  window,
+  mongo,
+}) => {
+  test.setTimeout(90_000);
+  const coll = 'orders_undo_removed_conflict';
+  await seed(mongo.uri, coll);
+  await window.setViewportSize({ width: 1400, height: 900 });
+  await saveProfile(window, mongo.uri);
+  await openCollection(window, coll);
+
+  await removeFieldAndSave(window, 'status');
+  // Another client changes qty, a field the save did not touch.
+  await withColl(mongo.uri, coll, (c) => c.updateOne({ _id: 1 }, { $set: { qty: new Int32(8) } }));
+  const changed = await storedText(mongo.uri, coll, 1);
+
+  await window.getByTestId('result-doc').first().getByTestId('doc-undo-save').click();
+  await expect(window.getByTestId('edit-message')).toContainText('Not undone');
+
+  expect(await storedText(mongo.uri, coll, 1)).toBe(changed);
+});
