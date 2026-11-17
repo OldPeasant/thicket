@@ -1,12 +1,13 @@
 ---
 title: M4: mongosh host in the backend
-status: in_progress
-owner: dell26/agent-1
+status: todo
+owner: 
 deps: [mongosh-spike,conn-manager]
 touches: [packages/backend/src/shell]
 prio: 2
-lease_until: 2026-11-17T02:59:32Z
-extended: dell26/agent-1
+lease_until: 
+extended: 
+releases: 1
 ---
 ## Goal
 shell.open/eval/complete/close per connection following docs/mongosh.md; output streamed as typed events (documents as EJSON, text, errors); interrupt; one runtime per shell tab.
@@ -29,3 +30,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 02:49+0100 by dell26/agent-1): Bundling: apps/desktop build.mjs gets a shell-worker.cjs entry; kerberos and mongodb-client-encryption are esbuild externals and not shipped yet (GSSAPI/CSFLE unavailable until packaging adds them); running the worker inside the real Electron utilityProcess was not verified here (plain Node worker of the bundle was)
 - ASSUMPTION (2026-11-17 03:07+0100 by dell26/agent-1): exit/quit (and exit()/quit()) are not passed to mongosh (it would close the session's client): the console prints that they are unavailable and the session goes on; closing the shell tab ends the session
 - extended by dell26/agent-1: Implementation complete; all 3 criteria verified on merged HEAD (shell int 17/17, npm run check pass); round-4 review 0 P0-P2. Main merged in 369c532 (conflict resolution in apps/desktop/scripts/build.mjs externals, packages/backend/package.json deps, src/index.ts exports, server/backend.ts ssh+indexes+shell wiring). done refuses: evidence stale after that resolution. Left: run test-writer + code-reviewer on current HEAD (scope: the merge resolution lines), update quality.json reviewed_revision, done.
+- release by dell26/agent-1: over budget after 2 sessions (~60 min) and a review that decided nothing; still resumable: continue from wip/shell-backend (see git log)
