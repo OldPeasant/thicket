@@ -217,6 +217,9 @@ async function handle(
   const done = () => {
     socket.destroy();
     remote.destroy();
+    // The pipe to the closed socket is gone: drain what is left, so the remote side reaches its
+    // end and closes (an ssh2 channel emits `close` only after `end`, else it stays counted).
+    remote.resume();
   };
   socket.once('close', done);
   remote.once('close', done);

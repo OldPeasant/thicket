@@ -208,14 +208,18 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   `mongodb+srv://` is resolved by the driver (locally) before any socket goes through the
   tunnel. `ssh` + `proxy` in one profile is `INVALID_PARAMS`. The tunnel is closed with the
   connection (`conn.close`, failed connect, end of `conn.test`): channels, local port, SSH
-  session. Host keys: `KnownHosts` keeps `userData/known_hosts` (OpenSSH format, `[host]:port`,
+  session. An SSH session lost while the connection is open (keepalive, server restart) closes
+  the tunnel; the connection becomes `error` (`SSH_ERROR`), the backend broadcasts `conn.status`,
+  and the next `conn.open` builds a new tunnel. Host keys: `KnownHosts` keeps `userData/known_hosts` (OpenSSH format, `[host]:port`,
   reads hashed entries); main passes `THICKET_USER_DATA` to the backend process. A known key
   connects; a host listed with other keys only is refused (`SSH_ERROR`, detail `reason:
   'hostKeyChanged'`, the message names the file to edit); an unknown key pauses the handshake
   timeout and asks: the backend broadcasts `ssh.hostKey` (`SshHostKeyPrompt`: `promptId`, host,
   port, key type, `SHA256:` fingerprint) to every window and waits up to 5 min for
-  `conn.trustHostKey({ promptId, trust })` (then appends the key); "no", the time out, no window
-  or a cancelled connect fail with `SSH_ERROR` (`reason: 'hostKeyRejected'`). Other failures are
+  `conn.trustHostKey({ promptId, trust })` (then appends the key); "no", the time out or no
+  window fail with `SSH_ERROR` (`reason: 'hostKeyRejected'`); a cancelled connect (`conn.close`,
+  request cancel) ends the question and fails with `CANCELLED`, and a server that closes the
+  connection meanwhile ends it too (`SSH_ERROR`). Other failures are
   `SSH_ERROR` with readable messages (authentication, missing/wrong passphrase, unreachable,
   timeout = `connectTimeoutMS`, default 20 s). The bundles keep ssh2's optional native
   `cpu-features` external (ssh2 falls back to JS). Integration fixture

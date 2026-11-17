@@ -1,4 +1,4 @@
-import type { Profile, ProfileDraft } from '@thicket/contract';
+import type { ConnStatus, Profile, ProfileDraft } from '@thicket/contract';
 import type { Document, MongoClientOptions } from 'mongodb';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -1247,6 +1247,78 @@ describe('ConnectionManager SSH tunnels', () => {
     const { manager } = sshSetup(() => Promise.resolve(tunnel));
     await manager.test({ profileId: 'p1' }, undefined);
     expect(tunnel.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('conn.test closes its tunnel when the driver client cannot be created (CR-2)', async () => {
+    const tunnel = fakeTunnel();
+    const manager = new ConnectionManager({
+      loadProfile: () => Promise.resolve(savedProfile('p1', { ssh: SSH })),
+      loadSecrets: () =>
+        Promise.resolve({ password: STORED_PASSWORD, sshPassword: 'fictitious-ssh-Pw4' }),
+      createClient: () => {
+        throw new Error('directConnection option requires exactly one host');
+      },
+      openTunnel: () => Promise.resolve(tunnel),
+      ssh: {
+        knownHosts: new KnownHosts('/nonexistent/known_hosts'),
+        confirmHostKey: () => Promise.resolve(false),
+      },
+    });
+    await expect(manager.test({ profileId: 'p1' }, undefined)).rejects.toThrow(/directConnection/);
+    expect(tunnel.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('a tunnel lost while connected → error state broadcast, client closed, next open rebuilds (CR-3)', async () => {
+    const tunnels: ReturnType<typeof fakeTunnel>[] = [];
+    const closedHooks: (() => void)[] = [];
+    const statuses: ConnStatus[] = [];
+    const created: FakeClient[] = [];
+    const manager = new ConnectionManager({
+      loadProfile: () => Promise.resolve(savedProfile('p1', { ssh: SSH })),
+      loadSecrets: () => Promise.resolve({ password: STORED_PASSWORD }),
+      createClient: () => {
+        const client = fakeClient();
+        created.push(client);
+        return client;
+      },
+      openTunnel: (_ssh, _secrets, _env, options) => {
+        const tunnel = fakeTunnel();
+        tunnels.push(tunnel);
+        if (options?.onClosed) closedHooks.push(options.onClosed);
+        return Promise.resolve(tunnel);
+      },
+      onStatus: (status) => statuses.push(status),
+      ssh: {
+        knownHosts: new KnownHosts('/nonexistent/known_hosts'),
+        confirmHostKey: () => Promise.resolve(false),
+      },
+    });
+    await manager.open('p1', undefined);
+    expect(closedHooks).toHaveLength(1);
+    expect(statuses).toEqual([]);
+
+    closedHooks[0]?.();
+    await vi.waitFor(() => expect(created[0]?.close).toHaveBeenCalled());
+    expect(manager.statusOf('p1')).toMatchObject({
+      state: 'error',
+      error: {
+        code: 'SSH_ERROR',
+        message: expect.stringMatching(/SSH tunnel was closed/) as unknown,
+      },
+    });
+    expect(statuses).toEqual([manager.statusOf('p1')]);
+    expect(() => manager.client('p1')).toThrow(RpcError);
+
+    // Open again: a new tunnel and a new client, connected.
+    expect((await manager.open('p1', undefined)).state).toBe('connected');
+    expect(tunnels).toHaveLength(2);
+    expect(created).toHaveLength(2);
+    expect(manager.client('p1')).toBe(created[1]);
+    // A late hook of the old tunnel changes nothing.
+    closedHooks[0]?.();
+    expect(manager.statusOf('p1').state).toBe('connected');
+    await manager.close('p1');
+    expect(tunnels[1]?.close).toHaveBeenCalledTimes(1);
   });
 
   it('refuses SSH together with a SOCKS5 proxy before opening a tunnel', async () => {

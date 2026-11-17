@@ -70,10 +70,24 @@ export class KnownHosts {
     const line = `${hostPattern(host, port)} ${keyTypeOf(key)} ${key.toString('base64')}\n`;
     const write = this.writing.then(async () => {
       await mkdir(dirname(this.file), { recursive: true });
-      await appendFile(this.file, line, { mode: 0o600 });
+      // A file edited by hand may lack the final newline: don't glue the new line onto the last.
+      const separator = (await this.endsWithoutNewline()) ? '\n' : '';
+      await appendFile(this.file, separator + line, { mode: 0o600 });
     });
     this.writing = write.catch(() => undefined);
     return write;
+  }
+
+  /** Whether the file has content that doesn't end with a newline (missing file: no). */
+  private async endsWithoutNewline(): Promise<boolean> {
+    let content: Buffer;
+    try {
+      content = await readFile(this.file);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw error;
+    }
+    return content.length > 0 && content[content.length - 1] !== 0x0a;
   }
 
   private async entries(): Promise<Entry[]> {

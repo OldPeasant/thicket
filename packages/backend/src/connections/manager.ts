@@ -42,6 +42,11 @@ export interface ConnectionManagerDeps {
   ssh?: SshEnvironment;
   /** Defaults to `openSshTunnel` (tests pass fakes). */
   openTunnel?: typeof openSshTunnel;
+  /**
+   * State changes the manager notices by itself (not answers to `conn.*` calls), for the
+   * `conn.status` broadcast: an open connection whose SSH tunnel was lost.
+   */
+  onStatus?(status: ConnStatus): void;
 }
 
 interface Entry {
@@ -104,8 +109,17 @@ export class ConnectionManager {
     }
     const { uri, options } = config;
     this.log(`${label}: connecting to ${uri}`, secrets);
-    const client = this.createClient(uri, options);
-    const connecting = client.connect();
+    let client: ClientLike;
+    let connecting: Promise<unknown>;
+    try {
+      // `new MongoClient` throws for some connection strings (e.g. directConnection with two
+      // hosts): the tunnel must not outlive that.
+      client = this.createClient(uri, options);
+      connecting = client.connect();
+    } catch (error) {
+      await tunnel?.close();
+      throw error;
+    }
     let connected = false;
     try {
       await abortable(connecting, signal);
@@ -144,6 +158,7 @@ export class ConnectionManager {
     secrets: ConnectSecrets,
     label: string,
     signal: AbortSignal | undefined,
+    onClosed?: () => void,
   ): Promise<SshTunnel | undefined> {
     if (!profile.ssh) return undefined;
     const env = this.deps.ssh;
@@ -167,6 +182,7 @@ export class ConnectionManager {
           ...(profile.connectTimeoutMS !== undefined
             ? { readyTimeoutMS: profile.connectTimeoutMS }
             : {}),
+          ...(onClosed ? { onClosed } : {}),
         },
       );
     } catch (error) {
@@ -243,6 +259,7 @@ export class ConnectionManager {
         secrets,
         `open ${profileId}`,
         entry.abort.signal,
+        () => void this.tunnelLost(profileId, entry),
       );
       if (tunnel) entry.tunnel = tunnel;
       if (this.entries.get(profileId) !== entry) throw closedWhileConnecting();
@@ -284,6 +301,26 @@ export class ConnectionManager {
       this.log(`open ${profileId}: ${failure.code} ${failure.message}`, secrets);
       throw failure;
     }
+  }
+
+  /**
+   * The SSH tunnel of an open connection closed by itself (session lost): the connection is
+   * `error` from now on, its client is closed and the new state is broadcast. The next `open`
+   * builds a new tunnel. While still connecting, the failing driver connect handles it.
+   */
+  private async tunnelLost(profileId: string, entry: Entry): Promise<void> {
+    if (this.entries.get(profileId) !== entry || entry.state !== 'connected') return;
+    entry.state = 'error';
+    entry.error = {
+      code: 'SSH_ERROR',
+      message: 'The SSH tunnel was closed (connection to the SSH server lost); open it again',
+    };
+    const client = entry.client;
+    delete entry.client;
+    delete entry.tunnel;
+    this.log(`open ${profileId}: SSH_ERROR ${entry.error.message}`);
+    this.deps.onStatus?.(this.statusOf(profileId));
+    if (client) await closeQuietly(client);
   }
 
   /** Closes the connection of a profile; nothing happens when it isn't open. */

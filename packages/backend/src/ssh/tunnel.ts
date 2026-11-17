@@ -52,6 +52,18 @@ export interface SshTunnel {
 /** Secrets of a connect, by `SecretKind`. */
 export type SshSecrets = Partial<Record<string, string>>;
 
+export interface OpenSshTunnelOptions {
+  /** Cancels the connect (`CANCELLED`); also ends an open host key question. */
+  signal?: AbortSignal;
+  /** Time for the TCP connect, handshake and authentication (paused during a host key question). */
+  readyTimeoutMS?: number;
+  /**
+   * Called once when an open tunnel closes without `close()` (SSH session lost: keepalive
+   * timeout, server restart, network error), after its local port is closed.
+   */
+  onClosed?: () => void;
+}
+
 /** Default time for the SSH handshake and authentication. */
 export const SSH_READY_TIMEOUT_MS = 20_000;
 
@@ -67,21 +79,29 @@ export async function openSshTunnel(
   ssh: SshSettings,
   secrets: SshSecrets,
   env: SshEnvironment,
-  options: { signal?: AbortSignal; readyTimeoutMS?: number } = {},
+  options: OpenSshTunnelOptions = {},
 ): Promise<SshTunnel> {
   const { signal } = options;
   const where = `${ssh.username}@${ssh.host}:${String(ssh.port)}`;
   const log = env.log ?? (() => undefined);
   if (signal?.aborted) throw cancelled();
   const auth = await authConfig(ssh, secrets, env);
+  // Cancelled during the key file read: an abort listener added now would never fire.
+  if (signal?.aborted) throw cancelled();
 
   const client = new Client();
   /** Why the host key was refused, for a clearer error than ssh2's "verification failed". */
   let hostKeyRefusal: RpcError | undefined;
+  /** True once the connect is over (ready or failed): no timer and no host key question after. */
+  let settled = false;
+  /** True while the user is asked about the host key. */
+  let askingUser = false;
   const asking = new AbortController();
+  // `end()` does not close a socket that is still connecting or whose peer never answers;
+  // `destroy()` does, at once.
   const onAbort = () => {
     asking.abort();
-    client.end();
+    client.destroy();
   };
   signal?.addEventListener('abort', onAbort, { once: true });
 
@@ -94,11 +114,16 @@ export async function openSshTunnel(
   };
   const startTimeout = () => {
     pauseTimeout();
+    if (settled) return;
     timer = setTimeout(() => {
       timedOut = true;
-      client.end();
+      client.destroy();
     }, readyTimeoutMS);
   };
+  const timeoutError = () =>
+    new RpcError('SSH_ERROR', `The SSH server ${where} did not answer in time`, {
+      reason: 'timeout',
+    });
 
   const verify = async (key: Buffer): Promise<boolean> => {
     const info = describeHostKey(key);
@@ -115,8 +140,10 @@ export async function openSshTunnel(
       );
       return false;
     }
+    if (settled) return false;
     // The handshake timeout doesn't run while the user decides; the question has its own.
     pauseTimeout();
+    askingUser = true;
     let trusted: boolean;
     try {
       trusted = await env.confirmHostKey(
@@ -124,8 +151,12 @@ export async function openSshTunnel(
         asking.signal,
       );
     } finally {
+      askingUser = false;
+      // Restarts only for a connect still in progress (`startTimeout` checks `settled`).
       startTimeout();
     }
+    // The connect is over meanwhile (server gone, cancelled): a late "trust" saves nothing.
+    if (settled) return false;
     if (!trusted) {
       hostKeyRefusal = new RpcError(
         'SSH_ERROR',
@@ -150,58 +181,85 @@ export async function openSshTunnel(
     keepaliveInterval: 15_000,
     keepaliveCountMax: 3,
     hostVerifier: (key: Buffer, callback: (valid: boolean) => void) => {
-      verify(key).then(callback, (error: unknown) => {
+      // Once the connect is over (connection gone, cancelled, timed out), ssh2's callback throws
+      // ("protocol._destruct is not a function"): don't call it then.
+      const answer = (valid: boolean) => {
+        if (!settled) callback(valid);
+      };
+      verify(key).then(answer, (error: unknown) => {
         hostKeyRefusal = new RpcError(
           'SSH_ERROR',
           `Cannot check the SSH host key of ${ssh.host}:${String(ssh.port)}: ${errorText(error)}`,
         );
-        callback(false);
+        answer(false);
       });
     },
   };
 
+  // One `error` listener for the whole life of the client: ssh2 may emit several errors (e.g. the
+  // agent's, then "All configured authentication methods failed"), also after the connect failed,
+  // and none of them may go unhandled. Before ready they fail the connect, after it the session.
+  let connected = false;
+  let failConnect: (error: RpcError) => void = () => undefined;
+  let onSessionError: (error: Error) => void = () => undefined;
+  client.on('error', (error: Error & { level?: string }) => {
+    if (connected) onSessionError(error);
+    else failConnect(hostKeyRefusal ?? (timedOut ? timeoutError() : toSshError(error, ssh)));
+  });
+
   try {
     await new Promise<void>((resolve, reject) => {
-      const onError = (error: Error & { level?: string }) => {
-        reject(hostKeyRefusal ?? toSshError(error, ssh));
+      failConnect = (error) => {
+        if (settled) return;
+        settled = true;
+        // Ends a host key question still open: no answer can help this connect any more.
+        asking.abort();
+        reject(error);
       };
       client.once('ready', () => {
-        client.off('error', onError);
+        if (settled) return;
+        settled = true;
+        connected = true;
         resolve();
       });
-      client.once('error', onError);
       client.once('close', () => {
-        reject(
+        failConnect(
           signal?.aborted
             ? cancelled()
             : (hostKeyRefusal ??
                 (timedOut
-                  ? new RpcError('SSH_ERROR', `The SSH server ${where} did not answer in time`, {
-                      reason: 'timeout',
-                    })
-                  : new RpcError('SSH_ERROR', `The SSH server ${where} closed the connection`))),
+                  ? timeoutError()
+                  : new RpcError(
+                      'SSH_ERROR',
+                      askingUser
+                        ? `The SSH server ${where} closed the connection while waiting for the ` +
+                            'answer to the host key question'
+                        : `The SSH server ${where} closed the connection`,
+                    ))),
         );
       });
       try {
         startTimeout();
         client.connect(config);
       } catch (error) {
-        reject(toSshError(error as Error, ssh));
+        failConnect(toSshError(error as Error, ssh));
       }
     });
   } catch (error) {
-    client.end();
+    client.destroy();
     throw signal?.aborted ? cancelled() : error;
   } finally {
     pauseTimeout();
     signal?.removeEventListener('abort', onAbort);
   }
 
-  // From here on: errors of the SSH connection (keepalive timeout, server gone) close the tunnel;
-  // the driver sees its sockets fail and reports the connection as lost.
+  // From here on: errors of the SSH connection (keepalive timeout, server gone) close the tunnel
+  // and call `onClosed`, so the owner can mark its connection as lost.
   const channels = new Set<{ destroy(): void }>();
   let socks: LocalSocks | undefined;
   let closing: Promise<void> | undefined;
+  /** True once the tunnel was handed to the caller; only then `onClosed` is called. */
+  let returned = false;
   const close = (): Promise<void> => {
     closing ??= (async () => {
       for (const channel of channels) channel.destroy();
@@ -217,11 +275,18 @@ export async function openSshTunnel(
     })();
     return closing;
   };
-  client.on('error', (error: Error) => {
+  /** The SSH session ended without `close()` from the owner. */
+  const lost = () => {
+    if (closing) return;
+    void close().then(() => {
+      if (returned) options.onClosed?.();
+    });
+  };
+  onSessionError = (error) => {
     log(`ssh ${where}: ${error.message}`);
-    void close();
-  });
-  client.on('close', () => void close());
+    lost();
+  };
+  client.on('close', lost);
 
   try {
     socks = await startLocalSocks(
@@ -248,7 +313,15 @@ export async function openSshTunnel(
     await close();
     throw new RpcError('SSH_ERROR', `Cannot open the local tunnel port: ${errorText(error)}`);
   }
+  if (closing) {
+    // The SSH session ended while the local port was starting: `close()` ran before `socks` was
+    // set and did not close it.
+    await socks.close();
+    await closing;
+    throw new RpcError('SSH_ERROR', `The SSH server ${where} closed the connection`);
+  }
   log(`ssh ${where}: connected, local port ${String(socks.port)}`);
+  returned = true;
   return {
     proxy: {
       proxyHost: socks.host,

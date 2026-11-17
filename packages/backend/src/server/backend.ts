@@ -44,7 +44,8 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
     if (!privileged) throw new RpcError('INTERNAL', 'The backend has no link to main yet');
     return privileged;
   };
-  // Senders of the connected renderer ports, for the backend's broadcasts (`ssh.hostKey`).
+  // Senders of the connected renderer ports, for the backend's broadcasts (`ssh.hostKey`,
+  // `conn.status` of a connection whose SSH tunnel was lost).
   const renderers = new Set<(event: Event) => void>();
   const prompts = new HostKeyPrompts((prompt) => {
     for (const send of renderers) {
@@ -63,6 +64,11 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
         }
       ).secrets,
     log: (message) => log(`connections: ${message}`),
+    onStatus: (status) => {
+      for (const send of renderers) {
+        send({ stream: BROADCAST_STREAMS.connStatus, kind: 'data', payload: status });
+      }
+    },
     ...(options.userData !== undefined
       ? {
           ssh: {

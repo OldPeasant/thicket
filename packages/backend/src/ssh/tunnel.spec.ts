@@ -332,6 +332,44 @@ describe('openSshTunnel: host keys', () => {
     expect(tunnel.proxy.proxyPort).toBeGreaterThan(0);
   });
 
+  it('the server closing while the user is asked → question aborted, clear error, a late "trust" saves nothing (CR-5)', async () => {
+    const ssh = await startSshServer();
+    // A TCP relay in front of the SSH server, so the test can drop the connection mid-handshake.
+    const relayed = new Set<Socket>();
+    const relay = createServer((socket) => {
+      relayed.add(socket);
+      socket.on('error', () => undefined);
+      const upstream = connect(ssh.port, '127.0.0.1');
+      upstream.on('error', () => undefined);
+      socket.pipe(upstream).pipe(socket);
+      socket.on('close', () => upstream.destroy());
+    });
+    const relayPort = await listen(relay);
+    cleanups.push(
+      () =>
+        new Promise<void>((resolve) => {
+          for (const socket of relayed) socket.destroy();
+          relay.close(() => resolve());
+        }),
+    );
+    const knownHosts = freshKnownHosts();
+    let questionSignal: AbortSignal | undefined;
+    const { env } = environment(knownHosts, (_q, signal) => {
+      questionSignal = signal;
+      // The server goes away while the user decides; the user then answers "trust" anyway.
+      for (const socket of relayed) socket.destroy();
+      return new Promise((resolve) => {
+        signal.addEventListener('abort', () => setTimeout(() => resolve(true), 50));
+      });
+    });
+    const error = await failure(openSshTunnel(settings(relayPort), { sshPassword: PASSWORD }, env));
+    expect(error.code).toBe('SSH_ERROR');
+    expect(error.message).toMatch(/closed the connection while waiting for the answer/);
+    expect(questionSignal?.aborted).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await expect(readFile(knownHosts.file)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('closing (abort) while the user is asked → CANCELLED and the question is aborted', async () => {
     const ssh = await startSshServer();
     const controller = new AbortController();
@@ -461,9 +499,7 @@ describe('openSshTunnel: authentication', () => {
       vi.stubEnv('SSH_AUTH_SOCK', join(dir, 'no-agent.sock'));
       cleanups.push(() => void vi.unstubAllEnvs());
       const { env } = environment(freshKnownHosts());
-      const error = await failure(
-        openSshTunnel(settings(ssh.port, { method: 'agent' }), {}, env),
-      );
+      const error = await failure(openSshTunnel(settings(ssh.port, { method: 'agent' }), {}, env));
       expect(error).toMatchObject({ code: 'SSH_ERROR', detail: { reason: 'authentication' } });
     },
   );
@@ -655,7 +691,9 @@ describe('openSshTunnel: forwarding and lifetime', () => {
     await vi.waitFor(
       () =>
         expect(log).toHaveBeenCalledWith(
-          expect.stringMatching(new RegExp(`^ssh ${USER}@127\\.0\\.0\\.1:${String(relayPort)}: .+`)),
+          expect.stringMatching(
+            new RegExp(`^ssh ${USER}@127\\.0\\.0\\.1:${String(relayPort)}: .+`),
+          ),
         ),
       { timeout: 3_000 },
     );
@@ -677,6 +715,30 @@ describe('openSshTunnel: forwarding and lifetime', () => {
     });
     expect(tunnel.openChannels()).toBe(0);
     await expect(through(tunnel, 9)).rejects.toThrow();
+  });
+
+  it("a lost SSH session calls onClosed once; the owner's own close() does not (CR-3)", async () => {
+    const ssh = await startSshServer({ dropAfterReady: true, dropDelayMS: 100 });
+    const { env } = environment(freshKnownHosts());
+    const onClosed = vi.fn();
+    const tunnel = await open(settings(ssh.port), { sshPassword: PASSWORD }, env, { onClosed });
+    await vi.waitFor(() => expect(onClosed).toHaveBeenCalledTimes(1), { timeout: 3_000 });
+    // The local port is closed before the owner hears about it.
+    expect(await portIsClosed(tunnel.proxy.proxyPort)).toBe(true);
+    await tunnel.close();
+    expect(onClosed).toHaveBeenCalledTimes(1);
+
+    const steady = await startSshServer();
+    const own = vi.fn();
+    const second = await openSshTunnel(
+      settings(steady.port),
+      { sshPassword: PASSWORD },
+      environment(freshKnownHosts()).env,
+      { onClosed: own },
+    );
+    await second.close();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(own).not.toHaveBeenCalled();
   });
 
   it('the SSH server disconnecting right at ready → the local port is closed too', async () => {
