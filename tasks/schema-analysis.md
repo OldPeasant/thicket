@@ -13,7 +13,8 @@ Sample-based (default 1 000) analysis with mongodb-schema: fields, types and sha
 ## Acceptance criteria
 - [x] Integration test on a fixture with mixed types per field gives the expected shares
   - verified (2026-11-17 06:12+0100 by felix/agent-2): npx vitest run --config test/integration/vitest.config.ts test/integration/schema.int.spec.ts (MongoDB container fixture, 100 docs with string/int/double/long/decimal/null/missing per field) at 738dbc16 -> 5 passed, exact type shares and missing ratio asserted
-- [ ] e2e: open analysis, click a value → query bar filter set
+- [x] e2e: open analysis, click a value → query bar filter set
+  - verified (2026-11-17 06:12+0100 by felix/agent-2): npm run build -w packages/renderer && npm run build -w apps/desktop && npx playwright test test/e2e/schema-analysis.e2e.ts (Electron app against MongoDB container) at 738dbc16 -> 1 passed (open Schema panel, click value chip and type chip -> query bar filter text set)
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
