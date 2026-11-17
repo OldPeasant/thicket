@@ -48,3 +48,48 @@ jobs:
 
       - name: Check (.taskcheck)
         run: bash .taskcheck
+
+  # The packaged app with native addons compiled. Optional addons (ssh2's sshcrypto,
+  # os-dns-native, ...) are built by `npm ci` only where a C/C++ toolchain exists: the runners
+  # have one, agents' machines usually don't. Release v0.1.0-rc.1 failed in esbuild because of
+  # them (apps/desktop/src/build/native-addons.ts); this job catches such failures on every push.
+  bundle:
+    name: bundle (ubuntu-latest, native addons)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # Fails if the toolchain went missing: the job would then no longer test what it is for.
+      - name: Native addons are compiled
+        run: |
+          ls -l node_modules/ssh2/lib/protocol/crypto/build/Release/sshcrypto.node \
+            node_modules/os-dns-native/build/Release/os_dns_native.node
+
+      # Renderer, esbuild bundles and the unpacked app (release/linux-unpacked), as `npm run dist`
+      # builds them but without the installers.
+      - name: Build app
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run dist:dir -w apps/desktop
+
+      # Ubuntu 24.04 restricts unprivileged user namespaces, which Chromium's sandbox needs
+      # (as in release.yml).
+      - name: Allow user namespaces for the Chromium sandbox
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      # Starts the packaged app (headless): renderer, main and the backend (which loads ssh2)
+      # must answer.
+      - name: Smoke test packaged app
+        working-directory: apps/desktop
+        run: node scripts/smoke-packaged.mjs release/linux-unpacked/thicket release/smoke.png

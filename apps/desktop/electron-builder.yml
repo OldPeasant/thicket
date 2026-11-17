@@ -10,7 +10,9 @@ directories:
 # main, preload and backend are esbuild bundles (scripts/build.mjs): only `electron` stays
 # external, so the workspace packages need not be copied. Native modules added later must be
 # marked external in build.mjs and listed in `dependencies`; electron-builder then rebuilds them
-# for Electron's ABI (npmRebuild) and unpacks *.node files from the asar.
+# for Electron's ABI (npmRebuild) and unpacks *.node files from the asar. Today no addon is
+# shipped: the optional ones the bundles reach are left out on purpose (JS fallbacks, see
+# src/build/native-addons.ts).
 files:
   - dist/**/*
   - '!dist/**/*.map'

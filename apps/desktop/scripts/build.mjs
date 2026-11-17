@@ -5,6 +5,7 @@
 import { build, context } from 'esbuild';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { omitNativeAddons } from '../src/build/native-addons.ts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const watch = process.argv.includes('--watch');
@@ -20,6 +21,10 @@ const common = {
   // cpu-features: ssh2's optional native helper (main gets the backend package too). ssh2 requires
   // it in try/catch and falls back to pure JS, so it stays out of the bundles and isn't shipped.
   external: ['electron', 'kerberos', 'mongodb-client-encryption', 'cpu-features'],
+  // Other native addons (ssh2's sshcrypto, os-dns-native, system-ca's certificate exporters) are
+  // compiled only where a C/C++ toolchain exists; they are left out the same way, see
+  // src/build/native-addons.ts. CI (check.yml "bundle") builds with them compiled.
+  plugins: [omitNativeAddons],
   logLevel: 'info',
 };
 
