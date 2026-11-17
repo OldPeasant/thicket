@@ -340,6 +340,9 @@ describe('startLocalSocks', () => {
     const first = socks.close();
     expect(socks.close()).toBe(first);
     await first;
+    // Once close() resolved no socket is counted any more (the regression on Windows and macOS),
+    // without waiting for the clients to see their sockets close.
+    expect(socks.openSockets()).toBe(0);
     await forwarded.closed;
     await handshaking.closed;
     expect(socks.openSockets()).toBe(0);
@@ -351,5 +354,25 @@ describe('startLocalSocks', () => {
         refused.once('error', reject);
       }),
     ).rejects.toMatchObject({ code: 'ECONNREFUSED' });
+  });
+
+  it('close() right after a socket was destroyed still waits until that socket is gone', async () => {
+    // A destroyed socket reports `closed` at once, but emits `close` (and leaves openSockets())
+    // only after its handle closed. close() must wait for that, else the socket is still counted.
+    const r = recordingConnect();
+    const socks = await start(r.connect);
+    const c = await authenticate(socks);
+    c.socket.write(connectDomain('a.example.test', 1));
+    await c.waitFor(14);
+    const remote = r.remotes[0]?.remote;
+    let closing: Promise<void> | undefined;
+    // The server's own error handler (registered first) has just destroyed the client socket.
+    remote?.once('error', () => {
+      closing = socks.close();
+    });
+    remote?.destroy(new Error('channel failed'));
+    await vi.waitFor(() => expect(closing).toBeDefined());
+    await closing;
+    expect(socks.openSockets()).toBe(0);
   });
 });
