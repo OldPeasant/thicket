@@ -13,7 +13,8 @@ releases: 1
 Replace Canopy's 'show more' with a pager for arrays/objects above N entries (setting, default 100); for documents above a size threshold, load array pages lazily through docs.getSlice.
 
 ## Acceptance criteria
-- [ ] Component tests: pager on a 2 000-item array, jump to page, edits on page 7 preserved when paging away
+- [x] Component tests: pager on a 2 000-item array, jump to page, edits on page 7 preserved when paging away
+  - verified (2026-11-17 03:21+0100 by dell26/agent-3): cd packages/renderer && npx ng test --include src/app/explorer/doc-paging.spec.ts (HEAD 35aa821) -> 16 passed: 2000-item array pager, next/last/prev/first, jump to typed page, edit on page 7 kept when paging away and back
 - [ ] e2e: 50 000-item array document opens in < 2 s and pages via getSlice (network log shows slices)
 
 ## Notes
