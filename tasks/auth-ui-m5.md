@@ -13,7 +13,8 @@ Auth mechanism choices and their fields in the connection editor; OIDC 'sign in'
 ## Acceptance criteria
 - [x] Component tests for each mechanism's fields and URI sync
   - verified (2026-11-17 05:16+0100 by felix/agent-1): cd packages/renderer && npx ng test --include src/app/connections -> 6 files, 318 passed (LDAP/OIDC/AWS/X.509/SCRAM fields and URI sync per mechanism in connection-editor.spec.ts, oidc-sign-in.spec.ts)
-- [ ] e2e: LDAP profile connects against the fixture
+- [x] e2e: LDAP profile connects against the fixture
+  - verified (2026-11-17 05:16+0100 by felix/agent-1): npm run test:e2e -- ldap.e2e.ts (Electron app + LDAP container fixture) -> 1 passed: LDAP profile created in the editor, tested, saved and connected
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
