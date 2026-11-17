@@ -13,8 +13,8 @@
      "note": "docs.find keeps its own copy of the streamOnConnection logic; file outside this task's touches, switch it to the helper when docs/query/handlers.ts changes next"}
   ],
   "validation": [
-    {"command": "npx vitest run --config test/integration/vitest.config.ts test/integration/agg.int.spec.ts", "result": "pass (16 passed)"},
+    {"command": "npx vitest run --config test/integration/vitest.config.ts test/integration/agg.int.spec.ts", "result": "pass"},
     {"command": "npx vitest run packages/backend/src/io/handlers.spec.ts packages/backend/src/agg/handlers.spec.ts packages/backend/src/connections/manager.spec.ts", "result": "pass"},
-    {"command": "npm run check", "result": "pass (4128 + 3015 tests)"}
+    {"command": "npm run check", "result": "pass"}
   ]
 }
