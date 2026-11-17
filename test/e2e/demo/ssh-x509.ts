@@ -8,7 +8,7 @@ import ssh2 from 'ssh2';
 import { GenericContainer, Network, Wait, type StartedTestContainer } from 'testcontainers';
 
 import { generateTestPki } from '../../integration/fixtures/certs.ts';
-import { MONGO_IMAGES } from '../../integration/fixtures/mongo.ts';
+import { MONGO_IMAGES, MONGOD_8_ARGS } from '../../integration/fixtures/mongo.ts';
 import { SSH_IMAGE } from '../../integration/fixtures/ssh.ts';
 import { issueClientCertificate, X509_USER_SUBJECT } from '../../integration/fixtures/x509.ts';
 
@@ -93,6 +93,7 @@ export async function startSshX509Fixture(): Promise<SshX509Fixture> {
           '--tlsCAFile',
           `${certDir}/ca.pem`,
           '--tlsAllowConnectionsWithoutCertificates',
+          ...MONGOD_8_ARGS,
         ])
         // The entrypoint starts mongod once without auth to create the root user, then for real.
         .withWaitStrategy(Wait.forLogMessage(/Waiting for connections/, 2))

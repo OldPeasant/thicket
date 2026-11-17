@@ -527,7 +527,8 @@ test('release demo, steps 2–11, against the AppImage', async ({
 
     await builder.getByTestId('agg-run').click();
     const results = builder.getByTestId('agg-result-doc');
-    await expect(results).toHaveCount(expected.length);
+    // The result list pages (20 per page): the first rows are the driver's, in its order.
+    await expect(results).toHaveCount(Math.min(expected.length, 20));
     for (const [i, row] of expected.slice(0, 3).entries()) {
       await expect(results.nth(i)).toContainText(`_id: ${String(row['_id'])}`);
       await expect(results.nth(i)).toContainText(`orders: ${String(row['orders'])}`);
@@ -652,7 +653,9 @@ test('release demo, steps 2–11, against the AppImage', async ({
     await expect(fleet).toBeVisible();
     await fleet.click();
     await treeNode(window, 'coll', X509_COLL).click();
-    await expect(window.getByTestId('pager-rows')).toContainText(`of ${String(X509_DOCS)}`);
+    await expect(
+      window.getByRole('region', { name: `Collection ${X509_COLL}` }).getByTestId('pager-rows'),
+    ).toContainText(`1–${String(X509_DOCS)} of ~${String(X509_DOCS)} documents`);
     await shot(window, 'step-10-connected.png');
   });
 

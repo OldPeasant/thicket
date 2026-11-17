@@ -13,6 +13,13 @@ export const MONGO_IMAGES = {
 
 export type MongoMajor = keyof typeof MONGO_IMAGES;
 
+/**
+ * Extra mongod arguments for the 8.x images: TCMalloc's background thread off. With it, mongod 8.2
+ * dies with SIGSEGV (exit 139, nothing logged) about 30 s after start on Linux 6.19 hosts, also
+ * when idle; tests then fail mid-way with ECONNREFUSED. 7.0 is not affected and lacks the parameter.
+ */
+export const MONGOD_8_ARGS = ['--setParameter', 'tcmallocEnableBackgroundThread=false'] as const;
+
 /** Every fixture the global setup starts, by name. */
 export const FIXTURE_NAMES = ['mongo8', 'mongo8rs', 'mongo7', 'mongo8tls', 'mongo7tls'] as const;
 export type FixtureName = (typeof FIXTURE_NAMES)[number];
@@ -64,6 +71,7 @@ export async function startFixture(
   certs: TestCertificates | undefined,
 ): Promise<StartedFixture> {
   const command = ['mongod', '--bind_ip_all', '--port', String(CONTAINER_PORT)];
+  if (spec.version === '8') command.push(...MONGOD_8_ARGS);
   let container = new GenericContainer(MONGO_IMAGES[spec.version])
     .withExposedPorts(CONTAINER_PORT)
     .withWaitStrategy(Wait.forLogMessage(/Waiting for connections/))

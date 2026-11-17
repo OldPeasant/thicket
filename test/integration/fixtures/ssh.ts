@@ -9,7 +9,7 @@ import {
   type StartedTestContainer,
 } from 'testcontainers';
 
-import { MONGO_IMAGES } from './mongo.ts';
+import { MONGO_IMAGES, MONGOD_8_ARGS } from './mongo.ts';
 
 /**
  * SSH fixture (task ssh-tunnel): a two-member replica set and an OpenSSH server on a private
@@ -50,7 +50,15 @@ function member(network: StartedNetwork, alias: string): Promise<StartedTestCont
   return new GenericContainer(MONGO_IMAGES['8'])
     .withNetwork(network)
     .withNetworkAliases(alias)
-    .withCommand(['mongod', '--bind_ip_all', '--port', '27017', '--replSet', SSH_REPLICA_SET])
+    .withCommand([
+      'mongod',
+      '--bind_ip_all',
+      '--port',
+      '27017',
+      '--replSet',
+      SSH_REPLICA_SET,
+      ...MONGOD_8_ARGS,
+    ])
     .withWaitStrategy(Wait.forLogMessage(/Waiting for connections/))
     .withStartupTimeout(120_000)
     .start();
