@@ -17,7 +17,8 @@ ssh2-based tunnels with password, private key (+passphrase) or SSH agent; known_
   - verified (2026-11-17 03:07+0100 by dell26/agent-2): npm run test:int -- ssh (Docker: linuxserver/openssh-server sshd in front of the replica set fixture) -> 15/15 passed, incl. password (unknown host key -> question, trust -> connects to RS), private key, key with passphrase, agent, and backend ssh.hostKey event + conn.trustHostKey -> connects
 - [x] Changed host key → refused with a clear error (int test)
   - verified (2026-11-17 03:07+0100 by dell26/agent-2): npm run test:int -- ssh -> 'a changed host key → refused with a clear error, without asking' passed (15/15)
-- [ ] Tunnels closed when the connection closes (no leaked sockets: test checks server connection count)
+- [x] Tunnels closed when the connection closes (no leaked sockets: test checks server connection count)
+  - verified (2026-11-17 03:07+0100 by dell26/agent-2): npm run test:int -- ssh -> 'closing the connection closes the tunnel: no SSH session, no member connection left' (checks sshd/mongod connection counts) and 'a failed driver connect closes its tunnel too' passed (15/15); unit test for CR-8 socket destroy on unresponsive peer passes
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
