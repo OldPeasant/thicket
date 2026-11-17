@@ -24,7 +24,8 @@ pinning the server), not whatever the read preference selects next.
 - [x] Int test: `docs.insert` on a profile with `writeConcern: { w: 3 }` answers `SERVER_ERROR`
       (write concern error, 2 members); with `w: 2` a secondary read sees the document
   - verified (2026-11-17 06:11+0100 by felix/agent-1): npm run test:int -- raw-cmd-read-pref at e19cc6a2 -> 7 passed; docs.insert with writeConcern {w:3} on the 2-member set answers SERVER_ERROR (write concern error, applied but not acknowledged), with {w:2} a secondary read on rs-b sees the document
-- [ ] Browse reads (`listCollections`, counts, stats) honour the read preference (unit test)
+- [x] Browse reads (`listCollections`, counts, stats) honour the read preference (unit test)
+  - verified (2026-11-17 06:11+0100 by felix/agent-1): cd packages/backend && npx vitest run src/browse/read-preference.spec.ts src/docs/query/read-preference.spec.ts src/docs/write/read-preference.spec.ts src/io/import.spec.ts -> 103 passed; browse spec asserts listDatabases, dbStats, listCollections, $collStats counts/stats send the profile ReadPreference (also covered by int test browse reads on rs-b)
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md ("Connections").
