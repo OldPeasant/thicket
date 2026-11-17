@@ -18,3 +18,4 @@ MONGODB-OIDC with authorization code flow in the system browser (main opens the 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 03:54+0100 by felix/agent-1): Added optional profile field auth.oidcFlow ('auto'|'authCode'|'deviceCode', default auto = browser, device flow when the browser/loopback port is unavailable): SPEC says device flow is a fallback but a browser that 'opens' on the wrong machine (remote desktop) needs an explicit choice; auth-ui-m5 should expose it
+- ASSUMPTION (2026-11-17 03:55+0100 by felix/agent-1): Default redirect URI is http://localhost:27097/redirect (mongosh/Compass's), so IdP apps registered for MongoDB tools work unchanged; not configurable in the profile yet
