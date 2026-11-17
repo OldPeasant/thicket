@@ -255,13 +255,15 @@ export class GridfsView {
       });
   }
 
-  /** Stops the running transfer; the backend removes what it wrote. */
+  /**
+   * Stops the running transfer; the backend removes what it wrote. An upload may already have
+   * been stored when the cancel arrives, so the message promises nothing and the list is reloaded.
+   */
   cancelTransfer(): void {
     const t = this.transfer();
     this.running?.unsubscribe();
-    this.finish(
-      t ? { error: false, text: `Cancelled the ${t.kind} of ${t.name}; nothing was kept.` } : null,
-    );
+    this.finish(t ? { error: false, text: `Cancelled the ${t.kind} of ${t.name}.` } : null);
+    if (t?.kind === 'upload') void this.reload();
   }
 
   async remove(file: GridfsFile): Promise<void> {

@@ -13,6 +13,7 @@ import {
   gridfsHandlers,
   guardWrites,
   serve,
+  uploadFile,
   type FileDialogs,
 } from '@thicket/backend';
 import {
@@ -78,20 +79,26 @@ function backendFor() {
   });
   const client = new RpcClient(clientPort);
   const events = new Map<string, Event[]>();
-  const listeners = new Map<string, () => void>();
+  const listeners = new Map<string, Set<() => void>>();
   clientPort.onMessage((message) => {
     const event = message as Partial<Event>;
     if (typeof event.stream !== 'string' || event.kind === undefined) return;
     const list = events.get(event.stream) ?? [];
     list.push(event as Event);
     events.set(event.stream, list);
-    listeners.get(event.stream)?.();
+    for (const listener of listeners.get(event.stream) ?? []) listener();
   });
   const call = <M extends MethodName>(method: M, params: ParamsOf<M>) =>
     client.call(method, params) as Promise<ResultOf<M>>;
+  const listen = (streamId: string, check: () => void) => {
+    const set = listeners.get(streamId) ?? new Set();
+    set.add(check);
+    listeners.set(streamId, set);
+    check();
+  };
   const finished = (streamId: string): Promise<StreamOutcome> =>
     new Promise((resolve) => {
-      const check = () => {
+      listen(streamId, () => {
         const list = events.get(streamId) ?? [];
         const last = list.at(-1);
         if (last === undefined || last.kind === 'data') return;
@@ -100,9 +107,15 @@ function backendFor() {
           ...(last.kind === 'end' ? { end: last.payload as { delivered: number } } : {}),
           ...(last.kind === 'error' ? { error: last.payload as ErrorInfo } : {}),
         });
-      };
-      listeners.set(streamId, check);
-      check();
+      });
+    });
+  /** Resolves with the first event of the stream (a progress event while it is running). */
+  const firstEvent = (streamId: string): Promise<Event> =>
+    new Promise((resolve) => {
+      listen(streamId, () => {
+        const first = events.get(streamId)?.[0];
+        if (first !== undefined) resolve(first);
+      });
     });
   const cancel = (streamId: string) => clientPort.send({ cancel: streamId });
   const close = async () => {
@@ -110,11 +123,25 @@ function backendFor() {
     stop();
     await manager.closeAll();
   };
-  return { manager, call, finished, cancel, close };
+  return { manager, call, finished, firstEvent, cancel, close };
 }
 
 let backend: ReturnType<typeof backendFor>;
 let direct: MongoClient;
+
+/** Gives writes still in flight (driver inserts, a file open) time to land. */
+const settleWrites = () => new Promise((resolve) => setTimeout(resolve, 300));
+
+/** Asserts that `bucket` holds no files document and no chunk, also after a settle. */
+async function expectNoFile(bucket: string) {
+  const counts = async () => [
+    await direct.db(DB).collection(`${bucket}.files`).countDocuments(),
+    await direct.db(DB).collection(`${bucket}.chunks`).countDocuments(),
+  ];
+  expect(await counts()).toEqual([0, 0]);
+  await settleWrites();
+  expect(await counts()).toEqual([0, 0]);
+}
 
 const sha256 = async (file: string) =>
   createHash('sha256')
@@ -333,9 +360,15 @@ describe('gridfs', () => {
     });
     expect(download.path).toBe(target);
     const streamId = download.streamId ?? '';
+    // Cancel mid-transfer: after the first progress event (1 MiB of 40 written).
+    expect((await backend.firstEvent(streamId)).kind).toBe('data');
     backend.cancel(streamId);
     const got = await backend.finished(streamId);
     expect(got.error?.code).toBe('CANCELLED');
+    expect(got.progress.length).toBeGreaterThan(0);
+    expect(got.progress.at(-1)?.bytes).toBeLessThan(40 * MB);
+    await expect(stat(target)).rejects.toMatchObject({ code: 'ENOENT' });
+    await settleWrites();
     await expect(stat(target)).rejects.toMatchObject({ code: 'ENOENT' });
     // The stored file is untouched.
     const { files } = await backend.call('gridfs.files', {
@@ -405,7 +438,7 @@ describe('gridfs', () => {
     ).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
   });
 
-  it('a cancelled upload leaves no files document and no chunks behind', async () => {
+  it('an upload cancelled mid-transfer leaves no files document and no chunks behind', async () => {
     const source = path.join(dir, 'cancel.bin');
     await writeFile(source, randomBytes(40 * MB));
     chosen.push(source);
@@ -415,10 +448,41 @@ describe('gridfs', () => {
       bucket: 'cancelled',
     });
     const streamId = result.streamId ?? '';
+    // Cancel after the first progress event: chunks have been written by then.
+    expect((await backend.firstEvent(streamId)).kind).toBe('data');
     backend.cancel(streamId);
     const outcome = await backend.finished(streamId);
     expect(outcome.error?.code).toBe('CANCELLED');
-    expect(await direct.db(DB).collection('cancelled.files').countDocuments()).toBe(0);
-    expect(await direct.db(DB).collection('cancelled.chunks').countDocuments()).toBe(0);
+    expect(outcome.progress.length).toBeGreaterThan(0);
+    expect(outcome.progress.at(-1)?.bytes).toBeLessThan(40 * MB);
+    await expectNoFile('cancelled');
+  });
+
+  // Every point of an upload, including the last chunk and the files document write: whatever
+  // the driver still had in flight when the cancel came must not land after the clean-up.
+  it('an upload cancelled at any progress step (also at its end) leaves the bucket empty', async () => {
+    const source = path.join(dir, 'steps.bin');
+    const size = 600 * 1024 + 123; // three chunks (255 KiB) and a remnant
+    await writeFile(source, randomBytes(size));
+    const step = 64 * 1024;
+    const steps = Math.floor(size / step);
+    for (let at = 1; at <= steps; at++) {
+      const controller = new AbortController();
+      let seen = 0;
+      const error = await uploadFile(direct, DB, 'steps', source, 'steps.bin', {
+        signal: controller.signal,
+        progressBytes: step,
+        progress: () => {
+          seen++;
+          if (seen === at) controller.abort();
+        },
+      }).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(error, `cancel at step ${at}`).toBeInstanceOf(RpcError);
+      expect((error as RpcError).code).toBe('CANCELLED');
+      await expectNoFile('steps');
+    }
   });
 });

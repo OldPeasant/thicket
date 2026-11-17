@@ -410,16 +410,16 @@ describe('GridfsView', () => {
       expect(sent('gridfs.upload')).toHaveLength(2);
     });
 
-    it('Cancel stops the stream at the backend and says nothing was kept', async () => {
+    it('Cancel stops the stream at the backend and reloads the list (it may have committed)', async () => {
       await click(get('gridfs-upload'));
       fake.data('gridfs.upload', 'up1', { bytes: 1024, totalBytes: 4096 });
       await settle();
+      expect(sent('gridfs.buckets')).toHaveLength(1);
       await click(get('gridfs-transfer-cancel'));
       expect(fake.cancels).toContain('up1');
       expect(q('gridfs-transfer')).toBeNull();
-      expect(text(get('gridfs-message'))).toBe(
-        'Cancelled the upload of photo.png; nothing was kept.',
-      );
+      expect(text(get('gridfs-message'))).toBe('Cancelled the upload of photo.png.');
+      expect(sent('gridfs.buckets')).toHaveLength(2);
       // Later events of the cancelled stream change nothing.
       fake.data('gridfs.upload', 'up1', { bytes: 4096, totalBytes: 4096 });
       fake.end('up1');
@@ -531,9 +531,9 @@ describe('GridfsView', () => {
       await click(get('gridfs-download', row('report.pdf')));
       await click(get('gridfs-transfer-cancel'));
       expect(fake.cancels).toContain('down1');
-      expect(text(get('gridfs-message'))).toBe(
-        'Cancelled the download of report.pdf; nothing was kept.',
-      );
+      expect(text(get('gridfs-message'))).toBe('Cancelled the download of report.pdf.');
+      // A download changes nothing in the bucket: no reload.
+      expect(sent('gridfs.buckets')).toHaveLength(1);
     });
 
     it('a missing file shows the NOT_FOUND message', async () => {

@@ -39,6 +39,7 @@ const DESTRUCTIVE: readonly WriteMethodName[] = [
   'db.drop',
   'idx.drop',
   'admin.killOp',
+  'gridfs.delete',
 ];
 
 const TITLES: Partial<Record<WriteMethodName, string>> = {
@@ -61,6 +62,8 @@ const TITLES: Partial<Record<WriteMethodName, string>> = {
   'agg.createView': 'Create view',
   'admin.killOp': 'Kill operation',
   'io.import': 'Import documents',
+  'gridfs.upload': 'Upload file',
+  'gridfs.delete': 'Delete file',
 };
 
 /** Error of a write the user cancelled in the confirm dialog (`code: 'CANCELLED'`). */

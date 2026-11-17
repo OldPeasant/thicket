@@ -1,6 +1,6 @@
-import { createReadStream, createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream, type WriteStream } from 'node:fs';
 import { rm, stat } from 'node:fs/promises';
-import { Transform, type TransformCallback } from 'node:stream';
+import { Transform, type TransformCallback, type Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
 import type { GridfsBucket, GridfsFile, GridfsProgress, ResultOf } from '@thicket/contract';
@@ -189,12 +189,17 @@ class ByteCounter extends Transform {
   }
 
   override _transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback) {
-    this.bytes += chunk.length;
+    this.count(chunk.length);
+    callback(null, chunk);
+  }
+
+  /** Adds `length` bytes (and reports them when a step is reached). */
+  count(length: number): void {
+    this.bytes += length;
     if (this.bytes - this.reported >= this.step) {
       this.reported = this.bytes;
       this.report(this.bytes);
     }
-    callback(null, chunk);
   }
 
   get total(): number {
@@ -239,11 +244,14 @@ export async function downloadFile(
     (bytes) => options.progress({ bytes, totalBytes }),
     options.progressBytes ?? GRIDFS_PROGRESS_BYTES,
   );
+  const output = createWriteStream(target);
   try {
-    await pipeline(gridfs.openDownloadStream(id as ObjectId), counter, createWriteStream(target), {
+    await pipeline(gridfs.openDownloadStream(id as ObjectId), counter, output, {
       signal: options.signal,
     });
   } catch (error) {
+    // An open still running finishes (and creates the file) first, so the removal is final.
+    await closeStream(output);
     await rm(target, { force: true }).catch(() => undefined);
     throw cancelledOr(error, options.signal, `write ${target}`);
   }
@@ -251,9 +259,41 @@ export async function downloadFile(
   return counter.total;
 }
 
+/** Destroys `stream` and resolves once it is closed (at once if it already is). */
+function closeStream(stream: WriteStream): Promise<void> {
+  return new Promise((resolve) => {
+    if (stream.closed) {
+      resolve();
+      return;
+    }
+    stream.once('close', () => resolve());
+    stream.destroy();
+  });
+}
+
+/** Writes `chunk` and resolves once the stream has handled it (for GridFS: stored its chunks). */
+function writeChunk(stream: Writable, chunk: Buffer): Promise<void> {
+  return new Promise((resolve, reject) => {
+    stream.write(chunk, (error) => (error ? reject(error) : resolve()));
+  });
+}
+
+/** Ends `stream` and resolves once it has finished (for GridFS: stored the files document). */
+function endStream(stream: Writable): Promise<void> {
+  return new Promise((resolve, reject) => {
+    stream.end((error?: Error | null) => (error ? reject(error) : resolve()));
+  });
+}
+
 /**
  * Streams the local file `source` into `bucket` as `filename`; resolves with the new file's id
  * (canonical EJSON). A failed or cancelled upload deletes its chunks and files document.
+ *
+ * The GridFS stream is written one read at a time, each write awaited (the driver stores the
+ * chunks it fills before it calls back), and its end is awaited too (the files document). A cancel
+ * is only acted on between these steps, so when the clean-up runs no insert of the upload is still
+ * in flight that could land after it: the bucket holds either the whole file or nothing. A cancel
+ * that arrives while the files document is being written removes the completed file.
  */
 export async function uploadFile(
   client: ClientLike,
@@ -271,14 +311,26 @@ export async function uploadFile(
     (bytes) => options.progress({ bytes, totalBytes }),
     options.progressBytes ?? GRIDFS_PROGRESS_BYTES,
   );
+  const { signal } = options;
+  let upload: Writable | undefined;
   try {
-    options.signal.throwIfAborted();
-    await pipeline(createReadStream(source), counter, gridfs.openUploadStream(filename, { id }), {
-      signal: options.signal,
-    });
+    signal.throwIfAborted();
+    upload = gridfs.openUploadStream(filename, { id });
+    // Failures arrive through the write/end callbacks; this keeps them from being unhandled.
+    upload.on('error', () => undefined);
+    for await (const chunk of createReadStream(source, { signal })) {
+      await writeChunk(upload, chunk as Buffer);
+      counter.count((chunk as Buffer).length);
+      signal.throwIfAborted();
+    }
+    await endStream(upload);
+    signal.throwIfAborted();
   } catch (error) {
-    await removeFile(db, bucket, id).catch(() => undefined);
-    throw cancelledOr(error, options.signal, `read ${source}`);
+    if (upload !== undefined) {
+      upload.destroy();
+      await removeFile(db, bucket, id).catch(() => undefined);
+    }
+    throw cancelledOr(error, signal, `read ${source}`);
   }
   const fileId = canonicalValue(id);
   options.progress({ bytes: counter.total, totalBytes, fileId });
