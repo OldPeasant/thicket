@@ -2,50 +2,53 @@
 
 Date: 2026-11-17
 
-Task: ci-windows-macos - CI: unit tests pass on Windows and macOS again
+Task: ci-windows-macos - CI: unit tests pass on Windows and macOS again (round 2, after the TW-1 fix)
 
-Scope: `git diff 442cca40b560e0f5e8ce16d3ae5240e800e98eda 20e804e4e54cd019f8078d7250ff37221ed6fcf3` (one task commit, 20e804e4, given by the parent; HEAD = 20e804e4 on main, plus the uncommitted test edit below).
-Production files changed: `packages/backend/src/ssh/socks.ts`, `packages/backend/src/ssh/tunnel.ts`. Test-only changes: `known-hosts.spec.ts`, `tunnel.spec.ts`, `auth/oidc/flows.spec.ts`, `io/bson/bson.spec.ts`.
+Scope: `git diff 442cca40b560e0f5e8ce16d3ae5240e800e98eda 9ad19862` (base and final HEAD given by the parent). Task commits: 20e804e4 (fixes), b5a51e0a (prettier), 42bacb87 (socks close() tests and round-1 reports), 4e199da9 (TW-1 fix); 9ad19862 merges origin/main. The merge brings no changes under `packages/backend` (`git diff 4e199da9 9ad19862 --stat -- packages/backend` is empty). Working tree clean at HEAD 9ad19862.
+Production files changed: `packages/backend/src/ssh/socks.ts`, `packages/backend/src/ssh/tunnel.ts`. Test-only changes: `socks.spec.ts`, `known-hosts.spec.ts`, `tunnel.spec.ts`, `auth/oidc/flows.spec.ts`, `io/bson/bson.spec.ts`.
 
 Requirements:
 - `tasks/ci-windows-macos.md` (goal and acceptance criteria, recorded assumptions on SSH agent/Pageant)
 - AGENTS.md project notes (OS-neutral tests, no timing asserts, skip only with a reason)
 - docs/ARCHITECTURE.md "Coverage"
-- Parent instructions (check socks close() with an already-closed socket and that close resolves only after sockets are gone)
+- `reviews/ci-windows-macos/fixes.md` (TW-1: the `socket.closed` shortcut was removed from socks close())
+- Parent instructions (re-run the focused tests and task-scoped coverage, confirm the tests still cover the fix, edit tests only for a real defect)
 
 ## Test files changed
 
-- `packages/backend/src/ssh/socks.spec.ts`
+- None in round 2. The round-1 test changes in `packages/backend/src/ssh/socks.spec.ts` are committed in 42bacb87 and were not changed (sha256 2e4371923397236bbb2661fe949830bd664021843c8adfe86df10356db6b5957, same as round 1).
 
 ## Tests added or updated
 
-Count: 2
+Count: 0 in round 2 (round 1: 2 in `socks.spec.ts`, committed in 42bacb87)
 
-- Updated `close() stops listening and destroys open sockets; it is idempotent`: now asserts `openSockets()` is 0 directly after `await close()`, before waiting for the clients to see the close. Before, the assertion came after awaiting the client sockets, so it did not prove that close() itself resolves only after the sockets are gone (the Windows/macOS regression). Strengthened, not weakened.
-- Added `close() right after a socket was destroyed still waits until that socket is gone`: destroys the remote side of a forwarded connection; in the remote's `error` listener (after the server's own handler has destroyed the client socket, so `socket.closed` is already true but `close` not yet emitted) it calls `close()`, then asserts `openSockets()` is 0 once close() resolves. Coverage confirms it is the test that reaches the `if (socket.closed) resolve()` branch (socks.ts:85, branch hits [1,0] when run alone). Deterministic: ordering is controlled by event listeners, no delays.
+Check of the TW-1 fix against the tests:
+- socks.ts close() now always registers `socket.once('close', resolve)` and then calls `destroy()` for every socket still in the set. The set-removal listener (`socket.once('close', () => sockets.delete(socket))`, socks.ts:50) is registered when the socket is accepted, so it runs before close()'s listener, and `openSockets()` is 0 when close() resolves. A socket that already emitted `close` has left the set, so close() cannot wait forever on it.
+- `close() right after a socket was destroyed still waits until that socket is gone` still runs the case the shortcut got wrong (socket destroyed, `closed` true, `close` not yet emitted) and asserts `openSockets()` is 0 once close() resolves. It passes. `close() stops listening and destroys open sockets; it is idempotent` covers the normal path and the second call returning the same promise. Coverage shows the close() socket lines (socks.ts:86-88) hit 18 times.
+- Limit: on Linux the round-1 test also passed with the shortcut in place, so here it does not tell the old code from the new. The ordering it guards against shows up on Windows/macOS; the CI `check` run of `wip/ci-windows-macos` is the evidence for that.
 
-No test added for `defaultSshAgent`: the task's own test covers all six input combinations (win32 with set/undefined/empty SSH_AUTH_SOCK, linux/darwin with set/undefined/empty), and every branch of it and of the changed `authConfig` agent lookup is covered. The test-only changes (known-hosts, oidc flows, bson) were read and are OS-neutral: `path.normalize` for the bson expectation, an explicit win32 branch with a reason for known-hosts, and the oidc test accepting either outcome of a genuine race between the late request and the receiver closing, with `await Promise.all(background)`.
+No test change was needed: no defect was found.
 
 ## Requirement coverage
 
 | Requirement | Tests | Command | Result |
 |---|---|---|---|
-| socks close() resolves only after every accepted socket is gone (Windows/macOS failure) | `close() stops listening and destroys open sockets; it is idempotent`, `close() right after a socket was destroyed still waits until that socket is gone` | `cd packages/backend && npx vitest run src/ssh src/io/bson src/auth/oidc` | Pass (Linux only) |
-| SSH agent: SSH_AUTH_SOCK wins on every OS, else Pageant on Windows, none elsewhere | `defaultSshAgent: SSH_AUTH_SOCK wins on every OS; ...`, `agent method without an agent → SSH_ERROR naming SSH_AUTH_SOCK` (skipped on win32 with reason) | same | Pass (Linux) |
+| socks close() resolves only after every accepted socket is gone (Windows/macOS failure, incl. TW-1) | `close() stops listening and destroys open sockets; it is idempotent`, `close() right after a socket was destroyed still waits until that socket is gone` | `npx vitest run src/ssh src/io/bson src/auth/oidc` (repo root); `npx vitest run packages/backend/src/ssh/socks.spec.ts -t "close"` | Pass (Linux only) |
+| SSH agent: SSH_AUTH_SOCK wins on every OS, else Pageant on Windows, none elsewhere | `defaultSshAgent: SSH_AUTH_SOCK wins on every OS; ...`, `agent method without an agent → SSH_ERROR naming SSH_AUTH_SOCK` (skipped on win32 with reason) | `npx vitest run src/ssh src/io/bson src/auth/oidc` | Pass (Linux) |
 | known-hosts, oidc flows, bson tests OS-neutral | existing changed tests in `known-hosts.spec.ts`, `flows.spec.ts`, `bson.spec.ts` | same | Pass (Linux); the win32/macOS branches were not run here |
-| AC1: `check` run green on ubuntu, macOS and Windows | - | - | Not run: there is no macOS/Windows here; the parent must use the CI run of `wip/ci-windows-macos` |
-| AC2: each fix says whether the product or the test was wrong | review of comments in diff | `git diff 442cca40 20e804e4` | Pass (by reading: comments in socks.ts, tunnel.spec.ts, known-hosts.spec.ts, flows.spec.ts, bson.spec.ts) |
+| AC1: `check` run green on ubuntu, macOS and Windows | - | - | Not run: there is no macOS/Windows here; the parent must use the CI run of `wip/ci-windows-macos` for revision 9ad19862 (or its task commit 4e199da9) |
+| AC2: each fix says whether the product or the test was wrong | review of comments in diff | `git diff 442cca40 9ad19862` | Pass (by reading: comments in socks.ts, including the updated close() comment, tunnel.spec.ts, known-hosts.spec.ts, flows.spec.ts, bson.spec.ts) |
 | AC3: `npm run check` passes locally | full suite | `npm run check` (repo root) | Pass |
 
 ## Focused test execution
 
 Command:
 
-`cd packages/backend && npx vitest run src/ssh src/io/bson src/auth/oidc`
+`npx vitest run src/ssh src/io/bson src/auth/oidc` (run from the repo root; it uses the root Vitest config and picks the same backend files) and `npx vitest run packages/backend/src/ssh/socks.spec.ts -t "close"`
 
 Result:
 
-Pass: 9 test files, 282 tests (Linux, Node v24.21.0, Vitest 5.1.0). `npx vitest run src/ssh/socks.spec.ts`: 19 passed.
+Pass: 9 test files, 282 tests (Linux, Vitest 5.1.0, started 17:40:21). The close() filter: 7 passed, 12 skipped by the filter.
 
 ## Full test execution
 
@@ -55,56 +58,55 @@ Command:
 
 Result:
 
-Pass: lint and formatting clean, typecheck clean, 99 files / 5219 tests, renderer 125 files / 4137 tests, exit 0.
+Pass: lint and formatting clean, typecheck clean, 99 files / 5219 tests, renderer 125 files / 4137 tests, exit 0 (started 17:41:29).
 
 ## .taskcheck
 
 Result:
 
-Not run separately: `.taskcheck` runs `npm run check` (AGENTS.md), which passed above.
+Not run separately: `.taskcheck` runs `npm run check` (AGENTS.md), which passed above on HEAD 9ad19862.
 
 ## Bugs found
 
-None confirmed.
-
-Observation for the parent and the CI run (not a confirmed defect): in `socks.ts` close(), `if (socket.closed) resolve()` skips waiting for a socket that is already destroyed but whose `close` event has not fired yet. Node sets `closed` as soon as `destroy()` runs, but emits `close` only after the handle closed, and any socket still in the set has not emitted `close` (its `delete` listener is registered first). So this shortcut could bring back the "still counted after close()" symptom on platforms where the server's close callback runs first. On Linux the new test passes. The new test runs exactly this case, so the Windows/macOS CI run of `wip/ci-windows-macos` will show whether it is a problem there. If it fails, always waiting for `close` for sockets still in the set is the fix.
+None. TW-1 (round 1 observation: the `socket.closed` shortcut in close()) is fixed in 4e199da9. The fix was checked above.
 
 ## Coverage
 
-Status: verified (Linux) for the task-changed production files.
+Status: verified (Linux) for the task-changed production files at HEAD 9ad19862.
 
 Metric: whole-file coverage of task-changed production files.
-Changed-line coverage: not measured as a number. I inspected the v8 branch map instead. No uncovered statement or branch is in the changed lines (socks.ts 76-92, tunnel.ts 380-405). Both outcomes of `socket.closed` at socks.ts:85 are hit, and so are both outcomes of `env.agent ??` and all three outcomes of `defaultSshAgent`.
+Changed-line coverage: not measured as a number. I inspected the v8 statement and branch maps instead. No uncovered statement or branch is in the task-changed lines (socks.ts close(), lines 76-94; tunnel.ts 380-405). Removing the shortcut removed one branch from socks.ts (47 to 45 branch counters, 149 to 147 statements). All close() statements are hit (lines 82-92).
 
 Evidence:
-- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: ci-windows-macos; base 442cca40b560e0f5e8ce16d3ae5240e800e98eda; HEAD 20e804e4e54cd019f8078d7250ff37221ed6fcf3; task commit and base given by the parent and checked with `git diff --stat` (6 files, all in the task's `touches`).
-- Source/test snapshot identifier (including uncommitted inputs): HEAD 20e804e4 plus the uncommitted `socks.spec.ts` sha256 2e4371923397236bbb2661fe949830bd664021843c8adfe86df10356db6b5957; socks.ts sha256 78de79d6f7606341217bcb74623d1d6071a0712f37a0c796fcc894c2310654a3; tunnel.ts sha256 1701c0241bfe4304ed62708c63182ea4a0b865dae4cdafd7d59ed23a43fa651d.
-- Exact included files; renamed/deleted/excluded files and reasons: included `packages/backend/src/ssh/socks.ts`, `packages/backend/src/ssh/tunnel.ts`; no renames or deletions; the four spec files are excluded because they are tests.
-- Provider/version, command, working directory, and test selection: @vitest/coverage-v8 with Vitest 5.1.0; `npx vitest run src/ssh --coverage --coverage.include='src/ssh/socks.ts' --coverage.include='src/ssh/tunnel.ts' --coverage.reporter=json-summary --coverage.reporter=json --coverage.reporter=text` in `packages/backend`; test selection is `src/ssh`: 6 files, 111 tests.
-- Run start/completion time and exit status: 2026-11-17 17:35:16 (first run, reports written 17:35:44) and a rerun at 17:35:54 that produced the same report; both exit 0 with all tests passing.
-- Generated report paths and report hashes/run identifier: `packages/backend/coverage/coverage-final.json` sha256 5f21ce4e0b79a5f7309e4033e0665881393500380db05b2fa095d563fd0667b9 (same in both runs); `packages/backend/coverage/coverage-summary.json` sha256 ade22cad3dda536949f8fc6bc4459543b9582d7e5b639f4a94c2657f3bc6f41d.
-- Evidence outputs are fresh and inputs stayed unchanged: yes. Both runs regenerated the reports, and the sources were not edited between or during the runs.
-- Final run after latest test additions and production fixes: yes (after both socks.spec.ts edits; no production fixes made).
+- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: ci-windows-macos; base 442cca40b560e0f5e8ce16d3ae5240e800e98eda; HEAD 9ad19862; base and HEAD given by the parent; task commits 20e804e4, b5a51e0a, 42bacb87, 4e199da9 found with `git log 442cca40..HEAD`; merge 9ad19862 changes nothing in `packages/backend`.
+- Source/test snapshot identifier (including uncommitted inputs): HEAD 9ad19862, clean working tree; socks.ts sha256 9147ff47c6920f45252b66e07c620c6379d3263ab045e8fe3052f40f96a89b48; tunnel.ts sha256 1701c0241bfe4304ed62708c63182ea4a0b865dae4cdafd7d59ed23a43fa651d; socks.spec.ts sha256 2e4371923397236bbb2661fe949830bd664021843c8adfe86df10356db6b5957 (same hashes before and after the runs).
+- Exact included files; renamed/deleted/excluded files and reasons: included `packages/backend/src/ssh/socks.ts`, `packages/backend/src/ssh/tunnel.ts`; no renames or deletions; the five spec files are excluded because they are tests.
+- Provider/version, command, working directory, and test selection: @vitest/coverage-v8 with Vitest 5.1.0; `npx vitest run src/ssh --coverage --coverage.include='src/ssh/socks.ts' --coverage.include='src/ssh/tunnel.ts' --coverage.reporter=json-summary --coverage.reporter=json --coverage.reporter=text` in `packages/backend`; test selection `src/ssh`: 6 files, 111 tests.
+- Run start/completion time and exit status: started 2026-11-17 17:40:36, duration 12.77 s, exit 0, all tests passed.
+- Generated report paths and report hashes/run identifier: `packages/backend/coverage/coverage-final.json` sha256 e5624eedca6900e8e3904aee0b5965fdb1caed3fe836f49a7c0c287a1be6f49e; `packages/backend/coverage/coverage-summary.json` sha256 fba0554c702277f942a3868f92302568567e07ee2c3f0df51b425b7622adff0d (both differ from round 1, so they were regenerated).
+- Evidence outputs are fresh and inputs stayed unchanged: yes. The reports were regenerated by this run, and the source hashes did not change.
+- Final run after latest test additions and production fixes: yes (after the TW-1 fix in 4e199da9 and the merge 9ad19862; no test edits in round 2).
 
 Values below use covered/total (percentage); zero-denominator or unsupported metrics are N/A.
 
 | Changed file | Statements | Branches | Functions | Lines |
 |---|---:|---:|---:|---:|
-| `packages/backend/src/ssh/socks.ts` | 144/149 (96.64%) | 40/47 (85.10%) | 27/29 (93.10%) | 133/135 (98.51%) |
+| `packages/backend/src/ssh/socks.ts` | 142/147 (96.59%) | 38/45 (84.44%) | 27/29 (93.10%) | 132/134 (98.51%) |
 | `packages/backend/src/ssh/tunnel.ts` | 183/189 (96.82%) | 92/98 (93.87%) | 36/38 (94.73%) | 167/169 (98.81%) |
-| Aggregate (both files, summed counters; no files missing or excluded) | 327/338 (96.74%) | 132/145 (91.03%) | 63/67 (94.02%) | 300/304 (98.68%) |
+| Aggregate (both files, summed counters; no files missing or excluded) | 325/336 (96.72%) | 130/143 (90.90%) | 63/67 (94.02%) | 299/303 (98.67%) |
 
 | File and uncovered lines/branch locations | Required behavior or risk | Action/test added or reason left uncovered |
 |---|---|---|
 | `socks.ts:65-67` (server without a TCP address) | Defensive guard, cannot happen when listening on 127.0.0.1:0 | Unchanged code and not reachable; no test |
-| `socks.ts:53, 115, 165, 175, 177, 194` (non-Error rejection, `?? 0` fallbacks, re-read after failure) | Defensive fallbacks in handshake parsing | Unchanged code, not part of this task; no test |
+| `socks.ts:53, 116, 166, 176, 178, 195` (non-Error rejection, `?? 0` fallbacks, re-read after failure) | Defensive fallbacks in handshake parsing | Unchanged code, not part of this task; no test |
 | `tunnel.ts:143, 220, 300-302, 369, 445, 455` | Defensive branches in the tunnel and error mapping | Unchanged code, not part of this task; no test |
 
 ## Unable to test
 
-- Windows and macOS behaviour (AC1: the win32 branches in known-hosts.spec.ts and tunnel.spec.ts, the socks close ordering on those OSes): only Linux is available here. Follow-up: the parent records the `check` run of `wip/ci-windows-macos` on all three OSes.
+- Windows and macOS behaviour (AC1: the win32 branches in known-hosts.spec.ts and tunnel.spec.ts, the socks close ordering on those OSes, and whether the TW-1 fix holds there): only Linux is available here. Follow-up: the parent records the `check` run of `wip/ci-windows-macos` on all three OSes for the final revision.
+- On Linux the close() tests cannot tell the old shortcut from the fixed code (both pass), because the ordering problem does not occur here. Only the macOS/Windows CI run checks that.
 - `defaultSshAgent('win32', ...)` returning `pageant` is tested as a pure function; a real Pageant connection on Windows is not tested, and doing so is out of scope.
 
 ## Summary
 
-Tests added and all validation passed on Linux. No production defects were confirmed. One possible problem in socks.ts close() (the `socket.closed` shortcut) is covered by a new test whose Windows/macOS CI result the parent should check.
+Tests and task-scoped coverage are sufficient; no production defects found. The TW-1 fix is covered by the existing close() tests: all close() lines are hit and the tests pass. The focused tests (282), the coverage run (111) and `npm run check` pass at 9ad19862 on Linux. AC1 still needs the Windows/macOS CI run.
