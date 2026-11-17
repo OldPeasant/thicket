@@ -13,7 +13,8 @@ Check the GitHub releases API at start (and daily) unless disabled in settings; 
 ## Acceptance criteria
 - [x] Unit tests with recorded API responses: newer, same, pre-release ignored, network error silent
   - verified (2026-11-17 07:41+0100 by dell26/agent-1): cd apps/desktop && npx vitest run src/update src/main -> 119 passed; checker.spec.ts 'UpdateChecker with recorded API responses' uses fixtures/releases.json, releases-prerelease.json, rate-limited.json: newer (0.2.0 -> 0.3.0 update), same (0.3.0 no update), pre-release ignored (flag and -beta tag), network error/HTTP 403/timeout silent (no update, logged only); renderer: cd packages/renderer && npx ng test --include src/app/update --include src/app/layout/app-shell.spec.ts -> 97 passed (check failure silent)
-- [ ] Setting off → no request made (test)
+- [x] Setting off → no request made (test)
+  - verified (2026-11-17 07:42+0100 by dell26/agent-1): checker.spec.ts 'the checkForUpdates setting' (off: fetch not called; handler via mainHandlers off: no request) + renderer update-notice.spec.ts 'setting off: no check is requested, not at start and not daily' (0 app.checkForUpdate requests over 3 days of fake timers) -> all pass in the runs above (119 desktop, 97 renderer)
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
