@@ -1,4 +1,12 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  input,
+  output,
+  signal,
+} from '@angular/core';
 import { type BsonValue } from '@thicket/core/bson';
 
 import { ApiError } from '../../api';
@@ -26,7 +34,7 @@ export class MultiEditPanel {
   /** The selected documents, as loaded. */
   readonly selected = input.required<readonly SelectedDocument[]>();
   /** Clear the selection. */
-  readonly cleared = output<void>();
+  readonly cleared = output();
 
   protected readonly multi = inject(MultiEdit);
   private readonly numbers = inject(NumberDefaultService);

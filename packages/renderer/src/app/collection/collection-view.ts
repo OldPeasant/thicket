@@ -261,8 +261,10 @@ export class CollectionView {
     return selected;
   });
   /** The `_id`s of the page's rows, in order: a different list ends the row selection. */
-  private readonly pageKeys = computed(
-    () => this.docs().map((d) => (d === null ? '' : (documentKey(d) ?? ''))).join('\u0000'),
+  private readonly pageKeys = computed(() =>
+    this.docs()
+      .map((d) => (d === null ? '' : (documentKey(d) ?? '')))
+      .join('\u0000'),
   );
   protected readonly rawText = computed(() => {
     const page = this.results.page();

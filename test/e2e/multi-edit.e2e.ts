@@ -165,7 +165,10 @@ test('one document changed on the server: it is reported, the others are saved',
   await selectThreeAndSet(window, '"shipped"');
   // Someone else changes document 2 after it was loaded.
   await withClient(mongo.uri, (client) =>
-    client.db(DB).collection<Order>(coll).updateOne({ _id: 2 }, { $set: { status: 'held' } }),
+    client
+      .db(DB)
+      .collection<Order>(coll)
+      .updateOne({ _id: 2 }, { $set: { status: 'held' } }),
   );
   await window.getByTestId('multi-edit-save').click();
   await expect(window.getByTestId('confirm-detail')).toContainText('Updates 3 documents');

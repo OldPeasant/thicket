@@ -54,7 +54,11 @@ export function planFieldEdit(original: BsonDocument, edit: FieldEdit): FieldEdi
 }
 
 /** `doc` with the edit applied below it, or the reason it can't be applied. */
-function editAt(doc: BsonDocument, segments: readonly string[], edit: FieldEdit): BsonDocument | string {
+function editAt(
+  doc: BsonDocument,
+  segments: readonly string[],
+  edit: FieldEdit,
+): BsonDocument | string {
   const [key, ...rest] = segments as [string, ...string[]];
   const index = doc.fields.findIndex((f) => f.key === key);
   const existing = index === -1 ? undefined : doc.fields[index]?.value;

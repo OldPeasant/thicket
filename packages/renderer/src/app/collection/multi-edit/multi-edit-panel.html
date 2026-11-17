@@ -43,7 +43,12 @@
         (input)="setValue($event)"
       />
     }
-    <button type="submit" class="btn primary" data-testid="multi-edit-save" [disabled]="multi.busy()">
+    <button
+      type="submit"
+      class="btn primary"
+      data-testid="multi-edit-save"
+      [disabled]="multi.busy()"
+    >
       {{ multi.busy() ? 'Saving…' : saveLabel() }}
     </button>
     <button
