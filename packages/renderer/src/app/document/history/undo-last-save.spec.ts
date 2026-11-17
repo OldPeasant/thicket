@@ -788,4 +788,57 @@ describe('Undo last save', () => {
       wholeCheck([fieldEq('total', { $numberInt: '10' })], 2),
     );
   });
+
+  // Added by the test-writer (round 3): which version the undo checks against. A whole read-back
+  // (no projection, nothing sliced, parsed) that holds what was sent is taken as stored; in every
+  // other case the undo checks the version modelled from the save (`applyUpdate`, MongoDB's
+  // field-name order). To tell the two apart, this server stores the two added sub-fields in the
+  // order they were sent (zip, apt), unlike the model (apt, zip).
+  describe('saved version: read-back or model', () => {
+    const NESTED = '{"_id":{"$numberInt":"1"},"addr":{"city":"Springfield"}}';
+    const SENT = '{"_id":{"$numberInt":"1"},"addr":{"city":"Springfield","zip":"","apt":""}}';
+    const AS_STORED = '{"addr":{"$eq":{"city":"Springfield","zip":"","apt":""}}}';
+    const AS_MODELLED = '{"addr":{"$eq":{"city":"Springfield","apt":"","zip":""}}}';
+
+    type ReadBack = 'whole' | 'fails' | 'null' | 'unparseable' | 'sliced' | 'projection';
+
+    /** Saves two added sub-fields, reads back as `readBack` says; returns the undo's check. */
+    async function undoCheckAfter(readBack: ReadBack): Promise<string | undefined> {
+      server.stored = doc(NESTED);
+      if (readBack === 'projection') projection = '{"addr":{"$numberInt":"1"}}';
+      edits.edit(doc(NESTED), doc(SENT), readBack === 'projection');
+      fake.handle('docs.update', () => {
+        server.stored = doc(updates().length === 1 ? SENT : NESTED);
+        return { modified: true };
+      });
+      fake.handle('docs.get', () => {
+        if (readBack === 'fails') return { error: { code: 'TIMEOUT', message: 'timed out' } };
+        if (readBack === 'null') return { doc: null, sliced: [] };
+        if (readBack === 'unparseable') return { doc: '{not ejson', sliced: [] };
+        const sliced = readBack === 'sliced' ? [{ path: 'addr', total: 3, loaded: 1 }] : [];
+        return { doc: stringifyEJson(server.stored as BsonDocument), sliced };
+      });
+      expect(await actions.save(ID)).toBe(true);
+      expect(actions.canUndoSave(ID)).toBe(true);
+      await actions.undoSave(ID);
+      return updates()[1]?.['expected'] as string | undefined;
+    }
+
+    it('takes a whole read-back that holds what was sent as the saved version, in its stored order', async () => {
+      expect(await undoCheckAfter('whole')).toBe(AS_STORED);
+      expect(stringifyEJson(server.stored as BsonDocument)).toBe(NESTED);
+      expect(replaces()).toHaveLength(0);
+    });
+
+    it.each<[string, ReadBack]>([
+      ['the read-back fails', 'fails'],
+      ['the document read back is gone (null)', 'null'],
+      ['the read-back does not parse', 'unparseable'],
+      ['the read-back has sliced arrays', 'sliced'],
+      ['the save was made under a projection', 'projection'],
+    ])('checks the modelled MongoDB order when %s', async (_what, readBack) => {
+      expect(await undoCheckAfter(readBack)).toBe(AS_MODELLED);
+      expect(replaces()).toHaveLength(0);
+    });
+  });
 });

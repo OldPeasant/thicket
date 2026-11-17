@@ -156,6 +156,68 @@ describe('applyUpdate', () => {
       ]);
       expect(text(result)).toBe('{"_id":"a","addr":{"city":"S","apt":"","zip":""}}');
     });
+
+    // Added by the test-writer (round 3): edge cases of MongoDB's name order (two all-digit names of
+    // different length by length, everything else byte by byte).
+    const keysAfterSetting = (names: readonly string[]) =>
+      applyUpdate(
+        doc('{"_id":"a"}'),
+        names.map((path) => ({ op: 'set', path, value: value('""') })),
+      ).fields.map((f) => f.key);
+
+    it('orders mixed numeric and other names: numeric order only between two numeric names', () => {
+      // 9 < 10 and 8 < 007 (length), 10 < 9a and 007 < 9a (bytes), 9 < 9a (prefix).
+      const expected = ['_id', '8', '9', '10', '007', '9a', 'b'];
+      expect(keysAfterSetting(['b', '9a', '10', '9', '007', '8'])).toEqual(expected);
+      expect(keysAfterSetting(['8', '007', '9', '10', '9a', 'b'])).toEqual(expected);
+    });
+
+    it('compares numeric names of the same length byte by byte', () => {
+      expect(keysAfterSetting(['10', '09', '99'])).toEqual(['_id', '09', '10', '99']);
+    });
+
+    it('orders by code point (UTF-8 bytes), not by UTF-16 unit or locale', () => {
+      // U+FF01 comes before U+1F600, although its UTF-16 unit (0xFF01) is above the surrogate
+      // 0xD83D; uppercase before lowercase; é (U+00E9) after z; a prefix first.
+      expect(keysAfterSetting(['\u{1F600}', '！', 'é', 'z', 'ab', 'a', 'Z'])).toEqual([
+        '_id',
+        'Z',
+        'a',
+        'ab',
+        'z',
+        'é',
+        '！',
+        '\u{1F600}',
+      ]);
+    });
+
+    it('compares dotted paths part by part, so a new parent comes before a longer sibling name', () => {
+      // As whole strings "a-c" < "a.b" ('-' < '.'); MongoDB orders the parent "a" before "a-c".
+      const result = applyUpdate(doc('{"_id":"a"}'), [
+        { op: 'set', path: 'a-c', value: value('"2"') },
+        { op: 'set', path: 'a.b', value: value('"1"') },
+      ]);
+      expect(text(result)).toBe('{"_id":"a","a":{"b":"1"},"a-c":"2"}');
+    });
+
+    it('adds the sub-fields of a new parent in name order', () => {
+      const result = applyUpdate(doc('{"_id":"a","n":"1"}'), [
+        { op: 'set', path: 'm.z', value: value('"1"') },
+        { op: 'set', path: 'm.a.y', value: value('"2"') },
+        { op: 'set', path: 'm.a.x', value: value('"3"') },
+      ]);
+      expect(text(result)).toBe('{"_id":"a","n":"1","m":{"a":{"x":"3","y":"2"},"z":"1"}}');
+    });
+
+    it('keeps existing fields in place whatever their names; only added ones are ordered', () => {
+      const result = applyUpdate(doc('{"_id":"a","z":"1","b":"1"}'), [
+        { op: 'set', path: 'z', value: value('"2"') },
+        { op: 'set', path: 'y', value: value('"3"') },
+        { op: 'set', path: 'b', value: value('"4"') },
+        { op: 'set', path: 'a', value: value('"5"') },
+      ]);
+      expect(text(result)).toBe('{"_id":"a","z":"2","b":"4","a":"5","y":"3"}');
+    });
   });
 
   it('does not change the document it is given', () => {
