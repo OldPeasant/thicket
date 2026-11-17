@@ -15,7 +15,8 @@ MONGODB-OIDC with authorization code flow in the system browser (main opens the 
   - verified (2026-11-17 04:31+0100 by felix/agent-1): npm run test:int -- oidc (Podman: MongoDB Enterprise + Keycloak fixture, headless Chromium) on c88f053 merged with main (de208f5) -> 6/6 passed, incl. 'authorization code flow: the browser signs in on Keycloak and the connect succeeds'
 - [x] Token reuse: second connect does not open the browser (test)
   - verified (2026-11-17 04:31+0100 by felix/agent-1): npm run test:int -- oidc (Podman: MongoDB Enterprise + Keycloak) on de208f5 -> 6/6 passed, incl. 'token reuse: a second connect (also after a restart) does not open the browser'
-- [ ] Device flow works (int test)
+- [x] Device flow works (int test)
+  - verified (2026-11-17 04:31+0100 by felix/agent-1): npm run test:int -- oidc (Podman: MongoDB Enterprise + Keycloak) on de208f5 -> 6/6 passed, incl. 'device flow: the user code is shown, approved on Keycloak, and the connect succeeds' and 'auto flow falls back to the device flow when no browser can be opened'
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
