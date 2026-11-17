@@ -626,6 +626,43 @@ describe('startBackend: connections', () => {
     }
   });
 
+  it('a failing shell close on connection loss is logged; the status is still broadcast', async () => {
+    const closeProfile = vi
+      .spyOn(ShellHost.prototype, 'closeProfile')
+      .mockImplementation(() => Promise.reject(new Error('worker would not stop')));
+    const statuses = vi.spyOn(ConnectionManager.prototype, 'statuses');
+    try {
+      const m = withMain();
+      const events: Event[] = [];
+      m.renderer.onMessage((message) => {
+        const event = message as Partial<Event>;
+        if (event.stream === BROADCAST_STREAMS.connStatus) events.push(event as Event);
+      });
+      m.renderer.send({ id: 's', method: 'conn.status', params: {} });
+      expect(await m.answer('s')).toMatchObject({ ok: true });
+      const manager = statuses.mock.contexts[0] as unknown as {
+        deps: { onStatus: (status: unknown) => void };
+      };
+      const lost = {
+        profileId: 'ssh',
+        state: 'error',
+        error: { code: 'SSH_ERROR', message: 'The SSH tunnel was closed' },
+      };
+      expect(() => manager.deps.onStatus(lost)).not.toThrow();
+      await vi.waitFor(() =>
+        expect(m.log).toHaveBeenCalledWith(
+          'shell: closing the sessions of ssh failed: Error: worker would not stop',
+        ),
+      );
+      await vi.waitFor(() => expect(events).toHaveLength(1));
+      expect(events[0]).toMatchObject({ kind: 'data', payload: lost });
+      expect(closeProfile).toHaveBeenCalledWith('ssh');
+    } finally {
+      closeProfile.mockRestore();
+      statuses.mockRestore();
+    }
+  });
+
   it('shell.open answers UNSUPPORTED without a shell worker once connected', async () => {
     const parentPort: ParentPortLike = { on: () => undefined };
     const configOf = vi

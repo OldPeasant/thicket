@@ -385,6 +385,200 @@ describe('ShellHost.open: driver options cross postMessage (MONGODB-AWS)', () =>
     expect(logs.join('\n')).not.toContain(AWS_TOKEN);
     expect(worker.terminated).toBe(1);
   });
+
+  // Round 6 (test-writer): restart, cancellation and credential-shape cases of CR-2.
+  it('a replacement worker (after a crash) gets freshly resolved AWS credentials, clone-safe', async () => {
+    let calls = 0;
+    const config: ClientConfig = {
+      uri: AWS_CONFIG.uri,
+      options: {
+        authMechanism: 'MONGODB-AWS',
+        authMechanismProperties: {
+          AWS_CREDENTIAL_PROVIDER: () => {
+            calls++;
+            return Promise.resolve({
+              accessKeyId: `${AWS_KEY_ID}${calls}`,
+              secretAccessKey: AWS_SECRET,
+              sessionToken: AWS_TOKEN,
+            });
+          },
+        },
+      },
+    };
+    const { host, workers } = setup();
+    const { sessionId } = await host.open('aws', config, 'shop');
+    (workers[0] as FakeWorker).exit(1);
+    const c = collector();
+    const next = host.eval(sessionId, '1', c.emit);
+    await vi.waitFor(() => expect(workers).toHaveLength(2));
+    const replacement = workers[1] as FakeWorker;
+    const { id } = await lastEval(replacement);
+    replacement.reply({ type: 'evalDone', id });
+    await expect(next).resolves.toBe(0);
+    const [open] = replacement.of('open');
+    expect(() => structuredClone(open)).not.toThrow();
+    expect(open).toMatchObject({ db: 'shop', awsCredentials: { accessKeyId: `${AWS_KEY_ID}2` } });
+    expect(open?.options.authMechanismProperties).toBeUndefined();
+    expect(c.outputs).toEqual([{ kind: 'print', text: CRASHED_TEXT }]);
+    // The session's own configuration still holds the provider (the next restart calls it again).
+    expect(config.options.authMechanismProperties?.AWS_CREDENTIAL_PROVIDER).toBeTypeOf('function');
+  });
+
+  it('a restart whose credential provider fails fails the evaluation (secrets masked); the next one retries', async () => {
+    let fail = false;
+    const config: ClientConfig = {
+      uri: AWS_CONFIG.uri,
+      options: {
+        authMechanism: 'MONGODB-AWS',
+        auth: { password: PASSWORD },
+        authMechanismProperties: {
+          AWS_CREDENTIAL_PROVIDER: () =>
+            fail
+              ? Promise.reject(new Error(`credentials expired for ${PASSWORD}`))
+              : Promise.resolve({ accessKeyId: AWS_KEY_ID, secretAccessKey: AWS_SECRET }),
+        },
+      },
+    };
+    const { host, workers, logs } = setup();
+    const { sessionId } = await host.open('aws', config, undefined);
+    (workers[0] as FakeWorker).exit(1);
+    fail = true;
+    const error = await rejection(host.eval(sessionId, '1', () => undefined));
+    expect(error.message).toContain('credentials expired for ****');
+    expect(error.message).not.toContain(PASSWORD);
+    expect(logs.join('\n')).not.toContain(PASSWORD);
+    // The worker created for the failed restart got nothing and was terminated.
+    expect(workers).toHaveLength(2);
+    expect((workers[1] as FakeWorker).posted).toEqual([]);
+    expect((workers[1] as FakeWorker).terminated).toBe(1);
+    expect(host.has(sessionId)).toBe(true);
+    fail = false;
+    const c = collector();
+    const next = host.eval(sessionId, '2', c.emit);
+    await vi.waitFor(() => expect(workers).toHaveLength(3));
+    const fresh = workers[2] as FakeWorker;
+    const { id } = await lastEval(fresh);
+    fresh.reply({ type: 'evalDone', id });
+    await expect(next).resolves.toBe(0);
+    expect(fresh.of('open')[0]?.awsCredentials?.accessKeyId).toBe(AWS_KEY_ID);
+  });
+
+  it('an open cancelled while the credential provider is pending answers CANCELLED and posts nothing', async () => {
+    let resolveProvider: (value: { accessKeyId: string; secretAccessKey: string }) => void = () =>
+      undefined;
+    const config: ClientConfig = {
+      uri: AWS_CONFIG.uri,
+      options: {
+        authMechanism: 'MONGODB-AWS',
+        authMechanismProperties: {
+          AWS_CREDENTIAL_PROVIDER: () =>
+            new Promise((resolve) => {
+              resolveProvider = resolve;
+            }),
+        },
+      },
+    };
+    const worker = new FakeWorker();
+    const { host } = setup({ workers: [worker] });
+    const controller = new AbortController();
+    const opening = host.open('aws', config, undefined, controller.signal);
+    controller.abort();
+    expect((await rejection(opening)).code).toBe('CANCELLED');
+    expect(worker.terminated).toBe(1);
+    // The provider answering late changes nothing.
+    resolveProvider({ accessKeyId: AWS_KEY_ID, secretAccessKey: AWS_SECRET });
+    await Promise.resolve();
+    expect(worker.posted).toEqual([]);
+    expect(host.sessionIds()).toEqual([]);
+  });
+
+  it('a worker that exits while the credential provider is pending answers INTERNAL', async () => {
+    let resolveProvider: (value: { accessKeyId: string; secretAccessKey: string }) => void = () =>
+      undefined;
+    const config: ClientConfig = {
+      uri: AWS_CONFIG.uri,
+      options: {
+        authMechanism: 'MONGODB-AWS',
+        authMechanismProperties: {
+          AWS_CREDENTIAL_PROVIDER: () =>
+            new Promise((resolve) => {
+              resolveProvider = resolve;
+            }),
+        },
+      },
+    };
+    const worker = new FakeWorker(false);
+    const { host } = setup({ workers: [worker] });
+    const opening = host.open('aws', config, undefined);
+    worker.exit(3);
+    // No unhandled rejection while the provider is still pending.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    resolveProvider({ accessKeyId: AWS_KEY_ID, secretAccessKey: AWS_SECRET });
+    const error = await rejection(opening);
+    expect(error.code).toBe('INTERNAL');
+    expect(error.message).toContain('exit code 3');
+    expect(worker.terminated).toBe(1);
+    expect(host.sessionIds()).toEqual([]);
+  });
+
+  it('posts only accessKeyId, secretAccessKey, sessionToken and expiration (absent fields left out)', async () => {
+    const expiration = new Date('2030-01-01T00:00:00Z');
+    const config: ClientConfig = {
+      uri: AWS_CONFIG.uri,
+      options: {
+        authMechanism: 'MONGODB-AWS',
+        authMechanismProperties: {
+          AWS_CREDENTIAL_PROVIDER: () =>
+            Promise.resolve({
+              accessKeyId: AWS_KEY_ID,
+              secretAccessKey: AWS_SECRET,
+              expiration,
+              // A provider (e.g. the AWS SDK) may add fields; a function would not clone.
+              extra: () => 'not cloneable',
+            } as unknown as { accessKeyId: string; secretAccessKey: string }),
+        },
+      },
+    };
+    const { host, workers } = setup();
+    await host.open('aws', config, undefined);
+    const [open] = (workers[0] as FakeWorker).of('open');
+    expect(open?.awsCredentials).toEqual({
+      accessKeyId: AWS_KEY_ID,
+      secretAccessKey: AWS_SECRET,
+      expiration,
+    });
+    expect(open?.awsCredentials).not.toHaveProperty('sessionToken');
+    const cloned = structuredClone(open);
+    expect(cloned?.awsCredentials?.expiration).toEqual(expiration);
+  });
+});
+
+describe('withAwsCredentials (worker side)', () => {
+  it('adds the provider next to other mechanism properties without changing the input', async () => {
+    const options = {
+      authMechanism: 'MONGODB-AWS' as const,
+      authMechanismProperties: { SERVICE_NAME: 'mongodb' },
+    };
+    const credentials = { accessKeyId: AWS_KEY_ID, secretAccessKey: AWS_SECRET };
+    const out = withAwsCredentials(options, credentials);
+    expect(out.authMechanismProperties?.SERVICE_NAME).toBe('mongodb');
+    await expect(out.authMechanismProperties?.AWS_CREDENTIAL_PROVIDER?.()).resolves.toBe(
+      credentials,
+    );
+    expect(options.authMechanismProperties).toEqual({ SERVICE_NAME: 'mongodb' });
+  });
+
+  it('builds authMechanismProperties when the options have none', async () => {
+    const out = withAwsCredentials(
+      { authMechanism: 'MONGODB-AWS' },
+      { accessKeyId: AWS_KEY_ID, secretAccessKey: AWS_SECRET, sessionToken: AWS_TOKEN },
+    );
+    await expect(out.authMechanismProperties?.AWS_CREDENTIAL_PROVIDER?.()).resolves.toEqual({
+      accessKeyId: AWS_KEY_ID,
+      secretAccessKey: AWS_SECRET,
+      sessionToken: AWS_TOKEN,
+    });
+  });
 });
 
 describe('ShellHost.eval', () => {

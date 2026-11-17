@@ -155,3 +155,76 @@ None.
 Material issues found; fix before completing the task.
 
 The merge resolutions themselves are correct: nothing from main or from the task was dropped, the lockfile only adds packages, the shell wiring and the build externals are intact and the bundles build. CR-2 is an integration defect between the shell host and the MONGODB-AWS auth that arrived with the merges and should be fixed before `done`; CR-3 is a low-priority resilience note.
+
+---
+
+# Code Review (round 6: CR-2/CR-3 fixes and latest main merge)
+
+Date: 2026-11-17
+
+Task: shell-backend - M4: mongosh host in the backend (round 6)
+
+Scope: `git diff origin/main...HEAD` (whole task diff), with focus on fix commit 5914df0 (`packages/backend/src/shell/{host,protocol,worker}.ts`, `packages/backend/src/server/backend.ts` and their specs) and merge commit 6628377 (origin/main b739b48, which brought `ConnectionManager.cancelOnClose`/close-time stream cancellation). Committed changes only. Reviewed revision: 662837788fd88af6de9c0c267891dbd3f88857dd.
+
+Requirements:
+- tasks/shell-backend.md acceptance criteria and recorded assumptions
+- SPEC.md (M4 Shell, M5 MONGODB-AWS), docs/mongosh.md, docs/ARCHITECTURE.md, AGENTS.md
+- round 5 of this report, fixes.md (round 5)
+
+Git range:
+- Branch: main
+- HEAD: 662837788fd88af6de9c0c267891dbd3f88857dd
+- Base/start: b739b48d188a45b25e68023ffc6cc61f3479e17e (`git merge-base HEAD origin/main`, equals origin/main)
+- Commits reviewed: fix commit 5914df0 and merge 6628377 in detail; the whole task diff (22 files outside `package-lock.json`, `reviews/`, `tasks/`) sanity-checked; working tree clean
+
+Summary: 0 P0, 0 P1, 0 P2, 1 P3
+
+## Round 5 findings
+
+- CR-2 (round 5, AWS provider DataCloneError and leaked worker): resolved.
+  - `cloneableOptions` (`host.ts:410`) removes `AWS_CREDENTIAL_PROVIDER`, calls it in the host and sends plain `{accessKeyId, secretAccessKey, sessionToken?, expiration?}` (all structured-clone safe, `expiration` is a `Date`); other `authMechanismProperties` are kept, an empty properties object is dropped. `withAwsCredentials` (`protocol.ts`) rebuilds a static provider in the worker before `ShellRuntime.open`; profiles without a user name (default AWS chain) have no provider and pass through unchanged, so the driver in the worker builds its own chain as `conn.open` does.
+  - `createWorker` is the only step before the `try`; option preparation, `postMessage` and the wait are inside it, so a throwing provider, a `DataCloneError`, a cancel or an open failure all terminate the worker (`host.ts:385-401`). `opened.catch(() => undefined)` prevents an unhandled rejection if the worker exits while the options are still being prepared. No leak path found; `restart` uses the same `startWorker`, so a restarted AWS session works too.
+  - Secrets: `secretsOf` now masks the resolved AWS secret access key and session token; `secrets` is updated before `postMessage`, so both the worker's `openFailed` message and the host log line (`failure.message` after `toConnectError`) are masked. The access key id is not a secret and stays visible, consistent with `conn.open`. No credential is logged by the new code; the `awsCredentials` field is only posted to the worker, never logged.
+  - Tests in `host.spec.ts` ("driver options cross postMessage (MONGODB-AWS)") cover the clone-safe message, the worker-side rebuild, kept properties, a non-static provider per start, a throwing `postMessage`, a failing provider and masking.
+- CR-3 (round 5, shells kept after tunnel loss): resolved. The `onStatus` callback in `startBackend` (`backend.ts:79-90`) calls `shells.closeProfile` for `error`/`disconnected` and logs (not throws) a failure. `onStatus` is only called by `tunnelLost` (`manager.ts:343`).
+  - Race with a reconnect: `closeProfile` selects the profile's sessions and `closeSession` marks each `closed` and removes it from the map synchronously, before its first `await`, all inside the synchronous `onStatus` call. A `conn.open` after the tunnel loss cannot have produced shells yet, and shells opened on the new connection are never in the closed set. A restart running at that moment checks `session.closed` after `startWorker` and terminates its new worker (`host.ts:348`). No race with `conn.open`/reconnect found; the remaining window is an in-flight `shell.open`, see CR-1 below.
+  - The backend.spec test drives the real `deps.onStatus` of the manager built by `startBackend` and asserts `closeProfile` only for `error`/`disconnected`.
+
+## Merge 6628377 check
+
+- `git diff b739b48 6628377 --stat -- packages/` lists only task files; `manager.ts` differs from main only by the task's `ClientConfig` import, the `configs` WeakMap/`createClient` wrapper and `configOf`. Main's `cancelOnClose`, `RunningWork`, `CLOSE_CANCEL_GRACE_MS` and the stream cancellation in `close` are intact.
+- The `conn.close` wrapper still calls the manager's `close` first (which now cancels streams with up to 5 s grace) and then `shells.closeProfile`; shells are not manager work, so the two do not interfere.
+- `manager.spec.ts` merged result passes together with the task's `configOf` tests.
+
+## Verification run by this reviewer
+
+- `npx vitest run packages/backend/src/shell packages/backend/src/server/backend.spec.ts packages/backend/src/connections/manager.spec.ts` at 6628377 -> 6 files, 391 tests passed.
+- Reading `packages/backend/src/connections/options.ts` and `packages/backend/src/auth/`: the AWS provider is the only function-valued driver option produced on this revision.
+- Integration tests and a real MONGODB-AWS server were not run by this reviewer (fixes.md records the Podman shell integration suite 17/17 and states that no AWS fixture was used).
+
+## P0 Critical
+
+None.
+
+## P1 High
+
+None.
+
+## P2 Medium
+
+None.
+
+## P3 Low
+
+- [ ] **CR-1 | A shell.open in flight while the connection is closed or its tunnel is lost registers a session afterwards**
+    - File: `packages/backend/src/shell/handlers.ts:22` (with `packages/backend/src/shell/host.ts:107-118`)
+    - Category: Correctness
+    - Problem: `shell.open` takes `manager.configOf(profileId)` and then waits for the worker to connect (`startWorker`). The session is put into `sessions` only after that. A `conn.close` (wrapper in `backend.ts:104-108`) or a tunnel loss (`onStatus`, `backend.ts:85-89`) during that wait runs `closeProfile` before the session exists, so it is not closed. For a direct (non-SSH) connection the worker's own client connects successfully and the shell session stays open after its connection was closed; nothing checks that the connection is still the same afterwards.
+    - Why it matters: the recorded behavior "conn.close also closes that profile's shell sessions" (and the CR-3 fix for connection loss) does not hold for a session that was opening at that moment; the window is a few hundred milliseconds to the driver's connect timeout, so it is narrow but reachable (e.g. user disconnects right after opening a console).
+    - Suggested fix: after `host.open` resolves, check that the profile's open client is still the one `configOf` was read from (e.g. `isOpenClient(manager, profileId, client)` captured before the open) and otherwise close the new session and answer `CANCELLED`/`NOT_CONNECTED`; add a handler test with a close during a pending open.
+
+## Review conclusion
+
+No material issues found.
+
+The CR-2 fix correctly removes the function from the cross-thread message, rebuilds the provider in the worker, terminates the worker on every failure path and masks the AWS secret and session token; the CR-3 fix closes a profile's shells on connection loss without racing a reconnect. The latest main merge kept main's `cancelOnClose` changes intact, and the focused unit suites pass at 6628377. The single P3 is a narrow pre-existing race that the parent worker may fix or record.

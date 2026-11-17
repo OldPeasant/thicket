@@ -2,12 +2,223 @@
 
 Date: 2026-11-17
 
-Task: shell-backend — M4: mongosh host in the backend (final report, round 5, revision 515cdb8)
+Task: shell-backend — M4: mongosh host in the backend (final report, round 6, revision 6628377)
 
-Scope (round 5): `git diff origin/main...HEAD`, merge-base
-`1ec66b38860e9925cd05c63d8ca088ca93ace3d6` (given by the parent) to HEAD
-`515cdb8ab181c7697c121441ae903f883f68f2c5`. Rounds 1-4 are kept below the round-5 section; their
-numbers describe revision 8712197 (pre-merge) and are superseded by round 5 where they differ.
+Scope (round 6): `git diff origin/main...HEAD`, merge-base
+`b739b48d188a45b25e68023ffc6cc61f3479e17e` (= origin/main) to HEAD
+`662837788fd88af6de9c0c267891dbd3f88857dd`. Round 5 (revision 515cdb8) and rounds 1-4 (revision
+8712197) are kept below; round 6 supersedes them where they differ.
+
+# Round 6 (CR-2 / CR-3 fixes, commit 5914df0, and the main merge 6628377)
+
+## Round 6 scope
+
+- Task `shell-backend`; ownership from the parent (task diff `git diff origin/main...HEAD`, base
+  `b739b48d`, HEAD `66283778`) and the task file's `touches: packages/backend/src/shell`.
+- Focus: commit `5914df0` (fixes for review round 5, CR-2 and CR-3):
+  - `shell/host.ts`: `cloneableOptions` (an `AWS_CREDENTIAL_PROVIDER` is called on the host and its
+    credentials are posted as data in `awsCredentials`), `postMessage` moved inside the `try` so any
+    failure terminates the worker, every open failure goes through `toConnectError`, and `secretsOf`
+    masks the AWS secret access key and session token.
+  - `shell/protocol.ts`: `awsCredentials` on the `open` message; `withAwsCredentials` (worker side)
+    rebuilds a static provider.
+  - `shell/worker.ts`: opens with `withAwsCredentials(options, awsCredentials)`.
+  - `server/backend.ts`: `ShellHost` built before the `ConnectionManager`; `onStatus` with
+    `error`/`disconnected` calls `shells.closeProfile(profileId)`, a failure is logged.
+- Merge `6628377`: per the parent, the only conflict was `manager.spec.ts` (both sides' blocks kept);
+  the full backend suite (including `manager.spec.ts`) passes on it.
+- Not my change: `reviews/shell-backend/review.md` was already modified in the working tree
+  (code-reviewer, running in parallel); this round did not touch it.
+
+## Round 6 test files changed (uncommitted)
+
+- `packages/backend/src/shell/host.spec.ts` (sha256 `e268320cc1aabbb3fd35070b4b073083e5316794655de7488546a208b37c3837`)
+- `packages/backend/src/server/backend.spec.ts` (sha256 `12e72804665f77230f205fc876429588899c7f2eaf4b11d7fda24f332034fa79`)
+- `test/integration/shell.int.spec.ts` (sha256 `98e241d21540e798b1290b8a53a4f0a82400cae9bc86c76a2a69bcf526e48faf`)
+
+## Round 6 tests added
+
+Count: 9 (7 in `host.spec.ts`: 5 open/restart cases and 2 `withAwsCredentials` cases; 1 in
+`backend.spec.ts`; 1 integration test).
+
+`host.spec.ts`, `ShellHost.open: driver options cross postMessage (MONGODB-AWS)`:
+- `a replacement worker (after a crash) gets freshly resolved AWS credentials, clone-safe`: the
+  restart path (`restart` → `startWorker` with `session.config`) calls the provider again, posts
+  clone-safe options on the remembered db with the new key id, and the session's config keeps its
+  provider function.
+- `a restart whose credential provider fails fails the evaluation (secrets masked); the next one
+  retries`: the eval rejects with the provider's message, the configured password masked as `****`
+  in the error and the logs; the worker made for the failed restart got nothing posted and was
+  terminated; the session stays open and the next eval restarts with good credentials.
+- `an open cancelled while the credential provider is pending answers CANCELLED and posts nothing`:
+  abort during `cloneableOptions` → `CANCELLED`, worker terminated, a late provider answer posts
+  nothing, no session.
+- `a worker that exits while the credential provider is pending answers INTERNAL`: the early
+  rejection of `opened` is not unhandled (the `opened.catch` guard), the open answers INTERNAL with
+  the exit code once the provider is done, the worker is terminated.
+- `posts only accessKeyId, secretAccessKey, sessionToken and expiration (absent fields left out)`:
+  a provider result with an `expiration` Date and an extra function field is reduced to the four
+  known fields (no `sessionToken` key when absent), and it clones with the Date intact.
+
+`host.spec.ts`, `withAwsCredentials (worker side)`:
+- `adds the provider next to other mechanism properties without changing the input`.
+- `builds authMechanismProperties when the options have none`.
+
+`backend.spec.ts`, `startBackend: connections`:
+- `a failing shell close on connection loss is logged; the status is still broadcast`: with
+  `closeProfile` rejecting, `onStatus` does not throw, the log gets
+  `shell: closing the sessions of ssh failed: Error: worker would not stop`, and the renderer still
+  receives the `conn.status` broadcast (covers the `.catch` branch of the CR-3 fix).
+
+`test/integration/shell.int.spec.ts`, `shell.open with MONGODB-AWS explicit keys (CR-2)`:
+- `posts the options to a real worker (no DataCloneError) and fails as an auth error, masked`: a
+  real `ShellHost` with the real `worker.ts` thread and options from `awsAuthOptions` (fictitious
+  keys) against the 8.x fixture. The open fails with `AUTH_FAILED` "Received authentication for
+  mechanism MONGODB-AWS which is not enabled", i.e. the options crossed the real `postMessage` and
+  the worker's driver signed with the rebuilt provider and reached the server. Secret and token are
+  not in the message; no session remains. Before 5914df0 this open threw a raw `DataCloneError`
+  (not an `RpcError`), so the test fails on the pre-fix code.
+
+Already present from 5914df0 (pass): the 6 `MONGODB-AWS` open tests in `host.spec.ts` and
+`a conn.status broadcast to error or disconnected closes that profile’s shell sessions` in
+`backend.spec.ts`.
+
+## Round 6 requirement coverage
+
+| Requirement | Tests | Command | Result |
+|---|---|---|---|
+| AC1: `use test; db.c.insertOne({a:1}); db.c.find()` returns the document as EJSON | int `shell.eval > use test; db.c.insertOne({a:1}); db.c.find() returns the document as EJSON` | `npx vitest run --config test/integration/vitest.config.ts test/integration/shell.int.spec.ts` (repo root, 8.x MongoDB container via Podman; first run with `--reporter=verbose`) | Pass |
+| AC2: interrupt stops `while(true){}` within 2 s | int `interrupt > stops while(true){} within 2 s and the session goes on` (1807 ms); host grace-timer unit tests | same int command; `npx vitest run` in `packages/backend` | Pass |
+| AC3: `complete('db.c.fi')` suggests `find`, `findOne` | int `shell.complete > complete('db.c.fi') suggests find and findOne` | same int command | Pass |
+| CR-2: MONGODB-AWS options cross `postMessage` (host resolves the provider, worker rebuilds it) | 3 existing + 3 new host tests, 2 `withAwsCredentials` tests; int `posts the options to a real worker (no DataCloneError) ...` | `npx vitest run src/shell/host.spec.ts` (in `packages/backend`); int command | Pass |
+| CR-2: a failing `postMessage` / provider terminates the worker and rejects | existing `a postMessage that throws on open ...`, `a failing credential provider ...`; new restart-provider-failure, cancel-during-provider, exit-during-provider tests | same | Pass |
+| CR-2: AWS secret and session token masked in errors and logs | existing `masks the AWS secret access key and session token ...`; new restart test (password masked in provider error); int test | same | Pass |
+| CR-3: `error`/`disconnected` status closes the profile's shells; failure logged | existing `a conn.status broadcast to error or disconnected ...`; new `a failing shell close on connection loss is logged ...` | `npx vitest run src/server/backend.spec.ts` (in `packages/backend`) | Pass |
+| CR-3 end to end (a real SSH tunnel loss closing shells) | none | Not run: the unit test drives `deps.onStatus` directly (manager.spec covers `tunnelLost` → `onStatus`); no int test kills an SSH tunnel under an open shell | Not run: covered in two halves by unit tests |
+
+## Round 6 focused test execution
+
+Command: `npx vitest run src/shell/host.spec.ts` (in `packages/backend`)
+
+Result: Pass, 60 tests.
+
+Command: `npx vitest run src/server/backend.spec.ts` (in `packages/backend`)
+
+Result: Pass, 48 tests.
+
+Command: `npx vitest run --config test/integration/vitest.config.ts test/integration/shell.int.spec.ts --reporter=verbose`
+(repo root, MongoDB 8.x container via Podman), final run 2026-11-17 04:13:08-04:13:22 +01:00
+
+Result: Pass, 1 file, 18 tests (17 earlier + 1 new).
+
+## Round 6 full test execution
+
+Command: `npx vitest run` (in `packages/backend`)
+
+Result: Pass, 33 files, 1444 tests.
+
+Command: `npm run check` (= `.taskcheck`: ESLint, Prettier, type checks of all workspaces, root
+vitest, renderer `ng test`), repo root, 2026-11-17 ~04:14-04:15 +01:00
+
+Result: Pass. Root vitest 68 files / 3787 tests; renderer 80 files / 2429 tests. Lint, Prettier and
+type checks passed (the script is `&&`-chained; tests run last).
+
+## Round 6 .taskcheck
+
+Result: Pass (`npm run check`, run directly above on the round-6 snapshot).
+
+## Round 6 bugs found
+
+None. No production defect was found in the CR-2/CR-3 fixes.
+
+## Round 6 coverage
+
+Status: verified. Fresh run, all backend tests selected, all passed.
+
+Metric: whole-file coverage of task-changed production files.
+Changed-line coverage: not measured (the configured tooling has no changed-line report). By
+inspection of `lcov.info`, every line and branch of the 5914df0 changes in `host.ts` (383-431,
+448-459), `protocol.ts` (`withAwsCredentials`) and the new `onStatus` block of `backend.ts` is hit;
+`worker.ts` is not instrumented (worker thread), its change is exercised by the integration test.
+
+Evidence:
+- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: task
+  `shell-backend`; base `b739b48d188a45b25e68023ffc6cc61f3479e17e` (`git merge-base HEAD
+  origin/main`, = origin/main); HEAD `662837788fd88af6de9c0c267891dbd3f88857dd`; file scope from
+  `git diff --name-only b739b48 HEAD -- '*.ts'` (parent-supplied task diff).
+- Source/test snapshot identifier: HEAD 6628377 plus the three uncommitted spec files above (hashes
+  listed). Production hashes: `shell/host.ts` `0bf12174…`, `shell/protocol.ts` `ea027397…`,
+  `shell/worker.ts` `1f545221…`, `server/backend.ts` `473dae39…`, `shell/split.ts` `791da1bf…`.
+  Taken before the coverage run and rechecked after it: unchanged.
+- Exact included files: `packages/backend/src/shell/{handlers,host,index,output,protocol,runtime,split,worker}.ts`,
+  `packages/backend/src/connections/manager.ts`, `packages/backend/src/index.ts`,
+  `packages/backend/src/server/backend.ts`, `packages/backend/src/server/entry.ts`.
+  Excluded: `apps/desktop/scripts/build.mjs` (build script), `package-lock.json`,
+  `packages/backend/package.json` (configuration), spec files. No renames or deletions.
+- Provider/version, command, working directory, and test selection: `@vitest/coverage-v8` (v8),
+  vitest 5.1.0; working directory `packages/backend`; `npx vitest run --coverage --coverage.include='src/shell/handlers.ts' --coverage.include='src/shell/host.ts' --coverage.include='src/shell/index.ts' --coverage.include='src/shell/output.ts' --coverage.include='src/shell/protocol.ts' --coverage.include='src/shell/runtime.ts' --coverage.include='src/shell/split.ts' --coverage.include='src/shell/worker.ts' --coverage.include='src/server/backend.ts' --coverage.include='src/server/entry.ts' --coverage.include='src/connections/manager.ts' --coverage.include='src/index.ts'`;
+  all tests (33 files, 1444 passed).
+- Run start/completion time and exit status: started 2026-11-17 04:13:49 +01:00, duration 13.16 s;
+  reports written 04:14:03; all test files passed and the summary was printed (the shell wrapper
+  piped the output through `tail`, so the raw exit status was not captured separately).
+- Generated report paths and hashes (git-ignored): `packages/backend/coverage/coverage-summary.json`
+  sha256 `e9ff6410fbbc0c3dc3440869ee26fc8efd2d9cbd322f2696875a9909fb8b3f8c`;
+  `packages/backend/coverage/lcov.info`; `packages/backend/coverage/lcov-report/`.
+- Freshness: every entry in `coverage/` has the 04:14:03 mtime of this run; the summary differs from
+  round 5 (`host.ts` 219 statements instead of 202, `protocol.ts` now has executable code).
+- Final run after latest test additions and production fixes: yes (no production change after
+  5914df0; the run includes all round-6 tests).
+
+| Changed file | Statements | Branches | Functions | Lines |
+|---|---:|---:|---:|---:|
+| `packages/backend/src/shell/host.ts` | 209/219 (95.43%) | 90/102 (88.23%) | 48/54 (88.88%) | 183/184 (99.45%) |
+| `packages/backend/src/shell/protocol.ts` | 4/4 (100%) | 2/2 (100%) | 2/2 (100%) | 3/3 (100%) |
+| `packages/backend/src/shell/split.ts` | 134/134 (100%) | 114/114 (100%) | 12/12 (100%) | 114/114 (100%) |
+| `packages/backend/src/shell/output.ts` | 32/32 (100%) | 47/48 (97.91%) | 8/8 (100%) | 30/30 (100%) |
+| `packages/backend/src/shell/handlers.ts` | 13/13 (100%) | 4/4 (100%) | 7/7 (100%) | 11/11 (100%) |
+| `packages/backend/src/shell/runtime.ts` | 0/67 (0%) | 0/12 (0%) | 0/17 (0%) | 0/59 (0%) |
+| `packages/backend/src/shell/worker.ts` | 0/42 (0%) | 0/17 (0%) | 0/7 (0%) | 0/35 (0%) |
+| `packages/backend/src/shell/index.ts` | N/A (0/0) | N/A | N/A | N/A |
+| `packages/backend/src/connections/manager.ts` | 249/252 (98.80%) | 124/127 (97.63%) | 47/48 (97.91%) | 217/218 (99.54%) |
+| `packages/backend/src/index.ts` | 1/1 (100%) | N/A (0/0) | N/A (0/0) | 1/1 (100%) |
+| `packages/backend/src/server/backend.ts` | 53/56 (94.64%) | 16/18 (88.88%) | 16/19 (84.21%) | 50/51 (98.03%) |
+| `packages/backend/src/server/entry.ts` | 0/6 (0%) | 0/4 (0%) | 0/1 (0%) | 0/6 (0%) |
+| **Aggregate (summed counters, all 12 files above)** | 695/826 (84.14%) | 397/448 (88.61%) | 140/175 (80.00%) | 609/712 (85.53%) |
+
+`packages/backend/src/shell` alone (8 files, summed): statements 392/511 (76.71%), branches
+257/299 (85.95%), functions 77/107 (71.96%), lines 341/436 (78.21%); `runtime.ts` and `worker.ts`
+(0%, worker threads) are included. Excluded beside the aggregate: `apps/desktop/scripts/build.mjs`.
+`manager.ts` and `backend.ts` are whole-file numbers and include code merged from main.
+
+| File and uncovered lines/branch locations | Required behavior or risk | Action/test added or reason left uncovered |
+|---|---|---|
+| `shell/host.ts:365#0, 366` (`startWorker` without `workerUrl`) | Defensive: `open` already checks `workerUrl` first, and restarts only happen for opened sessions | Unreachable; non-material. |
+| `shell/host.ts` (90#1, 93#1, 157#0, 175#1, 193#1, 226#1, 276#0, 283#1, 335#1, 346#0, 444#1; 6 anonymous functions) | Same locations as round 5 (lines shifted by the 5914df0 changes): default `new Worker`, default log, race guards | Same justifications as the round-4/5 gap tables. None are in the 5914df0 code. |
+| `server/backend.ts:68` (shell `log` prefix callback) | Shell log lines get the `shell: ` prefix | ShellHost logs only from real-worker paths (integration); non-material. |
+| `server/backend.ts:49#1, 102#1` | Default `log`; `if (connClose)` false | Default callback / defensive; non-material. |
+| `connections/manager.ts:93#1, 286#0, 441#0, 442` | Default `MongoClient` factory; merged main branch; `configOf` without a stored config | Real driver only / not task-owned / defensive (as in round 5). |
+| `shell/runtime.ts` (all), `shell/worker.ts` (all, incl. the `withAwsCredentials` call) | mongosh evaluation, interrupt, completion, AWS open in the worker | Run inside `worker_threads`, not instrumented by v8; the 18 integration tests exercise them and pass (the new int test covers the worker's AWS open). |
+| `server/entry.ts` (all) | Process entry wiring | Bootstrap; not unit-tested in this project. |
+| `shell/output.ts:80#1` | Unchanged | Defensive (see earlier rounds). |
+
+## Round 6 unable to test
+
+- A real MONGODB-AWS login succeeding through the shell: no AWS-enabled MongoDB fixture exists
+  (Atlas AWS IAM is a human task per AGENTS.md). The integration test proves the credentials reach
+  the server from the worker, not a successful AWS login.
+- CR-3 end to end (an SSH tunnel dropping under an open shell): verified in two halves by unit
+  tests (manager `tunnelLost` → `onStatus`; `onStatus` → `closeProfile`); no integration test kills
+  a tunnel with an open shell. Follow-up optional.
+- `build.mjs` / the bundled `shell-worker.cjs` in the Electron `utilityProcess`: unchanged from
+  round 5 (recorded assumption).
+
+## Round 6 summary
+
+Tests added and all validation passed. The CR-2 fix holds on the restart path, under cancellation
+and early worker exit, and against a real worker thread (no `DataCloneError`; the AWS mechanism
+reaches the server; secrets masked). The CR-3 wiring logs a failing shell close without breaking the
+status broadcast. Backend unit suite 1444 passed, shell integration 18/18 (Podman), `npm run check`
+pass, fresh task-scoped coverage for 6628377. No production defects found.
 
 # Round 5 (final code after the main merges 369c532 and 515cdb8)
 

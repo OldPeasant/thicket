@@ -24,6 +24,7 @@ import {
   type ShellOutput,
 } from '@thicket/contract';
 
+import { awsAuthOptions } from '../../packages/backend/src/auth/aws/aws';
 import { portPair } from '../../packages/backend/src/server/testing';
 
 // shell.open/eval/complete/close (task shell-backend) against the 8.x standalone fixture, served
@@ -354,6 +355,40 @@ describe('shell.complete', () => {
     expect(completions).toContain('db.c.find');
     expect(completions).toContain('db.c.findOne');
     await backend.call('shell.close', { sessionId });
+  });
+});
+
+describe('shell.open with MONGODB-AWS explicit keys (CR-2)', () => {
+  // Fictitious keys, not real credentials. The 8.x fixture has no MONGODB-AWS, so the open fails
+  // at the server; what matters is that the options cross the real worker's postMessage.
+  const SECRET = 'fictitious-int-aws-Secret-1';
+  const TOKEN = 'fictitious-int-aws-Token-1';
+
+  it('posts the options to a real worker (no DataCloneError) and fails as an auth error, masked', async () => {
+    const host = new ShellHost({ workerUrl: WORKER });
+    const options = awsAuthOptions(
+      { mechanism: 'MONGODB-AWS', username: 'AKIAFICTITIOUSINT01', secretMode: 'saved' },
+      { password: SECRET, awsSessionToken: TOKEN },
+      undefined,
+    );
+    const config = { uri: mongo.uri, options: { ...options, serverSelectionTimeoutMS: 10_000 } };
+    let error: unknown;
+    try {
+      await host.open(PROFILE.id, config, undefined);
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(RpcError);
+    const failure = error as RpcError;
+    // The worker's driver signed with the posted keys and reached the server, which refuses the
+    // mechanism ("... MONGODB-AWS which is not enabled").
+    expect(failure.code).toBe('AUTH_FAILED');
+    expect(failure.message).toContain('MONGODB-AWS');
+    expect(failure.message).not.toMatch(/clone/i);
+    expect(failure.message).not.toContain(SECRET);
+    expect(failure.message).not.toContain(TOKEN);
+    expect(host.sessionIds()).toEqual([]);
+    await host.closeAll();
   });
 });
 
