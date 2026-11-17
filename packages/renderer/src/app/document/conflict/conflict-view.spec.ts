@@ -144,6 +144,20 @@ describe('ConflictView with a partly loaded (cut-array) document', () => {
     expect(column('conflict-server')).toContain('replaced by a string (fictitious)');
   });
 
+  it('leaves a server value that is no object on the way to a dotted cut path as it is', async () => {
+    cut = [{ path: 'order.lines', total: 300, loaded: 100 }];
+    const loaded = doc({ name: 'large order', order: { ref: 'R-1', lines: skus(0, 100) } });
+    const edited = doc({ name: 'renamed order', order: { ref: 'R-1', lines: skus(0, 100) } });
+    const server = doc({ name: 'renamed elsewhere', order: 'archived (fictitious)' });
+    await conflictWith(loaded, edited, server);
+
+    expect(text('conflict-cut-note')).toBe(
+      'order.lines: read page by page, so only the first 100 items are compared.',
+    );
+    expect(column('conflict-server')).toContain('archived (fictitious)');
+    expect(column('conflict-local')).toContain(sku(42));
+  });
+
   it('names one note line per cut array, with singular wording and thousands separators', async () => {
     cut = [
       { path: 'items', total: 50_000, loaded: 100 },
@@ -196,6 +210,12 @@ describe('ConflictView with a partly loaded (cut-array) document', () => {
     expect(text('conflict-note')).toContain('loaded only partly');
     expect(text('conflict-note')).toContain('long arrays are read page by page');
     expect(text('conflict-note')).not.toContain('was loaded with a projection');
+    expect(text('conflict-note')).toContain(
+      'Keep the server version, then edit single values again',
+    );
+    // Exactly one note, and the cut note is shown next to it (review CR-2).
+    expect(el().querySelectorAll('[data-testid="conflict-note"]')).toHaveLength(1);
+    expect(q('conflict-cut-note')).not.toBeNull();
     expect(q('conflict-overwrite')).toBeNull();
     expect(q('conflict-merge')).toBeNull();
   });
@@ -224,6 +244,24 @@ describe('ConflictView with a partly loaded (cut-array) document', () => {
     expect(actions.message()?.text).not.toContain('with a projection active');
     expect(fake.requestsFor('docs.insert')).toHaveLength(0);
     expect(actions.conflicts().has(KEY)).toBe(true);
+  });
+
+  it('a deleted cut document under a top-level projection still names the partial load', async () => {
+    // Cut arrays win over an active projection (task ASSUMPTION): the view blocks insert-again and
+    // the refusal uses the partial-load wording, not "with a projection active".
+    projection = '{"name":{"$numberInt":"1"},"items":{"$numberInt":"1"}}';
+    const loaded = doc({ name: 'large order', items: skus(0, 100) });
+    await conflictWith(loaded, doc({ name: 'renamed order', items: skus(0, 100) }), null);
+
+    expect(el().querySelectorAll('[data-testid="conflict-note"]')).toHaveLength(1);
+    expect(text('conflict-note')).toContain('Inserting your version again is not available');
+    expect(text('conflict-note')).not.toContain("query's projection");
+    expect(q('conflict-overwrite')).toBeNull();
+    expect(text('conflict-keep-server')).toBe('Keep it deleted');
+    expect(await actions.overwrite(KEY)).toBe(false);
+    expect(actions.message()?.text).toContain('loaded only partly');
+    expect(actions.message()?.text).not.toContain('with a projection active');
+    expect(fake.requestsFor('docs.insert')).toHaveLength(0);
   });
 
   it('a deleted server version under a projection keeps the projection wording when not cut', async () => {
