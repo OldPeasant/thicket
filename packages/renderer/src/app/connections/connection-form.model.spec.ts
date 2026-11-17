@@ -3,8 +3,11 @@ import { MASK, emptyConnectionModel } from '@thicket/core/uri';
 import { describe, expect, it } from 'vitest';
 
 import {
+  DEFAULT_OIDC_FLOW,
   DEFAULT_PASSWORD_MECHANISM,
+  FORM_MECHANISMS,
   applyConnectionString,
+  awsKeys,
   connectionStringText,
   editorProblems,
   editorStateFromProfile,
@@ -14,9 +17,11 @@ import {
   newEditorState,
   parseTagSet,
   parseW,
+  passwordInUse,
   profileDraftFromState,
   stripUriSecrets,
   usedSecretKinds,
+  usesExternalSource,
   usesPassword,
   type EditorState,
 } from './connection-form.model';
@@ -983,6 +988,535 @@ describe('connection-form.model', () => {
       const state = withState({ name: 'S' });
       state.model.extra = { proxyPassword: PW };
       expect(uriOf(state)).not.toContain(PW);
+    });
+  });
+});
+
+describe('connection-form.model M5: LDAP (PLAIN), OIDC and AWS IAM (test-writer)', () => {
+  /** Fictitious AWS credentials (not real keys). */
+  const KEY_ID = 'AKIAFICTITIOUS00001';
+  const AWS_SECRET = 'fictitiousAwsSecret1';
+  const NEW_KEY_ID = 'AKIAFICTITIOUS00002';
+  const NEW_SECRET = 'fictitiousAwsSecret2';
+  type Draft = ReturnType<typeof profileDraftFromState>;
+  type Auth = NonNullable<Profile['auth']>;
+
+  const roundTrip = (p: Profile, fallback: 'saved' | 'ask' = 'saved'): Draft =>
+    profileDraftFromState(editorStateFromProfile(p, fallback));
+  /** A draft loaded again as a saved profile, and saved once more. */
+  const again = (draft: Draft): Draft => roundTrip({ ...draft, id: 'p1' } as Profile);
+  const withoutId = (draft: Draft): Omit<Draft, 'id'> => {
+    const rest = { ...draft };
+    delete rest.id;
+    return rest;
+  };
+
+  const ldapProfile = (extra: Partial<Profile> = {}): Profile =>
+    profile({
+      connectionString:
+        'mongodb://ldapuser@ldap.example.test:27017/?authSource=%24external&authMechanism=PLAIN',
+      auth: {
+        mechanism: 'PLAIN',
+        username: 'ldapuser',
+        authSource: '$external',
+        secretMode: 'ask',
+      },
+      ...extra,
+    });
+
+  const oidcProfile = (auth: Partial<Auth> = {}): Profile =>
+    profile({
+      connectionString: 'mongodb://oidc.example.test:27017/?authMechanism=MONGODB-OIDC',
+      auth: { mechanism: 'MONGODB-OIDC', secretMode: 'none', ...auth },
+    });
+
+  const awsProfile = (auth: Partial<Auth> = {}, query = ''): Profile =>
+    profile({
+      connectionString: `mongodb://db1.example.test:27017/?authMechanism=MONGODB-AWS${query}`,
+      auth: { mechanism: 'MONGODB-AWS', secretMode: 'saved', username: KEY_ID, ...auth },
+    });
+
+  /** An AWS IAM state with an access key ID and a typed secret access key. */
+  const awsState = (): EditorState => ({
+    ...editorStateFromProfile(awsProfile(), 'saved'),
+    password: AWS_SECRET,
+  });
+
+  describe('mechanism helpers', () => {
+    it('the form offers LDAP (PLAIN), OIDC and AWS IAM', () => {
+      expect(FORM_MECHANISMS).toEqual(
+        expect.arrayContaining(['PLAIN', 'MONGODB-OIDC', 'MONGODB-AWS']),
+      );
+    });
+
+    it('usesExternalSource is true for the $external mechanisms only', () => {
+      for (const m of ['MONGODB-X509', 'PLAIN', 'MONGODB-OIDC', 'MONGODB-AWS', 'GSSAPI'] as const) {
+        expect(usesExternalSource(m), m).toBe(true);
+      }
+      for (const m of ['NONE', 'SCRAM-SHA-256', 'SCRAM-SHA-1'] as const) {
+        expect(usesExternalSource(m), m).toBe(false);
+      }
+    });
+
+    it('usesPassword includes AWS IAM but not OIDC or GSSAPI', () => {
+      expect(usesPassword('MONGODB-AWS')).toBe(true);
+      expect(usesPassword('PLAIN')).toBe(true);
+      expect(usesPassword('MONGODB-OIDC')).toBe(false);
+      expect(usesPassword('GSSAPI')).toBe(false);
+    });
+
+    it('awsKeys / passwordInUse: AWS uses the password only with an access key ID', () => {
+      const state = (mechanism: EditorState['mechanism'], username?: string) =>
+        withState({ mechanism, model: { ...emptyConnectionModel(), username } });
+      expect(awsKeys(state('MONGODB-AWS'))).toBe(false);
+      expect(awsKeys(state('MONGODB-AWS', '   '))).toBe(false);
+      expect(awsKeys(state('MONGODB-AWS', KEY_ID))).toBe(true);
+      expect(awsKeys(state('SCRAM-SHA-256', 'alice'))).toBe(false);
+
+      expect(passwordInUse(state('MONGODB-AWS'))).toBe(false);
+      expect(passwordInUse(state('MONGODB-AWS', '  '))).toBe(false);
+      expect(passwordInUse(state('MONGODB-AWS', KEY_ID))).toBe(true);
+      expect(passwordInUse(state('PLAIN', 'ldapuser'))).toBe(true);
+      expect(passwordInUse(state('SCRAM-SHA-256'))).toBe(true);
+      expect(passwordInUse(state('MONGODB-OIDC', 'pat'))).toBe(false);
+      expect(passwordInUse(state('MONGODB-X509'))).toBe(false);
+      expect(passwordInUse(state('NONE'))).toBe(false);
+    });
+
+    it('usedSecretKinds lists the AWS session token only for AWS with an access key ID', () => {
+      expect(usedSecretKinds(awsState())).toEqual(['awsSessionToken']);
+      expect(usedSecretKinds(withState({ mechanism: 'MONGODB-AWS' }))).toEqual([]);
+      const scram = withState({
+        mechanism: 'SCRAM-SHA-256',
+        model: { ...emptyConnectionModel(), username: KEY_ID },
+      });
+      expect(usedSecretKinds(scram)).toEqual([]);
+    });
+  });
+
+  describe('LDAP (PLAIN) round trip', () => {
+    it('keeps user and secret mode, drops $external from the form, the string and the draft', () => {
+      const state = editorStateFromProfile(ldapProfile(), 'saved');
+      expect(state.mechanism).toBe('PLAIN');
+      expect(state.model.username).toBe('ldapuser');
+      expect(state.model.auth.source).toBeUndefined();
+      expect(state.secretMode).toBe('ask');
+      expect(uriOf(state)).not.toContain('authSource');
+
+      const draft = profileDraftFromState(state);
+      expect(draft.auth).toEqual({ mechanism: 'PLAIN', username: 'ldapuser', secretMode: 'ask' });
+      expect(draft.connectionString).toContain('ldapuser@ldap.example.test:27017');
+      expect(draft.connectionString).toContain('authMechanism=PLAIN');
+      expect(draft.connectionString).not.toContain('authSource');
+      expect(profileDraftSchema.safeParse(draft).success).toBe(true);
+      expect(withoutId(again(draft))).toEqual(withoutId(draft));
+    });
+
+    it('drops another authentication database of a saved LDAP profile', () => {
+      const draft = roundTrip(
+        ldapProfile({
+          connectionString:
+            'mongodb://ldapuser@ldap.example.test/?authSource=admin&authMechanism=PLAIN',
+          auth: {
+            mechanism: 'PLAIN',
+            username: 'ldapuser',
+            authSource: 'admin',
+            secretMode: 'saved',
+          },
+        }),
+      );
+      expect(draft.auth).toEqual({
+        mechanism: 'PLAIN',
+        username: 'ldapuser',
+        secretMode: 'saved',
+      });
+      expect(draft.connectionString).not.toContain('authSource');
+    });
+
+    it('an LDAP profile without auth takes the mechanism from the string and the fallback mode', () => {
+      const state = editorStateFromProfile(ldapProfile({ auth: undefined }), 'ask');
+      expect(state.mechanism).toBe('PLAIN');
+      expect(state.secretMode).toBe('ask');
+      expect(state.model.auth.source).toBeUndefined();
+    });
+
+    it('a typed LDAP password is masked in the string and never in the draft', () => {
+      const state = { ...editorStateFromProfile(ldapProfile(), 'saved'), password: PW };
+      expect(uriOf(state)).toContain(`ldapuser:${MASK}@`);
+      expect(uriOf(state)).not.toContain(PW);
+      expect(JSON.stringify(profileDraftFromState(state))).not.toContain(PW);
+    });
+  });
+
+  describe('OIDC round trip', () => {
+    it('keeps user name, flow and trusted endpoint; saves no secret mode and no authSource', () => {
+      const original = oidcProfile({
+        username: 'pat@example.test',
+        oidcFlow: 'deviceCode',
+        oidcTrustedEndpoint: true,
+      });
+      const state = editorStateFromProfile(original, 'saved');
+      expect(state.mechanism).toBe('MONGODB-OIDC');
+      expect(state.oidc).toEqual({ flow: 'deviceCode', trustedEndpoint: true });
+      expect(state.secretMode).toBe('none');
+
+      const draft = profileDraftFromState(state);
+      expect(draft.auth).toEqual({
+        mechanism: 'MONGODB-OIDC',
+        username: 'pat@example.test',
+        secretMode: 'none',
+        oidcFlow: 'deviceCode',
+        oidcTrustedEndpoint: true,
+      });
+      expect(draft.connectionString).toContain('authMechanism=MONGODB-OIDC');
+      expect(draft.connectionString).not.toContain('authSource');
+      expect(profileDraftSchema.safeParse(draft).success).toBe(true);
+      expect(withoutId(again(draft))).toEqual(withoutId(draft));
+    });
+
+    it('the authCode flow is saved', () => {
+      expect(roundTrip(oidcProfile({ oidcFlow: 'authCode' })).auth).toEqual({
+        mechanism: 'MONGODB-OIDC',
+        secretMode: 'none',
+        oidcFlow: 'authCode',
+      });
+    });
+
+    it('defaults: auto flow and no trusted endpoint, both left out of the draft', () => {
+      const state = editorStateFromProfile(oidcProfile(), 'saved');
+      expect(DEFAULT_OIDC_FLOW).toBe('auto');
+      expect(state.oidc).toEqual({ flow: 'auto', trustedEndpoint: false });
+      expect(newEditorState('ask').oidc).toEqual({ flow: 'auto', trustedEndpoint: false });
+      const explicit = roundTrip(oidcProfile({ oidcFlow: 'auto', oidcTrustedEndpoint: false }));
+      expect(explicit.auth).toEqual({ mechanism: 'MONGODB-OIDC', secretMode: 'none' });
+    });
+
+    it('without a user name, the string names no user', () => {
+      const draft = roundTrip(oidcProfile());
+      expect(draft.auth).not.toHaveProperty('username');
+      expect(draft.connectionString).not.toContain('@');
+    });
+
+    it('a secret mode left in the state is not saved for OIDC', () => {
+      const state: EditorState = {
+        ...editorStateFromProfile(oidcProfile(), 'saved'),
+        secretMode: 'saved',
+      };
+      expect(profileDraftFromState(state).auth?.secretMode).toBe('none');
+    });
+
+    it('OIDC settings are saved only while OIDC is the mechanism', () => {
+      const state = editorStateFromProfile(
+        oidcProfile({ oidcFlow: 'deviceCode', oidcTrustedEndpoint: true }),
+        'saved',
+      );
+      const scram: EditorState = {
+        ...state,
+        mechanism: 'SCRAM-SHA-256',
+        model: { ...state.model, username: 'alice' },
+        secretMode: 'ask',
+      };
+      expect(profileDraftFromState(scram).auth).toEqual({
+        mechanism: 'SCRAM-SHA-256',
+        username: 'alice',
+        secretMode: 'ask',
+      });
+    });
+  });
+
+  describe('AWS IAM round trip', () => {
+    it('access key ID: in the draft auth, never in the connection string', () => {
+      const state = editorStateFromProfile(awsProfile(), 'ask');
+      expect(state.mechanism).toBe('MONGODB-AWS');
+      expect(state.model.username).toBe(KEY_ID);
+      expect(state.secretMode).toBe('saved');
+      expect(awsKeys(state)).toBe(true);
+      expect(uriOf(state)).not.toContain(KEY_ID);
+
+      const draft = profileDraftFromState(state);
+      expect(draft.auth).toEqual({
+        mechanism: 'MONGODB-AWS',
+        username: KEY_ID,
+        secretMode: 'saved',
+      });
+      expect(draft.connectionString).toBe(
+        'mongodb://db1.example.test:27017/?authMechanism=MONGODB-AWS',
+      );
+      expect(profileDraftSchema.safeParse(draft).success).toBe(true);
+      expect(withoutId(again(draft))).toEqual(withoutId(draft));
+    });
+
+    it('a typed secret access key appears nowhere: not masked in the string, not in the draft', () => {
+      const state = awsState();
+      const uri = uriOf(state);
+      expect(uri).not.toContain(AWS_SECRET);
+      expect(uri).not.toContain(MASK);
+      expect(uri).not.toContain(KEY_ID);
+      expect(JSON.stringify(profileDraftFromState(state))).not.toContain(AWS_SECRET);
+    });
+
+    it('default credential chain: saved with secret mode none; the editor keeps the fallback', () => {
+      const state = editorStateFromProfile(
+        awsProfile({ username: undefined, secretMode: 'none' }),
+        'ask',
+      );
+      expect(state.model.username).toBeUndefined();
+      expect(awsKeys(state)).toBe(false);
+      expect(state.secretMode).toBe('ask');
+      expect(profileDraftFromState(state).auth).toEqual({
+        mechanism: 'MONGODB-AWS',
+        secretMode: 'none',
+      });
+      // Once a key ID is entered, the kept mode is saved.
+      const keyed: EditorState = { ...state, model: { ...state.model, username: KEY_ID } };
+      expect(profileDraftFromState(keyed).auth).toEqual({
+        mechanism: 'MONGODB-AWS',
+        username: KEY_ID,
+        secretMode: 'ask',
+      });
+    });
+
+    it('keeps a saved "ask" mode of an AWS profile with keys', () => {
+      const state = editorStateFromProfile(awsProfile({ secretMode: 'ask' }), 'saved');
+      expect(state.secretMode).toBe('ask');
+    });
+
+    it('trims the access key ID; a blank one means the default chain', () => {
+      const padded = withState({
+        mechanism: 'MONGODB-AWS',
+        secretMode: 'saved',
+        model: { ...emptyConnectionModel(), username: `  ${KEY_ID} ` },
+      });
+      expect(profileDraftFromState(padded).auth).toEqual({
+        mechanism: 'MONGODB-AWS',
+        username: KEY_ID,
+        secretMode: 'saved',
+      });
+      const blank: EditorState = { ...padded, model: { ...padded.model, username: '   ' } };
+      expect(profileDraftFromState(blank).auth).toEqual({
+        mechanism: 'MONGODB-AWS',
+        secretMode: 'none',
+      });
+    });
+
+    it('drops an authSource of a saved AWS profile', () => {
+      const draft = roundTrip(awsProfile({ authSource: '$external' }, '&authSource=%24external'));
+      expect(draft.auth).not.toHaveProperty('authSource');
+      expect(draft.connectionString).not.toContain('authSource');
+    });
+
+    it('a saved AWS profile with a session token in its string loads without it, keeping the key', () => {
+      const state = editorStateFromProfile(
+        awsProfile({}, `&authMechanismProperties=AWS_SESSION_TOKEN:${PW}`),
+        'saved',
+      );
+      expect(state.droppedSecrets).toEqual(['authMechanismProperties AWS_SESSION_TOKEN']);
+      expect(state.model.username).toBe(KEY_ID);
+      expect(JSON.stringify(profileDraftFromState(state))).not.toContain(PW);
+      expect(uriOf(state)).not.toContain(PW);
+    });
+  });
+
+  describe('applyConnectionString', () => {
+    it('AWS: editing the string keeps the access key ID, secret and secret mode', () => {
+      const state = applied(
+        awsState(),
+        'mongodb://db2.example.test:27018/?authMechanism=MONGODB-AWS&appName=Reports',
+      );
+      expect(state.mechanism).toBe('MONGODB-AWS');
+      expect(state.model.username).toBe(KEY_ID);
+      expect(state.password).toBe(AWS_SECRET);
+      expect(state.secretMode).toBe('saved');
+      expect(state.model.hosts).toEqual([{ host: 'db2.example.test', port: 27018 }]);
+      expect(profileDraftFromState(state).auth?.username).toBe(KEY_ID);
+    });
+
+    it('AWS on the default credential chain: editing the string adds no key and no secret', () => {
+      const chain = withState({ mechanism: 'MONGODB-AWS', secretMode: 'ask' });
+      const state = applied(
+        chain,
+        'mongodb://db2.example.test/?authMechanism=MONGODB-AWS&appName=Reports',
+      );
+      expect(state.model.username).toBeUndefined();
+      expect(state.password).toBe('');
+      expect(profileDraftFromState(state).auth).toEqual({
+        mechanism: 'MONGODB-AWS',
+        secretMode: 'none',
+      });
+    });
+
+    it('AWS: the tab text applied unchanged keeps the keys (sync loop)', () => {
+      const state = awsState();
+      const next = applied(state, uriOf(state));
+      expect(next.model.username).toBe(KEY_ID);
+      expect(next.password).toBe(AWS_SECRET);
+      expect(profileDraftFromState(next)).toEqual(profileDraftFromState(state));
+    });
+
+    it('AWS: a pasted string with key ID and secret replaces them, and they leave the string', () => {
+      const state = applied(
+        awsState(),
+        `mongodb://${NEW_KEY_ID}:${NEW_SECRET}@db1.example.test/?authMechanism=MONGODB-AWS`,
+      );
+      expect(state.model.username).toBe(NEW_KEY_ID);
+      expect(state.model.password).toBeUndefined();
+      expect(state.password).toBe(NEW_SECRET);
+      const uri = uriOf(state);
+      expect(uri).not.toContain(NEW_KEY_ID);
+      expect(uri).not.toContain(NEW_SECRET);
+      const draft = profileDraftFromState(state);
+      expect(draft.auth?.username).toBe(NEW_KEY_ID);
+      expect(JSON.stringify(draft)).not.toContain(NEW_SECRET);
+    });
+
+    it('AWS: a pasted key ID without secret replaces the key and clears the old secret', () => {
+      const state = applied(
+        awsState(),
+        `mongodb://${NEW_KEY_ID}@db1.example.test/?authMechanism=MONGODB-AWS`,
+      );
+      expect(state.model.username).toBe(NEW_KEY_ID);
+      expect(state.password).toBe('');
+    });
+
+    it('AWS: a session token in a pasted string is dropped, the keys stay', () => {
+      const state = applied(
+        awsState(),
+        `mongodb://db1.example.test/?authMechanism=MONGODB-AWS` +
+          `&authMechanismProperties=AWS_SESSION_TOKEN:${PW}`,
+      );
+      expect(state.droppedSecrets).toEqual(['authMechanismProperties AWS_SESSION_TOKEN']);
+      expect(state.model.username).toBe(KEY_ID);
+      expect(state.password).toBe(AWS_SECRET);
+      expect(JSON.stringify(profileDraftFromState(state))).not.toContain(PW);
+      expect(uriOf(state)).not.toContain(PW);
+    });
+
+    it('AWS: an authSource in a pasted string is dropped', () => {
+      const state = applied(
+        awsState(),
+        'mongodb://db1.example.test/?authMechanism=MONGODB-AWS&authSource=admin',
+      );
+      expect(state.model.auth.source).toBeUndefined();
+      expect(uriOf(state)).not.toContain('authSource');
+    });
+
+    it('SCRAM → AWS string: the database user and password do not become AWS keys', () => {
+      const scram = withState({
+        mechanism: 'SCRAM-SHA-256',
+        password: PW,
+        secretMode: 'saved',
+        model: { ...emptyConnectionModel(), username: 'alice' },
+      });
+      const state = applied(scram, 'mongodb://db1.example.test/?authMechanism=MONGODB-AWS');
+      expect(state.mechanism).toBe('MONGODB-AWS');
+      expect(state.model.username).toBeUndefined();
+      expect(state.password).toBe('');
+      expect(state.secretMode).toBe('saved');
+      expect(profileDraftFromState(state).auth).toEqual({
+        mechanism: 'MONGODB-AWS',
+        secretMode: 'none',
+      });
+    });
+
+    it('AWS → SCRAM string: the AWS secret is not kept as a database password', () => {
+      const state = applied(awsState(), 'mongodb://alice@db1.example.test');
+      expect(state.mechanism).toBe('SCRAM-SHA-256');
+      expect(state.model.username).toBe('alice');
+      expect(state.password).toBe('');
+    });
+
+    it('PLAIN: user and password from the string, $external dropped, "none" becomes "ask"', () => {
+      const state = applied(
+        withState({ secretMode: 'none' }),
+        `mongodb://ldapuser:${PW}@ldap.example.test/?authSource=%24external&authMechanism=PLAIN`,
+      );
+      expect(state.mechanism).toBe('PLAIN');
+      expect(state.model.username).toBe('ldapuser');
+      expect(state.password).toBe(PW);
+      expect(state.model.auth.source).toBeUndefined();
+      expect(state.secretMode).toBe('ask');
+      expect(uriOf(state)).toContain(`ldapuser:${MASK}@`);
+      expect(uriOf(state)).not.toContain('authSource');
+    });
+
+    it('OIDC: no secret mode, no authSource, other properties and the OIDC settings kept', () => {
+      const before: EditorState = {
+        ...withState({ secretMode: 'saved' }),
+        oidc: { flow: 'deviceCode', trustedEndpoint: true },
+      };
+      const state = applied(
+        before,
+        'mongodb://oidc.example.test/?authMechanism=MONGODB-OIDC&authSource=%24external' +
+          '&authMechanismProperties=ENVIRONMENT:azure,TOKEN_RESOURCE:api://thicket-app',
+      );
+      expect(state.mechanism).toBe('MONGODB-OIDC');
+      expect(state.secretMode).toBe('none');
+      expect(state.model.auth.source).toBeUndefined();
+      expect(state.oidc).toEqual({ flow: 'deviceCode', trustedEndpoint: true });
+      const draft = profileDraftFromState(state);
+      expect(draft.auth).toEqual({
+        mechanism: 'MONGODB-OIDC',
+        secretMode: 'none',
+        oidcFlow: 'deviceCode',
+        oidcTrustedEndpoint: true,
+      });
+      expect(draft.connectionString).toContain('ENVIRONMENT:azure');
+    });
+
+    it('OIDC: a password in a pasted string is never shown nor saved', () => {
+      const state = applied(
+        withState(),
+        `mongodb://pat:${PW}@oidc.example.test/?authMechanism=MONGODB-OIDC`,
+      );
+      expect(uriOf(state)).not.toContain(PW);
+      expect(uriOf(state)).not.toContain(MASK);
+      expect(JSON.stringify(profileDraftFromState(state))).not.toContain(PW);
+    });
+  });
+
+  describe('GSSAPI (not offered by the form, kept for loaded profiles)', () => {
+    it('is not in the form list, but a loaded profile keeps it and saves no authSource', () => {
+      expect(FORM_MECHANISMS).not.toContain('GSSAPI');
+      const draft = roundTrip(
+        profile({
+          connectionString:
+            'mongodb://svc%40EXAMPLE.TEST@db1.example.test/?authMechanism=GSSAPI&authSource=%24external',
+          auth: {
+            mechanism: 'GSSAPI',
+            username: 'svc@EXAMPLE.TEST',
+            authSource: '$external',
+            secretMode: 'none',
+          },
+        }),
+      );
+      expect(draft.auth).toEqual({
+        mechanism: 'GSSAPI',
+        username: 'svc@EXAMPLE.TEST',
+        secretMode: 'none',
+      });
+      expect(draft.connectionString).toContain('authMechanism=GSSAPI');
+      expect(draft.connectionString).not.toContain('authSource');
+    });
+  });
+
+  describe('editorProblems', () => {
+    const named = (patch: Partial<EditorState>) => withState({ name: 'M5', ...patch });
+
+    it('AWS without an access key ID (default credential chain) is valid', () => {
+      expect(editorProblems(named({ mechanism: 'MONGODB-AWS' }))).toEqual([]);
+      const blank = named({
+        mechanism: 'MONGODB-AWS',
+        model: { ...emptyConnectionModel(), username: ' ' },
+      });
+      expect(editorProblems(blank)).toEqual([]);
+      expect(editorProblems(awsState())).toEqual([]);
+    });
+
+    it('LDAP needs a user name, OIDC does not', () => {
+      expect(editorProblems(named({ mechanism: 'PLAIN' }))).toEqual([
+        'Enter the user name, or choose "No authentication".',
+      ]);
+      expect(editorProblems(named({ mechanism: 'MONGODB-OIDC' }))).toEqual([]);
     });
   });
 });

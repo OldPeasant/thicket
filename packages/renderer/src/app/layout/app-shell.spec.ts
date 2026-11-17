@@ -312,6 +312,54 @@ describe('AppShell', () => {
       ]);
     });
 
+    it('hosts the OIDC sign-in panel: not modal, inert only behind a modal dialog (test-writer)', async () => {
+      fake.respond('conn.trustHostKey', {});
+      await start();
+      ['a', 'b'].forEach((id) => ws.open(tab(id)));
+      await settle();
+      const host = must(el.querySelector<HTMLElement>('app-oidc-sign-in'));
+      fake.emit({
+        stream: BROADCAST_STREAMS.oidcPrompt,
+        kind: 'data',
+        payload: {
+          kind: 'device',
+          promptId: 'o1',
+          profileName: 'Fictitious Cluster',
+          verificationUri: 'https://idp.example.test/device',
+          userCode: 'WDJB-MJHT',
+          expiresInSeconds: 600,
+        },
+      });
+      await settle();
+      expect(el.querySelector('[data-testid="oidc-sign-in"]')).not.toBeNull();
+      // The sign-in panel does not block the window: nothing is inert, shortcuts work.
+      expect(host.hasAttribute('inert')).toBe(false);
+      expect(must(el.querySelector('.work')).hasAttribute('inert')).toBe(false);
+      key({ key: 'w', ctrlKey: true });
+      await settle();
+      expect(tabIds()).toEqual(['a']);
+
+      // A modal dialog on top makes the panel inert like the rest of the window.
+      fake.emit({
+        stream: BROADCAST_STREAMS.sshHostKey,
+        kind: 'data',
+        payload: {
+          promptId: 'hk1',
+          host: 'bastion.example',
+          port: 22,
+          keyType: 'ssh-ed25519',
+          fingerprint: 'SHA256:fictitiousFingerprint',
+          timeoutMS: 300_000,
+        },
+      });
+      await settle();
+      expect(host.hasAttribute('inert')).toBe(true);
+      must(el.querySelector<HTMLElement>('[data-testid="host-key-reject"]')).click();
+      await settle();
+      await settle();
+      expect(host.hasAttribute('inert')).toBe(false);
+    });
+
     it('while the sidebar prompt is open, the work area is inert and shortcuts do nothing', async () => {
       fake.handle('profiles.list', () => ({
         profiles: [
