@@ -21,3 +21,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 02:55+0100 by felix/agent-1): A stage with a syntax error blocks only its own preview: later stages are previewed without it and say so ('Without stage N: it has an error'); Run, Export and Create view refuse until it is fixed or disabled
 - ASSUMPTION (2026-11-17 02:55+0100 by felix/agent-1): Full-text mode prints disabled stages as lines starting with '//- ' (comments for the parser), so they survive the round trip and come back disabled
 - ASSUMPTION (2026-11-17 02:55+0100 by felix/agent-1): Run pages by appending $skip/$limit (20 per page, one extra doc to know if there is a next page); pipelines with $out/$merge run unpaged and always open the confirm dialog (SPEC: they ask first), not only on production
+- ASSUMPTION (2026-11-17 02:56+0100 by felix/agent-1): Exported Node/Python/Java code uses the profile's connectionString (profiles.get; it never holds a password), else codegen's localhost default
