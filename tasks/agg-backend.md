@@ -1,10 +1,11 @@
 ---
 title: M3: Aggregation run, stage preview, explain, views
-status: todo
-owner:
+status: in_progress
+owner: dell26/agent-1
 deps: [docs-query-backend]
 touches: [packages/backend/src/agg]
 prio: 2
+lease_until: 2026-11-17T01:39:55Z
 ---
 ## Goal
 agg.run (streamed, paged), previewStage (pipeline up to stage n on a sample), explain for find and aggregate, createView; `$out`/`$merge` treated as writes through the guard.
