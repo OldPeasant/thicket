@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test';
+import { access, readFile } from 'node:fs/promises';
 
 import { headlessArgs } from './harness/app';
 import { capturePageWithRepaint, expect, screenshot, test } from './harness';
@@ -186,6 +187,64 @@ test.describe('screenshot() on headless Linux', () => {
     // Only the element: its width, give or take the rounding of fractional CSS pixels.
     expect(Math.abs(shown.width - (box?.width ?? 0))).toBeLessThanOrEqual(1);
     expect(shown.rgb).toEqual([255, 128, 0]);
+  });
+
+  test('when Playwright times out, screenshot() falls back to a repaint capture of the element', async ({
+    electronApp,
+    window,
+  }, testInfo) => {
+    await expect(window.getByTestId('welcome-new')).toBeVisible();
+    // A laid-out but invisible element: Playwright's element screenshot waits for it to become
+    // visible and times out (TimeoutError), so the helper uses the main-process capture of its box.
+    await window.evaluate(() => {
+      const doc = (globalThis as unknown as Dom).document;
+      const box = doc.createElement('div');
+      box.id = 'e2e-hidden-box';
+      box.style.cssText =
+        'position:fixed;left:20px;top:100px;width:240px;height:60px;visibility:hidden;z-index:1';
+      doc.body.appendChild(box);
+    });
+    const hidden = window.locator('#e2e-hidden-box');
+    await expect(hidden).toBeHidden();
+    const box = await hidden.boundingBox();
+    expect(box?.width).toBe(240);
+    // A folder that does not exist yet: the helper creates it.
+    const path = testInfo.outputPath('fallback', 'nested', 'hidden-box.png');
+    const png = await screenshot(electronApp, hidden, path);
+    expect(png.length).toBeGreaterThan(0);
+    expect((await readFile(path)).equals(png), 'the file holds the returned PNG').toBe(true);
+    const shown = await pixel(window, png, 0, 0);
+    // Only the element's rectangle, not the whole window (CSS px; the headless scale factor is 1).
+    expect(Math.abs(shown.width - 240)).toBeLessThanOrEqual(1);
+    expect(Math.abs(shown.height - 60)).toBeLessThanOrEqual(1);
+  });
+
+  test('a page screenshot creates the output folder and writes the returned PNG', async ({
+    electronApp,
+    window,
+  }, testInfo) => {
+    await expect(window.getByTestId('welcome-new')).toBeVisible();
+    await drawMarker(window, [10, 120, 250]);
+    const path = testInfo.outputPath('new-folder', 'deeper', 'page.png');
+    const png = await screenshot(electronApp, window, path);
+    expect((await readFile(path)).equals(png)).toBe(true);
+    expect((await pixel(window, png, 10, MARKER_HEIGHT / 2)).rgb).toEqual([10, 120, 250]);
+  });
+
+  test('errors other than a timeout are rethrown, not hidden by the fallback', async ({
+    electronApp,
+    window,
+  }, testInfo) => {
+    await expect(window.getByTestId('welcome-new')).toBeVisible();
+    // Matches several elements: Playwright's strict mode rejects it at once (not a TimeoutError).
+    const ambiguous = window.locator('button');
+    expect(await ambiguous.count()).toBeGreaterThan(1);
+    const path = testInfo.outputPath('ambiguous.png');
+    const started = Date.now();
+    await expect(screenshot(electronApp, ambiguous, path)).rejects.toThrow(/strict mode violation/);
+    // Rethrown right away: no 5 s timeout and no repaint rounds were waited for.
+    expect(Date.now() - started).toBeLessThan(4_000);
+    await expect(access(path)).rejects.toThrow();
   });
 
   test('the repaint fallback captures the current view', async ({ electronApp, window }) => {
