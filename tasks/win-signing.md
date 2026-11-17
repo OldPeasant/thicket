@@ -19,7 +19,8 @@ Sign the Windows release artefacts through the SignPath Foundation's free open s
   - verified (2026-11-17 06:41+0100 by dell26/agent-3): release-workflow.spec.ts runs Use signed installer -> Collect installers -> release Checksums bash on fake files: out/ holds only thicket-<v>-win-x64.exe/.zip, SHA256SUMS.txt hashes the signed bytes, mismatched/0/2 signed installers fail -> pass; local Linux: npx electron-builder --win --x64 --dir, copy with modified Thicket.exe packed with --prepackaged release/win-signed -> thicket-0.1.0-test-win-x64.zip, its Thicket.exe sha256 == modified one (339ae4b7...), names unchanged
 - [x] docs/CODE_SIGNING.md has the policy text and the step-by-step SignPath setup for a human; README has the attribution and the updated SmartScreen note
   - verified (2026-11-17 06:41+0100 by dell26/agent-3): Read docs/CODE_SIGNING.md: policy (what is signed, roles committers/reviewers/approvers, manual approval, MFA, privacy statement, no telemetry), 8-step SignPath setup (apply, GitHub trusted build system, project 'thicket', artifact configs win-app/win-installer XML, policy release-signing, API token, SIGNPATH_API_TOKEN secret + SIGNPATH_ORGANIZATION_ID variable, test tag); README has 'Free code signing provided by SignPath.io, certificate by SignPath Foundation' and updated SmartScreen note; release-workflow.spec.ts asserts slugs/names/attribution present -> pass
-- [ ] A real signed release needs the human setup: skip with reason; `signpath-setup` covers it
+- [~] A real signed release needs the human setup: skip with reason; `signpath-setup` covers it
+  - skipped (2026-11-17 06:41+0100 by dell26/agent-3): Real signed release needs the SignPath Foundation account, project, secret and variable (human); covered by task signpath-setup
 
 ## Notes
 See SPEC.md (Release) and docs/ARCHITECTURE.md.
