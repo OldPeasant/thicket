@@ -618,13 +618,15 @@ Contract layout (`packages/contract/src/`):
 - `explain.model.ts` (pure): `summarizeExplain(canonical EJSON)` → stage tree (output on top,
   scans as leaves), totals (returned, keys/docs examined, time), indexes used, COLLSCAN flag.
   Classic (`executionStats.executionStages`), slot-based (`explainVersion` 2: tree from
-  `winningPlan.queryPlan`, numbers of the outermost SBE stage with the same `planNodeId`),
-  aggregate `stages` (a chain with `$cursor` holding the query tree) and sharded outputs.
+  `winningPlan.queryPlan`; returned and time from the outermost SBE stage with the same
+  `planNodeId`, keys/docs examined from the summed `numReads` of that node's `ixseek`/`ixscan`/
+  `ixscan_generic` and `scan`/`seek` stages), aggregate `stages` (a chain with `$cursor` holding
+  the query tree) and sharded outputs.
 - `ExplainPlan` shows the verdict, totals and tree (flow bar per stage: examined vs returned);
   "Raw output" shows the explain document in the explorer (`ExplainRaw`, read-only, own explorer
   services). Fixtures captured from mongo 8.2 with `explain/fixtures/capture.mjs`. e2e:
-  `test/e2e/explain.e2e.ts` (demo step 9; the index is created with `idx.create` until the Indexes
-  tab exists).
+  `test/e2e/explain.e2e.ts` (demo step 9; the test creates the index with `idx.create` over the
+  bridge, not through the Indexes tab).
 
 ## Write safety in the renderer (`packages/renderer/src/app/safety`)
 - Every write UI sends writes through `WriteGuard.run(method, params, options)` (or `approve()`,

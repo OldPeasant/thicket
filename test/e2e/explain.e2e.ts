@@ -96,7 +96,7 @@ test('demo step 9: Explain shows COLLSCAN before the index and IXSCAN after it',
   await expect(panel.locator('app-explain-raw')).toContainText('winningPlan');
   await panel.getByTestId('explain-view-plan').click();
 
-  // Create the index (the Indexes tab is task index-ui; the same backend method it calls).
+  // Create the index over the bridge (`idx.create`, the backend method the Indexes tab calls).
   const created = await request(window, 'idx.create', {
     profileId,
     db: DB,

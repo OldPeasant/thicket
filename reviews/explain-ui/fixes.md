@@ -148,3 +148,58 @@ Remaining unresolved findings:
 ## Final status
 
 All validated findings fixed and validation passed.
+
+# Fix Report (round 3)
+
+Date: 2026-11-17
+
+Task: explain-ui
+
+Scope: CR-4 from the round-3 `reviews/explain-ui/review.md`. Docs only, no code changed.
+
+## Fixed findings
+
+### CR-4 — Architecture notes for the Explain viewer are out of date after the fix and the rebase
+
+Files changed:
+- `docs/ARCHITECTURE.md` (section "Explain plan viewer")
+
+Problem:
+The section said slot-based plans take the numbers of the outermost SBE stage with the same
+`planNodeId`. Since the CR-2 fix, only returned and time come from there. It also said the e2e
+creates the index with `idx.create` "until the Indexes tab exists", but index-ui is done.
+
+Fix:
+- Slot-based: returned and time come from the outermost SBE stage with the same `planNodeId`.
+  Keys/docs examined are the summed `numReads` of that node's `ixseek`/`ixscan`/`ixscan_generic`
+  and `scan`/`seek` stages. Checked against `collectSbe` and `planNode` in `explain.model.ts`.
+- e2e: the test creates the index with `idx.create` over the bridge, not through the Indexes tab
+  (`test/e2e/explain.e2e.ts`). The "until" clause is gone.
+
+Validation:
+- `npx prettier --check docs/ARCHITECTURE.md` — Pass
+
+## Not fixed
+
+None.
+
+## Validation summary
+
+Focused tests:
+- Not applicable (documentation only)
+
+Full test suite:
+- Not run (no code changed)
+
+Lint/type-check/build:
+- `npx prettier --check docs/ARCHITECTURE.md` — Pass
+
+`.taskcheck`:
+- Not run (documentation-only change; the parent runs it before `done`)
+
+Remaining unresolved findings:
+0
+
+## Final status
+
+All validated findings fixed and validation passed.
