@@ -1,11 +1,11 @@
 ---
 title: M2: Raw-command reads follow the profile read preference, writes its write concern
-status: in_progress
+status: done
 owner: felix/agent-1
 deps: [x509-proxy,conn-close-streams,validator]
 touches: [packages/backend/src/docs,packages/backend/src/browse]
 prio: 2
-lease_until: 2026-11-17T05:31:09Z
+lease_until: 
 ---
 ## Goal
 `x509-proxy` sets the profile's read preference (+ tags) and write concern as the driver client's
@@ -34,3 +34,4 @@ See SPEC.md and docs/ARCHITECTURE.md ("Connections").
 - ASSUMPTION (2026-11-17 05:35+0100 by felix/agent-1): Aggregations (agg.run incl. $out/$merge, agg.explain) and io.export follow the read preference too, since they go through Operation; $out/$merge on a secondary needs MongoDB 5.0+.
 - ASSUMPTION (2026-11-17 05:35+0100 by felix/agent-1): ClientLike test fakes without db().runCursorCommand fall back to plain getMore commands (with the read preference) instead of rewriting every existing fake; real MongoClients always use the pinned driver cursor.
 - ASSUMPTION (2026-11-17 05:50+0100 by felix/agent-1): agg.run with $out/$merge (packages/backend/src/agg, outside this task's touches) still writes without the profile write concern; only document writes (docs.*, io.import) carry it (review CR-2).
+- done by felix/agent-1: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 104s on 69f1fbfef; criteria verified 3/3
