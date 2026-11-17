@@ -270,6 +270,48 @@ describe('AppShell', () => {
       expect(tabIds()).toEqual(['a', 'b']);
     });
 
+    it('while the SSH host key dialog is open, the rest of the window is inert and shortcuts do nothing', async () => {
+      fake.respond('conn.trustHostKey', {});
+      await start();
+      ['a', 'b'].forEach((id) => ws.open(tab(id)));
+      await settle();
+      expect(el.querySelector('app-host-key-dialog')).not.toBeNull();
+      const behind = () =>
+        ['[data-testid="sidebar"]', '[data-testid="splitter"]', '.work', 'app-status-bar'].map(
+          (selector) => must(el.querySelector(selector)).hasAttribute('inert'),
+        );
+      expect(behind()).toEqual([false, false, false, false]);
+
+      fake.emit({
+        stream: BROADCAST_STREAMS.sshHostKey,
+        kind: 'data',
+        payload: {
+          promptId: 'hk1',
+          host: 'bastion.example',
+          port: 22,
+          keyType: 'ssh-ed25519',
+          fingerprint: 'SHA256:fictitiousFingerprint',
+          timeoutMS: 300_000,
+        },
+      });
+      await settle();
+      const dialog = must(el.querySelector<HTMLElement>('[data-testid="host-key-dialog"]'));
+      expect(behind()).toEqual([true, true, true, true]);
+      expect(dialog.closest('[inert]')).toBeNull();
+      expect(key({ key: 'w', ctrlKey: true }).defaultPrevented).toBe(true);
+      await settle();
+      expect(tabIds()).toEqual(['a', 'b']);
+
+      must(dialog.querySelector<HTMLElement>('[data-testid="host-key-reject"]')).click();
+      await settle();
+      await settle();
+      expect(el.querySelector('[data-testid="host-key-dialog"]')).toBeNull();
+      expect(behind()).toEqual([false, false, false, false]);
+      expect(fake.requestsFor('conn.trustHostKey').map((r) => r.params)).toEqual([
+        { promptId: 'hk1', trust: false },
+      ]);
+    });
+
     it('while the sidebar prompt is open, the work area is inert and shortcuts do nothing', async () => {
       fake.handle('profiles.list', () => ({
         profiles: [
