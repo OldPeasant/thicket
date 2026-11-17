@@ -95,6 +95,52 @@ describe('collectPaths', () => {
     collectPaths({}, paths);
     expect(paths.size).toBe(0);
   });
+
+  describe('field names with a dot', () => {
+    it('makes a top-level dotted key its own column, read back with its value', () => {
+      const docs: Document[] = [{ 'a.b': 1, c: 2 }, { a: { b: 3 } }];
+      const paths = new Set<string>();
+      for (const d of docs) collectPaths(d, paths);
+      expect([...paths]).toEqual(['a.b', 'c']);
+      expect(docs.map((d) => valueAt(d, 'a.b'))).toEqual([1, 3]);
+    });
+
+    it('does not flatten a document that collides with a dotted key of the same document', () => {
+      const doc: Document = { 'a.b': 1, a: { b: 2, c: 3 } };
+      const paths = new Set<string>();
+      collectPaths(doc, paths);
+      expect([...paths]).toEqual(['a.b', 'a']);
+      expect(valueAt(doc, 'a.b')).toBe(1);
+      expect(valueAt(doc, 'a')).toEqual({ b: 2, c: 3 });
+    });
+
+    it('does not flatten a nested document holding a dotted key', () => {
+      const doc: Document = { x: { 'a.b': 1, c: 2 }, y: { z: 1 } };
+      const paths = new Set<string>();
+      collectPaths(doc, paths);
+      expect([...paths]).toEqual(['x', 'y.z']);
+      expect(cellText(valueAt(doc, 'x'), false)).toBe(
+        canonical({ 'a.b': new Int32(1), c: new Int32(2) }),
+      );
+    });
+
+    it('loses no value of any document on export', () => {
+      const docs: Document[] = [
+        { 'a.b': 'literal', a: { b: 'nested' } },
+        { a: { b: 'only nested' } },
+        { 'a.b.c': 'deep literal' },
+        { x: { 'p.q': 'inner' } },
+      ];
+      const paths = new Set<string>();
+      for (const d of docs) collectPaths(d, paths);
+      const text = docs
+        .map((d) => [...paths].map((p) => cellText(valueAt(d, p), true)).join('|'))
+        .join('\n');
+      for (const value of ['literal', 'nested', 'only nested', 'deep literal', 'inner']) {
+        expect(text).toContain(value);
+      }
+    });
+  });
 });
 
 describe('valueAt', () => {
@@ -370,6 +416,41 @@ describe('convertCell', () => {
         new Date(Date.UTC(2026, 2, 1, 10, 0, 30, 123)),
       );
     });
+
+    it.each([
+      ['year 10000', Date.UTC(10000, 0, 1)],
+      ['year -1', Date.UTC(-1, 11, 31, 23, 59, 59, 999)],
+      ['year 0', Date.UTC(0, 5, 15, 12)],
+      ['the latest date', 8.64e15],
+      ['the earliest date', -8.64e15],
+      ['year 9999', Date.UTC(9999, 11, 31, 23, 59, 59, 999)],
+    ])('reads back the export text of a date in %s', (_what, millis) => {
+      const at = new Date(millis);
+      const text = cellText(at, true);
+      expect(convertCell(text, 'date'), text).toEqual(at);
+    });
+
+    it('reads the extended year form ±YYYYYY', () => {
+      expect(convertCell('+010000-01-01T00:00:00.000Z', 'date')).toEqual(
+        new Date(Date.UTC(10000, 0, 1)),
+      );
+      expect(convertCell('-000001-12-31', 'date')).toEqual(new Date(Date.UTC(-1, 11, 31)));
+      expect(convertCell('+002026-03-01', 'date')).toEqual(new Date(Date.UTC(2026, 2, 1)));
+    });
+
+    it.each([
+      '-000000-01-01',
+      '010000-01-01',
+      '+10000-01-01',
+      '+0100000-01-01',
+      '+275761-01-01',
+      '+275760-09-13T00:00-01:00',
+    ])(
+      'refuses the year form %j',
+      (text) => {
+        expect(() => convertCell(text, 'date')).toThrow(new CellError('is not a date'));
+      },
+    );
 
     it('reads the offset forms Z, +hh:mm, -hh:mm and +hhmm', () => {
       const at = new Date(Date.UTC(2026, 2, 1, 10, 0));

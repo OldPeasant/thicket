@@ -159,7 +159,11 @@ export function csvCell(text: string): string {
   return NEEDS_QUOTES.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
-/** One record as a CSV line (with its `\n`). */
+/**
+ * One record as a CSV line (with its `\n`). A record of one empty cell is written `""`: a blank
+ * line would be read as no record.
+ */
 export function csvLine(cells: readonly string[]): string {
+  if (cells.length === 1 && cells[0] === '') return '""\n';
   return `${cells.map(csvCell).join(',')}\n`;
 }

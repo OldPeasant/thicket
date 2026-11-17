@@ -43,6 +43,8 @@ vi.mock('node:fs', async (importOriginal) => {
   return { ...fs, default: { ...fs, createWriteStream }, createWriteStream };
 });
 import { RpcError } from '../server/rpc';
+import { defaultMapping, recordToDocument, resolveMapping } from './csv/convert';
+import { CsvScanner } from './csv/csv';
 import {
   EXPORT_BATCH_SIZE,
   EXPORT_PROGRESS_EVERY,
@@ -562,6 +564,67 @@ describe('exportToFile as CSV', () => {
     ).toBe(0);
     expect(await readFile(plain, 'utf8')).toBe('');
     expect(await readFile(withFields, 'utf8')).toBe('a,b\n');
+  });
+
+  /** The documents an import of the CSV `text` makes (header from the first record). */
+  function importCsv(
+    text: string,
+    mapping?: Parameters<typeof resolveMapping>[1],
+  ): Document[] {
+    const scanner = new CsvScanner();
+    const [header, ...records] = [...scanner.feed(text), ...scanner.end()];
+    const columns = mapping ? resolveMapping(header.cells, mapping) : defaultMapping(header.cells);
+    return records.map((r) => recordToDocument(r.cells, r.line, header.cells, columns));
+  }
+
+  it('a one-column export keeps documents with an empty, null or missing value', async () => {
+    const docs = [{ email: 'a@x' }, { email: '' }, { email: null }, {}, { email: 'b@x' }];
+    const file = path.join(dir, 'one.csv');
+    await exportToFile(fakeServer([docs]).client, csv({ csvFields: ['email'] }), file);
+    const text = await readFile(file, 'utf8');
+    expect(text).toBe('email\na@x\n""\n""\n""\nb@x\n');
+    expect(importCsv(text, [{ column: 'email', path: 'email', bsonType: 'string' }])).toEqual([
+      { email: 'a@x' },
+      { email: '' },
+      { email: '' },
+      { email: '' },
+      { email: 'b@x' },
+    ]);
+    expect(importCsv(text)).toHaveLength(5);
+  });
+
+  it('exports dates outside the years 0-9999 so that the date type imports them back', async () => {
+    const dates = [
+      new Date(Date.UTC(10000, 0, 1)),
+      new Date(Date.UTC(-1, 11, 31, 23, 59, 59, 999)),
+      new Date(8.64e15),
+      new Date(-8.64e15),
+    ];
+    const file = path.join(dir, 'dates.csv');
+    await exportToFile(fakeServer([dates.map((at) => ({ at }))]).client, csv(), file);
+    const text = await readFile(file, 'utf8');
+    expect(text.split('\n')[1]).toBe('+010000-01-01T00:00:00.000Z');
+    expect(importCsv(text, [{ column: 'at', path: 'at', bsonType: 'date' }])).toEqual(
+      dates.map((at) => ({ at })),
+    );
+  });
+
+  it('exports fields whose name contains a dot with their values', async () => {
+    const server = fakeServer([
+      [
+        { _id: new Int32(1), 'a.b': 'literal', a: { b: 'nested' } },
+        { _id: new Int32(2), a: { b: 'only nested' } },
+        { _id: new Int32(3), x: { 'p.q': 'inner' } },
+      ],
+    ]);
+    const file = path.join(dir, 'dotted.csv');
+    await exportToFile(server.client, csv(), file);
+    expect(await readFile(file, 'utf8')).toBe(
+      '_id,a.b,a,x\n' +
+        '1,literal,"{""b"":""nested""}",\n' +
+        '2,only nested,"{""b"":""only nested""}",\n' +
+        '3,,,"{""p.q"":""inner""}"\n',
+    );
   });
 
   it('writes no metadata file for CSV', async () => {

@@ -24,11 +24,28 @@ export function isPlainDocument(value: unknown): value is Document {
  * Adds the flattened field paths of `doc` to `paths` (in the order first seen): a nested,
  * non-empty document becomes one path per leaf (`a.b.c`); arrays and every other value are
  * one column.
+ *
+ * Field names that contain a dot (legal since MongoDB 5.0) never lose their value:
+ * - a top-level one (`"a.b"`) is its own column, named by the key ({@link valueAt} reads the
+ *   literal key first);
+ * - a top-level document that such a key would collide with in the same document (`a` next to
+ *   `"a.b"`) is not flattened: it is one column (`a`, as Extended JSON);
+ * - a nested document with such a key (`{x: {"a.b": 1}}`) is not flattened: it is one column
+ *   (`x`, as Extended JSON).
  */
 export function collectPaths(doc: Document, paths: Set<string>, prefix = ''): void {
+  const keys = Object.keys(doc);
+  const shadowed = new Set(
+    prefix === '' ? keys.filter((k) => k.includes('.')).map((k) => k.split('.')[0]) : [],
+  );
   for (const [key, value] of Object.entries(doc)) {
     const path = prefix + key;
-    if (isPlainDocument(value) && Object.keys(value).length > 0) {
+    if (
+      isPlainDocument(value) &&
+      Object.keys(value).length > 0 &&
+      !shadowed.has(key) &&
+      !Object.keys(value).some((k) => k.includes('.'))
+    ) {
       collectPaths(value, paths, `${path}.`);
     } else {
       paths.add(path);
@@ -37,10 +54,12 @@ export function collectPaths(doc: Document, paths: Set<string>, prefix = ''): vo
 }
 
 /**
- * The value at a dotted path (`undefined` when missing). A numeric segment also indexes an
- * array (`tags.0`).
+ * The value at a dotted path (`undefined` when missing): a top-level field named exactly `path`
+ * (a key containing a dot) first, else the path's segments one level each. A numeric segment
+ * also indexes an array (`tags.0`).
  */
 export function valueAt(doc: Document, path: string): unknown {
+  if (path.includes('.') && Object.hasOwn(doc, path)) return doc[path];
   let current: unknown = doc;
   for (const key of path.split('.')) {
     if (Array.isArray(current)) {
@@ -111,10 +130,11 @@ function double(text: string): Double {
 
 /**
  * ISO 8601 calendar date, optionally with a time (`T`, minutes required, seconds and a fraction
- * optional) and an offset (`Z`, `±hh:mm` or `±hhmm`).
+ * optional) and an offset (`Z`, `±hh:mm` or `±hhmm`). The year has 4 digits, or 6 with a sign
+ * (`+010000`, `-000001`: the extended form `toISOString()` writes outside the years 0-9999).
  */
 const ISO_DATE =
-  /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d+))?)?(?:Z|([+-])(\d{2}):?(\d{2}))?)?$/;
+  /^([+-]\d{6}|\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d+))?)?(?:Z|([+-])(\d{2}):?(\d{2}))?)?$/;
 
 /**
  * A date cell: milliseconds since 1970 (digits only, what exports may write) or ISO 8601 (see
@@ -129,7 +149,8 @@ function date(text: string): Date {
     return d;
   }
   const m = ISO_DATE.exec(text);
-  if (!m) throw new CellError('is not a date');
+  // ISO 8601 has no year -000000 (year 0 is +000000).
+  if (!m || m[1] === '-000000') throw new CellError('is not a date');
   const n = (i: number) => Number(m[i] ?? '0');
   const [year, month, day, hours, minutes, seconds] = [n(1), n(2), n(3), n(4), n(5), n(6)];
   const millis = Number((m[7] ?? '').padEnd(3, '0').slice(0, 3));
@@ -148,7 +169,10 @@ function date(text: string): Date {
     n(10) <= 59;
   if (!valid) throw new CellError('is not a date');
   const offsetMinutes = (m[8] === '-' ? -1 : 1) * (n(9) * 60 + n(10));
-  return new Date(utc.getTime() - offsetMinutes * 60_000);
+  const result = new Date(utc.getTime() - offsetMinutes * 60_000);
+  // The offset can move the first or last representable day out of range.
+  if (Number.isNaN(result.getTime())) throw new CellError('is not a date');
+  return result;
 }
 
 /**

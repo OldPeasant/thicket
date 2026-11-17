@@ -351,8 +351,8 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   aggregation + a `find` sample (default 20); `docs.updateMany` (operators or pipeline) /
   `docs.deleteMany` refuse with `CONFLICT` (no detail) when more documents match than the
   confirmed `expectedCount` (best effort: count, then write; not atomic). Write and write-concern errors in a reply → `SERVER_ERROR`.
-- Import/export (`packages/backend/src/io/`, `ioHandlers`; JSON and JSON Lines, CSV/BSON answer
-  `UNSUPPORTED` until io-advanced): routed to the backend, which asks main over the privileged port
+- Import/export (`packages/backend/src/io/`, `ioHandlers`; JSON, JSON Lines, CSV (`io/csv/`) and
+  BSON dumps (`io/bson/`)): routed to the backend, which asks main over the privileged port
   for the native dialog (`dialog.saveFile` / `dialog.openFile`, `apps/desktop/src/dialogs`, parented
   to the focused window; a cancelled dialog answers `streamId: null` / `null`). `io.export` reads
   the find (filter, projection as given, sort, collation, hint, skip, limit) or aggregation cursor
@@ -373,6 +373,28 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   stops the same way (earlier documents inserted, last progress, `INVALID_PARAMS` "Line N: …");
   a failed write to the export file (cannot be created, disk full) answers `INTERNAL`. `end.delivered` is the number of
   documents written (export) or inserted (import). `io.import` is behind the write guard.
+  - CSV export: the header is `csvFields`, or the flattened paths of the first batch (≤ 1 000
+    documents, order first seen; arrays, empty documents and BSON values are one column); then
+    one line per document (`csvLine`, RFC 4180 quoting; a record of one empty cell is written
+    `""`, never a blank line). Cells: strings as is, numbers in decimal (Long/Decimal128 exact),
+    dates `toISOString()` (`±YYYYYY` outside the years 0–9999), ObjectIds as hex, null/missing
+    blank, the rest Extended JSON. Field names with a dot: a top-level one (`"a.b"`) is its own
+    column (`valueAt` reads the literal key first), and a document that would collide with it
+    (`a` next to `"a.b"`) or holds such a key itself is one Extended JSON column, not flattened.
+  - CSV import (`CsvScanner`: RFC 4180, quoted line breaks, blank lines skipped, a record ≤
+    `MAX_VALUE_CHARS` counting separators): the first record is the header. `csvMapping` entries
+    name a column (plus its header `index`, required for a repeated name), a field path and a type
+    of `CSV_TYPES` (`auto`, `string`, `int`, `long`, `double`, `decimal`, `bool`, `date` = epoch
+    millis or strict ISO 8601, UTC without an offset, `objectId`, `json` = Extended JSON). Without
+    one, `defaultMapping`: every named column as `auto`, leaving out blank names, empty segments
+    and names that repeat or overlap an earlier one. Blank cells leave the field out (`string`
+    keeps `""`). `io.previewImport` also answers `csvColumns` and the first 20 `csvRows`.
+  - BSON (`BsonScanner`: int32-length-framed documents, inserted byte-exact): export writes the
+    `.bson` and a mongodump-shaped `<name>.metadata.json` (options, indexes without `ns`, UUID;
+    empty for an aggregation, view or time series). Import reads the metadata next to the file
+    (preview answers `metadataFile`): it creates a new collection with the dump's restorable
+    options before the documents (an existing one keeps its own) and the indexes (all but `_id_`)
+    after them. For BSON, `IoProgress.index` of an error is the 1-based document number, not a line.
 - Indexes (`packages/backend/src/indexes/`, `indexHandlers`): `idx.list` (`listIndexes`, server
   order), `idx.stats` (`$collStats` `indexSizes` + `$indexStats` usage; summed over shards,
   earliest `since`; without the `indexStats` privilege sizes only), `idx.create` (`createIndexes`,

@@ -301,4 +301,12 @@ describe('csvCell and csvLine', () => {
     expect(line.endsWith('\n')).toBe(true);
     expect(cells(scan(line))).toEqual([row]);
   });
+
+  it('writes a record of one empty cell as "" so that it is no blank line', () => {
+    expect(csvLine([''])).toBe('""\n');
+    expect(csvLine(['', ''])).toBe(',\n');
+    expect(csvLine(['x'])).toBe('x\n');
+    const text = csvLine(['email']) + csvLine(['a@x']) + csvLine(['']) + csvLine(['b@x']);
+    expect(cells(scan(text))).toEqual([['email'], ['a@x'], [''], ['b@x']]);
+  });
 });
