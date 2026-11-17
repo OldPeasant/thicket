@@ -1252,6 +1252,20 @@ describe('getDocument', () => {
     expect(result.sliced).toEqual([]);
   });
 
+  it('all-digit field names are not sliced (docs.getSlice cannot page them), others still are', async () => {
+    const client = docClient(
+      [
+        { k: '2024', n: 500 },
+        { k: '0', n: 500 },
+        { k: 'items', n: 500 },
+      ],
+      { _id: OID, '2024': items(500), '0': items(500), items: items(10) },
+    );
+    const result = await getDocument(client, { ...target, id: ID, sliceAbove: 10 });
+    expect(findOf(client)?.['projection']).toEqual({ items: { $slice: 10 } });
+    expect(result.sliced).toEqual([{ path: 'items', total: 500, loaded: 10 }]);
+  });
+
   it('matches the id literally, also when it looks like a query operator', async () => {
     const client = docClient([], { _id: { $ne: null } });
     await getDocument(client, { ...target, id: '{"$ne":null}', sliceAbove: 10 });
