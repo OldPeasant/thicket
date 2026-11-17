@@ -21,6 +21,11 @@
   margin-bottom: 1rem;
 }
 
+.head-actions {
+  display: inline-flex;
+  gap: 0.5rem;
+}
+
 h1 {
   margin: 0;
   font-size: 1.5rem;

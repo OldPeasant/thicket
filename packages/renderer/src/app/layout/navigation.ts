@@ -1,6 +1,6 @@
 /**
- * Router URLs of the pages the layout links to. The Compass import (profiles-import-export)
- * replaces the placeholder page behind `importCompass`.
+ * Router URLs of the pages the layout links to. `importCompass` is the import and export page
+ * (Compass file, connection strings, export without secrets).
  */
 export const NAV = {
   home: '/',

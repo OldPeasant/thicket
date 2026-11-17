@@ -1,7 +1,6 @@
 import type { Routes } from '@angular/router';
 
 import { AppShell } from './layout/app-shell';
-import { PlannedPage } from './layout/planned-page';
 import { Welcome } from './layout/welcome';
 
 /**
@@ -40,12 +39,11 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./connections/connection-editor').then((m) => m.ConnectionEditor),
       },
-      // Placeholder until profiles-import-export builds this page.
       {
         path: 'connections/import/compass',
-        component: PlannedPage,
-        title: 'Import from Compass · Thicket',
-        data: { heading: 'Import from Compass' },
+        title: 'Import and export connections · Thicket',
+        loadComponent: () =>
+          import('./connections/import/import-export-page').then((m) => m.ImportExportPage),
       },
       // Route parameter `id` → the editor's `id` input (`withComponentInputBinding`).
       {
