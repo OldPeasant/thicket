@@ -5,7 +5,7 @@ owner: dell26/agent-1
 deps: [users-roles-view,safety-ui]
 touches: [packages/backend/src/admin/users/edit,packages/renderer/src/app/admin/users/edit]
 prio: 4
-lease_until: 2026-11-17T07:05:17Z
+lease_until: 2026-11-17T07:07:06Z
 ---
 ## Goal
 Create/edit/drop users and roles, grant/revoke, through the guard.
