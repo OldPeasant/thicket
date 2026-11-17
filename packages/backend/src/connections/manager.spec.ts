@@ -1688,7 +1688,7 @@ describe('ConnectionManager.cancelOnClose', () => {
   it('close aborts the running work and waits for it before closing the client', async () => {
     const { manager, created } = setup();
     await manager.open('p1', undefined);
-    const client = created[0]!.client;
+    const client = created[0]?.client as FakeClient;
     const order: string[] = [];
     client.close.mockImplementation(() => {
       order.push('client closed');
@@ -1714,7 +1714,7 @@ describe('ConnectionManager.cancelOnClose', () => {
   it('passes the caller signal through and returns the work result', async () => {
     const { manager, created } = setup();
     await manager.open('p1', undefined);
-    const client = created[0]!.client;
+    const client = created[0]?.client as FakeClient;
     await expect(
       manager.cancelOnClose('p1', client, undefined, () => Promise.resolve(7)),
     ).resolves.toBe(7);
@@ -1737,7 +1737,7 @@ describe('ConnectionManager.cancelOnClose', () => {
   it('refuses work for a client that is not the open connection', async () => {
     const { manager, created } = setup();
     await manager.open('p1', undefined);
-    const client = created[0]!.client;
+    const client = created[0]?.client as FakeClient;
     const work = vi.fn(() => Promise.resolve(1));
     const error = await rejection(manager.cancelOnClose('p2', client, undefined, work));
     expect(error).toMatchObject({ code: 'CANCELLED', message: 'The connection was closed' });
@@ -1751,7 +1751,7 @@ describe('ConnectionManager.cancelOnClose', () => {
     try {
       const { manager, created } = setup();
       await manager.open('p1', undefined);
-      const client = created[0]!.client;
+      const client = created[0]?.client as FakeClient;
       void manager.cancelOnClose(
         'p1',
         client,
