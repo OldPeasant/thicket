@@ -1,11 +1,11 @@
 ---
 title: layout.e2e: welcome Import button test expects a page-heading the import page no longer has
-status: in_progress
+status: done
 owner: felix/agent-2
 deps: []
 touches: [test/e2e/layout.e2e.ts,packages/renderer/src/app/connections/import]
 prio: 2
-lease_until: 2026-11-17T06:05:41Z
+lease_until: 
 ---
 ## Goal
 The welcome-page e2e test clicks Import and expects `page-heading` = 'Import from Compass', but the
@@ -21,3 +21,4 @@ import/export page's h1 has no `page-heading` test id and reads 'Import and expo
 
 ## Notes
 - ASSUMPTION (2026-11-17 06:35+0100 by felix/agent-2): Fixed the stale e2e expectation instead of renaming the page: the import/export page heading stays 'Import and export connections' (the page does both); the welcome button label 'Import from Compass' is unchanged
+- done by felix/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 114s on aae4b5bb8; criteria verified 3/3
