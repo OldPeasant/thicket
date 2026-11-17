@@ -13,9 +13,10 @@ type ProfileAuth = NonNullable<ProfileDraft['auth']>;
  * never from `auth` or `AWS_SESSION_TOKEN`).
  *
  * - Explicit keys: the profile's user name is the access key ID; the secret access key is the
- *   password typed at connect (`password`, also for `secretMode: 'ask'`) or the stored
- *   `awsSecretAccessKey` (`secretMode: 'saved'`); a stored `awsSessionToken` is added for temporary
- *   credentials. `secretMode: 'none'` with an access key ID is refused (no secret to sign with).
+ *   `password` secret, i.e. the one typed at connect or the stored `password` kind (the profile's
+ *   primary secret and what the connection editor saves; with `secretMode: 'ask'` only the typed
+ *   one), which wins over a stored `awsSecretAccessKey`, a fallback used only with
+ *   `secretMode: 'saved'`; a stored `awsSessionToken` is added for temporary credentials. `secretMode: 'none'` with an access key ID is refused (no secret to sign with).
  *   They go to the driver as a static `AWS_CREDENTIAL_PROVIDER`.
  * - No user name: the default AWS credential chain of `@aws-sdk/credential-providers`
  *   (environment, SSO, web identity, shared config/credentials files and `AWS_PROFILE`, ECS/EC2
@@ -40,6 +41,8 @@ export function awsAuthOptions(
   const accessKeyId = auth.username;
   if (accessKeyId === undefined) return options;
 
+  // `password` (typed, or the stored primary secret) wins; the stored `awsSecretAccessKey` is only
+  // a fallback for `secretMode: 'saved'`.
   const secretAccessKey =
     auth.secretMode === 'none'
       ? undefined

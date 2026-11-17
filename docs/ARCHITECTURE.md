@@ -187,8 +187,11 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   MONGODB-AWS (task aws-auth, `packages/backend/src/auth/aws/`, always `authSource: '$external'`):
   driver 7 takes AWS credentials only from `authMechanismProperties.AWS_CREDENTIAL_PROVIDER` (a
   user/password or `AWS_SESSION_TOKEN` is refused, so a user name in the URI is `AUTH_FAILED`).
-  With `auth.username` (the access key ID) the secret access key is the typed `password` or, for
-  `secretMode: 'saved'`, the `awsSecretAccessKey` secret, plus an optional `awsSessionToken`, given
+  With `auth.username` (the access key ID) the secret access key is the `password` secret (typed at
+  connect, or the stored `password` kind: the profile's primary secret and what the connection
+  editor saves; with `secretMode: 'ask'` only the typed one). It wins over a stored
+  `awsSecretAccessKey`, which is only a fallback for `secretMode: 'saved'`. An optional
+  `awsSessionToken` is added; the credentials are given
   as a static provider (missing secret or `secretMode: 'none'` → `AUTH_FAILED`). Without a user name
   the driver uses the default chain (`fromNodeProviderChain()` of `@aws-sdk/credential-providers`,
   a backend dependency the driver needs for MONGODB-AWS at all: environment, SSO, shared
