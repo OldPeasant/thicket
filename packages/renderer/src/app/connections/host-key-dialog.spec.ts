@@ -231,6 +231,58 @@ describe('HostKeyDialog', () => {
       expect(find('host-key-dialog')).toBeNull();
     });
 
+    it('after a failed answer, focus the user moved inside the dialog stays there (CR-3 re-check)', async () => {
+      let fail: (() => void) | undefined;
+      fake.handle(
+        'conn.trustHostKey',
+        () =>
+          new Promise((_resolve, reject) => {
+            fail = () => {
+              reject(new Error('known_hosts not writable (fictitious)'));
+            };
+          }),
+      );
+      await ask(prompt());
+      must('host-key-trust').click();
+      await settle();
+      expect(document.activeElement).toBe(must('host-key-dialog'));
+      // While busy, the user moves to the fingerprint (still focusable).
+      const fingerprint = must('host-key-fingerprint');
+      fingerprint.focus();
+      fail?.();
+      await settle();
+      expect(find('host-key-error')).not.toBeNull();
+      expect(document.activeElement).toBe(fingerprint);
+    });
+
+    it('a failed answer to a question that is gone meanwhile does not move the focus to the next one', async () => {
+      let fail: (() => void) | undefined;
+      fake.handle(
+        'conn.trustHostKey',
+        () =>
+          new Promise((_resolve, reject) => {
+            fail = () => {
+              reject(new Error('known_hosts not writable (fictitious)'));
+            };
+          }),
+      );
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
+      await ask(prompt({ timeoutMS: 60_000 }));
+      await ask(prompt({ promptId: 'k2', host: 'other.example' }));
+      must('host-key-trust').click();
+      await settle();
+      // k1 times out while its answer is still being sent: k2 is shown with its buttons enabled.
+      vi.advanceTimersByTime(60_001);
+      await settle();
+      expect(must('host-key-host').textContent).toBe('other.example:2222');
+      expect(must('host-key-trust').hasAttribute('disabled')).toBe(false);
+      fail?.();
+      await settle();
+      // The late error of k1 is not shown on k2.
+      expect(find('host-key-error')).toBeNull();
+      expect(must('host-key-host').textContent).toBe('other.example:2222');
+    });
+
     it('a retry after an error clears the error and can succeed', async () => {
       fake.fail('conn.trustHostKey', { code: 'INTERNAL', message: 'known_hosts not writable' });
       await ask(prompt());

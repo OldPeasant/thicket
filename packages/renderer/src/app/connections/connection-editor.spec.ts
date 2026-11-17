@@ -1453,6 +1453,36 @@ describe('ConnectionEditor', () => {
       expect(must<HTMLInputElement>('field-secret-sshPassword').disabled).toBe(true);
     });
 
+    it('a saved X.509 profile holding an authSource is saved without it (CR-2 re-check)', async () => {
+      stored = saved({
+        connectionString:
+          'mongodb://db1.example:27017/?authMechanism=MONGODB-X509&authSource=admin' +
+          '&tls=true&tlsCertificateKeyFile=%2Ffictitious%2Fclient.pem',
+        auth: { mechanism: 'MONGODB-X509', secretMode: 'none', authSource: 'admin' },
+        tls: { enabled: true, certificateKeyFile: '/fictitious/client.pem' },
+      });
+      await start('p1');
+      expect(must<HTMLSelectElement>('field-mechanism').value).toBe('MONGODB-X509');
+      expect(text('uri-preview')).not.toContain('authSource');
+      await click('save');
+      expect(savedDraft().connectionString).not.toContain('authSource');
+      expect(savedDraft().auth).toEqual({ mechanism: 'MONGODB-X509', secretMode: 'none' });
+    });
+
+    it('a dropped client key password alone still points to its field (CR-4 re-check)', async () => {
+      await start();
+      await click('tab-uri');
+      await input(
+        must('field-uri'),
+        'mongodb://db.example:27017/?tls=true&tlsCertificateKeyFile=%2Fk.pem' +
+          '&tlsCertificateKeyFilePassword=fictitious-key-pw',
+      );
+      await click('tab-form');
+      expect(text('dropped-secrets')).toContain('tlsCertificateKeyFilePassword');
+      expect(text('dropped-secrets')).toContain('in its field below');
+      expect(text('dropped-secrets')).not.toContain('fictitious-key-pw');
+    });
+
     it('a failed copy says so; copying from the connection-string tab works too', async () => {
       const copied: string[] = [];
       let fail = true;
