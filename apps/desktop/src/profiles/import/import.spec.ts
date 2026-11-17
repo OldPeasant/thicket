@@ -1240,6 +1240,56 @@ describe('importExportHandlers (edge cases)', () => {
     expect(dropped.notices[0]?.reason).not.toMatch(/when connecting/);
   });
 
+  it('weak keychain: each notice says where its dropped secrets are entered (CR-6)', async () => {
+    const { profiles, call } = setup({ level: 'weak' });
+    const result = (await call('profiles.importCompass')) as {
+      notices: { source: string; reason: string }[];
+    };
+    const reason = (source: string) =>
+      result.notices.find((n) => n.source === source)?.reason ?? '';
+    // Only the database password is asked when connecting, and that profile asks for it.
+    expect(reason('Orders (staging)')).toMatch(
+      /^password not saved: .*; the password is asked when connecting$/,
+    );
+    expect(profiles.profiles.find((p) => p.name === 'Orders (staging)')?.auth?.secretMode).toBe(
+      'ask',
+    );
+    expect(reason('Behind bastion')).toMatch(/; enter the SSH password in the connection editor$/);
+    const x509 = reason('X.509 via key');
+    expect(x509).toMatch(/in the connection editor$/);
+    expect(x509).toContain('client key passphrase');
+    expect(x509).toContain('SSH key passphrase');
+    for (const source of ['Behind bastion', 'X.509 via key'])
+      expect(reason(source)).not.toMatch(/when connecting/);
+    expect(JSON.stringify(result.notices)).not.toMatch(/enter it when connecting|fake-/);
+  });
+
+  it('secure keychain: a password and an SSH password that both fail get both pieces of advice (CR-6)', async () => {
+    const both = compassFile([
+      sshEntry(
+        { host: 'b.test', username: 'ops', password: 'fake-both-ssh-pw' },
+        'mongodb://u:fake-both-db-pw@a.test',
+      ),
+    ]);
+    const { profiles, secrets, call } = setup({ file: both });
+    secrets.failKinds.add('password');
+    secrets.failKinds.add('sshPassword');
+    const result = (await call('profiles.importCompass')) as {
+      imported: Profile[];
+      notices: { source: string; reason: string }[];
+    };
+    expect(result.notices).toEqual([
+      {
+        source: 'Tunnel',
+        reason:
+          'password, SSH password could not be saved; the password is asked when connecting; ' +
+          'enter the SSH password in the connection editor',
+      },
+    ]);
+    expect(result.imported[0]?.auth?.secretMode).toBe('ask');
+    expect(profiles.profiles[0]?.auth?.secretMode).toBe('ask');
+  });
+
   it('a failing password secret turns saved into ask in the stored profile and the result', async () => {
     const { profiles, secrets, call } = setup();
     secrets.failKinds.add('password');

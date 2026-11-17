@@ -114,6 +114,17 @@ describe('ImportExportPage', () => {
     ]);
   });
 
+  it('explains that only the password is asked; other encrypted secrets go into the editor (CR-6)', async () => {
+    await start();
+    const hint =
+      el
+        .querySelector('[aria-labelledby="from-file-title"] .hint')
+        ?.textContent?.replace(/\s+/g, ' ') ?? '';
+    expect(hint).toContain('the password is asked when connecting');
+    expect(hint).toContain('(SSH, client key, proxy) are entered in the connection editor');
+    expect(hint).not.toContain('you enter them when connecting');
+  });
+
   it('shows nothing when the file dialog is cancelled', async () => {
     fake.respond('profiles.importCompass', null);
     await start();
