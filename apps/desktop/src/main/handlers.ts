@@ -12,6 +12,7 @@ import {
   type ProfilesStore,
 } from '../profiles';
 import { secretsGetHandler, secretsHandlers, type SecretsStore } from '../secrets';
+import { updateHandlers, type UpdateChecker } from '../update';
 
 /** What the settings handlers need from the `SettingsStore`. */
 export interface SettingsAccess {
@@ -32,6 +33,8 @@ export interface MainHandlerDeps {
   pipelines?: PipelinesStore;
   /** Serves `history.*` (query history and favorites) when given. */
   history?: HistoryStore;
+  /** Serves `app.checkForUpdate` when given. */
+  updates?: Pick<UpdateChecker, 'check'>;
   /** Diagnostics of the handlers (e.g. an imported secret that could not be saved). */
   log?: (message: string) => void;
 }
@@ -53,6 +56,7 @@ export function mainHandlers(deps: MainHandlerDeps): Record<string, Handler> {
       : {}),
     ...(deps.pipelines ? pipelinesHandlers(deps.pipelines) : {}),
     ...(deps.history ? historyHandlers(deps.history) : {}),
+    ...(deps.updates ? updateHandlers(deps.updates) : {}),
   };
   const store = deps.settings;
   if (store) {

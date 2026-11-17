@@ -7,6 +7,7 @@
  * - `THICKET_RENDERER_DIR`: folder of the built renderer (default `packages/renderer/dist`).
  *   A packaged app ignores both and serves `resources/renderer` (`rendererSource`).
  * - `THICKET_USER_DATA`: use this folder as Electron's `userData` (settings.json ...), for tests.
+ * - `THICKET_UPDATE_CHECK=1`: check GitHub for updates also when not packaged (`updateChecker`).
  */
 import { fromMainPort, serve } from '@thicket/backend';
 import { BROADCAST_STREAMS, privilegedMethods, type SettingsChanged } from '@thicket/contract';
@@ -31,6 +32,7 @@ import { ProfilesStore } from '../profiles';
 import { SecretsStore } from '../secrets';
 import { HistoryStore } from '../history';
 import { SettingsStore } from '../settings/store';
+import { UpdateChecker, openReleaseLink } from '../update';
 import { BackendHost } from './backend-host';
 import { Broadcaster } from './broadcast';
 import { mainHandlers, privilegedHandlers } from './handlers';
@@ -41,7 +43,6 @@ import {
   blockWebview,
   contentSecurityPolicy,
   denyPermission,
-  denyWindowOpen,
   mimeType,
   resolveAppFile,
   withCspHeader,
@@ -70,7 +71,10 @@ protocol.registerSchemesAsPrivileged([
 
 // Every web contents, also ones we don't create on purpose: no popups, no navigation, no webviews.
 app.on('web-contents-created', (_event, contents) => {
-  contents.setWindowOpenHandler(denyWindowOpen);
+  // No popups; the update notice's link to a Thicket release page opens in the user's browser.
+  contents.setWindowOpenHandler(({ url }) =>
+    openReleaseLink(url, (link) => shell.openExternal(link), log),
+  );
   contents.on('will-navigate', (event) => {
     if (blockNavigation(event, event.url, contents.getURL()))
       log(`blocked navigation to ${event.url}`);
@@ -131,6 +135,23 @@ function historyStore(): HistoryStore {
     log: (message) => log(`history: ${message}`),
   });
   return history;
+}
+
+/**
+ * The update check (GitHub releases API), one per app. Only a packaged app checks by default: a
+ * dev or test run (version 0.0.0) would always see an update and must not call GitHub;
+ * `THICKET_UPDATE_CHECK=1` turns it on there. The `checkForUpdates` setting is read on every check.
+ */
+let updates: UpdateChecker | undefined;
+
+function updateChecker(settings: SettingsStore): UpdateChecker {
+  const allowed = app.isPackaged || process.env['THICKET_UPDATE_CHECK'] === '1';
+  updates ??= new UpdateChecker({
+    current: app.getVersion(),
+    enabled: () => allowed && settings.get().checkForUpdates,
+    log: (message) => log(`update: ${message}`),
+  });
+  return updates;
 }
 
 /** File dialogs for the backend (io.*), attached to the focused window (or any window). */
@@ -200,6 +221,7 @@ function createWindow(settings: SettingsStore): void {
       dialogs: nativeDialogs,
       pipelines: pipelinesStore(),
       history: historyStore(),
+      updates: updateChecker(settings),
       log: (message) => log(`profiles: ${message}`),
     }),
     broadcaster,
