@@ -5,7 +5,7 @@ owner: felix/agent-1
 deps: [x509-proxy]
 touches: [packages/backend/src/auth/oidc,apps/desktop/src/oidc,test/integration/fixtures/oidc]
 prio: 3
-lease_until: 2026-11-17T03:24:54Z
+lease_until: 2026-11-17T03:34:58Z
 ---
 ## Goal
 MONGODB-OIDC with authorization code flow in the system browser (main opens the URL, loopback redirect) and device flow fallback; tokens cached in the keychain and refreshed.
@@ -23,3 +23,5 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 03:55+0100 by felix/agent-1): OIDC tokens are persisted (oidcTokens secret) only when secret storage is 'secure' (OS keychain) and the profile exists; with weak/unavailable storage they stay in backend memory for the session. Persisted regardless of the profile's secretMode
 - ASSUMPTION (2026-11-17 03:55+0100 by felix/agent-1): New privileged methods oidc.openBrowser (http/https only, shell.openExternal) and oidc.saveTokens, and broadcast oidc.prompt (browser URL / device user code / finished) for the auth-ui-m5 'sign in' state
 - ASSUMPTION (2026-11-17 03:55+0100 by felix/agent-1): The IdP is trusted with Node's default CAs (no per-profile CA for the IdP yet); tests inject the fixture CA via OidcEnvironment.ca. Headless Chromium for the int test needs 'npx playwright install chromium-headless-shell'
+- ASSUMPTION (2026-11-17 04:14+0100 by felix/agent-1): Added optional profile field auth.oidcTrustedEndpoint (default false; like mongosh --oidcTrustedEndpoint): when true ALLOWED_HOSTS = the connection string's hosts (SRV: *.<parent domain>), otherwise driver default (Atlas/localhost only); auth-ui-m5 should expose it
+- ASSUMPTION (2026-11-17 04:14+0100 by felix/agent-1): Cached/refreshed OIDC tokens are forgotten (memory + keychain) when the server refuses them with AUTH_FAILED, so the next connect signs in interactively

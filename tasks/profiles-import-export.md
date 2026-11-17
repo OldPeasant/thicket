@@ -5,15 +5,18 @@ owner: dell26/agent-2
 deps: [conn-ui-m2,profiles-store]
 touches: [apps/desktop/src/profiles/import,packages/renderer/src/app/connections/import]
 prio: 2
-lease_until: 2026-11-17T03:25:05Z
+lease_until: 2026-11-17T03:35:06Z
 ---
 ## Goal
 Import Compass's exported connections JSON (plain and encrypted-without-passphrase skipped with a notice) and a list of connection strings; export selected profiles as JSON without secrets.
 
 ## Acceptance criteria
-- [ ] Unit tests with Compass export fixtures (write them from Compass's documented format; record source with `assume`)
-- [ ] Export file contains no password/passphrase/token (test greps the output)
-- [ ] e2e: import → profiles appear in the sidebar
+- [x] Unit tests with Compass export fixtures (write them from Compass's documented format; record source with `assume`)
+  - verified (2026-11-17 04:17+0100 by dell26/agent-2): cd apps/desktop && npx vitest run src/profiles/import -> 74 passed (Compass plain/encrypted fixtures in src/profiles/import/fixtures; source recorded via assume)
+- [x] Export file contains no password/passphrase/token (test greps the output)
+  - verified (2026-11-17 04:17+0100 by dell26/agent-2): cd apps/desktop && npx vitest run src/profiles/import -t 'without secrets' -> 2 passed (greps export output for passwords/passphrases/tokens); e2e test also greps the exported file
+- [x] e2e: import → profiles appear in the sidebar
+  - verified (2026-11-17 04:17+0100 by dell26/agent-2): npm run test:e2e -- profiles-import (Electron + Playwright, real mongod container) -> 1 passed: imported Compass + URI profiles appear in sidebar
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
