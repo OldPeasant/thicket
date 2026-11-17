@@ -5,7 +5,7 @@ owner: dell26/agent-1
 deps: [mongosh-spike,conn-manager]
 touches: [packages/backend/src/shell]
 prio: 2
-lease_until: 2026-11-17T02:49:22Z
+lease_until: 2026-11-17T02:54:27Z
 ---
 ## Goal
 shell.open/eval/complete/close per connection following docs/mongosh.md; output streamed as typed events (documents as EJSON, text, errors); interrupt; one runtime per shell tab.
