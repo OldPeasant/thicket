@@ -6,6 +6,7 @@ deps: [conn-manager]
 touches: [packages/backend/src/ssh,test/integration/fixtures/ssh]
 prio: 2
 lease_until: 2026-11-17T02:03:57Z
+extended: felix/agent-1
 ---
 ## Goal
 ssh2-based tunnels with password, private key (+passphrase) or SSH agent; known_hosts in userData with a 'trust this host key' event to the renderer; replica sets get one forwarded port per member; SRV resolved before tunnelling.
@@ -22,3 +23,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 02:03+0100 by felix/agent-1): A host listed in known_hosts with only other keys (any key type) counts as 'changed' and is refused; the user removes the line from userData/known_hosts by hand (no 'replace key' action).
 - ASSUMPTION (2026-11-17 02:03+0100 by felix/agent-1): SSH secrets (sshPassword, sshKeyPassphrase) come only from stored secrets; the request's password stays the database password. A profile with both ssh and proxy is INVALID_PARAMS.
 - ASSUMPTION (2026-11-17 02:03+0100 by felix/agent-1): Integration sshd image: lscr.io/linuxserver/openssh-server:latest with AllowTcpForwarding switched on via sshd_config.d (image default is off).
+- extended by felix/agent-1: Implementation, fixes (CR-1..CR-7), tests report and re-review (0 P0-P2, 1 P3) are committed; merged origin/main at 239b60c (manager.spec.ts conflict resolved, npm run check passes). Left: re-run npm run test:int -- ssh on the merged code, record verify for AC1-3, write reviews/ssh-tunnel/quality.json (reviewed_revision = c9a83ed-equivalent, P3 disposition), commit, tasks.py done.
