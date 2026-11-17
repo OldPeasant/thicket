@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "task": "oidc-auth",
+  "reviewed_revision": "c88f053e308e85461d15e75aeb7fd346eb19b50c",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/oidc-auth/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/oidc-auth/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/oidc-auth/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P1",
+      "disposition": "fixed",
+      "note": "driver ALLOWED_HOSTS refused non-Atlas/non-localhost servers; new profile option auth.oidcTrustedEndpoint sets ALLOWED_HOSTS to the profile's hosts, refusal mapped to a readable AUTH_FAILED"
+    },
+    {
+      "id": "CR-2",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "tokens the server refuses (AUTH_FAILED) are forgotten in memory and keychain, next connect signs in interactively"
+    },
+    {
+      "id": "CR-3",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "shared discovery fetch no longer bound to the first caller's abort signal"
+    }
+  ],
+  "validation": [
+    { "command": "npm run check (on c88f053 merged with main, de208f5)", "result": "pass" },
+    { "command": "npm run test:int -- oidc (Podman: MongoDB Enterprise + Keycloak, headless Chromium) on de208f5", "result": "pass" },
+    { "command": "sh -c \"$(head -1 .taskcheck)\"", "result": "pass" }
+  ]
+}
