@@ -335,6 +335,222 @@ describe('ConnectionEditor', () => {
     });
   });
 
+  describe('more form fields (test-writer)', () => {
+    it('color, folder, hosts, direct connection and the CA file end up in the saved draft', async () => {
+      fake.respond('profiles.chooseFile', { path: '/fictitious/ca.pem' });
+      await start();
+      await input(must('field-name'), 'Lab');
+      await check('color-violet');
+      await input(must('field-folder'), ' Customers / EU ');
+      await click('add-host');
+      await change(nth('field-host', 1), 'db2.example');
+      await click('remove-host');
+      expect(all('field-host').map((h) => h.value)).toEqual(['db2.example']);
+      // The last host cannot be removed.
+      expect(all<HTMLButtonElement>('remove-host').every((b) => b.disabled)).toBe(true);
+      await check('field-direct');
+      await check('field-tls');
+      await click('choose-ca');
+      expect(must<HTMLInputElement>('field-ca-file').value).toBe('/fictitious/ca.pem');
+      expect(text('uri-preview')).toContain('directConnection=true');
+      await click('save');
+      expect(savedDraft()).toMatchObject({
+        name: 'Lab',
+        color: '#8a5cd0',
+        folder: 'Customers/EU',
+        tls: { enabled: true, caFile: '/fictitious/ca.pem' },
+      });
+      expect(savedDraft().connectionString).toMatch(/^mongodb:\/\/db2\.example:27017\/\?/);
+
+      await check('color-none');
+      await check('field-direct', false);
+      await change(must('field-ca-file'), ' ');
+      await click('save');
+      expect(savedDraft()).not.toHaveProperty('color');
+      expect(savedDraft().tls).toEqual({ enabled: true });
+      expect(savedDraft().connectionString).not.toContain('directConnection');
+    });
+
+    it('clearing fields removes their options again', async () => {
+      await start();
+      await change(nth('field-host', 0), 'cluster0.example.net');
+      await check('field-scheme-srv');
+      await check('field-scheme-standard');
+      // Back to a host list: the single host gets the default port again.
+      expect(text('uri-preview')).toBe('mongodb://cluster0.example.net:27017');
+      await change(nth('field-port', 0), ' ');
+      expect(text('uri-preview')).toBe('mongodb://cluster0.example.net');
+
+      await check('field-tls');
+      await check('field-allow-invalid-certificates');
+      expect(text('uri-preview')).toContain('tlsAllowInvalidCertificates=true');
+      expect(must('tls-insecure').textContent).toContain('not fully checked');
+      await check('field-allow-invalid-certificates', false);
+      expect(text('uri-preview')).not.toContain('tlsAllowInvalidCertificates');
+
+      await change(must<HTMLSelectElement>('field-read-preference'), 'nearest');
+      await change(must('field-app-name'), 'Reports');
+      await change(must<HTMLSelectElement>('field-mechanism'), 'SCRAM-SHA-256');
+      await input(must('field-username'), 'alice');
+      await change(must('field-auth-source'), 'admin');
+      await change(must('field-replica-set'), 'rs0');
+      await change(must('field-selection-timeout'), '2500');
+      expect(text('uri-preview')).toContain('serverSelectionTimeoutMS=2500');
+      await change(must<HTMLSelectElement>('field-read-preference'), '');
+      await change(must('field-app-name'), '  ');
+      await change(must('field-auth-source'), ' ');
+      await change(must('field-replica-set'), '');
+      await change(must('field-selection-timeout'), 'soon');
+      await input(must('field-username'), '');
+      expect(text('uri-preview')).toBe(
+        'mongodb://cluster0.example.net/?authMechanism=SCRAM-SHA-256&tls=true',
+      );
+    });
+
+    it('a cancelled or failed CA file chooser keeps the field', async () => {
+      fake.respond('profiles.chooseFile', { path: null });
+      await start();
+      await check('field-tls');
+      await click('choose-ca');
+      expect(must<HTMLInputElement>('field-ca-file').value).toBe('');
+      fake.fail('profiles.chooseFile', { code: 'INTERNAL', message: 'dialog failed (fictitious)' });
+      await click('choose-ca');
+      expect(text('save-error')).toContain('dialog failed (fictitious)');
+    });
+
+    it('No authentication clears user, password and auth source', async () => {
+      await start();
+      await change(must<HTMLSelectElement>('field-mechanism'), 'SCRAM-SHA-256');
+      await input(must('field-username'), 'alice');
+      await change(must('field-auth-source'), 'admin');
+      await input(must('field-password'), 'fictitious-pw');
+      await change(must<HTMLSelectElement>('field-mechanism'), 'NONE');
+      expect(text('uri-preview')).toBe('mongodb://localhost:27017');
+      expect(el.querySelector('[data-testid="field-password"]')).toBeNull();
+      // Choosing a password mechanism again starts without the old credentials.
+      await change(must<HTMLSelectElement>('field-mechanism'), 'SCRAM-SHA-1');
+      expect(must<HTMLInputElement>('field-username').value).toBe('');
+      expect(must<HTMLInputElement>('field-password').value).toBe('');
+      expect(must<HTMLInputElement>('secret-saved').checked).toBe(true);
+    });
+
+    it('arrow keys switch between the form and the connection-string tab', async () => {
+      await start();
+      must('tab-form').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
+      await settle();
+      expect(el.querySelector('[data-testid="field-uri"]')).not.toBeNull();
+      must('tab-uri').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft' }));
+      await settle();
+      expect(el.querySelector('[data-testid="field-uri"]')).toBeNull();
+      must('tab-form').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+      await settle();
+      expect(el.querySelector('[data-testid="field-uri"]')).toBeNull();
+    });
+  });
+
+  describe('test and save errors (test-writer)', () => {
+    const TEST_OK = {
+      latencyMS: 3,
+      server: { version: '8.0.4', topology: 'standalone' as const, enterprise: false, raw: '{}' },
+    };
+
+    it('Test connection in ask-each-time mode sends the typed password but never stores it', async () => {
+      fake.respond('conn.test', TEST_OK);
+      await start();
+      await input(must('field-name'), 'Asker');
+      await change(must<HTMLSelectElement>('field-mechanism'), 'SCRAM-SHA-256');
+      await input(must('field-username'), 'eve');
+      await check('secret-ask');
+      await input(must('field-password'), 'fictitious-once');
+      await click('test-connection');
+      const params = fake.requestsFor('conn.test')[0]?.params as {
+        profile: ProfileDraft;
+        password: string;
+      };
+      expect(params.password).toBe('fictitious-once');
+      expect(JSON.stringify(params.profile)).not.toContain('fictitious-once');
+      expect(text('test-ok')).toContain('8.0.4');
+      expect(fake.requestsFor('profiles.setSecret')).toHaveLength(0);
+    });
+
+    it('Test connection of an edited saved profile sends the draft', async () => {
+      fake.respond('conn.test', TEST_OK);
+      await start('p1');
+      await change(must('field-app-name'), 'Edited');
+      await click('test-connection');
+      const params = fake.requestsFor('conn.test')[0]?.params as { profile: ProfileDraft };
+      expect(params).not.toHaveProperty('password');
+      expect(params.profile).toMatchObject({ id: 'p1', appName: 'Edited' });
+    });
+
+    it('a running test can be cancelled', async () => {
+      fake.handle('conn.test', () => new Promise(() => undefined));
+      await start('p1');
+      await click('test-connection');
+      expect(el.querySelector('[data-testid="test-running"]')).not.toBeNull();
+      await click('test-cancel');
+      expect(el.querySelector('[data-testid="test-running"]')).toBeNull();
+      expect(el.querySelector('[data-testid="test-error"]')).toBeNull();
+      expect(fake.cancels).toHaveLength(1);
+      expect(must('test-connection')).toBeTruthy();
+    });
+
+    it('a CANCELLED answer resets the test without an error', async () => {
+      fake.fail('conn.test', { code: 'CANCELLED', message: 'cancelled' });
+      await start('p1');
+      await click('test-connection');
+      expect(el.querySelector('[data-testid="test-error"]')).toBeNull();
+      expect(el.querySelector('[data-testid="test-ok"]')).toBeNull();
+    });
+
+    it('a failed save is shown and the form stays editable', async () => {
+      fake.fail('profiles.save', { code: 'INTERNAL', message: 'store locked (fictitious)' });
+      await start('p1');
+      await click('save');
+      expect(text('save-error')).toContain('store locked (fictitious)');
+      expect(el.querySelector('[data-testid="saved-notice"]')).toBeNull();
+      expect(must<HTMLButtonElement>('save').disabled).toBe(false);
+      expect(fake.requestsFor('profiles.setSecret')).toHaveLength(0);
+    });
+
+    it('switching a saved password profile to ask each time no longer says a password is saved', async () => {
+      await start('p1');
+      expect(must<HTMLInputElement>('field-password').placeholder).toContain('Saved');
+      await check('secret-ask');
+      await click('save');
+      expect(savedDraft().auth?.secretMode).toBe('ask');
+      await check('secret-saved');
+      expect(must<HTMLInputElement>('field-password').placeholder).not.toContain('Saved');
+    });
+
+    it('shows the load error of a profile that cannot be read', async () => {
+      fake.fail('profiles.get', { code: 'NOT_FOUND', message: 'no such profile' });
+      await start('missing');
+      expect(text('editor-load-error')).toContain('could not be loaded');
+      expect(text('page-heading')).toBe('Edit connection');
+    });
+
+    it('switching to another profile while one loads shows only the latest', async () => {
+      let releaseFirst: (() => void) | undefined;
+      fake.handle('profiles.get', ({ profileId }) => {
+        const profile = saved({ id: profileId, name: `Name ${profileId}` });
+        if (profileId === 'slow') {
+          return new Promise((resolve) => {
+            releaseFirst = () => resolve({ profile, storedSecrets: [] });
+          });
+        }
+        return { profile, storedSecrets: [] };
+      });
+      await start('slow');
+      fixture.componentRef.setInput('id', 'fast');
+      await settle();
+      expect(must<HTMLInputElement>('field-name').value).toBe('Name fast');
+      releaseFirst?.();
+      await settle();
+      expect(must<HTMLInputElement>('field-name').value).toBe('Name fast');
+    });
+  });
+
   it('problems block saving and testing', async () => {
     await start();
     await change(nth('field-host', 0), '');

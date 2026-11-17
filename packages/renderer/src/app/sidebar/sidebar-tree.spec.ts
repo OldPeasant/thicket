@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
 import type { CollectionInfo, Profile } from '@thicket/contract';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -503,6 +503,34 @@ describe('SidebarTree', () => {
       await click(must('menu-disconnect'));
       expect(fake.requestsFor('conn.close')[0]?.params).toEqual({ profileId: 'p1' });
       expect(node('conn', 'Profile p1').dataset['state']).toBe('disconnected');
+    });
+
+    it('opens the connection editor from the context menu, also on a read-only profile', async () => {
+      const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+      await start();
+      await menu(node('conn', 'Reader'));
+      const edit = must('menu-edit-conn') as HTMLButtonElement;
+      expect(edit.textContent).toContain('Edit connection…');
+      expect(edit.disabled).toBe(false);
+      await click(edit);
+      expect(navigate).toHaveBeenCalledWith('/connections/p2');
+      expect(byTestId('tree-menu')).toBeNull();
+      expect(fake.requestsFor('conn.open')).toHaveLength(0);
+    });
+
+    it('encodes the profile id in the editor URL', async () => {
+      profiles = [profile('a/b c')];
+      const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+      await start();
+      await menu(node('conn', 'Profile a/b c'));
+      await click(must('menu-edit-conn'));
+      expect(navigate).toHaveBeenCalledWith('/connections/a%2Fb%20c');
+    });
+
+    it('links to the connection manager', async () => {
+      await start();
+      expect(must('sidebar-manage').getAttribute('href')).toBe('/connections');
+      expect(must('sidebar-manage').getAttribute('aria-label')).toBe('Manage connections');
     });
 
     it('closes the menu with Escape and opens it with Shift+F10', async () => {
