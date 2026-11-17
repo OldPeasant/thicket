@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "task": "users-roles-view",
-  "reviewed_revision": "8cf069d7e1888a2adccdd899da4525d1367b75e1",
+  "reviewed_revision": "88c6823c8396528f1b26e744b7b67f8afa70576e",
   "helpers": {
     "test-writer": {"status": "completed", "report": "reviews/users-roles-view/tests.md"},
     "code-reviewer": {"status": "completed", "report": "reviews/users-roles-view/review.md"},
