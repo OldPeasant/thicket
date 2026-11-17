@@ -31,16 +31,26 @@ export interface LaunchOptions {
   switches?: string[];
   /** Receives the app's stdout and stderr. */
   output?: string[];
+  /**
+   * A packaged build to start instead of the development build in `apps/desktop` (an AppImage,
+   * `release/linux-unpacked/thicket`, ...). AppImages get `APPIMAGE_EXTRACT_AND_RUN=1`, so they
+   * start without FUSE (as in `apps/desktop/scripts/smoke-packaged.mjs`).
+   */
+  executable?: string;
 }
 
 /** Starts the built app with Playwright's Electron driver and an explicit `userData` folder. */
 export async function launchApp(options: LaunchOptions): Promise<ElectronApplication> {
+  const packaged = options.executable;
   const app = await _electron.launch({
-    executablePath: electronPath,
-    args: [...headlessArgs(), ...(options.switches ?? []), appDir],
+    executablePath: packaged ?? electronPath,
+    args: [...headlessArgs(), ...(options.switches ?? []), ...(packaged ? [] : [appDir])],
+    // An AppImage extracts itself before Electron starts.
+    ...(packaged ? { timeout: 120_000 } : {}),
     env: {
       ...process.env,
       ELECTRON_ENABLE_LOGGING: '1',
+      ...(packaged ? { APPIMAGE_EXTRACT_AND_RUN: '1' } : {}),
       ...options.env,
       THICKET_USER_DATA: options.userDataDir,
     } as Record<string, string>,

@@ -17,6 +17,11 @@ export interface E2EFixtures {
   userDataDir: string;
   /** Extra environment for the app (override with `test.use({ appEnv: {...} })`). */
   appEnv: Record<string, string>;
+  /**
+   * A packaged build to start instead of the development build (`LaunchOptions.executable`), e.g.
+   * `test.use({ appExecutable: '…/thicket-0.0.0-linux-x86_64.AppImage' })`.
+   */
+  appExecutable: string | undefined;
   /** The app's stdout/stderr lines; attached to the report when the test fails. */
   appOutput: string[];
   /** The built app, started with `userDataDir`. Screenshots its windows when the test fails. */
@@ -61,15 +66,22 @@ export const test = base.extend<E2EFixtures, E2EWorkerFixtures>({
 
   appEnv: [{}, { option: true }],
 
+  appExecutable: [undefined, { option: true }],
+
   // eslint-disable-next-line no-empty-pattern -- Playwright fixtures must destructure their deps.
   appOutput: async ({}, use) => {
     await use([]);
   },
 
-  electronApp: async ({ userDataDir, appEnv, appOutput }, use, testInfo) => {
+  electronApp: async ({ userDataDir, appEnv, appExecutable, appOutput }, use, testInfo) => {
     const realDir = realUserDataDir();
     const before = await snapshotDir(realDir);
-    const app = await launchApp({ userDataDir, env: appEnv, output: appOutput });
+    const app = await launchApp({
+      userDataDir,
+      env: appEnv,
+      output: appOutput,
+      ...(appExecutable ? { executable: appExecutable } : {}),
+    });
     try {
       await use(app);
     } finally {
