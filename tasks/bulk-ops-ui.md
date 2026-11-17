@@ -17,3 +17,4 @@ updateMany (update document in shell syntax) and deleteMany for the current filt
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 04:57+0100 by dell26/agent-3): Type-to-confirm (collection name) applies to bulk updates over 1 000 documents too, not only deletes: the acceptance criterion demands it for updateMany on 1 500 docs; the panel passes typeToConfirm itself, WriteGuard's default stays deletes-only.
+- ASSUMPTION (2026-11-17 04:57+0100 by dell26/agent-3): The bulk panel uses the applied query (last Run) filter + collation, like Export; sort/limit are ignored (updateMany/deleteMany have none) and the panel says so. A write is only enabled for a preview of the current mode/update/query.
