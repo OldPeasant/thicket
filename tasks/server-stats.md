@@ -13,7 +13,8 @@ serverStatus, dbStats and replica set status with a few charts (ops/s, connectio
 ## Acceptance criteria
 - [x] Integration test for the data methods
   - verified (2026-11-17 07:56+0100 by dell26/agent-2): npm run test:int -- server-stats (testcontainers mongo:8.2 standalone + mongo:8.2 replica set, served through serve() with contract validation) -> 7 passed: admin.serverStatus fields + counters grow, admin.replSetStatus null on standalone / members on RS, serverStatus repl section, db.stats sizes, NOT_CONNECTED
-- [ ] Component tests with recorded serverStatus fixtures
+- [x] Component tests with recorded serverStatus fixtures
+  - verified (2026-11-17 07:56+0100 by dell26/agent-2): cd packages/renderer && npx ng test --include='src/app/admin/stats/**/*.spec.ts' -> server-stats-view.spec.ts (14) + server-stats.model.spec.ts (16) passed, using serverStatus/replSetGetStatus recorded from mongo:8.2 by fixtures/capture.mjs; plus npm run test:e2e -- server-stats -> 1 passed (Electron, real mongo:8.2)
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
