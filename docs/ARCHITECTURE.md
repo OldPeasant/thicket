@@ -13,7 +13,7 @@ file current when the structure changes: agents read it before every task.
 | MongoDB | official `mongodb` Node driver, `bson`, `mongodb-connection-string-url` |
 | SSH tunnels | `ssh2` |
 | Shell-syntax parsing | own parser in `packages/core/src/shellsyntax` (no `eval`; see below) |
-| Schema analysis | `mongodb-schema` |
+| Schema analysis | `@mongodb-js/mongodb-schema` |
 | Embedded shell | mongosh packages (`@mongosh/service-provider-node-driver`, the browser/Electron runtime) — confirm with a spike task in M4 |
 | Contract validation | `zod` |
 | Tests | Vitest (+ `@vitest/coverage-v8`), Testcontainers, Playwright (`_electron`) |
@@ -638,10 +638,13 @@ Contract layout (`packages/contract/src/`):
 - Backend `schema.analyze` (`schemaHandlers`, `analyzeCollection`): one `aggregate` with
   `$match` (the filter, when not empty) then `$sample` (`DEFAULT_SCHEMA_SAMPLE` = 1 000) through
   `Operation` (cancellable), raw batches decoded without promotion, analyzed with
-  `mongodb-schema` (`storeValues`, no semantic types) and flattened depth first (`flattenSchema`):
+  `@mongodb-js/mongodb-schema` (`storeValues`, no semantic types) and flattened depth first
+  (`flattenSchema`):
   paths dotted, array items `a.[]`, documents in arrays `a.[].b`; type names as `$type` aliases
   (`typeAlias`); shares relative to the parent (see the contract's `schemaField`); `Undefined`
-  (missing) is not a type; up to `MAX_SCHEMA_EXAMPLES` distinct canonical-EJSON examples per type.
+  (missing) is not a type; up to `MAX_SCHEMA_EXAMPLES` distinct canonical-EJSON examples per type,
+  only full values: strings, code and binaries the analyzer may have cut at
+  `EXAMPLE_LENGTH_LIMIT` (1 000) are left out, so every example works as an equality filter.
   Int tests `test/integration/schema.int.spec.ts`.
 - Renderer: **Schema** (`query-schema`) on the collection query bar opens `SchemaPanel`
   (`app-schema-panel`) under the bar for the bar's parsed filter. One row per path: present /

@@ -1,12 +1,13 @@
 import type { ParsedParamsOf, Profile, SchemaField } from '@thicket/contract';
 import { BSON, MongoServerError, type Document } from 'mongodb';
-import type { Schema } from 'mongodb-schema';
+import type { Schema } from '@mongodb-js/mongodb-schema';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ConnectionManager, type ClientLike } from '../connections/manager';
 import { RpcError, type Handler } from '../server/rpc';
 import {
   DEFAULT_SCHEMA_SAMPLE,
+  EXAMPLE_LENGTH_LIMIT,
   MAX_SCHEMA_EXAMPLES,
   analyzeCollection,
   analyzeSample,
@@ -16,7 +17,7 @@ import {
 } from './analyze';
 import { schemaHandlers } from './handlers';
 
-const { Int32, Double, Long, Decimal128, ObjectId } = BSON;
+const { Int32, Double, Long, Decimal128, ObjectId, Binary, Code } = BSON;
 
 type Answer = (db: string, command: Document) => Document | Promise<Document>;
 
@@ -228,12 +229,46 @@ describe('analyzeSample', () => {
     expect(examplesOf(n, 'int')).toHaveLength(2);
   });
 
-  it('cuts long example strings at 200 characters', async () => {
-    const r = await analyzeSample([{ text: 'x'.repeat(500) }]);
-    const [example] = examplesOf(fieldOf(r.fields, 'text'), 'string');
-    expect(typeof example).toBe('string');
-    expect((example as string).length).toBeLessThanOrEqual(200);
-    expect((example as string).length).toBeGreaterThan(0);
+  it('keeps no example that may have been cut, so every example is a full value (filterable)', async () => {
+    expect(EXAMPLE_LENGTH_LIMIT).toBe(1000);
+    const short = 'y'.repeat(EXAMPLE_LENGTH_LIMIT - 2);
+    const docs: Document[] = [
+      { text: 'x'.repeat(5000) },
+      { text: 'z'.repeat(EXAMPLE_LENGTH_LIMIT) },
+      { text: 'w'.repeat(EXAMPLE_LENGTH_LIMIT - 1) },
+      // A cut that would split a surrogate pair leaves one character less.
+      { text: 'a'.repeat(EXAMPLE_LENGTH_LIMIT - 1) + '\u{1F600}' },
+      { text: short },
+      { text: 'ok' },
+    ];
+    const r = await analyzeSample(docs);
+    const text = fieldOf(r.fields, 'text');
+    // Counted as strings all the same, only left out of the examples.
+    expect(typeOf(text, 'string').count).toBe(6);
+    const examples = examplesOf(text, 'string') as string[];
+    expect(examples.sort()).toEqual(['ok', short].sort());
+    for (const example of examples) {
+      expect(docs.some((d) => d['text'] === example)).toBe(true);
+    }
+  });
+
+  it('keeps no binary or code example that may have been cut', async () => {
+    const bytes = (n: number) => new Uint8Array(n).fill(7);
+    const docs: Document[] = [
+      { bin: new Binary(bytes(EXAMPLE_LENGTH_LIMIT + 10)), code: new Code('x'.repeat(5000)) },
+      { bin: new Binary(bytes(EXAMPLE_LENGTH_LIMIT)), code: new Code('1;'.repeat(600)) },
+      { bin: new Binary(bytes(4)), code: new Code('return 1') },
+    ];
+    const r = await analyzeSample(docs);
+    const bin = fieldOf(r.fields, 'bin');
+    expect(typeOf(bin, 'binData').count).toBe(3);
+    const bins = examplesOf(bin, 'binData') as BSON.Binary[];
+    expect(bins.map((b) => b.length())).toEqual([4]);
+    const code = fieldOf(r.fields, 'code');
+    expect(typeOf(code, 'javascript').count).toBe(3);
+    expect((examplesOf(code, 'javascript') as BSON.Code[]).map((c) => c.code)).toEqual([
+      'return 1',
+    ]);
   });
 
   it('nested fields: dotted paths, shares relative to the parent documents', async () => {

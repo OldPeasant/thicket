@@ -1667,7 +1667,8 @@ describe('CollectionView', () => {
       type('query-filter', '{ n: { $gt: 100 } }');
       type('query-limit', '7');
       expect(q('schema-panel')).toBeNull();
-      expect(q('query-schema')?.getAttribute('aria-pressed')).toBe('false');
+      // Not a toggle (a second press analyzes again; the panel has Close): no aria-pressed.
+      expect(q('query-schema')?.hasAttribute('aria-pressed')).toBe(false);
       click('query-schema');
       await settle();
       expect(analyses()).toEqual([
@@ -1680,7 +1681,7 @@ describe('CollectionView', () => {
       ]);
       expect(finds()).toHaveLength(1);
       expect(q('schema-panel')).not.toBeNull();
-      expect(q('query-schema')?.getAttribute('aria-pressed')).toBe('true');
+      expect(q('query-schema')?.hasAttribute('aria-pressed')).toBe(false);
       expect(el().querySelectorAll('[data-testid="schema-row"]')).toHaveLength(4);
     });
 
@@ -1771,7 +1772,6 @@ describe('CollectionView', () => {
       click('schema-close');
       await settle();
       expect(q('schema-panel')).toBeNull();
-      expect(q('query-schema')?.getAttribute('aria-pressed')).toBe('false');
     });
 
     it('pointing the tab at another collection closes the panel and cancels a running analysis', async () => {

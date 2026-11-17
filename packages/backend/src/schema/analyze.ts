@@ -1,6 +1,6 @@
 import type { ParsedParamsOf, ResultOf, SchemaField } from '@thicket/contract';
 import { BSON, type Document } from 'mongodb';
-import { parseSchema, type Schema, type SchemaType } from 'mongodb-schema';
+import { parseSchema, type Schema, type SchemaType } from '@mongodb-js/mongodb-schema';
 
 import type { ClientLike } from '../connections/manager';
 import { Operation, parseDocument } from '../docs/query/query';
@@ -9,7 +9,7 @@ import { Operation, parseDocument } from '../docs/query/query';
  * Schema analysis (`schema.analyze`): a `$sample` of the collection (after the optional filter)
  * read like `docs/query` (raw batches decoded without promotion, so `int`, `long`, `double` and
  * `decimal` stay apart; the command carries a `comment`, so a cancel kills it), analyzed with
- * `mongodb-schema` and flattened into one entry per field path.
+ * `@mongodb-js/mongodb-schema` and flattened into one entry per field path.
  *
  * Paths are dotted; the items of an array are `<path>.[]` (documents in arrays continue below
  * it: `tags.[].name`). Shares (`probability`) are relative to the parent: for a top-level field
@@ -24,8 +24,13 @@ export const DEFAULT_SCHEMA_SAMPLE = 1000;
 /** Example values kept per path and type. */
 export const MAX_SCHEMA_EXAMPLES = 5;
 
-/** Longest string kept as an example (longer ones are cut by `mongodb-schema`). */
-const EXAMPLE_STRING_LIMIT = 200;
+/**
+ * Length limit for stored example values (string and code characters, binary bytes).
+ * `mongodb-schema` cuts longer values to this length (strings and code to one less when the cut
+ * would split a surrogate pair); a cut value would build an equality filter that matches nothing,
+ * so values that may have been cut are not kept as examples (`isCut`).
+ */
+export const EXAMPLE_LENGTH_LIMIT = 1000;
 
 /** `mongodb-schema` type names → the `$type` aliases the query language uses. */
 const TYPE_ALIASES: Readonly<Record<string, string>> = {
@@ -72,6 +77,25 @@ const valuesOf = (type: SchemaType): unknown[] => {
   return Array.isArray(values) ? values : [];
 };
 
+/**
+ * Whether a stored value of the type `name` may have been cut by `mongodb-schema` (its
+ * `getCappedValue`): strings and code at the limit or one below it, binaries at the limit.
+ */
+function isCut(name: string, value: unknown): boolean {
+  // `_bsontype`, not `instanceof`: `mongodb-schema` may build cut values with its own `bson` copy.
+  const tag = (value as { _bsontype?: unknown } | null)?._bsontype;
+  if (name === 'String' && typeof value === 'string') {
+    return value.length >= EXAMPLE_LENGTH_LIMIT - 1;
+  }
+  if (name === 'Binary' && tag === 'Binary') {
+    return (value as BSON.Binary).buffer.length >= EXAMPLE_LENGTH_LIMIT;
+  }
+  if (name === 'Code' && tag === 'Code') {
+    return (value as BSON.Code).code.length >= EXAMPLE_LENGTH_LIMIT - 1;
+  }
+  return false;
+}
+
 const exampleKey = (value: unknown): string => BSON.EJSON.stringify([value], { relaxed: false });
 
 /** Collects the types of one path, merging names with the same alias (`DBRef` and `Document`). */
@@ -89,6 +113,7 @@ function mergeTypes(types: readonly SchemaType[]): TypeAcc[] {
     acc.count += type.count;
     for (const value of valuesOf(type)) {
       if (acc.examples.length >= MAX_SCHEMA_EXAMPLES) break;
+      if (isCut(type.name, value)) continue;
       const key = exampleKey(value);
       if (acc.seen.has(key)) continue;
       acc.seen.add(key);
@@ -168,7 +193,7 @@ export async function analyzeSample(
   const schema = await parseSchema(docs, {
     storeValues: true,
     semanticTypes: false,
-    storedValuesLengthLimit: EXAMPLE_STRING_LIMIT,
+    storedValuesLengthLimit: EXAMPLE_LENGTH_LIMIT,
     signal,
   });
   return { sampled: schema.count, fields: flattenSchema(schema) };
