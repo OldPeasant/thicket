@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "task": "release-native-modules",
-  "reviewed_revision": "0f63ea94451b657937fb0eb4c48d0da9335cd7d9",
+  "reviewed_revision": "ec8615850e85dcd4d9ed011ac4dc0bed8d6b8d9b",
   "helpers": {
     "test-writer": { "status": "completed", "report": "reviews/release-native-modules/tests.md" },
     "code-reviewer": { "status": "completed", "report": "reviews/release-native-modules/review.md" },
