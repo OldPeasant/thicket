@@ -14,7 +14,8 @@ a docs.find stream ended by `conn.close` reports `CANCELLED` but its server oper
 because `ConnectionManager.close` closes the client first (review round 2, CR-2).
 
 ## Acceptance criteria
-- [ ] Integration test: `conn.close` during a slow docs.find ends the stream with CANCELLED and the server op is gone (currentOp check, like the docs-query cancel test)
+- [x] Integration test: `conn.close` during a slow docs.find ends the stream with CANCELLED and the server op is gone (currentOp check, like the docs-query cancel test)
+  - verified (2026-11-17 03:56+0100 by dell26/agent-1): npm run test:int -- test/integration/docs-query.int.spec.ts (mongo:8.2 rs fixture, podman) -> 35 passed; test 'conn.close during a running find...' calls conn.close via RPC: stream ends CANCELLED 'The connection was closed', $currentOp for the ns is empty, and the backend's own client sent >=1 killOp. Same test against the pre-task handler fails (expected 0 to be greater than 0).
 
 ## Notes
 See SPEC.md section 4 and docs/ARCHITECTURE.md (streams, document reads).
