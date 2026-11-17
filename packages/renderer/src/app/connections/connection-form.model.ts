@@ -22,12 +22,57 @@ export type ProfileMechanism = NonNullable<Profile['auth']>['mechanism'];
 
 export type SecretMode = NonNullable<Profile['auth']>['secretMode'];
 
-/** Mechanisms the M1 form edits (the others are kept as they are, see `conn-ui-m2`). */
+/** Mechanisms the form offers (others of a loaded profile are kept as they are). */
 export const FORM_MECHANISMS: readonly ProfileMechanism[] = [
   'NONE',
   'SCRAM-SHA-256',
   'SCRAM-SHA-1',
+  'MONGODB-X509',
 ];
+
+export type SshMethod = NonNullable<Profile['ssh']>['method'];
+
+/** The SSH tunnel fields (`profile.ssh`); `enabled: false` keeps the typed values unsaved. */
+export interface SshForm {
+  enabled: boolean;
+  host: string;
+  port?: number;
+  username: string;
+  method: SshMethod;
+  privateKeyFile?: string;
+}
+
+/** Secrets besides the database password that this editor stores with `profiles.setSecret`. */
+export type ExtraSecretKind =
+  'sshPassword' | 'sshKeyPassphrase' | 'tlsKeyPassphrase' | 'proxyPassword';
+
+/** Default SSH port. */
+export const SSH_DEFAULT_PORT = 22;
+/** Default SOCKS5 port (also what the backend uses without one). */
+export const PROXY_DEFAULT_PORT = 1080;
+
+export function emptySshForm(): SshForm {
+  return { enabled: false, host: '', port: SSH_DEFAULT_PORT, username: '', method: 'password' };
+}
+
+/**
+ * The extra secrets the current settings use (only these are stored on save): the SSH password
+ * or key passphrase, the client key passphrase, the proxy password.
+ */
+export function usedSecretKinds(state: EditorState): ExtraSecretKind[] {
+  const kinds: ExtraSecretKind[] = [];
+  if (state.ssh.enabled) {
+    if (state.ssh.method === 'password') kinds.push('sshPassword');
+    if (state.ssh.method === 'privateKey') kinds.push('sshKeyPassphrase');
+  }
+  const tls = state.model.tls;
+  const tlsOn = tls.enabled ?? state.model.scheme === 'mongodb+srv';
+  if (tlsOn && nonEmpty(tls.certificateKeyFile) !== undefined) kinds.push('tlsKeyPassphrase');
+  if (nonEmpty(state.model.proxy.host) !== undefined && nonEmpty(state.model.proxy.username)) {
+    kinds.push('proxyPassword');
+  }
+  return kinds;
+}
 
 /** Mechanism a user name without `authMechanism` gets (MongoDB's default since 4.0). */
 export const DEFAULT_PASSWORD_MECHANISM: ProfileMechanism = 'SCRAM-SHA-256';
@@ -51,15 +96,18 @@ export interface EditorState {
   secretMode: SecretMode;
   readOnly: boolean;
   production: boolean;
+  /** SSH tunnel (not part of the connection string). */
+  ssh: SshForm;
+  /** Separate private key file of `tls.certificateKeyFile` (`profile.tls.keyFile`). */
+  tlsKeyFile?: string;
+  /** Extra secrets typed in this editor ('' or absent = none typed; saved ones are not known). */
+  secrets: Partial<Record<ExtraSecretKind, string>>;
   /**
    * Secret options of the connection string (`proxyPassword`, ...) that were removed from it:
    * the editor never keeps them, it only tells the user they were not stored.
    */
   droppedSecrets?: readonly string[];
-  /**
-   * The profile as loaded, for the fields this form does not edit (SSH, the separate TLS key
-   * file): saving keeps them.
-   */
+  /** The profile as loaded. */
   base?: Profile;
 }
 
@@ -73,6 +121,8 @@ export function newEditorState(defaultSecretMode: 'saved' | 'ask'): EditorState 
     secretMode: defaultSecretMode,
     readOnly: false,
     production: false,
+    ssh: emptySshForm(),
+    secrets: {},
   };
 }
 
@@ -225,6 +275,9 @@ export function editorStateFromProfile(
     secretMode: auth?.secretMode ?? (usesPassword(mechanism) ? fallbackSecretMode : 'none'),
     readOnly: profile.readOnly,
     production: profile.production,
+    ssh: profile.ssh ? { enabled: true, ...profile.ssh } : emptySshForm(),
+    ...(tls?.keyFile !== undefined ? { tlsKeyFile: tls.keyFile } : {}),
+    secrets: {},
     ...(droppedSecrets.length > 0 ? { droppedSecrets } : {}),
     base: profile,
   };
@@ -244,6 +297,9 @@ function uriModel(state: EditorState, password: string | undefined): ConnectionU
     delete model.auth.source;
   } else {
     model.auth.mechanism = state.mechanism;
+    // X.509 always authenticates against $external (the backend sets it); another authSource
+    // only makes the driver refuse the string.
+    if (state.mechanism === 'MONGODB-X509') delete model.auth.source;
     if (nonEmpty(model.username) === undefined) delete model.username;
     if (password !== undefined && model.username !== undefined) model.password = password;
   }
@@ -327,15 +383,93 @@ export function editorProblems(state: EditorState): string[] {
   if (usesPassword(state.mechanism) && nonEmpty(state.model.username) === undefined) {
     problems.push('Enter the user name, or choose "No authentication".');
   }
+  const model = state.model;
+  const tls = model.tls;
+  const tlsOn = tls.enabled ?? model.scheme === 'mongodb+srv';
+  const certificate = tlsOn && nonEmpty(tls.certificateKeyFile) !== undefined;
+  if (state.mechanism === 'MONGODB-X509' && !certificate) {
+    problems.push('X.509 authentication needs TLS and a client certificate file.');
+  }
+  if (
+    tlsOn &&
+    nonEmpty(state.tlsKeyFile) !== undefined &&
+    nonEmpty(tls.certificateKeyFile) === undefined
+  ) {
+    problems.push('A private key file needs the client certificate file it belongs to.');
+  }
+  const tags = model.readPreference.tags;
+  if (tags && tags.length > 0) {
+    const mode = model.readPreference.mode;
+    if (mode === undefined || mode === 'primary') {
+      problems.push('Read preference tags need a read preference other than Primary.');
+    }
+    if (tags.some((set) => Object.keys(set).some((name) => name.trim() === ''))) {
+      problems.push('Every read preference tag needs a name (name:value).');
+    }
+  }
+  const ssh = state.ssh;
+  if (ssh.enabled) {
+    if (ssh.host.trim() === '') problems.push('Enter the SSH server.');
+    if (!validPort(ssh.port ?? SSH_DEFAULT_PORT)) {
+      problems.push('The SSH port is a whole number from 1 to 65535.');
+    }
+    if (ssh.username.trim() === '') problems.push('Enter the SSH user name.');
+    if (ssh.method === 'privateKey' && nonEmpty(ssh.privateKeyFile) === undefined) {
+      problems.push('Choose the SSH private key file.');
+    }
+  }
+  const proxyHost = nonEmpty(model.proxy.host);
+  if (proxyHost === undefined && nonEmpty(model.proxy.username) !== undefined) {
+    problems.push('Enter the proxy host, or remove the proxy user name.');
+  }
+  if (proxyHost !== undefined && !validPort(model.proxy.port ?? PROXY_DEFAULT_PORT)) {
+    problems.push('The proxy port is a whole number from 1 to 65535.');
+  }
+  if (ssh.enabled && proxyHost !== undefined) {
+    problems.push('Use either an SSH tunnel or a SOCKS5 proxy, not both.');
+  }
   const uri = connectionStringText(state);
   if (uri.error !== undefined && problems.length === 0) problems.push(uri.error);
   return problems;
 }
 
+function validPort(port: number | undefined): boolean {
+  return port !== undefined && Number.isInteger(port) && port >= 1 && port <= 65535;
+}
+
+/** A read preference tag set as the form shows it: `dc:east, rack:1` ('' matches any member). */
+export function formatTagSet(set: Readonly<Record<string, string>>): string {
+  return Object.entries(set)
+    .map(([name, value]) => `${name}:${value}`)
+    .join(', ');
+}
+
+/** Parses `dc:east, rack:1` (a name without `:` gets an empty value). */
+export function parseTagSet(text: string): Record<string, string> {
+  const set = new Map<string, string>();
+  for (const entry of text.split(',')) {
+    if (entry.trim() === '') continue;
+    const colon = entry.indexOf(':');
+    const name = (colon < 0 ? entry : entry.slice(0, colon)).trim();
+    const value = colon < 0 ? '' : entry.slice(colon + 1).trim();
+    set.set(name, value);
+  }
+  return Object.fromEntries(set);
+}
+
+/**
+ * Parses the write concern `w` field: a whole number of members, or `majority` / a custom
+ * write concern name; `undefined` for an empty field.
+ */
+export function parseW(text: string): number | string | undefined {
+  const trimmed = text.trim();
+  if (trimmed === '') return undefined;
+  return /^\d+$/.test(trimmed) ? Number(trimmed) : trimmed;
+}
+
 /** The profile draft to save or test. Never contains the password or another secret. */
 export function profileDraftFromState(state: EditorState): ProfileDraft {
   const model = uriModel(state, undefined);
-  const base = state.base;
   const draft: ProfileDraft = {
     name: state.name.trim(),
     connectionString: toConnectionString(model),
@@ -361,7 +495,7 @@ export function profileDraftFromState(state: EditorState): ProfileDraft {
     };
     if (model.username !== undefined) draft.auth.username = model.username;
     const source = nonEmpty(model.auth.source);
-    if (source !== undefined) draft.auth.authSource = source;
+    if (source !== undefined && state.mechanism !== 'MONGODB-X509') draft.auth.authSource = source;
   }
 
   const tls = model.tls;
@@ -378,7 +512,8 @@ export function profileDraftFromState(state: EditorState): ProfileDraft {
     const certificateKeyFile = nonEmpty(tls.certificateKeyFile);
     if (certificateKeyFile !== undefined) {
       draft.tls.certificateKeyFile = certificateKeyFile;
-      if (base?.tls?.keyFile !== undefined) draft.tls.keyFile = base.tls.keyFile;
+      const keyFile = nonEmpty(state.tlsKeyFile);
+      if (keyFile !== undefined) draft.tls.keyFile = keyFile;
     }
     if (tls.allowInvalidHostnames !== undefined) {
       draft.tls.allowInvalidHostnames = tls.allowInvalidHostnames;
@@ -413,11 +548,21 @@ export function profileDraftFromState(state: EditorState): ProfileDraft {
   }
   const proxyHost = nonEmpty(model.proxy.host);
   if (proxyHost !== undefined) {
-    draft.proxy = { host: proxyHost, port: model.proxy.port ?? 1080 };
+    draft.proxy = { host: proxyHost, port: model.proxy.port ?? PROXY_DEFAULT_PORT };
     const proxyUser = nonEmpty(model.proxy.username);
     if (proxyUser !== undefined) draft.proxy.username = proxyUser;
   }
-  if (base?.ssh) draft.ssh = base.ssh;
+  const ssh = state.ssh;
+  if (ssh.enabled) {
+    draft.ssh = {
+      host: ssh.host.trim(),
+      port: ssh.port ?? SSH_DEFAULT_PORT,
+      username: ssh.username.trim(),
+      method: ssh.method,
+    };
+    const keyFile = nonEmpty(ssh.privateKeyFile);
+    if (ssh.method === 'privateKey' && keyFile !== undefined) draft.ssh.privateKeyFile = keyFile;
+  }
   return draft;
 }
 

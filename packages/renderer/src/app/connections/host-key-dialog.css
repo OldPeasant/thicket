@@ -1,0 +1,148 @@
+/* SSH host key dialog. Colors only from the theme tokens (app/theme/tokens.css). */
+:host {
+  display: contents;
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: color-mix(in srgb, var(--bg-page) 72%, transparent);
+  backdrop-filter: blur(1px);
+}
+
+.dialog {
+  position: fixed;
+  z-index: 1001;
+  top: 14vh;
+  left: 50%;
+  translate: -50% 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: min(36rem, calc(100vw - 2rem));
+  max-height: 76vh;
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 1rem 1.125rem 0.875rem;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-ui);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  box-shadow: var(--shadow-pop);
+}
+
+.title {
+  margin: 0;
+  font-size: 1.15em;
+  font-weight: 600;
+  letter-spacing: var(--heading-tracking);
+  text-transform: var(--heading-transform);
+}
+
+.what,
+.hint,
+.error {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.server,
+.key-type {
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+/*
+ * The fingerprint is what the user has to compare character by character: large, mono, with
+ * room between the characters, ruled in the accent like a seal.
+ */
+.fingerprint {
+  margin: 0.25rem 0;
+  padding: 0.75rem 0.875rem;
+  font-family: var(--font-mono);
+  font-size: 1.15em;
+  line-height: 1.5;
+  letter-spacing: 0.06em;
+  overflow-wrap: anywhere;
+  user-select: all;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 0 4px 4px 0;
+}
+
+.fingerprint:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.algo {
+  color: var(--text-muted);
+}
+
+.digest {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.hint {
+  font-size: 0.85em;
+  color: var(--text-muted);
+}
+
+.hint code {
+  font-family: var(--font-mono);
+}
+
+.error {
+  padding: 0.45rem 0.75rem;
+  color: var(--danger-text);
+  background: var(--danger-bg);
+  border-left: 3px solid var(--danger);
+  border-radius: 0 4px 4px 0;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding-top: 0.25rem;
+}
+
+.btn {
+  padding: 0.35rem 0.85rem;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn:hover:not([disabled]) {
+  background: var(--bg-hover);
+}
+
+.btn.primary {
+  color: var(--accent-contrast);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.btn.primary:hover:not([disabled]) {
+  background: var(--accent-2);
+}
+
+.btn[disabled] {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}

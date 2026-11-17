@@ -18,6 +18,8 @@ import {
 import { SIDEBAR_WIDTH } from '@thicket/contract';
 import { filter } from 'rxjs';
 
+import { HostKeyDialog } from '../connections/host-key-dialog';
+import { HostKeyService } from '../connections/host-key.service';
 import { ConfirmDialog } from '../safety/confirm-dialog';
 import { SidebarTree } from '../sidebar/sidebar-tree';
 import { SidebarTreeService } from '../sidebar/sidebar-tree.service';
@@ -46,7 +48,15 @@ export const SIDEBAR_KEY_STEP = 16;
 @Component({
   selector: 'app-shell',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ConfirmDialog, NgComponentOutlet, RouterOutlet, SidebarTree, StatusBar, TabBar],
+  imports: [
+    ConfirmDialog,
+    HostKeyDialog,
+    NgComponentOutlet,
+    RouterOutlet,
+    SidebarTree,
+    StatusBar,
+    TabBar,
+  ],
   host: {
     '[style.--sidebar-width.px]': 'sidebar.width()',
     '[class.production]': 'production()',
@@ -109,6 +119,7 @@ export const SIDEBAR_KEY_STEP = 16;
     </div>
     <app-status-bar class="status" [attr.inert]="modal() ? '' : null" />
     <app-confirm-dialog />
+    <app-host-key-dialog />
   `,
   styleUrl: './app-shell.css',
 })
@@ -128,8 +139,11 @@ export class AppShell {
   private readonly status = inject(StatusService);
   private readonly confirm = inject(ConfirmService);
   private readonly sidebarTree = inject(SidebarTreeService);
-  /** The write confirm dialog is open: everything else is inert. */
-  protected readonly confirmOpen = computed(() => this.confirm.current() !== null);
+  private readonly hostKeys = inject(HostKeyService);
+  /** The write confirm dialog or the SSH host key dialog is open: everything else is inert. */
+  protected readonly confirmOpen = computed(
+    () => this.confirm.current() !== null || this.hostKeys.current() !== null,
+  );
   /**
    * A modal dialog is open (the confirm dialog or the sidebar's prompt): the shortcuts are
    * ignored and the work area, splitter and status bar are inert.

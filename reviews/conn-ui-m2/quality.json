@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "task": "conn-ui-m2",
+  "reviewed_revision": "b34b61a27cddf613f7ceca404f3354c5dfa080ff",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/conn-ui-m2/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/conn-ui-m2/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/conn-ui-m2/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "empty SSH port now means the default 22"
+    },
+    {
+      "id": "CR-2",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "X.509 never writes authSource (switching clears it; URI and draft leave it out)"
+    },
+    {
+      "id": "CR-3",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "host key dialog keeps focus inside while busy and restores it after a failed answer"
+    },
+    {
+      "id": "CR-4",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "dropped-secrets note points to a field only for proxyPassword / key passphrase"
+    },
+    {
+      "id": "TW-1",
+      "source": "test-writer",
+      "severity": "Low",
+      "disposition": "fixed",
+      "note": "storeSecrets comment described clearing typed fields; corrected to the actual behavior"
+    },
+    {
+      "id": "CR-4-followup",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "accepted",
+      "note": "re-review remark, not a finding: the field the note points to appears only once a proxy user or client certificate is set; wording acceptable"
+    }
+  ],
+  "validation": [
+    { "command": "npm run check", "result": "pass" },
+    {
+      "command": "cd packages/renderer && npx ng test --include src/app/connections",
+      "result": "pass"
+    },
+    { "command": "npm run test:e2e -- ssh.e2e.ts connections.e2e.ts", "result": "pass" },
+    { "command": "npm run test:int -- ssh", "result": "pass" }
+  ]
+}
