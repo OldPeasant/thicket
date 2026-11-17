@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "task": "conflict-merge-close",
+  "reviewed_revision": "c575ff46fb36f8dda41c34d9b598ff60739ebdfe",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/conflict-merge-close/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/conflict-merge-close/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/conflict-merge-close/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "deleted/unknown tests did not prove the closing effect; added a test where the deleted conflict changes in place to a readable version (fails without the effect); round 2 review found no findings"}
+  ],
+  "validation": [
+    {"command": "cd packages/renderer && npx ng test --include='src/app/document/**/*.spec.ts'", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}
