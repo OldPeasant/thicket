@@ -16,3 +16,4 @@ agg.run (streamed, paged), previewStage (pipeline up to stage n on a sample), ex
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-17 02:23+0100 by dell26/agent-1): previewStage samples the first sampleSize input docs in natural order ($limit, inserted after a must-be-first stage like $geoNear), not $sample: deterministic, so a preview matches running the stages; same as docs.previewMany
