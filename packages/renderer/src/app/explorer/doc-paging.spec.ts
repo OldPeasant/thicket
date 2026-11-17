@@ -24,7 +24,10 @@ class Host {
   readonly doc = signal<unknown>({ _id: 1, items: items(2000) });
 }
 
-describe('Paging inside a document', () => {
+// Rendering pages of a 2 000-item array in jsdom can take more than Vitest's default 5 s per test
+// when the whole renderer suite runs in parallel. A timed-out test keeps running and would then
+// click the next test's pager (shared `fixture`), so allow more time than the default.
+describe('Paging inside a document', { timeout: 30_000 }, () => {
   let fixture: ComponentFixture<Host>;
   const el = () => fixture.nativeElement as HTMLElement;
   const settle = async () => {
@@ -135,6 +138,22 @@ describe('Paging inside a document', () => {
     expect(docItems()).toHaveLength(2000);
     expect(docItems()[649]?.name).toBe('item 649');
     expect(docItems()[651]?.name).toBe('item 651');
+  });
+
+  it('deletes the item it was asked to on page 7, not the one at that row of page 1', async () => {
+    await jumpTo('7');
+    // Row 0 of page 7 is item 600.
+    const del = [...el().querySelectorAll<HTMLButtonElement>('button[title="Delete item"]')];
+    expect(del.length).toBeGreaterThanOrEqual(100);
+    del[0]?.click();
+    await settle();
+    expect(docItems()).toHaveLength(1999);
+    expect(docItems()[599]?.name).toBe('item 599');
+    expect(docItems()[600]?.name).toBe('item 601');
+    expect(docItems()[0]?.name).toBe('item 0');
+    // The page stays; it now starts with the item after the deleted one.
+    expect(range()).toBe('601–700 of 1,999 items');
+    expect(names()[0]).toBe('item 601');
   });
 
   it('follows the page size setting', async () => {
