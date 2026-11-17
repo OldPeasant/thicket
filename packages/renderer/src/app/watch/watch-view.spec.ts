@@ -220,6 +220,156 @@ describe('WatchView', () => {
     expect(text(get('watch-count'))).toContain(`showing the newest ${MAX_EVENTS}`);
   });
 
+  it('switching the lookup while stopped does not start; Start then uses the new mode', async () => {
+    await create();
+    get('watch-stop').click();
+    await settle();
+    const box = get<HTMLInputElement>('watch-lookup');
+    box.checked = false;
+    box.dispatchEvent(new Event('change'));
+    await settle();
+    expect(sent()).toHaveLength(1);
+    expect(view.status()).toEqual({ state: 'stopped' });
+    expect(all('watch-start')).toHaveLength(1);
+    get('watch-start').click();
+    await settle();
+    expect(sent().at(-1)).toEqual({ profileId: 'p1', db: 'shop', coll: 'orders' });
+  });
+
+  it('switching the lookup back on restarts with updateLookup; an unchanged mode does nothing', async () => {
+    await create();
+    view.setFullDocument(false);
+    await settle();
+    view.setFullDocument(false);
+    await settle();
+    expect(sent()).toHaveLength(2);
+    view.setFullDocument(true);
+    await settle();
+    expect(sent()).toHaveLength(3);
+    expect(sent().at(-1)).toEqual({
+      profileId: 'p1',
+      db: 'shop',
+      coll: 'orders',
+      fullDocument: 'updateLookup',
+    });
+  });
+
+  it('collapses an expanded event on a second click', async () => {
+    await create();
+    await push(UPDATE);
+    el().querySelector<HTMLButtonElement>('.toggle')?.click();
+    await settle();
+    expect(all('watch-event-text')).toHaveLength(1);
+    el().querySelector<HTMLButtonElement>('.toggle')?.click();
+    await settle();
+    expect(all('watch-event-text')).toEqual([]);
+  });
+
+  it('does not start without a profile', async () => {
+    fixture = TestBed.createComponent(WatchView);
+    view = fixture.componentInstance;
+    fixture.componentRef.setInput('tab', { id: 'watch:x', kind: 'watch', title: 'Watch' });
+    await settle();
+    expect(sent()).toEqual([]);
+    expect(view.status()).toEqual({ state: 'stopped' });
+  });
+
+  it('ignores events and errors of a stream replaced by a restart', async () => {
+    let n = 0;
+    fake.handle('admin.watch', () => ({ streamId: `s${++n}` }));
+    await create();
+    get('watch-stop').click();
+    await settle();
+    get('watch-start').click();
+    await settle();
+    expect(fake.cancels).toEqual(['s1']);
+    // Late data and a late error of the cancelled stream change nothing.
+    fake.data('admin.watch', 's1', { event: DELETE });
+    fake.failStream('s1', { code: 'CANCELLED', message: 'The operation was cancelled' });
+    await push();
+    expect(all('watch-event')).toEqual([]);
+    expect(all('watch-error')).toEqual([]);
+    expect(text(get('watch-waiting'))).toContain('Watching');
+    fake.data('admin.watch', 's2', { event: INSERT });
+    await settle();
+    expect(all('watch-event').map((r) => r.dataset['op'])).toEqual(['insert']);
+  });
+
+  describe('opening documents in quick succession', () => {
+    const OTHER_ID = '{"$oid":"65a000000000000000000002"}';
+    const OTHER = event('insert', {
+      documentKey: { _id: JSON.parse(OTHER_ID) as unknown },
+      fullDocument: { _id: JSON.parse(OTHER_ID) as unknown, n: 7 },
+    });
+    const docOf = (id: string, n: number) => `{"_id":${id},"n":{"$numberInt":"${n}"}}`;
+
+    /** docs.get answers the test releases by hand, per requested id. */
+    function deferredDocsGet() {
+      const pending = new Map<string, (outcome: unknown) => void>();
+      fake.handle(
+        'docs.get',
+        ({ id }) =>
+          new Promise((resolve) => pending.set(id, resolve as (outcome: unknown) => void)),
+      );
+      return (id: string, outcome: unknown) => pending.get(id)?.(outcome);
+    }
+
+    it('shows the newest document when an older request answers last', async () => {
+      const release = deferredDocsGet();
+      await create();
+      await push(INSERT, OTHER);
+      // Newest first: [OTHER, INSERT]. Open INSERT, then OTHER.
+      all('watch-open')[1]?.click();
+      await settle();
+      all('watch-open')[0]?.click();
+      await settle();
+      release(OTHER_ID, { doc: docOf(OTHER_ID, 7), sliced: [] });
+      await settle();
+      release(ID, { doc: docOf(ID, 1), sliced: [] });
+      await settle();
+      expect(text(get('watch-doc-text'))).toContain('n: 7');
+      expect(text(get('watch-doc-text'))).not.toContain('n: 1');
+    });
+
+    it('a late failure of an older request does not replace the newer document', async () => {
+      const release = deferredDocsGet();
+      await create();
+      await push(INSERT, OTHER);
+      all('watch-open')[1]?.click();
+      await settle();
+      all('watch-open')[0]?.click();
+      await settle();
+      release(OTHER_ID, { doc: docOf(OTHER_ID, 7), sliced: [] });
+      await settle();
+      release(ID, { error: { code: 'SERVER_ERROR', message: 'boom' } });
+      await settle();
+      expect(text(get('watch-doc-text'))).toContain('n: 7');
+      expect(el().textContent).not.toContain('boom');
+    });
+
+    it('closing the panel while a document loads keeps it closed when the answer arrives', async () => {
+      const release = deferredDocsGet();
+      await create();
+      await push(INSERT);
+      get('watch-open').click();
+      await settle();
+      get('watch-doc-close').click();
+      await settle();
+      release(ID, { doc: docOf(ID, 1), sliced: [] });
+      await settle();
+      expect(all('watch-doc')).toEqual([]);
+    });
+
+    it('shows a failed document load as an error', async () => {
+      fake.fail('docs.get', { code: 'SERVER_ERROR', message: 'not authorized on shop' });
+      await create();
+      await push(INSERT);
+      get('watch-open').click();
+      await settle();
+      expect(text(get('watch-doc'))).toContain('not authorized on shop');
+    });
+  });
+
   it('cancels the stream when the tab closes', async () => {
     await create();
     fixture.destroy();

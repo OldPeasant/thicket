@@ -709,6 +709,85 @@ describe('SidebarTree', () => {
     });
   });
 
+  describe('watch changes', () => {
+    it('is offered on a connection only while it is connected', async () => {
+      await start();
+      await menu(node('conn', 'Profile p1'));
+      const item = must('menu-watch') as HTMLButtonElement;
+      expect(item.textContent?.trim()).toBe('Watch changes');
+      expect(item.disabled).toBe(true);
+      await click(item);
+      expect(TestBed.inject(WorkspaceService).tabs()).toHaveLength(0);
+    });
+
+    it('opens the deployment watch tab from the connection menu', async () => {
+      await start();
+      await click(node('conn', 'Profile p1'));
+      await menu(node('conn', 'Profile p1'));
+      await click(must('menu-watch'));
+      expect(TestBed.inject(WorkspaceService).active()).toMatchObject({
+        id: 'watch:p1',
+        kind: 'watch',
+        title: 'Watch deployment',
+        detail: 'Profile p1',
+        data: { profileId: 'p1' },
+      });
+      expect(byTestId('tree-menu')).toBeNull();
+    });
+
+    it('opens the database watch tab from the database menu', async () => {
+      await start();
+      await click(node('conn', 'Profile p1'));
+      await menu(node('db', 'shop'));
+      const item = must('menu-watch') as HTMLButtonElement;
+      expect(item.textContent?.trim()).toBe('Watch changes');
+      await click(item);
+      expect(TestBed.inject(WorkspaceService).active()).toMatchObject({
+        id: 'watch:p1:shop',
+        kind: 'watch',
+        title: 'Watch shop',
+        data: { profileId: 'p1', db: 'shop' },
+      });
+    });
+
+    it('opens the collection watch tab from the collection menu', async () => {
+      await start();
+      await openShop();
+      await menu(node('coll', 'orders'));
+      const item = must('menu-watch') as HTMLButtonElement;
+      expect(item.disabled).toBe(false);
+      await click(item);
+      expect(TestBed.inject(WorkspaceService).active()).toMatchObject({
+        id: 'watch:p1:shop.orders',
+        kind: 'watch',
+        title: 'Watch shop.orders',
+        data: { profileId: 'p1', db: 'shop', coll: 'orders' },
+      });
+    });
+
+    it('is disabled on a view (views have no change stream)', async () => {
+      await start();
+      await openShop();
+      await menu(node('coll', 'big_orders'));
+      const item = must('menu-watch') as HTMLButtonElement;
+      expect(item.disabled).toBe(true);
+      await click(item);
+      expect(TestBed.inject(WorkspaceService).tabs()).toHaveLength(0);
+    });
+
+    it('stays available on read-only profiles (watching is a read)', async () => {
+      await start();
+      await click(node('conn', 'Reader'));
+      await menu(node('conn', 'Reader'));
+      expect((must('menu-watch') as HTMLButtonElement).disabled).toBe(false);
+      await menu(node('db', 'shop'));
+      expect((must('menu-watch') as HTMLButtonElement).disabled).toBe(false);
+      await click(node('db', 'shop'));
+      await menu(node('coll', 'orders'));
+      expect((must('menu-watch') as HTMLButtonElement).disabled).toBe(false);
+    });
+  });
+
   describe('read-only profiles', () => {
     it('disables every write action and shows the badge', async () => {
       await start();

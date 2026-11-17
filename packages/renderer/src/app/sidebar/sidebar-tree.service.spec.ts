@@ -979,6 +979,69 @@ describe('SidebarTreeService', () => {
       });
     });
 
+    it('openWatch opens the change-stream tab of a deployment with the production flag', () => {
+      tree.openWatch('prod');
+      expect(ws.active()).toEqual({
+        id: 'watch:prod',
+        kind: 'watch',
+        title: 'Watch deployment',
+        detail: 'Profile prod',
+        production: true,
+        data: { profileId: 'prod' },
+      });
+    });
+
+    it('openWatch opens the tab of a database and of a collection', () => {
+      tree.openWatch('p1', 'shop');
+      expect(ws.active()).toEqual({
+        id: 'watch:p1:shop',
+        kind: 'watch',
+        title: 'Watch shop',
+        detail: 'Profile p1 / shop',
+        production: false,
+        data: { profileId: 'p1', db: 'shop' },
+      });
+      tree.openWatch('p1', 'shop', 'orders');
+      expect(ws.active()).toEqual({
+        id: 'watch:p1:shop.orders',
+        kind: 'watch',
+        title: 'Watch shop.orders',
+        detail: 'Profile p1 / shop',
+        production: false,
+        data: { profileId: 'p1', db: 'shop', coll: 'orders' },
+      });
+    });
+
+    it('openWatch ignores a collection without a database (watches the deployment)', () => {
+      tree.openWatch('p1', undefined, 'orders');
+      expect(ws.active()).toMatchObject({ id: 'watch:p1', data: { profileId: 'p1' } });
+      expect(ws.active()?.data).toEqual({ profileId: 'p1' });
+    });
+
+    it('openWatch twice selects the existing tab; each target gets its own tab', () => {
+      tree.openWatch('p1', 'shop', 'orders');
+      tree.openWatch('p1', 'shop');
+      tree.openWatch('p1');
+      tree.openWatch('p2', 'shop', 'orders');
+      tree.openWatch('p1', 'shop', 'orders');
+      expect(ws.tabs().map((t) => t.id)).toEqual([
+        'watch:p1:shop.orders',
+        'watch:p1:shop',
+        'watch:p1',
+        'watch:p2:shop.orders',
+      ]);
+      expect(ws.active()?.id).toBe('watch:p1:shop.orders');
+    });
+
+    it('openWatch of an unknown profile falls back to its id', () => {
+      tree.openWatch('gone', 'shop');
+      expect(ws.active()).toMatchObject({
+        id: 'watch:gone:shop',
+        detail: 'gone / shop',
+        production: false,
+      });
+    });
+
     it('dropping a database closes the tabs of its collections only', async () => {
       openTabs();
       const done = tree.dropDatabase('p1', 'shop');
