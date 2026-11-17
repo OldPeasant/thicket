@@ -1,11 +1,11 @@
 ---
 title: M1: Paging inside documents
-status: todo
-owner: 
+status: in_progress
+owner: dell26/agent-3
 deps: [bson-inputs,docs-query-backend]
 touches: [packages/renderer/src/app/explorer]
 prio: 1
-lease_until: 
+lease_until: 2026-11-17T02:40:31Z
 extended: 
 releases: 1
 ---
