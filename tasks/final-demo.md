@@ -16,6 +16,7 @@ The complete SPEC demo script as one e2e suite (steps 2–11, fixtures instead o
   - verified (2026-11-17 05:58+0100 by dell26/agent-1): at final code 287f9b8: npm run dist (AppImage target built, mtime 2026-11-17T04:56:49Z; .deb target fails on this host: fpm ruby lacks libcrypt.so.1, unrelated), then npm run test:e2e -- demo -> test logs that AppImage path+mtime; 2 passed (release demo steps 2-11 against the AppImage 49.2s; m1 demo 10.0s)
 - [x] Screenshots of every step in Business light and Tron dark committed under reviews/final-demo/
   - verified (2026-11-17 05:48+0100 by dell26/agent-1): same run wrote test-results/demo/{business-light,tron-dark}/step-01..step-11 (22 PNGs per theme); copied to reviews/final-demo/{business-light,tron-dark}/ and committed in a751b3d; spot-checked step-02 (password masked), step-09 IXSCAN (tron dark), step-11 shell count 40000 (business light)
+  - verified (2026-11-17 05:58+0100 by dell26/agent-1): same run wrote test-results/demo/{business-light,tron-dark}/step-01..step-11 (22 PNGs per theme), copied to reviews/final-demo/{business-light,tron-dark}/ and committed (287f9b8); checked step-02 password masked, tron-dark step-02-production shows checked Production box, step-09 IXSCAN, step-11 count 40000
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
