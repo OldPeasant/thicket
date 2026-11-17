@@ -217,6 +217,75 @@ describe('docsQueryHandlers', () => {
     });
   });
 
+  it('conn.close kills a running find (killOp, killCursors) before it closes the client', async () => {
+    const order: string[] = [];
+    let releaseFind: (reply: Document) => void = () => undefined;
+    const client: ClientLike = {
+      connect: () => Promise.resolve(),
+      close: () => {
+        order.push('client.close');
+        return Promise.resolve();
+      },
+      db: () => ({
+        command: async (command: Document) => {
+          order.push(Object.keys(command)[0] ?? '');
+          if ('find' in command) {
+            return new Promise<Document>((resolve) => (releaseFind = resolve));
+          }
+          if ('currentOp' in command) return { inprog: [{ opid: 42 }], ok: 1 };
+          if ('killOp' in command) {
+            // The killed find answers with the cursor it had opened.
+            releaseFind(cursorReply(77, [{ _id: 1 }]));
+            return { ok: 1 };
+          }
+          return defaultAnswer('admin', command);
+        },
+      }),
+    };
+    const manager = new ConnectionManager({
+      loadProfile: () => Promise.resolve(profile),
+      loadSecrets: () => Promise.resolve(null),
+      createClient: () => client,
+    });
+    await manager.open('p1', undefined);
+    order.length = 0;
+    const producers: StreamProducer[] = [];
+    const handler = docsQueryHandlers(manager)['docs.find'] as Handler;
+    await handler({ ...base, filter: '{}' } as never, {
+      signal: new AbortController().signal,
+      requestId: 'r1',
+      openStream: (producer) => {
+        producers.push(producer);
+        return 'stream-1';
+      },
+    });
+    const out = sink();
+    const running = producers[0]?.(out);
+    running?.catch(() => undefined);
+    await vi.waitFor(() => expect(order).toEqual(['find']));
+    await manager.close('p1');
+    await expect(running).rejects.toMatchObject({
+      code: 'CANCELLED',
+      message: 'The connection was closed',
+    });
+    expect(order).toEqual(['find', 'currentOp', 'killOp', 'killCursors', 'client.close']);
+    expect(out.batches).toEqual([]);
+  });
+
+  it('a finished find does not delay a later conn.close', async () => {
+    vi.useFakeTimers();
+    try {
+      const { call, producers, manager } = await setup();
+      await call('docs.find', { ...base, filter: '{}' });
+      await expect(producers[0]?.(sink())).resolves.toBe(2);
+      // No timer advanced: the finished stream is no longer waited for.
+      await manager.close('p1');
+      expect(manager.statusOf('p1')).toEqual({ profileId: 'p1', state: 'disconnected' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('docs.find passes a failure on unchanged while its connection is open', async () => {
     const { call, producers } = await setup((db, command) => {
       if ('find' in command) throw new Error('boom');
