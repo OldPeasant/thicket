@@ -5,7 +5,7 @@ owner: felix/agent-2
 deps: [doc-edit-save]
 touches: [packages/renderer/src/app/document/history]
 prio: 3
-lease_until: 2026-11-17T07:21:20Z
+lease_until: 2026-11-17T07:26:24Z
 ---
 ## Goal
 Keep the pre-save version of the last save per document; 'Undo last save' writes it back with the same conflict check.
