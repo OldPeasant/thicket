@@ -1,10 +1,11 @@
 ---
 title: conn.close kills the server ops of the profile's running streams
-status: todo
-owner:
+status: in_progress
+owner: dell26/agent-1
 deps: [docs-query-backend]
 touches: [packages/backend/src/connections/manager.ts,packages/backend/src/connections/handlers.ts,packages/backend/src/docs/query]
 prio: 2
+lease_until: 2026-11-17T03:03:41Z
 ---
 ## Goal
 `conn.close` cancels the profile's running streams (contract `conn.ts`) before it closes the driver
