@@ -205,6 +205,7 @@ export async function openSshTunnel(
   const close = (): Promise<void> => {
     closing ??= (async () => {
       for (const channel of channels) channel.destroy();
+      channels.clear();
       await socks?.close();
       await new Promise<void>((resolve) => {
         client.once('close', () => resolve());
