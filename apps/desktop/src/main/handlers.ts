@@ -2,6 +2,7 @@ import type { Handler } from '@thicket/backend';
 import type { ParsedParamsOf, ResultOf, Settings } from '@thicket/contract';
 
 import { dialogHandlers, type NativeDialogs } from '../dialogs';
+import { historyHandlers, type HistoryStore } from '../history';
 import { oidcHandlers, type OidcMainDeps } from '../oidc';
 import {
   importExportHandlers,
@@ -26,6 +27,8 @@ export interface MainHandlerDeps {
   profiles?: ProfilesStore;
   /** With `profiles`: serves `profiles.importCompass/importUris/export` (native file dialogs). */
   dialogs?: NativeDialogs;
+  /** Serves `history.*` (query history and favorites) when given. */
+  history?: HistoryStore;
   /** Diagnostics of the handlers (e.g. an imported secret that could not be saved). */
   log?: (message: string) => void;
 }
@@ -45,6 +48,7 @@ export function mainHandlers(deps: MainHandlerDeps): Record<string, Handler> {
           ...(deps.log ? { log: deps.log } : {}),
         })
       : {}),
+    ...(deps.history ? historyHandlers(deps.history) : {}),
   };
   const store = deps.settings;
   if (store) {
