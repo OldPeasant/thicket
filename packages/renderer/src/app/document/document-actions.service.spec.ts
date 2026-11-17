@@ -1023,6 +1023,82 @@ describe('DocumentActions', () => {
       expect(actions.isPartial(keyOf(2))).toBe(true);
       expect(actions.isPartial(keyOf(9))).toBe(false);
     });
+
+    // conflict-reinsert-rule: the one rule the conflict view and overwrite share.
+    describe('reinsertBlocker', () => {
+      it('is null without a conflict, even with a projection active', () => {
+        expect(actions.reinsertBlocker(keyOf(1))).toBeNull();
+        projection = '{"total":{"$numberInt":"1"}}';
+        expect(actions.reinsertBlocker(keyOf(1))).toBeNull();
+      });
+
+      it('is null when the server version changed (not deleted), even under a projection', async () => {
+        await conflictWith(orderText(1, 77, 3));
+        expect(actions.reinsertBlocker(keyOf(1))).toBeNull();
+        projection = '{"total":{"$numberInt":"1"}}';
+        expect(actions.reinsertBlocker(keyOf(1))).toBeNull();
+      });
+
+      it('is null when the server version is unknown', async () => {
+        fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: 42 } });
+        fake.fail('docs.get', { code: 'SERVER_ERROR', message: 'connection reset' });
+        edits.edit(order(1), order(1, 15));
+        expect(await actions.save(keyOf(1))).toBe(false);
+        expect(actions.conflicts().has(keyOf(1))).toBe(true);
+        expect(actions.conflicts().get(keyOf(1))?.current).toBeUndefined();
+        projection = '{"total":{"$numberInt":"1"}}';
+        expect(actions.reinsertBlocker(keyOf(1))).toBeNull();
+      });
+
+      it('is null for a whole document deleted on the server, and overwrite inserts it', async () => {
+        await conflictWith(null);
+        expect(actions.reinsertBlocker(keyOf(1))).toBeNull();
+        expect(await actions.overwrite(keyOf(1))).toBe(true);
+        expect(params('docs.insert')).toHaveLength(1);
+      });
+
+      it.each([
+        ['an inclusion projection of top-level fields', '{"total":{"$numberInt":"1"}}'],
+        ['an exclusion projection of top-level fields', '{"qty":{"$numberInt":"0"}}'],
+        ['a dotted projection', '{"addr.city":{"$numberInt":"1"}}'],
+      ])(
+        'is "projection" for a deleted document while %s is active (unlike resolveBlocker)',
+        async (_name, query) => {
+          await conflictWith(null);
+          projection = query;
+          expect(actions.resolveBlocker(keyOf(1))).toBeNull();
+          expect(actions.reinsertBlocker(keyOf(1))).toBe('projection');
+          expect(await actions.overwrite(keyOf(1))).toBe(false);
+          expect(fake.requests).toHaveLength(0);
+          expect(actions.message()?.text).toMatch(/^Not inserted: with a projection/);
+        },
+      );
+
+      it('is "partial" for a deleted document edited under a projection that was cleared since', async () => {
+        projection = '{"total":{"$numberInt":"1"}}';
+        fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: null } });
+        edits.edit(order(1), order(1, 15), true);
+        expect(await actions.save(keyOf(1))).toBe(false);
+        fake.requests.length = 0;
+        expect(actions.reinsertBlocker(keyOf(1))).toBe('projection');
+        projection = undefined;
+        expect(actions.reinsertBlocker(keyOf(1))).toBe('partial');
+        expect(await actions.overwrite(keyOf(1))).toBe(false);
+        expect(fake.requests).toHaveLength(0);
+        expect(actions.message()?.text).toContain('Not inserted');
+        expect(actions.message()?.text).toContain('loaded only partly');
+        expect(actions.message()?.text).not.toContain('with a projection active');
+      });
+
+      it('is null again once the conflict of the deleted document is resolved', async () => {
+        await conflictWith(null);
+        projection = '{"total":{"$numberInt":"1"}}';
+        expect(actions.reinsertBlocker(keyOf(1))).toBe('projection');
+        await actions.keepServer(keyOf(1));
+        expect(actions.conflicts().size).toBe(0);
+        expect(actions.reinsertBlocker(keyOf(1))).toBeNull();
+      });
+    });
   });
 
   // Round 2: the paths the CR-1..CR-6 fixes added.
@@ -1755,6 +1831,25 @@ describe('DocumentActions', () => {
       expect(actions.message()?.text).not.toContain('run the query');
       expect(fake.requests).toHaveLength(0);
       expect(changes).toEqual([]);
+    });
+
+    it('reinsertBlocker: a cut document deleted on the server is "partial", even under a projection', async () => {
+      await conflictWith({ current: null });
+      // The document left the shown page: the conflict still remembers it is cut.
+      cut = undefined;
+      expect(actions.reinsertBlocker(keyOf(1))).toBe('partial');
+      projection = '{"name":{"$numberInt":"1"},"items":{"$numberInt":"1"}}';
+      expect(actions.reinsertBlocker(keyOf(1))).toBe('partial');
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      expect(actions.message()?.text).toContain('long arrays are read page by page');
+      expect(actions.message()?.text).not.toContain('with a projection active');
+      expect(fake.requests).toHaveLength(0);
+    });
+
+    it('reinsertBlocker is null for a cut document whose server version changed (not deleted)', async () => {
+      await conflictWith({ current: bigText('renamed elsewhere') });
+      expect(actions.resolveBlocker(keyOf(1))).toBe('partial');
+      expect(actions.reinsertBlocker(keyOf(1))).toBeNull();
     });
 
     it('a save after the conflict was kept reads back cut and passes the new cut arrays', async () => {
