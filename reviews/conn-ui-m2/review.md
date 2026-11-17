@@ -4,9 +4,9 @@ Date: 2026-11-17
 
 Task: conn-ui-m2 - M2: Connection editor for SSH, X.509, proxy and read preference
 
-Scope: `git diff f94e6cf..aa77cf8` (task code commits a9c1310, 0c7ce7e, 7fceb46, test-writer c05e8df, fixes aa77cf8; 2df263b holds only the first review report). Re-review of the final code with focus on the commits after 7fceb46; production code: `packages/renderer/src/app/connections/` (connection-form.model.ts, connection-editor.ts/.html/.css, host-key.service.ts, host-key-dialog.ts/.css), `packages/renderer/src/app/layout/app-shell.ts`, `test/e2e/ssh.e2e.ts`, `test/integration/fixtures/ssh.ts`.
+Scope: `git diff f94e6cf..b34b61a` (task code commits a9c1310, 0c7ce7e, 7fceb46, test-writer c05e8df, fixes aa77cf8, test-writer re-check tests b34b61a; 2df263b holds only the first review report). Re-review of the final code with focus on the commits after 7fceb46; production code: `packages/renderer/src/app/connections/` (connection-form.model.ts, connection-editor.ts/.html/.css, host-key.service.ts, host-key-dialog.ts/.css), `packages/renderer/src/app/layout/app-shell.ts`, `test/e2e/ssh.e2e.ts`, `test/integration/fixtures/ssh.ts`.
 
-Reviewed revision: aa77cf816cbef0c84eaf4d15d1c6f8ae824c2cea
+Reviewed revision: b34b61a27cddf613f7ceca404f3354c5dfa080ff (production code unchanged since aa77cf8; b34b61a adds spec tests only)
 
 Requirements:
 - tasks/conn-ui-m2.md (goal, 2 acceptance criteria, CR-2/CR-3 constraints from the x509-proxy review, recorded assumptions)
@@ -17,14 +17,15 @@ Requirements:
 
 Git range:
 - Branch: main (local, task work not yet pushed)
-- HEAD: aa77cf816cbef0c84eaf4d15d1c6f8ae824c2cea
+- HEAD: b34b61a27cddf613f7ceca404f3354c5dfa080ff
 - Base/start: f94e6cf312b7efef453e423d6a70bafc02d1e8ab
-- Commits reviewed: 6 (5 with code or tests)
+- Commits reviewed: 7 (6 with code or tests)
 - Uncommitted changes: none at review start
 
 Commands run (read-only):
 - `git diff 7fceb46..aa77cf8` and `git diff f94e6cf..aa77cf8`: read in full for production files
-- `cd packages/renderer && npx ng test` -> 73 test files, 2228 tests passed
+- `git diff aa77cf8..b34b61a -- packages/`: only `connection-editor.spec.ts` (+2 tests: a saved X.509 profile with authSource is saved without it; a dropped client key password still points to its field) and `host-key-dialog.spec.ts` (+2 tests: focus moved inside the dialog survives a failed answer; a late error of a timed-out question is not shown on the next one). No production files changed. The fake timers are reset in `afterEach` (`vi.useRealTimers()`), and the tests assert behavior, not internals.
+- `cd packages/renderer && npx ng test` at b34b61a -> 73 test files, 2228 tests passed. The run at aa77cf8 gave the same count, apparently because these tests were already in the working tree, uncommitted, at that point.
 
 Summary: 0 P0, 0 P1, 0 P2, 0 P3 open (4 P3 from the first pass, all resolved)
 
