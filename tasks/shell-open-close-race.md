@@ -16,7 +16,8 @@ connection the new shell outlives its connection (shell-backend review round 6, 
 ## Acceptance criteria
 - [x] A `conn.close` (or status error/disconnected) while `shell.open` is pending makes that open answer `CANCELLED` and terminates its worker (unit test in handlers.spec.ts or host.spec.ts)
   - verified (2026-11-17 05:58+0100 by dell26/agent-3): cd packages/backend && npx vitest run src/shell/host.spec.ts -> 69 passed; tests 'closeProfile while an open waits for its worker answers CANCELLED and terminates the worker', '...credential provider is pending...', several pending opens, abort after worker answer (closeProfile is what backend.ts calls on conn.close and status error/disconnected)
-- [ ] A shell opened after a reconnect is unaffected (unit test)
+- [x] A shell opened after a reconnect is unaffected (unit test)
+  - verified (2026-11-17 05:58+0100 by dell26/agent-3): same run -> 'a shell opened after closeProfile (reconnect) is unaffected' passes (new open stays registered, evaluates; worker not terminated)
 
 ## Notes
 See reviews/shell-backend/review.md round 6.
