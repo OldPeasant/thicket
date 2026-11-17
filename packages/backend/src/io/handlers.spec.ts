@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -371,6 +372,121 @@ describe('ioHandlers', () => {
         code: 'NOT_FOUND',
       });
     });
+  });
+});
+
+describe('ioHandlers and conn.close', () => {
+  /**
+   * A connection whose `hang` command waits until a `killOp` interrupts it; `order` records the
+   * commands and the client's close (with whether `file` still existed at that moment).
+   */
+  async function closing(hang: string, file: string) {
+    const order: string[] = [];
+    let interrupt: (error: Error) => void = () => undefined;
+    const client: ClientLike = {
+      connect: () => Promise.resolve(),
+      close: () => {
+        order.push(`client.close (file ${existsSync(file) ? 'exists' : 'removed'})`);
+        return Promise.resolve();
+      },
+      db: () => ({
+        command: (command: Document) => {
+          const name = Object.keys(command)[0] ?? '';
+          order.push(name);
+          if (name === hang) {
+            return new Promise<Document>((_resolve, reject) => (interrupt = reject));
+          }
+          if ('hello' in command) return Promise.resolve({ isWritablePrimary: true, ok: 1 });
+          if ('buildInfo' in command) return Promise.resolve({ version: '8.2.0', ok: 1 });
+          if ('find' in command) {
+            return Promise.resolve({
+              cursor: { id: 77, ns: 'shop.orders', firstBatch: [{ _id: 1 }] },
+              ok: 1,
+            });
+          }
+          if ('currentOp' in command) return Promise.resolve({ inprog: [{ opid: 42 }], ok: 1 });
+          if ('killOp' in command) {
+            interrupt(new Error('operation was interrupted'));
+            return Promise.resolve({ ok: 1 });
+          }
+          return Promise.resolve({ ok: 1 });
+        },
+      }),
+    };
+    const manager = new ConnectionManager({
+      loadProfile: () => Promise.resolve(profile),
+      loadSecrets: () => Promise.resolve(null),
+      createClient: () => client,
+    });
+    await manager.open('p1', undefined);
+    order.length = 0;
+    const answers: (string | null)[] = [];
+    const dialogs: FileDialogs = {
+      saveFile: () => Promise.resolve(answers.shift() ?? null),
+      openFile: () => Promise.resolve(answers.shift() ?? null),
+    };
+    const handlers = ioHandlers(manager, dialogs);
+    const producers: StreamProducer[] = [];
+    const call = (method: string, params: unknown) =>
+      (handlers[method] as Handler)(params as never, {
+        signal: new AbortController().signal,
+        requestId: 'r1',
+        openStream: (producer) => {
+          producers.push(producer);
+          return `stream-${String(producers.length)}`;
+        },
+      });
+    return { manager, order, answers, producers, call };
+  }
+
+  it('io.export ends CANCELLED; the server operation, cursor and partial file go first', async () => {
+    const file = path.join(dir, 'partial.jsonl');
+    const { manager, order, answers, producers, call } = await closing('getMore', file);
+    answers.push(file);
+    await call('io.export', exportParams());
+    const out = sink();
+    const running = producers[0]?.(out);
+    running?.catch(() => undefined);
+    // The first batch is written, the next one is still running on the server.
+    await vi.waitFor(() => expect(order).toEqual(['find', 'getMore']));
+    expect(existsSync(file)).toBe(true);
+    await manager.close('p1');
+    await expect(running).rejects.toMatchObject({
+      code: 'CANCELLED',
+      message: 'The connection was closed',
+    });
+    expect(order).toEqual([
+      'find',
+      'getMore',
+      'currentOp',
+      'killOp',
+      'killCursors',
+      'client.close (file removed)',
+    ]);
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it('io.import ends CANCELLED; its running insert is killed before the client closes', async () => {
+    const file = path.join(dir, 'in.jsonl');
+    await writeFile(file, '{"_id":1}\n{"_id":2}\n');
+    const { manager, order, answers, producers, call } = await closing('insert', file);
+    answers.push(file);
+    const preview = (await call('io.previewImport', { format: 'jsonl' })) as {
+      fileToken: string;
+    };
+    await call('io.import', { ...target, fileToken: preview.fileToken });
+    const out = sink();
+    const running = producers[0]?.(out);
+    running?.catch(() => undefined);
+    await vi.waitFor(() => expect(order).toEqual(['insert']));
+    await manager.close('p1');
+    await expect(running).rejects.toMatchObject({
+      code: 'CANCELLED',
+      message: 'The connection was closed',
+    });
+    // The chosen file itself is the user's: an import never removes it.
+    expect(order).toEqual(['insert', 'currentOp', 'killOp', 'client.close (file exists)']);
+    expect(out.batches).toEqual([]);
   });
 });
 
