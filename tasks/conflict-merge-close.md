@@ -5,7 +5,7 @@ owner: felix/agent-2
 deps: [conflict-ui]
 touches: [packages/renderer/src/app/document/conflict]
 prio: 2
-lease_until: 2026-11-17T03:14:04Z
+lease_until: 2026-11-17T03:19:04Z
 ---
 ## Goal
 The conflict view's merge editor (`conflict-view.ts`) stays open after its conflict is gone or no longer
