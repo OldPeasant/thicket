@@ -14,7 +14,7 @@ import { printShellSyntax } from '@thicket/core/shellsyntax';
 import { ApiError, ApiService, describeError } from '../api';
 import { generateObjectId } from '../explorer/bson-input.util';
 import { WriteGuard } from '../safety/write-guard.service';
-import { DocumentEdits, documentKey, idOf } from './edit-session';
+import { DocumentEdits, documentKey, idOf, pendingSave } from './edit-session';
 
 /** The collection the documents belong to, and how the view shows them. */
 export interface DocumentHost {
@@ -47,9 +47,18 @@ export interface ActionMessage {
 /** A save that failed because the document changed on the server. */
 export interface SaveConflict {
   readonly key: string;
-  /** The server version at the time of the save (`null`: deleted). */
-  readonly current: BsonDocument | null;
+  /**
+   * The server version at the time of the save: `null` when deleted, `undefined` when it is
+   * unknown (the conflict did not carry a readable version and reading it again failed).
+   */
+  readonly current: BsonDocument | null | undefined;
 }
+
+/**
+ * Why Overwrite and Merge manually can't resolve a conflict: the server version is unknown, or the
+ * document was loaded with a projection they can't respect (see `DocumentActions.resolveBlocker`).
+ */
+export type ResolveBlocker = 'server-unknown' | 'projection';
 
 let nextDraftId = 0;
 
@@ -96,49 +105,14 @@ export class DocumentActions {
    * cancelled, it was refused or it failed (the edits stay and `message` says why).
    */
   async save(key: string): Promise<boolean> {
-    const host = this.requireHost();
+    this.requireHost();
     const entry = this.edits.get(key);
-    const pending = this.edits.pending().get(key);
-    if (entry === undefined || pending === undefined || this.isBusy(key)) return false;
-    if (!pending.ok) {
-      this.messageState.set({ kind: 'error', text: `Not saved: ${pending.error}` });
-      return false;
-    }
-    const id = idOf(entry.original);
-    if (id === null) return false;
-    const base = {
-      profileId: host.profileId,
-      db: host.db,
-      coll: host.coll,
-      id: stringifyEJson(id),
-    };
-    const diff = pending.diff;
-    const partial = entry.partial || host.projection() !== undefined;
-    if (partial && overwritesHiddenData(diff, entry.original)) {
-      this.messageState.set({ kind: 'error', text: PROJECTION_REFUSED });
-      return false;
-    }
+    if (entry === undefined || this.isBusy(key)) return false;
     const sent = entry.current;
-    return this.write('Not saved', key, async () => {
-      if (diff.kind === 'update') {
-        await this.guard.run('docs.update', {
-          ...base,
-          update: stringifyEJson(diff.update),
-          expected: stringifyEJson(diff.expected),
-        });
-      } else {
-        await this.guard.run('docs.replace', {
-          ...base,
-          doc: stringifyEJson(diff.replacement),
-          expected: stringifyEJson(diff.expected),
-        });
-      }
-      this.dropConflict(key);
-      this.messageState.set({ kind: 'info', text: `Saved ${label(id)}.` });
-      await this.readBack(key, base.id, sent);
-      // What was sent is the new baseline; edits made since then stay unsaved.
-      this.edits.rebase(key, sent);
-    });
+    // What was sent is the new baseline; edits made since then stay unsaved.
+    return this.send(key, entry.original, sent, this.isPartial(key), () =>
+      this.edits.rebase(key, sent),
+    );
   }
 
   /** Saves every edited document, one after the other; stops at the first that isn't saved. */
@@ -173,7 +147,9 @@ export class DocumentActions {
   async overwrite(key: string): Promise<boolean> {
     const entry = this.edits.get(key);
     if (entry === undefined) return false;
-    return this.resolveWith(key, entry.current);
+    const sent = entry.current;
+    // As after a save: what was sent is the baseline, edits made since then stay unsaved.
+    return this.resolveWith(key, sent, () => this.edits.rebase(key, sent));
   }
 
   /**
@@ -183,7 +159,8 @@ export class DocumentActions {
   async saveMerged(key: string, merged: BsonDocument): Promise<boolean> {
     const conflict = this.conflictMap().get(key);
     if (conflict === undefined || conflict.current === null) return false;
-    const id = idOf(conflict.current);
+    if (this.refuseResolve(key)) return false;
+    const id = conflict.current === undefined ? null : idOf(conflict.current);
     const mergedId = idOf(merged);
     if (id === null || mergedId === null || !bsonEquals(id, mergedId)) {
       this.messageState.set({
@@ -192,7 +169,8 @@ export class DocumentActions {
       });
       return false;
     }
-    return this.resolveWith(key, merged);
+    // The merged document replaces the local edits.
+    return this.resolveWith(key, merged, () => this.edits.discard(key));
   }
 
   /**
@@ -217,7 +195,40 @@ export class DocumentActions {
     return (this.edits.get(key)?.partial ?? false) || this.requireHost().projection() !== undefined;
   }
 
-  private async resolveWith(key: string, local: BsonDocument): Promise<boolean> {
+  /**
+   * Why Overwrite and Merge manually can't resolve the conflict under `key` (`null`: they can, or
+   * there is no such conflict; a document deleted on the server is never blocked here).
+   * `'server-unknown'`: the server's current version could not be read. `'projection'`: the
+   * document may be partial and the query's projection is not one of whole top-level fields (a
+   * dotted path or an operator such as `$slice`), or it was edited under a projection that is no
+   * longer active; comparing top-level fields could then change data the user never loaded.
+   */
+  resolveBlocker(key: string): ResolveBlocker | null {
+    const conflict = this.conflictMap().get(key);
+    if (conflict === undefined || conflict.current === null) return null;
+    if (conflict.current === undefined) return 'server-unknown';
+    if (!this.isPartial(key)) return null;
+    const projection = this.requireHost().projection();
+    return projection !== undefined && isTopLevelProjection(projection) ? null : 'projection';
+  }
+
+  /** Refuses (with a message) when `resolveBlocker` says Overwrite and Merge can't run. */
+  private refuseResolve(key: string): boolean {
+    const blocker = this.resolveBlocker(key);
+    if (blocker === null) return false;
+    this.messageState.set({
+      kind: 'error',
+      text: blocker === 'projection' ? PROJECTION_RESOLVE_REFUSED : SERVER_UNKNOWN_REFUSED,
+    });
+    return true;
+  }
+
+  /**
+   * Writes `local` over the server's current version of a conflicting document. The edit session
+   * is changed only once the write succeeded (`saved`); a cancel, refusal or failure leaves it
+   * as it was.
+   */
+  private async resolveWith(key: string, local: BsonDocument, saved: () => void): Promise<boolean> {
     const conflict = this.conflictMap().get(key);
     const entry = this.edits.get(key);
     if (conflict === undefined || this.isBusy(key)) return false;
@@ -237,17 +248,72 @@ export class DocumentActions {
         await this.readBack(key, key, local);
       });
     }
-    // With a projection only the fields the user saw are compared, so hidden ones stay as they are.
+    const server = conflict.current;
+    // refuseResolve also refuses an unknown server version (`undefined`).
+    if (this.refuseResolve(key) || server === undefined) return false;
+    // A projection of whole top-level fields (see resolveBlocker): only the fields the user saw are
+    // compared, so hidden ones stay as they are.
     const base = partial
-      ? visibleFields(conflict.current, entry === undefined ? [local] : [entry.original, local])
-      : conflict.current;
+      ? visibleFields(server, entry === undefined ? [local] : [entry.original, local])
+      : server;
     if (bsonEquals(base, local)) {
       // Nothing left to write: the server already has this version.
       await this.keepServer(key);
       return true;
     }
-    this.edits.resolve(key, base, local);
-    return this.save(key);
+    return this.send(key, base, local, partial, saved);
+  }
+
+  /**
+   * Saves `current` as the minimal diff from `original`, with `original`'s values as the conflict
+   * check (`docs.update`, or `docs.replace` when the diff needs it), then reads it back and calls
+   * `saved`. Nothing in the edit session changes before the write succeeded.
+   */
+  private async send(
+    key: string,
+    original: BsonDocument,
+    current: BsonDocument,
+    partial: boolean,
+    saved: () => void,
+  ): Promise<boolean> {
+    const host = this.requireHost();
+    const pending = pendingSave({ key, original, current, partial });
+    if (!pending.ok) {
+      this.messageState.set({ kind: 'error', text: `Not saved: ${pending.error}` });
+      return false;
+    }
+    const id = idOf(original);
+    if (id === null) return false;
+    const base = {
+      profileId: host.profileId,
+      db: host.db,
+      coll: host.coll,
+      id: stringifyEJson(id),
+    };
+    const diff = pending.diff;
+    if (partial && overwritesHiddenData(diff, original)) {
+      this.messageState.set({ kind: 'error', text: PROJECTION_REFUSED });
+      return false;
+    }
+    return this.write('Not saved', key, async () => {
+      if (diff.kind === 'update') {
+        await this.guard.run('docs.update', {
+          ...base,
+          update: stringifyEJson(diff.update),
+          expected: stringifyEJson(diff.expected),
+        });
+      } else {
+        await this.guard.run('docs.replace', {
+          ...base,
+          doc: stringifyEJson(diff.replacement),
+          expected: stringifyEJson(diff.expected),
+        });
+      }
+      this.dropConflict(key);
+      this.messageState.set({ kind: 'info', text: `Saved ${label(id)}.` });
+      await this.readBack(key, base.id, current);
+      saved();
+    });
   }
 
   /** Deletes the loaded document `doc` after the confirm dialog; its unsaved edits go too. */
@@ -327,7 +393,7 @@ export class DocumentActions {
       await body();
       return true;
     } catch (error) {
-      this.failed(failure, key, error);
+      await this.failed(failure, key, error);
       return false;
     } finally {
       this.busyKeys.update((set) => {
@@ -338,7 +404,7 @@ export class DocumentActions {
     }
   }
 
-  private failed(failure: string, key: string, error: unknown): void {
+  private async failed(failure: string, key: string, error: unknown): Promise<void> {
     const apiError = ApiError.from(error);
     if (apiError.code === 'CANCELLED') {
       this.messageState.set(null);
@@ -346,13 +412,15 @@ export class DocumentActions {
     }
     if (apiError.code === 'CONFLICT') {
       const detail = conflictDetail.safeParse(apiError.detail);
-      let current: BsonDocument | null = null;
-      if (detail.success && detail.data.current !== null) current = parseServerDoc(detail.data);
+      let current: BsonDocument | null | undefined;
+      if (detail.success) current = parseServerDoc(detail.data);
+      // No readable server version in the conflict: read it again (a missing one is no deletion).
+      if (current === undefined) current = await this.serverVersion(key);
       this.conflictMap.update((map) => new Map(map).set(key, { key, current }));
       this.messageState.set({
         kind: 'error',
         text:
-          detail.success && detail.data.current === null
+          current === null
             ? 'Not saved: the document was deleted on the server since it was loaded.'
             : 'Not saved: the document was changed on the server since it was loaded. Your edits are kept.',
       });
@@ -362,10 +430,29 @@ export class DocumentActions {
   }
 
   /**
-   * Reads a saved document back, so the page shows the server's version (MongoDB puts new fields
-   * last, for example).
+   * The server's current version of the document under `key`, read without the projection:
+   * `null` when it is deleted, `undefined` when it could not be read.
    */
-  private async readBack(key: string, id: string, saved: BsonDocument): Promise<void> {
+  private async serverVersion(key: string): Promise<BsonDocument | null | undefined> {
+    const host = this.requireHost();
+    try {
+      const { doc } = await this.api.request('docs.get', {
+        profileId: host.profileId,
+        db: host.db,
+        coll: host.coll,
+        id: key,
+      });
+      return doc === null ? null : parseEJsonDocument(doc);
+    } catch (error) {
+      return ApiError.from(error).code === 'NOT_FOUND' ? null : undefined;
+    }
+  }
+
+  /**
+   * Reads a saved document back, so the page shows the server's version (MongoDB puts new fields
+   * last, for example). When it can't be read, the page shows `saved` (or stays as it is without).
+   */
+  private async readBack(key: string, id: string, saved: BsonDocument | undefined): Promise<void> {
     const host = this.requireHost();
     const projection = host.projection();
     try {
@@ -379,7 +466,7 @@ export class DocumentActions {
       host.documentChanged(key, doc);
     } catch {
       // Not readable now: show what was saved.
-      host.documentChanged(key, stringifyEJson(saved));
+      if (saved !== undefined) host.documentChanged(key, stringifyEJson(saved));
     }
   }
 
@@ -408,6 +495,15 @@ export class DocumentActions {
 const PROJECTION_REFUSED =
   'Not saved: with a projection active, this edit would replace data the projection hides. ' +
   'Clear the projection and edit again.';
+
+const PROJECTION_RESOLVE_REFUSED =
+  'Not saved: the document was loaded with a projection that hides parts of fields or is no ' +
+  'longer active, so this could change data you did not load. Clear the projection, run the ' +
+  'query again and edit again.';
+
+const SERVER_UNKNOWN_REFUSED =
+  "Not saved: the server's current version of the document could not be read. Keep the server " +
+  'version, then edit again.';
 
 const PROJECTION_REINSERT_REFUSED =
   'Not inserted: with a projection active only part of the document is loaded. ' +
@@ -452,11 +548,43 @@ function newIdField(): BsonField {
   return { key: '_id', value: generateObjectId() };
 }
 
-function parseServerDoc(detail: ConflictDetail): BsonDocument | null {
+/** The conflict's server version: `null` when deleted, `undefined` when it is not readable. */
+function parseServerDoc(detail: ConflictDetail): BsonDocument | null | undefined {
   try {
     return detail.current === null ? null : parseEJsonDocument(detail.current);
   } catch {
-    return null;
+    return undefined;
+  }
+}
+
+/**
+ * Whether `projection` (canonical EJSON) only includes or excludes whole top-level fields: no
+ * dotted path, no operator (`$slice`, `$elemMatch`, `$meta`, expressions), every value 0/1 or a
+ * boolean. Such a projection loads each field it keeps in full.
+ */
+export function isTopLevelProjection(projection: string): boolean {
+  let doc: BsonDocument;
+  try {
+    doc = parseEJsonDocument(projection);
+  } catch {
+    return false;
+  }
+  return doc.fields.every(
+    ({ key, value }) => !key.includes('.') && !key.startsWith('$') && isProjectionFlag(value),
+  );
+}
+
+function isProjectionFlag(value: BsonValue): boolean {
+  switch (value.type) {
+    case 'bool':
+      return true;
+    case 'int':
+    case 'double':
+      return value.value === 0 || value.value === 1;
+    case 'long':
+      return value.value === 0n || value.value === 1n;
+    default:
+      return false;
   }
 }
 

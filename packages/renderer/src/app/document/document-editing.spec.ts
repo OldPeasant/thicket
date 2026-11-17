@@ -552,6 +552,104 @@ describe('Editing documents in a collection tab', () => {
       expect(text('conflict-title')).not.toBe('Deleted on the server since you loaded it');
       expect(q('conflict-overwrite')?.textContent?.trim()).not.toBe('Insert your version again');
     });
+
+    it('reads the server version again for a malformed conflict detail and shows it', async () => {
+      fake.respond('docs.get', { doc: orderText(1, 99, 1), sliced: [] });
+      fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: 42 } });
+      await typeInto(0, 'total', '15');
+      await click('edit-save');
+      expect(text('conflict-title')).toBe('Changed on the server since you loaded it');
+      const changed = rows().filter((r) => r.dataset['kind'] !== 'same');
+      expect(text('conflict-server', changed[0])).toContain('total: 99');
+      expect(q('conflict-overwrite')).not.toBeNull();
+    });
+
+    it('offers only Keep server version when the server version cannot be read', async () => {
+      fake.fail('docs.get', { code: 'SERVER_ERROR', message: 'connection reset' });
+      fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: 42 } });
+      await typeInto(0, 'total', '15');
+      await click('edit-save');
+      expect(text('conflict-title')).toBe(
+        'Changed on the server; its current version could not be read',
+      );
+      expect(rows()).toHaveLength(0);
+      expect(q('conflict-overwrite')).toBeNull();
+      expect(q('conflict-merge')).toBeNull();
+      expect(text('conflict-keep-server')).toBe('Keep server version');
+      await click('conflict-keep-server');
+      expect(q('conflict-view')).toBeNull();
+      // The document stays on the page as loaded.
+      expect(el().querySelectorAll('[data-testid="result-doc"]')).toHaveLength(3);
+      expect(input(0, 'total').value).toBe('10');
+    });
+
+    it('hides Overwrite and Merge under a projection of parts of fields, and says why', async () => {
+      const projection = get<HTMLInputElement>('query-projection');
+      projection.value = '{ total: 1, qty: 1, "addr.city": 1 }';
+      projection.dispatchEvent(new Event('input'));
+      await click('query-run');
+      await conflict();
+      expect(text('conflict-note')).toMatch(/^Overwrite and Merge manually are not available/);
+      expect(text('conflict-note')).toContain('clear the projection, run the query again');
+      expect(q('conflict-overwrite')).toBeNull();
+      expect(q('conflict-merge')).toBeNull();
+      expect(button('conflict-keep-server').disabled).toBe(false);
+      expect(updates()).toHaveLength(1);
+    });
+
+    it('with a projection shows the whole server version once every edit was undone', async () => {
+      const projection = get<HTMLInputElement>('query-projection');
+      projection.value = '{ total: 1, qty: 1 }';
+      projection.dispatchEvent(new Event('input'));
+      await click('query-run');
+      await conflict(
+        '{"_id":{"$numberInt":"1"},"total":{"$numberInt":"99"},"qty":{"$numberInt":"1"},"note":"n"}',
+      );
+      await key('z');
+      expect(text('conflict-count')).toBe('No unsaved edits left');
+      const server = rows()
+        .map((r) => text('conflict-server', r))
+        .join('\n');
+      expect(server).toContain('total: 99');
+      expect(server).toMatch(/note: ['"]n['"]/);
+      expect(q('conflict-note')).toBeNull();
+    });
+
+    it('gives the merge editor an id unique to the tab, and its label points to it', async () => {
+      await conflict();
+      await click('conflict-merge');
+      const area = get<HTMLTextAreaElement>('conflict-merge-text');
+      expect(area.id).toMatch(/^coll-view-\d+-conflicts-merge-0$/);
+      const label = el().querySelector<HTMLLabelElement>('.merge-label');
+      expect(label?.htmlFor).toBe(area.id);
+    });
+
+    it('tells screen readers which lines differ and on which side', async () => {
+      await conflict();
+      await typeInto(0, 'qty', '4');
+      const changed = rows().filter((r) => r.dataset['kind'] === 'changed');
+      const srText = (cell: string, row: HTMLElement) =>
+        get(cell, row).querySelector('.sr-only')?.textContent ?? null;
+      expect(changed.length).toBeGreaterThan(0);
+      for (const row of changed) {
+        expect(srText('conflict-local', row)).toBe('Changed: ');
+        expect(srText('conflict-server', row)).toBe('Changed: ');
+      }
+      const same = rows().filter((r) => r.dataset['kind'] === 'same');
+      expect(same.every((r) => r.querySelector('.sr-only') === null)).toBe(true);
+    });
+
+    it('labels lines only one side has for screen readers', async () => {
+      await conflict(
+        '{"_id":{"$numberInt":"1"},"total":{"$numberInt":"10"},"qty":{"$numberInt":"1"},"note":"n"}',
+      );
+      const serverOnly = rows().find((r) => r.dataset['kind'] === 'right');
+      expect(serverOnly).toBeDefined();
+      expect(
+        get('conflict-server', serverOnly as HTMLElement).querySelector('.sr-only')?.textContent,
+      ).toBe('Only on the server: ');
+      expect(get('conflict-local', serverOnly as HTMLElement).querySelector('.sr-only')).toBeNull();
+    });
   });
 
   it('reports other save errors and keeps the edits', async () => {

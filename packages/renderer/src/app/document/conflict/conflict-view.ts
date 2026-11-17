@@ -13,8 +13,10 @@ interface ConflictItem {
   readonly idText: string;
   /** The local version (with the unsaved edits); `null` when no edits are left. */
   readonly local: BsonDocument | null;
-  /** `false`: the document was deleted on the server. */
-  readonly serverExists: boolean;
+  /** The server version: changed, deleted, or changed but not readable. */
+  readonly state: 'changed' | 'deleted' | 'unknown';
+  /** Overwrite and Merge manually can't respect the projection the document was loaded with. */
+  readonly blocked: boolean;
   /** Only the fields loaded with the query's projection are compared. */
   readonly partial: boolean;
   readonly rows: readonly DiffRow[];
@@ -46,59 +48,77 @@ function lines(doc: BsonDocument | null): string[] {
       >
         <header class="head">
           <h3 class="title" data-testid="conflict-title">
-            @if (item.serverExists) {
-              Changed on the server since you loaded it
-            } @else {
-              Deleted on the server since you loaded it
+            @switch (item.state) {
+              @case ('changed') {
+                Changed on the server since you loaded it
+              }
+              @case ('deleted') {
+                Deleted on the server since you loaded it
+              }
+              @default {
+                Changed on the server; its current version could not be read
+              }
             }
           </h3>
           <code class="id">{{ item.idText }}</code>
           <span class="count" data-testid="conflict-count">{{ countText(item) }}</span>
         </header>
-        @if (item.partial) {
-          <p class="note">
+        @if (item.state === 'unknown') {
+          <p class="note" data-testid="conflict-note">
+            Keep the server version to load it again, then edit again.
+          </p>
+        } @else if (item.blocked) {
+          <p class="note" data-testid="conflict-note">
+            Overwrite and Merge manually are not available: the document was loaded with a
+            projection that hides parts of fields or is no longer active, so they could change data
+            you did not load. To use them, clear the projection, run the query again and edit again.
+          </p>
+        } @else if (item.partial && item.local !== null) {
+          <p class="note" data-testid="conflict-note">
             Only the fields loaded with the query's projection are compared; the others stay as they
             are on the server.
           </p>
         }
 
-        <div class="sides" role="table" [attr.aria-label]="'Your version and the server version'">
-          <div class="side-head" role="row">
-            <span role="columnheader">Your version</span>
-            <span role="columnheader">Server version</span>
+        @if (item.state !== 'unknown') {
+          <div class="sides" role="table" [attr.aria-label]="'Your version and the server version'">
+            <div class="side-head" role="row">
+              <span role="columnheader">Your version</span>
+              <span role="columnheader">Server version</span>
+            </div>
+            <div class="rows" role="rowgroup">
+              @for (row of item.rows; track $index) {
+                <div class="row" role="row" [attr.data-kind]="row.kind" data-testid="conflict-row">
+                  <pre
+                    class="cell local"
+                    role="cell"
+                    [class.gap]="row.left === null"
+                    [class.diff]="row.kind !== 'same' && row.left !== null"
+                    data-testid="conflict-local"
+                  ><span class="mark" aria-hidden="true">{{ row.kind !== 'same' && row.left !== null ? '+' : ' ' }}</span>@if (localLabel(row); as srText) {<span class="sr-only">{{ srText }}</span>}{{ row.left ?? '' }}</pre>
+                  <pre
+                    class="cell server"
+                    role="cell"
+                    [class.gap]="row.right === null"
+                    [class.diff]="row.kind !== 'same' && row.right !== null"
+                    data-testid="conflict-server"
+                  ><span class="mark" aria-hidden="true">{{ row.kind !== 'same' && row.right !== null ? '−' : ' ' }}</span>@if (serverLabel(row); as srText) {<span class="sr-only">{{ srText }}</span>}{{ row.right ?? '' }}</pre>
+                </div>
+              }
+            </div>
           </div>
-          <div class="rows" role="rowgroup">
-            @for (row of item.rows; track $index) {
-              <div class="row" role="row" [attr.data-kind]="row.kind" data-testid="conflict-row">
-                <pre
-                  class="cell local"
-                  role="cell"
-                  [class.gap]="row.left === null"
-                  [class.diff]="row.kind !== 'same' && row.left !== null"
-                  data-testid="conflict-local"
-                ><span class="mark" aria-hidden="true">{{ row.kind !== 'same' && row.left !== null ? '+' : ' ' }}</span>{{ row.left ?? '' }}</pre>
-                <pre
-                  class="cell server"
-                  role="cell"
-                  [class.gap]="row.right === null"
-                  [class.diff]="row.kind !== 'same' && row.right !== null"
-                  data-testid="conflict-server"
-                ><span class="mark" aria-hidden="true">{{ row.kind !== 'same' && row.right !== null ? '−' : ' ' }}</span>{{ row.right ?? '' }}</pre>
-              </div>
-            }
-          </div>
-        </div>
+        }
 
         @if (mergeKey() === item.key) {
           <div class="merge">
-            <label class="merge-label" [for]="'merge-' + $index">
+            <label class="merge-label" [for]="uid() + '-merge-' + $index">
               Merged document (shell syntax): it replaces the server version
             </label>
             <textarea
               class="merge-text"
               data-testid="conflict-merge-text"
               spellcheck="false"
-              [id]="'merge-' + $index"
+              [id]="uid() + '-merge-' + $index"
               [rows]="mergeRows()"
               [value]="mergeText()"
               [attr.aria-invalid]="mergeError() ? true : null"
@@ -140,9 +160,9 @@ function lines(doc: BsonDocument | null): string[] {
               [disabled]="busy(item.key)"
               (click)="keepServer(item.key)"
             >
-              {{ item.serverExists ? 'Keep server version' : 'Keep it deleted' }}
+              {{ item.state === 'deleted' ? 'Keep it deleted' : 'Keep server version' }}
             </button>
-            @if (item.serverExists && item.local !== null) {
+            @if (item.state === 'changed' && item.local !== null && !item.blocked) {
               <button
                 type="button"
                 class="btn"
@@ -154,7 +174,7 @@ function lines(doc: BsonDocument | null): string[] {
                 Merge manually
               </button>
             }
-            @if (item.local !== null) {
+            @if (item.state !== 'unknown' && item.local !== null && !item.blocked) {
               <button
                 type="button"
                 class="btn danger"
@@ -162,14 +182,16 @@ function lines(doc: BsonDocument | null): string[] {
                 [appWriteControl]="profileId()"
                 [disabledWhen]="busy(item.key)"
                 [title]="
-                  item.serverExists
+                  item.state === 'changed'
                     ? 'Replace the server version with yours'
                     : 'Insert your version again'
                 "
                 (click)="overwrite(item.key)"
               >
                 {{
-                  item.serverExists ? 'Overwrite with your version' : 'Insert your version again'
+                  item.state === 'changed'
+                    ? 'Overwrite with your version'
+                    : 'Insert your version again'
                 }}
               </button>
             }
@@ -266,6 +288,14 @@ function lines(doc: BsonDocument | null): string[] {
     .cell.server.diff .mark {
       color: var(--danger-text);
     }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
     .cell.gap {
       background: repeating-linear-gradient(135deg, transparent 0 4px, var(--bg-hover) 4px 5px);
     }
@@ -303,6 +333,8 @@ function lines(doc: BsonDocument | null): string[] {
 export class ConflictView {
   /** Profile the documents are written to (write controls follow its read-only flag). */
   readonly profileId = input.required<string>();
+  /** Prefix of element ids, unique per collection tab. */
+  readonly uid = input('conflicts');
 
   private readonly actions = inject(DocumentActions);
   private readonly edits = inject(DocumentEdits);
@@ -320,10 +352,22 @@ export class ConflictView {
   );
 
   protected countText(item: ConflictItem): string {
-    if (!item.serverExists) return '';
+    if (item.state !== 'changed') return '';
     if (item.local === null) return 'No unsaved edits left';
     const n = item.differences;
     return n === 0 ? 'No differences' : `${n} differing ${n === 1 ? 'line' : 'lines'}`;
+  }
+
+  /** What a screen reader says before a differing line of the local version (the `+` mark). */
+  protected localLabel(row: DiffRow): string | null {
+    if (row.kind === 'same' || row.left === null) return null;
+    return row.right === null ? 'Only in your version: ' : 'Changed: ';
+  }
+
+  /** What a screen reader says before a differing line of the server version (the `−` mark). */
+  protected serverLabel(row: DiffRow): string | null {
+    if (row.kind === 'same' || row.right === null) return null;
+    return row.left === null ? 'Only on the server: ' : 'Changed: ';
   }
 
   protected busy(key: string): boolean {
@@ -371,16 +415,23 @@ export class ConflictView {
     const entry = this.edits.get(conflict.key);
     const local = entry?.current ?? null;
     const partial = this.actions.isPartial(conflict.key);
-    let server = conflict.current;
-    if (server !== null && partial) {
-      server = visibleFields(server, entry === undefined ? [] : [entry.original, entry.current]);
+    let server = conflict.current ?? null;
+    // Without edits left there is nothing to compare: the server version is shown as it is.
+    if (server !== null && partial && entry !== undefined) {
+      server = visibleFields(server, [entry.original, entry.current]);
     }
-    const rows = diffLines(lines(local), lines(server));
+    const rows = conflict.current === undefined ? [] : diffLines(lines(local), lines(server));
     return {
       key: conflict.key,
       idText: `_id: ${idText(conflict.key)}`,
       local,
-      serverExists: conflict.current !== null,
+      state:
+        conflict.current === undefined
+          ? 'unknown'
+          : conflict.current === null
+            ? 'deleted'
+            : 'changed',
+      blocked: this.actions.resolveBlocker(conflict.key) === 'projection',
       partial,
       rows,
       differences: rows.filter((r) => r.kind !== 'same').length,
