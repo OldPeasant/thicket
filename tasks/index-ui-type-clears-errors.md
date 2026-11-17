@@ -1,11 +1,11 @@
 ---
 title: Indexes form: changing a key type clears collation/wildcard projection errors (CR-6 of index-ui)
-status: in_progress
+status: done
 owner: dell26/agent-2
 deps: [index-ui]
 touches: [packages/renderer/src/app/indexes]
 prio: 2
-lease_until: 2026-11-17T04:40:48Z
+lease_until: 
 ---
 ## Goal
 In `IndexCreateForm.setType` (packages/renderer/src/app/indexes/index-create-form.ts), also clear the
@@ -18,3 +18,4 @@ failed Create, switching a text/2d field to ascending leaves a stale message unt
   - verified (2026-11-17 05:20+0100 by dell26/agent-2): cd packages/renderer && npx ng test --include='src/app/indexes/index-create-form.spec.ts' -> 29 passed; tests 'clears a collation error after Create with a text key when the type changes to ascending' and the $** text variant fail without the setType fix (checked by stashing it: 1 failed)
 
 ## Notes
+- done by dell26/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 55s on d5a9dc972; criteria verified 1/1
