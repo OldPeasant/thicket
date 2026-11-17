@@ -5,7 +5,7 @@ owner: dell26/agent-2
 deps: [conn-ui-m2,profiles-store]
 touches: [apps/desktop/src/profiles/import,packages/renderer/src/app/connections/import]
 prio: 2
-lease_until: 2026-11-17T03:20:02Z
+lease_until: 2026-11-17T03:25:05Z
 ---
 ## Goal
 Import Compass's exported connections JSON (plain and encrypted-without-passphrase skipped with a notice) and a list of connection strings; export selected profiles as JSON without secrets.
