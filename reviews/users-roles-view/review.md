@@ -4,23 +4,24 @@ Date: 2026-11-17
 
 Task: users-roles-view - M6 (Should): Users and roles viewer
 
-Scope: committed changes of the task up to the final revision, `git diff 8020ba9..8c98ff1`. This re-review focuses on the fix commits, `git diff cbfbca2..62fa503` (056aec3 fixes for CR-1 and CR-2, 62fa503 one added test), and on the docs-only commit 8c98ff1 (new "Users and roles" section in docs/ARCHITECTURE.md). The first review covered 8020ba9..cbfbca2.
+Scope: all committed changes of the task after the rebase onto main, `git diff 62aa9cd..096eefe` (62aa9cd is the merge-base with origin/main). This review covers the whole task again, not only the fixes, and adds a check of how the task fits with code that main gained since the first review: the `indexes` tab kind, the sidebar's drop/rename tab closing, and closing tabs when a profile is removed.
 
 Requirements:
 - tasks/users-roles-view.md (acceptance criteria and recorded assumptions)
 - SPEC.md M6 "Users and roles: read-only view per database (privileges, inherited roles)"
 - packages/contract/src/admin.ts (`admin.users`, `admin.roles` contract)
 - docs/ARCHITECTURE.md, AGENTS.md
-- Existing conventions (collection-view.ts and aggregation-view.ts tab handling)
-- reviews/users-roles-view/fixes.md and tests.md (claimed validation)
+- Existing conventions (`indexesTabId` / `aggregationTabId` next to their views, `SidebarTreeService.closeTabs`, `ConnectionsPage` profile removal)
+- Instructions from the parent worker (rebase context, integration with main)
 
 Git range:
 - Branch: main
-- HEAD: 8c98ff1a662ae5cdcfa26e72f826bedf7f8e81a7
-- Base/start: 8020ba9e644ea2da3c9d47835f542da1213e48ba
-- Commits reviewed: 6 (70f9f9c, 38e0fd9, cbfbca2, 056aec3, 62fa503, 8c98ff1). Apart from this report, there are no uncommitted changes.
+- HEAD: 096eefe401fe144cb7b1abfa3db58ac361988233
+- Base/start: 62aa9cda12109876a24c3621abdc10c0dca3b22a
+- Commits reviewed: 7 (a170ecd, 559520d, 8337d70, 83938a6, 53cebf5, 096dab4, 096eefe; 096eefe changes only reviews/)
+- Uncommitted changes: the working tree has an uncommitted change to `packages/renderer/src/app/app.spec.ts` (13 added lines). It is not part of the reviewed range and was not reviewed.
 
-Summary: 0 P0, 0 P1, 0 P2, 0 P3 open (CR-1 and CR-2 from the first review are resolved)
+Summary: 0 P0, 0 P1, 0 P2, 0 P3
 
 ## P0 Critical
 
@@ -32,75 +33,66 @@ None.
 
 ## P2 Medium
 
-- [x] **CR-1 | Reopening the Users and roles tab reloads it and drops the selection - RESOLVED in 056aec3**
-    - File: `packages/renderer/src/app/admin/users/users-roles-view.ts:71`
-    - Category: Correctness
-    - Problem: `target` was a `computed` without an `equal` function. Reopening an open tab from the
-      sidebar gave the view a new tab object, which cleared the selection and loaded both lists again.
-    - Resolution check: `target` now has
-      `equal: (a, b) => a.profileId === b.profileId && a.db === b.db`, the same approach as
-      `CollectionView` and `AggregationView`. The effect that resets the selection and refreshes only
-      depends on `target`, so a new tab object with equal data no longer starts it. Three component
-      tests cover this:
-      - reopening with an equal tab object sends no new `admin.users` / `admin.roles` request and
-        keeps both selections;
-      - a tab for another database loads again (earlier test);
-      - a tab for the same database of another profile loads again (62fa503). This proves the
-        comparator also checks `profileId`.
-
-      fixes.md says the new test failed with the comparator disabled and passes with the fix.
+None.
 
 ## P3 Low
 
-- [x] **CR-2 | The authentication restriction count probably never shows for real users - RESOLVED in 056aec3**
-    - File: `packages/backend/src/admin/users/users.ts:53`
-    - Category: Correctness
-    - Problem: The exact-match `usersInfo` query did not request `authenticationRestrictions`, so the
-      view's restriction count could not appear for real users.
-    - Resolution check: The detail query now sends `showAuthenticationRestrictions: true` next to
-      `showPrivileges: true`, and the doc comment says so. `showCredentials` is still not requested,
-      and `credentials` is still removed.
-      - The integration fixture now creates `carol` with `authenticationRestrictions`.
-      - A new integration test checks that the restrictions come back as a flat array of documents,
-        which is the shape `toUserEntry` counts, together with inherited privileges. It also checks
-        that `alice` gets `[]`.
-      - The handler unit tests assert the new flag in the command sent.
-
-      fixes.md records that the integration test failed before the backend change and passed after
-      it (`npm run test:int -- users-roles`, 10 tests). Restrictions are user metadata (allowed client
-      and server addresses), not secrets, so showing them read-only is acceptable.
+None.
 
 ## Notes (verified, no finding)
 
+- Rebase union: `TabKind` in `layout/workspace.service.ts` is
+  `'collection' | 'aggregation' | 'indexes' | 'shell' | 'admin' | 'users'`, and `app.config.ts`
+  registers `IndexesView` and `UsersRolesView` together with the existing views. Neither side of
+  the conflict was lost. `tab-bar.css` gives `users` the same icon as `admin`.
+- Dropping a database: `SidebarTreeService.closeTabs` closes the `collection`, `aggregation` and
+  `indexes` tabs of the database, but not a `users` tab. This is correct and not a gap. MongoDB's
+  `dropDatabase` does not remove the database's users or roles (they are stored in
+  `admin.system.users` / `admin.system.roles`), so the users and roles tab still shows valid data
+  after a drop. `shell` tabs also stay open, and the existing test "dropping a database closes the
+  tabs of its collections only" still describes the behavior. Dropping or renaming a collection
+  only affects tabs that belong to that collection, so it rightly leaves `users` tabs alone.
+- Removing a profile: `connections/connections-page.ts:90` closes every tab whose
+  `data.profileId` matches, whatever its kind. `UsersTabData` has `profileId`, so `users` tabs are
+  closed together with the profile's other tabs.
+- Disconnect: no kind of tab is closed on disconnect. A `users` tab behaves the same: a refresh
+  shows the `NOT_CONNECTED` error message (`role="alert"`), and the user can try again with
+  Refresh.
+- Contract: params (`profileId`, `db`, optional `builtin`) and results (arrays of canonical EJSON
+  document text) match `packages/contract/src/admin.ts`. Handlers are registered in
+  `server/backend.ts` with the other connection handlers. The integration test serves them through
+  `serve`/`RpcClient`, so the contract is validated end to end.
 - Credentials: `showCredentials` is never requested, and a top-level `credentials` field is
-  removed before results are serialized. Unit and integration tests cover this.
-- Contract: params and results match `packages/contract/src/admin.ts`. Results are canonical EJSON
-  text, the same as other handlers.
-- Out-of-order answers and cancellation: each list has its own `AbortController`, older answers
-  and older failures are ignored, and requests are aborted when the view is destroyed. Tests cover
-  all of these.
-- Read-only: the view only reads data, and the menu item stays enabled on read-only profiles, which
-  is correct.
-- Accessibility: the mode buttons use `aria-pressed`, the lists are labelled `nav` regions with
-  `aria-current`, errors use `role="alert"`, loading uses `role="status"`, and the privilege tables
-  have captions and `scope` on header cells.
+  removed before the result is serialized. Unit tests check that neither the field nor its value
+  reaches the result, and the integration test covers it too. The tests contain no committed
+  secrets: passwords are generated with `randomBytes`.
+- Out-of-order answers and cancellation: `loadUsers` and `loadRoles` each abort their earlier
+  request through their own `AbortController`. Answers and failures from aborted requests are
+  ignored, and both requests are aborted on destroy. Every path ends in `loaded` or `error`, except
+  an aborted one, which a newer request has already replaced. The backend wraps both handlers in
+  `abortable`, so a cancel answers `CANCELLED` at once. Unit tests cover all of this.
+- Reopening (earlier CR-1): `target` compares by value, so reopening the tab keeps the selection
+  and sends no new requests. A different database or a different profile reloads. Component tests
+  cover all three cases.
+- Authentication restrictions (earlier CR-2): the detail query asks for
+  `showAuthenticationRestrictions`. The integration test checks the restriction entries for
+  `carol` and an empty list for `alice`.
+- Read-only: there are no writes. The sidebar menu item stays enabled on read-only profiles, and a
+  sidebar test asserts this.
+- Dependency direction: `sidebar-tree.service.ts` imports `usersTabId` / `UsersTabData` from the
+  view file. `collection-view.ts` imports `indexesTabId` / `aggregationTabId` from their view files
+  in the same way.
 - Acceptance criteria:
-  1. The integration test runs against a fixture with custom roles: `test/integration/users-roles.int.spec.ts`, mongo8 fixture, 10 tests, recorded as passing.
-  2. Component tests cover the views (`users-roles-view.spec.ts`, `users-roles.model.spec.ts`) and the sidebar entry.
-- The fix commits add no new issues.
-- Docs (8c98ff1): the new "Users and roles" section in `docs/ARCHITECTURE.md` matches the code. It
-  correctly describes:
-  - the tab kind `users`, `usersTabId(profileId, db)`, the `UsersTabData` fields, and opening the tab
-    with `SidebarTreeService.openUsers` from the database menu;
-  - the read-only content of the users and roles views, including links only to roles of the same
-    database and `users-roles.model.ts` reducing the EJSON entries;
-  - the two-step `usersInfo` query with `showPrivileges` and `showAuthenticationRestrictions`;
-  - that credentials are never requested and are removed if present;
-  - that `rolesInfo: 1` runs with `showPrivileges` and `showBuiltinRoles`;
-  - the path of the integration test.
-
-  The commit changes documentation only, so it does not affect the code evidence (patch-id freshness).
+  1. Integration test against a fixture with custom roles: `test/integration/users-roles.int.spec.ts`
+     runs on the mongo8 fixture. `orderClerk` inherits from the custom role `orderReader` and the
+     built-in role `read`. Users `alice`, `bob` (holding a role on another database) and `carol`
+     (with restrictions) cover the main cases. Users and roles are dropped in `afterAll`. The
+     recorded evidence names the command and the result (10 passed).
+  2. Component tests for the views: `users-roles-view.spec.ts`, `users-roles.model.spec.ts`, and
+     the sidebar specs for the menu item and `openUsers`. The recorded evidence names the command
+     and the result.
+- Docs: the "Users and roles" section in `docs/ARCHITECTURE.md` matches the code.
 
 ## Review conclusion
 
-No material issues found. CR-1 and CR-2 are resolved. Reviewed revision: 8c98ff1a662ae5cdcfa26e72f826bedf7f8e81a7, the same code as 62fa503 plus the accurate architecture doc section.
+No material issues found. Reviewed revision: 096eefe401fe144cb7b1abfa3db58ac361988233.
