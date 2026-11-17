@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "task": "index-ui",
+  "reviewed_revision": "3b02f47fcc216eeaefa83eb80f4219c308c16f40",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/index-ui/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/index-ui/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/index-ui/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    { "id": "TW-1", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "field '.$**' was accepted; only a bare $** may have an empty base" },
+    { "id": "CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "wildcard text index { $**: 'text' } now allowed" },
+    { "id": "CR-2", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "indexes-view.spec.ts added by the test-writer" },
+    { "id": "CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "2d must be first; no collation with text/2d keys" },
+    { "id": "CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "Cancel disabled while a create runs" },
+    { "id": "CR-5", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "text indexes listed by their fields; language and wildcard projection tags" },
+    { "id": "CR-6", "source": "code-reviewer", "severity": "P3", "disposition": "deferred", "note": "stale collation/wildcardProjection error after a key type change until the next Create; follow-up task index-ui-type-clears-errors" }
+  ],
+  "validation": [
+    { "command": "npm run test -w packages/renderer -- --include='src/app/indexes/**/*.spec.ts'", "result": "pass" },
+    { "command": "npm run test:e2e -- test/e2e/indexes.e2e.ts", "result": "pass" },
+    { "command": "npm run check (.taskcheck)", "result": "pass" }
+  ]
+}

@@ -1,10 +1,11 @@
 ---
 title: M3 (Should): Collection validator
-status: todo
-owner:
+status: in_progress
+owner: dell26/agent-1
 deps: [browse-backend,doc-edit-save]
 touches: [packages/backend/src/browse/validator,packages/renderer/src/app/validator]
 prio: 3
+lease_until: 2026-11-17T03:49:55Z
 ---
 ## Goal
 View/edit `$jsonSchema` validator, validation level and action; mark documents in the editor that fail the validator (backend check with `$jsonSchema` query, not client-side Ajv).

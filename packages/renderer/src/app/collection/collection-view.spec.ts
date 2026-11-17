@@ -751,6 +751,31 @@ describe('CollectionView', () => {
     expect(workspace.tabs().filter((t) => t.kind === 'aggregation')).toHaveLength(1);
   });
 
+  it('Indexes… opens the indexes tab of this collection, once', async () => {
+    const workspace = TestBed.inject(WorkspaceService);
+    fixture.componentRef.setInput('tab', {
+      ...TAB,
+      detail: 'Live / shop',
+      production: true,
+    });
+    await settle();
+    click('open-indexes');
+    await settle();
+    expect(workspace.active()).toEqual({
+      id: 'indexes:p1:shop.orders',
+      kind: 'indexes',
+      title: 'orders indexes',
+      detail: 'Live / shop',
+      production: true,
+      data: { profileId: 'p1', db: 'shop', coll: 'orders', type: 'collection' },
+    });
+    expect(workspace.active()?.data).not.toBe(TAB.data);
+
+    click('open-indexes');
+    await settle();
+    expect(workspace.tabs().filter((t) => t.kind === 'indexes')).toHaveLength(1);
+  });
+
   it('Aggregate… is offered on a read-only profile (it reads)', async () => {
     TestBed.inject(ProfileSafetyService).set({
       id: 'p1',

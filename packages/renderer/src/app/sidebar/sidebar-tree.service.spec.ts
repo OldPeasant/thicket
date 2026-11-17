@@ -1057,6 +1057,57 @@ describe('SidebarTreeService', () => {
       });
     });
 
+    describe('indexes tabs', () => {
+      /** The indexes tab of a collection, as the collection tab's Indexes… opens it. */
+      const openIndexes = (profileId: string, db: string, name: string): void => {
+        ws.open({
+          id: `indexes:${profileId}:${db}.${name}`,
+          kind: 'indexes',
+          title: `${name} indexes`,
+          data: { profileId, db, coll: name, type: 'collection' },
+        });
+      };
+      const withIndexes = (): void => {
+        openTabs();
+        openIndexes('p1', 'shop', 'orders');
+        openIndexes('p1', 'shop', 'items');
+        openIndexes('p1', 'other', 'orders');
+        openIndexes('p2', 'shop', 'orders');
+      };
+      const indexTabs = () =>
+        ws
+          .tabs()
+          .filter((t) => t.kind === 'indexes')
+          .map((t) => t.id);
+
+      it('dropping a collection closes its indexes tab, and only that one', async () => {
+        withIndexes();
+        const done = tree.dropCollection('p1', 'shop', 'orders');
+        await answer(true);
+        await done;
+        expect(indexTabs()).toEqual([
+          'indexes:p1:shop.items',
+          'indexes:p1:other.orders',
+          'indexes:p2:shop.orders',
+        ]);
+      });
+
+      it('dropping a database closes the indexes tabs of all its collections', async () => {
+        withIndexes();
+        const done = tree.dropDatabase('p1', 'shop');
+        await answer(true);
+        await done;
+        expect(indexTabs()).toEqual(['indexes:p1:other.orders', 'indexes:p2:shop.orders']);
+      });
+
+      it('renaming a collection closes its indexes tab', async () => {
+        withIndexes();
+        await tree.renameCollection('p1', 'shop', 'orders', 'orders2');
+        expect(indexTabs()).not.toContain('indexes:p1:shop.orders');
+        expect(indexTabs()).toContain('indexes:p1:shop.items');
+      });
+    });
+
     it('create and rename on a non-production profile are sent without a dialog', async () => {
       await tree.createCollection('p1', 'shop', 'fresh');
       await tree.createDatabase('p1', 'newdb', 'first');

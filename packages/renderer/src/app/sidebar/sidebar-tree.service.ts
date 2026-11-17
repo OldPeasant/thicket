@@ -445,7 +445,7 @@ export class SidebarTreeService {
     for (const tab of this.workspace.tabs()) {
       const data = tab.data as Partial<CollectionTabData> | undefined;
       if (
-        (tab.kind === 'collection' || tab.kind === 'aggregation') &&
+        (tab.kind === 'collection' || tab.kind === 'aggregation' || tab.kind === 'indexes') &&
         data?.profileId === profileId &&
         data.db === db &&
         (coll === undefined || data.coll === coll)
