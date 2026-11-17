@@ -5,7 +5,7 @@ owner: dell26/agent-3
 deps: [packaging]
 touches: [apps/desktop/electron-builder.yml,apps/desktop/src/main]
 prio: 3
-lease_until: 2026-11-17T05:27:33Z
+lease_until: 2026-11-17T05:32:35Z
 ---
 ## Goal
 From the packaging review (reviews/packaging/review.md, CR-3): the packaged app keeps Electron's
