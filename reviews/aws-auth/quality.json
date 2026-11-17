@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "task": "aws-auth",
+  "reviewed_revision": "25a54b2bc2a45c6460bec3ae5270971a0570984a",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/aws-auth/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/aws-auth/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/aws-auth/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "MongoAWSError -> AUTH_FAILED tests added to errors.spec.ts by the test-writer (3eaa142); round-2 review confirms"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "secret order (password first, stored awsSecretAccessKey as saved-mode fallback) documented in aws.ts and ARCHITECTURE.md by the fixer; behaviour unchanged"}
+  ],
+  "validation": [
+    {"command": "cd packages/backend && npx vitest run src/auth/aws src/connections", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}
