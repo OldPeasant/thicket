@@ -1,9 +1,14 @@
 <section class="page" aria-labelledby="connections-title">
   <header class="head">
     <h1 id="connections-title">Connections</h1>
-    <a class="btn primary" data-testid="manager-new" [routerLink]="nav.newConnection"
-      >New connection</a
-    >
+    <span class="head-actions">
+      <a class="btn" data-testid="manager-transfer" [routerLink]="nav.importCompass"
+        >Import or export…</a
+      >
+      <a class="btn primary" data-testid="manager-new" [routerLink]="nav.newConnection"
+        >New connection</a
+      >
+    </span>
   </header>
 
   @if (error(); as message) {

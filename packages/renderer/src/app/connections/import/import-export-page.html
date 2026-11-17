@@ -1,0 +1,146 @@
+<section class="page" aria-labelledby="transfer-title">
+  <header class="head">
+    <h1 id="transfer-title">Import and export connections</h1>
+    <a class="btn" [routerLink]="nav.connections">All connections</a>
+  </header>
+
+  @if (error(); as message) {
+    <p class="error" role="alert" data-testid="transfer-error">{{ message }}</p>
+  }
+
+  @if (outcome(); as o) {
+    <section class="outcome" aria-live="polite" data-testid="transfer-outcome">
+      @if (o.kind === 'export') {
+        <p class="outcome-line" data-testid="export-done">
+          Exported {{ count(o.exported) }} to <span class="path">{{ o.path }}</span>. Passwords are
+          not in the file.
+        </p>
+      } @else {
+        <p class="outcome-line" data-testid="import-summary">{{ importSummary(o.result) }}</p>
+        <ul class="ledger">
+          @for (p of o.result.imported; track p.id) {
+            <li
+              class="row imported"
+              data-testid="import-imported"
+              [attr.data-name]="p.name"
+              [class.has-color]="!!p.color"
+              [style.--profile-color]="p.color ?? null"
+            >
+              <span class="name">{{ p.name }}</span>
+              <span class="detail mono">{{ summary(p) }}</span>
+            </li>
+          }
+          @for (n of o.result.notices ?? []; track $index) {
+            <li class="row notice" data-testid="import-notice">
+              <span class="name">{{ n.source }}</span>
+              <span class="detail">{{ n.reason }}</span>
+            </li>
+          }
+          @for (s of o.result.skipped; track $index) {
+            <li class="row skipped" data-testid="import-skipped">
+              <span class="name">Skipped {{ s.source }}</span>
+              <span class="detail">{{ s.reason }}</span>
+            </li>
+          }
+        </ul>
+      }
+    </section>
+  }
+
+  <section class="block" aria-labelledby="from-file-title">
+    <h2 id="from-file-title">From a Compass export</h2>
+    <p class="hint">
+      In Compass, use Connections › Export connections and save the file. Credentials that Compass
+      encrypted with a passphrase are not imported: the password is asked when connecting, other
+      secrets (SSH, client key, proxy) are entered in the connection editor. A file exported from
+      Thicket works here too.
+    </p>
+    <button
+      type="button"
+      class="btn primary"
+      data-testid="import-file"
+      [disabled]="busy()"
+      (click)="importFile()"
+    >
+      Choose file to import…
+    </button>
+  </section>
+
+  <section class="block" aria-labelledby="from-uris-title">
+    <h2 id="from-uris-title">From connection strings</h2>
+    <label class="hint" for="import-uris">
+      One <code>mongodb://</code> or <code>mongodb+srv://</code> string per line. Passwords in them
+      are saved in the system keychain, not in the profile.
+    </label>
+    <textarea
+      id="import-uris"
+      rows="5"
+      spellcheck="false"
+      autocomplete="off"
+      data-testid="import-uris"
+      placeholder="mongodb://db1.example.com:27017"
+      [value]="uriText()"
+      (input)="uriText.set($any($event.target).value)"
+    ></textarea>
+    <button
+      type="button"
+      class="btn primary"
+      data-testid="import-uris-submit"
+      [disabled]="busy() || uriCount() === 0"
+      (click)="importUris()"
+    >
+      Import {{ count(uriCount()) }}
+    </button>
+  </section>
+
+  <section class="block" aria-labelledby="export-title">
+    <h2 id="export-title">Export</h2>
+    <p class="hint">
+      Writes the chosen connections to a JSON file you can share with your team. Passwords,
+      passphrases and tokens are never written.
+    </p>
+    @if (profiles().length === 0) {
+      <p class="empty">No connections to export yet.</p>
+    } @else {
+      <label class="check all">
+        <input
+          type="checkbox"
+          data-testid="export-all"
+          [checked]="allSelected()"
+          (change)="toggleAll($any($event.target).checked)"
+        />
+        All connections
+      </label>
+      <ul class="pick">
+        @for (p of profiles(); track p.id) {
+          <li>
+            <label
+              class="check"
+              [class.has-color]="!!p.color"
+              [style.--profile-color]="p.color ?? null"
+            >
+              <input
+                type="checkbox"
+                data-testid="export-pick"
+                [attr.data-name]="p.name"
+                [checked]="selected().has(p.id)"
+                (change)="toggle(p.id, $any($event.target).checked)"
+              />
+              <span class="name">{{ p.name }}</span>
+              <span class="detail mono">{{ summary(p) }}</span>
+            </label>
+          </li>
+        }
+      </ul>
+      <button
+        type="button"
+        class="btn primary"
+        data-testid="export-submit"
+        [disabled]="busy() || selectedIds().length === 0"
+        (click)="exportSelected()"
+      >
+        Export {{ count(selectedIds().length) }}…
+      </button>
+    }
+  </section>
+</section>

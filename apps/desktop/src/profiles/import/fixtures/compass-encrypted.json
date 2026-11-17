@@ -1,0 +1,35 @@
+{
+  "type": "Compass Connections",
+  "version": {
+    "$numberInt": "1"
+  },
+  "connections": [
+    {
+      "id": "5b7e0f0e-3f4a-4c1b-8f4e-9d2a7c1e0b01",
+      "connectionOptions": {
+        "connectionString": "mongodb://carol@db.example.test:27017/?authSource=admin",
+        "sshTunnel": {
+          "host": "bastion.example.test",
+          "port": 22,
+          "username": "carol"
+        }
+      },
+      "favorite": {
+        "name": "Encrypted prod",
+        "color": "color4"
+      },
+      "savedConnectionType": "favorite",
+      "connectionSecrets": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+    },
+    {
+      "id": "5b7e0f0e-3f4a-4c1b-8f4e-9d2a7c1e0b02",
+      "connectionOptions": {
+        "connectionString": "mongodb://localhost:27017"
+      },
+      "favorite": {
+        "name": "Local"
+      },
+      "savedConnectionType": "favorite"
+    }
+  ]
+}

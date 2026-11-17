@@ -46,17 +46,8 @@ describe('Welcome', () => {
     await harness.fixture.whenStable();
     expect(spy).toHaveBeenCalledExactlyOnceWith(NAV.importCompass);
     expect(router.url).toBe('/connections/import/compass');
-    expect(el.querySelector('[data-testid="page-heading"]')?.textContent).toBe(
-      'Import from Compass',
+    expect(el.querySelector('app-import-export-page h1')?.textContent).toBe(
+      'Import and export connections',
     );
-  });
-
-  it('the placeholder page links back to the start page', async () => {
-    const { harness, el, router } = await start();
-    await harness.navigateByUrl(NAV.importCompass);
-    el.querySelector<HTMLElement>('app-planned-page a')?.click();
-    await harness.fixture.whenStable();
-    expect(router.url).toBe('/');
-    expect(el.querySelector('app-welcome')).not.toBeNull();
   });
 });

@@ -1,0 +1,90 @@
+{
+  "type": "Compass Connections",
+  "version": {
+    "$numberInt": "1"
+  },
+  "connections": [
+    {
+      "id": "8c3a8f46-6d3e-4a59-9a5e-2f0d1c3b6a01",
+      "connectionOptions": {
+        "connectionString": "mongodb://alice:fake-pass%40word@db1.example.test:27017,db2.example.test:27018/shop?replicaSet=rs0&authSource=admin&readPreference=secondaryPreferred&appName=orders"
+      },
+      "favorite": {
+        "name": "Orders (staging)",
+        "color": "color2"
+      },
+      "savedConnectionType": "favorite"
+    },
+    {
+      "id": "8c3a8f46-6d3e-4a59-9a5e-2f0d1c3b6a02",
+      "connectionOptions": {
+        "connectionString": "mongodb+srv://reporting@cluster0.example.test/?tls=true&authMechanism=SCRAM-SHA-1"
+      },
+      "favorite": {
+        "name": "Reporting",
+        "color": "#1f9d8b"
+      },
+      "savedConnectionType": "favorite"
+    },
+    {
+      "id": "8c3a8f46-6d3e-4a59-9a5e-2f0d1c3b6a03",
+      "connectionOptions": {
+        "connectionString": "mongodb://bastion-only.internal.test:27017/?directConnection=true",
+        "sshTunnel": {
+          "host": "bastion.example.test",
+          "port": 2222,
+          "username": "ops",
+          "password": "fake-ssh-password"
+        }
+      },
+      "favorite": {
+        "name": "Behind bastion"
+      },
+      "savedConnectionType": "favorite"
+    },
+    {
+      "id": "8c3a8f46-6d3e-4a59-9a5e-2f0d1c3b6a04",
+      "connectionOptions": {
+        "connectionString": "mongodb://localhost:27017/?tls=true&tlsCAFile=%2Fhome%2Fu%2Fca.pem&tlsCertificateKeyFile=%2Fhome%2Fu%2Fclient.pem&tlsCertificateKeyFilePassword=fake-key-passphrase&authMechanism=MONGODB-X509",
+        "sshTunnel": {
+          "host": "jump.example.test",
+          "port": 22,
+          "username": "deploy",
+          "identityKeyFile": "/home/u/.ssh/id_ed25519",
+          "identityKeyPassphrase": "fake-identity-passphrase"
+        }
+      },
+      "favorite": {
+        "name": "X.509 via key",
+        "color": "color9"
+      },
+      "savedConnectionType": "favorite"
+    },
+    {
+      "id": "8c3a8f46-6d3e-4a59-9a5e-2f0d1c3b6a05",
+      "connectionOptions": {
+        "connectionString": "mongodb://127.0.0.1:27018"
+      },
+      "lastUsed": {
+        "$date": "2026-10-01T08:00:00.000Z"
+      },
+      "savedConnectionType": "recent"
+    },
+    {
+      "id": "8c3a8f46-6d3e-4a59-9a5e-2f0d1c3b6a06",
+      "connectionOptions": {},
+      "favorite": {
+        "name": "Broken entry"
+      }
+    },
+    {
+      "id": "8c3a8f46-6d3e-4a59-9a5e-2f0d1c3b6a07",
+      "connectionOptions": {
+        "connectionString": "postgres://not-mongo.example.test"
+      },
+      "favorite": {
+        "name": "Not MongoDB"
+      }
+    }
+  ]
+}

@@ -236,6 +236,98 @@ describe('main handlers with a ProfilesStore', () => {
     expect(JSON.stringify(port.sent)).not.toContain('"fictitious"');
   });
 
+  describe('import/export (profiles.importCompass/importUris/export)', () => {
+    const IMPORT_METHODS = ['profiles.importCompass', 'profiles.importUris', 'profiles.export'];
+    const dialogs = {
+      showSaveDialog: vi.fn(() => Promise.resolve({ canceled: true })),
+      showOpenDialog: vi.fn(() => Promise.resolve({ canceled: true, filePaths: [] })),
+    };
+
+    function stores() {
+      const secrets = new SecretsStore({
+        file: path.join(dir, 'secrets.bin'),
+        safeStorage: new FakeSafeStorage(),
+        platform: 'linux',
+      });
+      const profiles = new ProfilesStore({ file: path.join(dir, 'connections.json'), secrets });
+      return { secrets, profiles };
+    }
+
+    it('are served only when both a ProfilesStore and native dialogs are given', () => {
+      const { secrets, profiles } = stores();
+      const keys = (d: Parameters<typeof mainHandlers>[0]) => Object.keys(mainHandlers(d));
+      for (const name of IMPORT_METHODS) {
+        expect(keys({ version: '1', secrets })).not.toContain(name);
+        expect(keys({ version: '1', secrets, dialogs })).not.toContain(name);
+        expect(keys({ version: '1', secrets, profiles })).not.toContain(name);
+        expect(keys({ version: '1', secrets, profiles, dialogs })).toContain(name);
+        expect(route(name as 'profiles.export')).toBe('main');
+      }
+      // Adding the dialogs adds exactly the three methods; nothing is replaced or lost.
+      expect(keys({ version: '1', secrets, profiles, dialogs }).sort()).toEqual(
+        [...keys({ version: '1', secrets, profiles }), ...IMPORT_METHODS].sort(),
+      );
+      // Never on the privileged port.
+      const privileged = Object.keys(privilegedHandlers({ secrets, profiles, dialogs }));
+      for (const name of IMPORT_METHODS) expect(privileged).not.toContain(name);
+    });
+
+    it('import connection strings over the main port: password to secrets.bin only', async () => {
+      const { secrets, profiles } = stores();
+      const port = fakePort();
+      serve(port, {
+        table: methods,
+        route: 'main',
+        handlers: mainHandlers({ version: '1', secrets, profiles, dialogs }),
+      });
+      port.push({
+        id: 'i1',
+        method: 'profiles.importUris',
+        params: { uris: ['mongodb://alice:fictitious-pw@db.example.test/?authSource=admin'] },
+      });
+      await vi.waitFor(() => expect(port.sent).toHaveLength(1));
+      const reply = port.sent[0] as { ok: true; result: unknown };
+      expect(reply).toMatchObject({ id: 'i1', ok: true });
+      expect(parseResult('profiles.importUris', reply.result).ok).toBe(true);
+      expect(reply.result).toMatchObject({
+        imported: [
+          {
+            name: 'db.example.test',
+            connectionString: 'mongodb://alice@db.example.test/?authSource=admin',
+            auth: { username: 'alice', secretMode: 'saved' },
+          },
+        ],
+        skipped: [],
+        notices: [],
+      });
+      expect(JSON.stringify(port.sent)).not.toContain('fictitious-pw');
+      const stored = await readFile(path.join(dir, 'connections.json'), 'utf8');
+      expect(stored).toContain('db.example.test');
+      expect(stored).not.toContain('fictitious-pw');
+
+      port.push({ id: 'c1', method: 'profiles.importCompass', params: {} });
+      port.push({ id: 'e1', method: 'profiles.export', params: {} });
+      await vi.waitFor(() => expect(port.sent).toHaveLength(3));
+      const byId = new Map(port.sent.map((r) => [r.id, r]));
+      expect(byId.get('c1')).toMatchObject({ ok: true, result: null });
+      expect(byId.get('e1')).toMatchObject({ ok: true, result: { path: null, exported: 0 } });
+    });
+
+    it('passes its log to the import (a secret that cannot be saved is logged)', async () => {
+      const { secrets, profiles } = stores();
+      vi.spyOn(secrets, 'set').mockRejectedValue(new Error('disk full'));
+      const log = vi.fn();
+      const handlers = mainHandlers({ version: '1', secrets, profiles, dialogs, log });
+      const result = await handlers['profiles.importUris']?.(
+        { uris: ['mongodb://alice:fictitious-pw@db.example.test/'] } as never,
+        ctx,
+      );
+      expect(result).toMatchObject({ imported: [{ auth: { secretMode: 'ask' } }] });
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('could not save the password'));
+      expect(JSON.stringify(log.mock.calls)).not.toContain('fictitious-pw');
+    });
+  });
+
   describe('together with a settings store', () => {
     function both() {
       const secrets = new SecretsStore({

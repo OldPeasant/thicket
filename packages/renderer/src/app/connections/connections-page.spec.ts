@@ -149,6 +149,13 @@ describe('ConnectionsPage', () => {
     );
   });
 
+  it('links to the import and export page', async () => {
+    await start();
+    const [link] = all('manager-transfer');
+    expect(link?.getAttribute('href')).toBe('/connections/import/compass');
+    expect(link?.textContent.trim()).toBe('Import or export…');
+  });
+
   it('opens the editor of a profile', async () => {
     await start();
     await click(inItem('Billing', 'manager-edit'));
