@@ -88,6 +88,14 @@ describe('ImportExportPage', () => {
     return found;
   };
 
+  it('marks its h1 as the page heading like the other pages', async () => {
+    await start();
+    const heading = one('page-heading');
+    expect(heading.tagName).toBe('H1');
+    expect(heading.textContent).toBe('Import and export connections');
+    expect(all('page-heading')).toHaveLength(1);
+  });
+
   it('imports a Compass file, shows the ledger and reloads the sidebar profiles', async () => {
     const added = profile('p3', { name: 'Imported', color: '#326fde' });
     fake.handle('profiles.importCompass', () => {
