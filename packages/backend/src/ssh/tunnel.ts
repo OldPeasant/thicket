@@ -268,8 +268,13 @@ export async function openSshTunnel(
       await new Promise<void>((resolve) => {
         client.once('close', () => resolve());
         client.end();
-        // `close` may never come for a connection that is already gone.
-        setTimeout(resolve, 1000).unref();
+        // `close` may never come for a peer that stopped answering: `end()` only half-closes the
+        // socket, and `client.destroy()` does nothing after `end()` (it checks `writable`), so the
+        // socket itself is destroyed.
+        setTimeout(() => {
+          socketOf(client)?.destroy();
+          resolve();
+        }, 1000).unref();
       });
       log(`ssh ${where}: closed`);
     })();
@@ -430,4 +435,15 @@ function errorText(error: unknown): string {
 
 function cancelled(): RpcError {
   return new RpcError('CANCELLED', 'The operation was cancelled');
+}
+
+/** The TCP socket of an ssh2 client (`_sock`, set by `connect()`; not in ssh2's public API). */
+function socketOf(client: Client): { destroy(): void } | undefined {
+  const sock = (client as unknown as { _sock?: unknown })._sock;
+  return sock !== null &&
+    typeof sock === 'object' &&
+    'destroy' in sock &&
+    typeof sock.destroy === 'function'
+    ? (sock as { destroy(): void })
+    : undefined;
 }
