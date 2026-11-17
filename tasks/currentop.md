@@ -13,7 +13,8 @@ List running operations with filters (namespace, duration, type) and auto-refres
 ## Acceptance criteria
 - [x] Integration test: a slow op is listed and killed
   - verified (2026-11-17 07:16+0100 by felix/agent-1): npx vitest run --config test/integration/vitest.config.ts test/integration/currentop.int.spec.ts (Podman MongoDB container) at 0fecf7d2 -> 3 passed (slow $where find listed with filters, killed, ends Interrupted, gone from list; read-only refused)
-- [ ] e2e: kill from the UI with confirm
+- [x] e2e: kill from the UI with confirm
+  - verified (2026-11-17 07:16+0100 by felix/agent-1): npm run test:e2e -- test/e2e/currentop.e2e.ts (Playwright Electron harness, MongoDB container) at 0fecf7d2 -> 1 passed (cancel sends nothing, confirm kills, query Interrupted, row disappears)
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
