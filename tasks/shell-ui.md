@@ -13,7 +13,8 @@ Console tab: multi-line input, history, autocompletion, document output in the e
 ## Acceptance criteria
 - [x] e2e: demo step 11 (`db.orders.countDocuments()`)
   - verified (2026-11-17 04:49+0100 by dell26/agent-3): npm run test:e2e -- shell (built renderer + Electron, Playwright _electron, real mongosh worker against the mongo8 Podman fixture) at 40db3c6 -> 2 passed: demo step 11 opens Open shell from the connection menu, use shell_e2e, db.orders.countDocuments() shows 137; read-only profile shows the warning banner
-- [ ] Component tests: history navigation, completion popup, read-only banner
+- [x] Component tests: history navigation, completion popup, read-only banner
+  - verified (2026-11-17 04:49+0100 by dell26/agent-3): cd packages/renderer && npx ng test --include='src/app/console/**/*.spec.ts' --include='src/app/sidebar/**/*.spec.ts' at 40db3c6 -> 297 passed (shell-console.spec.ts: history up/down with draft + multi-line caret, completion popup arrows/Enter/Escape/click/caret-move, read-only banner, production accent; console-input.spec.ts; sidebar Open shell)
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
