@@ -11,7 +11,8 @@ lease_until: 2026-11-17T06:31:57Z
 CSV export with field selection/flattening; CSV import with field mapping and a BSON type per column; export and import a collection as mongodump-compatible `.bson` (+ metadata JSON).
 
 ## Acceptance criteria
-- [ ] Integration tests: CSV round trip with types; `.bson` written by Thicket restores with `mongorestore` in the fixture container and vice versa
+- [x] Integration tests: CSV round trip with types; `.bson` written by Thicket restores with `mongorestore` in the fixture container and vice versa
+  - verified (2026-11-17 07:16+0100 by dell26/agent-2): npm run test:int -- test/integration/io-advanced.int.spec.ts (mongo:8.2 fixture container, mongodump/mongorestore of that image) -> 10 passed: CSV round trip with a type per column; Thicket .bson restores with mongorestore (docs+indexes); mongodump .bson imports with Thicket
 - [ ] e2e: CSV import with type mapping
 
 ## Notes
