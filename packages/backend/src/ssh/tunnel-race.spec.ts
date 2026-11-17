@@ -16,6 +16,8 @@ import { openSshTunnel } from './tunnel';
 const hooks = vi.hoisted(() => ({
   started: [] as LocalSocks[],
   hold: undefined as (() => Promise<void>) | undefined,
+  /** When set, the local SOCKS port fails to start with this error. */
+  fail: undefined as Error | undefined,
 }));
 
 vi.mock('./socks', async (importOriginal) => {
@@ -23,6 +25,7 @@ vi.mock('./socks', async (importOriginal) => {
   return {
     ...actual,
     startLocalSocks: async (...args: Parameters<typeof actual.startLocalSocks>) => {
+      if (hooks.fail) throw hooks.fail;
       const socks = await actual.startLocalSocks(...args);
       hooks.started.push(socks);
       await hooks.hold?.();
@@ -39,6 +42,7 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
   hooks.started.length = 0;
   hooks.hold = undefined;
+  hooks.fail = undefined;
 });
 
 function portIsClosed(port: number): Promise<boolean> {
@@ -99,6 +103,60 @@ describe('openSshTunnel: session lost while the local port starts', () => {
     expect(socks?.openSockets()).toBe(0);
     expect(await portIsClosed(socks?.port ?? 0)).toBe(true);
     // The caller never got a tunnel, so it is not told about a lost one either.
+    expect(onClosed).not.toHaveBeenCalled();
+  });
+});
+
+describe('openSshTunnel: the local port cannot start', () => {
+  it('closes the SSH session and fails with SSH_ERROR; onClosed is not called', async () => {
+    let sessionReady = false;
+    let sessionGone!: () => void;
+    const gone = new Promise<void>((resolve) => (sessionGone = resolve));
+    const server = new Server(
+      { hostKeys: [utils.generateKeyPairSync('ed25519').private] },
+      (conn) => {
+        conn.on('error', () => undefined);
+        conn.on('close', () => sessionGone());
+        conn.on('authentication', (ctx) =>
+          ctx.method === 'password' && ctx.username === USER && ctx.password === PASSWORD
+            ? ctx.accept()
+            : ctx.reject(['password']),
+        );
+        conn.on('ready', () => (sessionReady = true));
+      },
+    );
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    cleanups.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
+    const port = (server.address() as AddressInfo).port;
+    const dir = await mkdtemp(join(tmpdir(), 'thicket-race-'));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+
+    hooks.fail = new Error('listen EADDRINUSE: fictitious port clash');
+    const onClosed = vi.fn();
+    await expect(
+      openSshTunnel(
+        { host: '127.0.0.1', port, username: USER, method: 'password' },
+        { sshPassword: PASSWORD },
+        {
+          knownHosts: new KnownHosts(join(dir, 'known_hosts')),
+          confirmHostKey: () => Promise.resolve(true),
+        },
+        { onClosed },
+      ),
+    ).rejects.toMatchObject({
+      code: 'SSH_ERROR',
+      message: expect.stringMatching(
+        /Cannot open the local tunnel port: listen EADDRINUSE/,
+      ) as unknown,
+    });
+    // The SSH session was authenticated, then closed: no session outlives the failed open.
+    expect(sessionReady).toBe(true);
+    await expect(
+      Promise.race([
+        gone.then(() => 'closed'),
+        new Promise((resolve) => setTimeout(() => resolve('still open'), 3_000)),
+      ]),
+    ).resolves.toBe('closed');
     expect(onClosed).not.toHaveBeenCalled();
   });
 });

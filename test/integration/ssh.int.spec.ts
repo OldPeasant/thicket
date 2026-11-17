@@ -363,6 +363,112 @@ describe('SSH tunnel lifetime', () => {
   });
 });
 
+describe('SSH tunnel lost while connected (backend, CR-3)', () => {
+  it('a dropped SSH session → conn.status error broadcast, tunnel port closed; open again reconnects', async () => {
+    const userData = await mkdtemp(join(dir, 'userdata-lost-'));
+    const profile = tunnelled('lost');
+    let deliver: ((e: { data: unknown; ports: MainPortLike[] }) => void) | undefined;
+    const parentPort: ParentPortLike = {
+      on: (_event, listener) => {
+        deliver = listener;
+      },
+    };
+    startBackend({ parentPort, pid: 1, userData });
+    const [mainEnd, backendPrivileged] = portPair();
+    const stopMain = serve(mainEnd, {
+      table: privilegedMethods,
+      route: 'main',
+      handlers: {
+        'profiles.forConnect': () => ({ profile }),
+        'secrets.get': () => ({ secrets: { sshPassword: fx.password } }),
+      },
+    });
+    deliver?.({ data: { type: 'privileged' }, ports: [mainPort(backendPrivileged)] });
+    const [renderer, backendRenderer] = portPair();
+    deliver?.({ data: { type: 'renderer', window: 1 }, ports: [mainPort(backendRenderer)] });
+    const messages: unknown[] = [];
+    renderer.onMessage((message) => messages.push(message));
+    const response = (id: string) => messages.find((m) => (m as Response).id === id) as Response;
+    const answered = (id: string, timeout = 30_000) =>
+      vi.waitFor(
+        () => {
+          expect(response(id)).toBeDefined();
+          return response(id);
+        },
+        { timeout },
+      );
+    const statuses = () =>
+      messages
+        .filter((m) => (m as Event).stream === BROADCAST_STREAMS.connStatus)
+        .map((m) => (m as Event).payload as { profileId: string; state: string; error?: unknown });
+    const sshBefore = await fx.sshConnections();
+    try {
+      // First open: trust the unknown host key, so known_hosts in userData holds it.
+      renderer.send({ id: 'open1', method: 'conn.open', params: { profileId: 'lost' } });
+      const prompt = await vi.waitFor(
+        () => {
+          const event = messages.find(
+            (m) => (m as Event).stream === BROADCAST_STREAMS.sshHostKey,
+          ) as Event | undefined;
+          expect(event).toBeDefined();
+          return event?.payload as { promptId: string };
+        },
+        { timeout: 15_000 },
+      );
+      renderer.send({
+        id: 'trust',
+        method: 'conn.trustHostKey',
+        params: { promptId: prompt.promptId, trust: true },
+      });
+      expect(await answered('open1')).toMatchObject({ ok: true, result: { state: 'connected' } });
+      expect(await fx.sshConnections()).toBe(sshBefore + 1);
+      expect(statuses()).toEqual([]);
+
+      await fx.dropSshSessions();
+
+      const lost = await vi.waitFor(
+        () => {
+          const status = statuses().find((s) => s.profileId === 'lost');
+          expect(status).toBeDefined();
+          return status;
+        },
+        { timeout: 15_000, interval: 100 },
+      );
+      expect(lost).toMatchObject({
+        profileId: 'lost',
+        state: 'error',
+        error: { code: 'SSH_ERROR', message: expect.stringMatching(/SSH tunnel was closed/) },
+      });
+      renderer.send({ id: 'list', method: 'conn.status', params: { profileId: 'lost' } });
+      expect(await answered('list')).toMatchObject({
+        ok: true,
+        result: { connections: [{ profileId: 'lost', state: 'error' }] },
+      });
+
+      // Open again: a new tunnel and client, no new host key question (the key is known now).
+      renderer.send({ id: 'open2', method: 'conn.open', params: { profileId: 'lost' } });
+      expect(await answered('open2')).toMatchObject({ ok: true, result: { state: 'connected' } });
+      expect(
+        messages.filter((m) => (m as Event).stream === BROADCAST_STREAMS.sshHostKey),
+      ).toHaveLength(1);
+      renderer.send({ id: 'info', method: 'conn.serverInfo', params: { profileId: 'lost' } });
+      expect(await answered('info')).toMatchObject({
+        ok: true,
+        result: { topology: 'replicaSet' },
+      });
+      expect(await fx.sshConnections()).toBe(sshBefore + 1);
+    } finally {
+      renderer.send({ id: 'close', method: 'conn.close', params: { profileId: 'lost' } });
+      await answered('close');
+      stopMain();
+    }
+    await vi.waitFor(async () => expect(await fx.sshConnections()).toBe(sshBefore), {
+      timeout: 15_000,
+      interval: 250,
+    });
+  });
+});
+
 /** True when nothing listens on 127.0.0.1:`port` any more. */
 function portIsClosed(port: number): Promise<boolean> {
   return new Promise((resolve) => {

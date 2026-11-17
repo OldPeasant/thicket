@@ -1332,4 +1332,22 @@ describe('ConnectionManager SSH tunnels', () => {
     expect((await rejection(manager.open('p1', undefined))).code).toBe('INVALID_PARAMS');
     expect(open).not.toHaveBeenCalled();
   });
+
+  it("the profile's connectTimeoutMS is the SSH handshake timeout; without it the tunnel's default applies", async () => {
+    const open = vi.fn<NonNullable<ConnectionManagerDeps['openTunnel']>>(() =>
+      Promise.resolve(fakeTunnel()),
+    );
+    const { manager } = setup({
+      profiles: {
+        timed: savedProfile('timed', { ssh: SSH, connectTimeoutMS: 7_500 }),
+        plain: savedProfile('plain', { ssh: SSH }),
+      },
+      secrets: { timed: { password: STORED_PASSWORD }, plain: { password: STORED_PASSWORD } },
+      openTunnel: open,
+    });
+    await manager.open('timed', undefined);
+    await manager.open('plain', undefined);
+    expect(open.mock.calls[0]?.[3]).toMatchObject({ readyTimeoutMS: 7_500 });
+    expect(open.mock.calls[1]?.[3]).not.toHaveProperty('readyTimeoutMS');
+  });
 });

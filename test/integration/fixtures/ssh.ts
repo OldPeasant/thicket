@@ -40,6 +40,8 @@ export interface SshFixture {
   sshConnections(): Promise<number>;
   /** Connections a member has from the SSH server (= tunnelled ones), read inside its container. */
   mongoConnections(member: 'primary' | 'secondary'): Promise<number>;
+  /** Kills every SSH session of the test user inside the sshd container (the listener stays). */
+  dropSshSessions(): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -128,6 +130,16 @@ export async function startSshFixture(): Promise<SshFixture> {
             `.toArray().filter((op) => String(op.client).startsWith('${sshdIp}:')).length`,
         );
         return Number(out.trim());
+      },
+      dropSshSessions: async () => {
+        // Session processes are named `sshd: thicket...` / `sshd-session: thicket...`. No shell:
+        // its own command line would match the pattern too.
+        const result = await sshd.exec(['pkill', '-KILL', '-f', `: ${SSH_USER}`]);
+        if (result.exitCode !== 0) {
+          throw new Error(
+            `pkill found no SSH session (${String(result.exitCode)}): ${result.output}`,
+          );
+        }
       },
       stop,
     };
