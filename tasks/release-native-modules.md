@@ -18,3 +18,4 @@ The release for tag `v0.1.0-rc.1` (GitHub Actions run 44118230764, 2026-11-17) f
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-17 17:46+0100 by dell26/agent-3): Optional native addons reached by the bundles (ssh2 sshcrypto, os-dns-native, system-ca's win/macos certificate exporters) are deliberately left out rather than shipped: an esbuild plugin turns every *.node require into a stub throwing MODULE_NOT_FOUND. All are required in try/catch with JS fallbacks, so the packaged app behaves exactly like today's toolchain-less builds; shipping them (electron-builder npmRebuild, cross-arch macOS) can be a later task if their speed/OS-cert features are wanted.
