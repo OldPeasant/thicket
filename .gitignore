@@ -16,3 +16,4 @@ board.html
 *.key
 *.crt
 test-results/
+__pycache__/
