@@ -4,59 +4,53 @@ Date: 2026-11-17
 
 Task: explain-ui - M3: Explain plan viewer
 
-Scope: round 3. The whole task diff on the final code, `git diff a60d732..e686724` (7 commits:
+Scope: round 4. The whole task diff on the final code, `git diff ef8927e..7a06a56` (8 commits:
 implementation, model/component tests, e2e, architecture notes, round-1 test-writer tests and
-reports, fixer commit, round-2 test-writer tests and reports). Since round 2 (old HEAD 8d2acb3)
-the branch has been rebased onto a60d732. The closest reading went to the only code commit since
-round 2 (e686724: new tests in `explain.model.spec.ts` and `aggregation-view.spec.ts`) and to the
-rebase resolution of `docs/ARCHITECTURE.md`. There are no uncommitted changes.
+reports, fixer commit, round-2 test-writer tests and reports, CR-4 fix). Since round 3 (HEAD
+e686724 on base a60d732) the branch was rebased onto ef8927e, and commit 7a06a56 fixed CR-4
+(`docs/ARCHITECTURE.md`) and reworded one comment in `test/e2e/explain.e2e.ts`. The closest reading
+went to 7a06a56 and to the rebase. There are no uncommitted changes. A test-writer runs in parallel;
+any later changes to tests or `reviews/explain-ui/tests.md` are not part of this review.
 
 Requirements:
 - tasks/explain-ui.md (goal, 2 acceptance criteria, recorded assumptions: index created over the
   bridge in the e2e, and the query-bar Explain explains the query as typed)
 - SPEC.md M3 "Explain plan for find and aggregate", demo step 9
 - docs/ARCHITECTURE.md ("Explain plan viewer", "Indexes tab"), docs/QUALITY.md, AGENTS.md
-- reviews/explain-ui/fixes.md, reviews/explain-ui/tests.md, the round-2 review
+- reviews/explain-ui/fixes.md (rounds 1-3), reviews/explain-ui/tests.md, the round-3 review
 
 Git range:
 - Branch: main
-- HEAD: e686724b5ea589ca0f8417ac5c70c3a68ec1a551
-- Base/start: a60d7325727c3212ad69a51e4ce927acc962c801 (`git merge-base HEAD origin/main`)
-- Commits reviewed: 7 (f6e4dea, 375928c, 5a37965, 6ba4fe3, 8740d57, 688d6a2, e686724)
+- HEAD: 7a06a568d0561f58932958c77142974b1e143c46
+- Base/start: ef8927e50e0878c20c6d7b70533e22449855106c (`git merge-base HEAD origin/main`)
+- Commits reviewed: 8 (c202c00, e6c39e1, 2fbf41d, 9ac2c96, a36416a, 8ec6154, 4049309, 7a06a56)
 
-Summary: 0 P0, 0 P1, 0 P2, 1 P3 open (round 1 found 1 P2 and 2 P3; all 3 are still resolved)
+Summary: 0 P0, 0 P1, 0 P2, 0 P3 open (rounds 1-3 found 1 P2 and 3 P3; all 4 are resolved)
 
-## How the rebase was checked
+## How the rebase and the CR-4 commit were checked
 
-- The task's code (`packages`, `apps`, `test`) has the same `git patch-id --stable` before and after
-  the rebase: `git diff 6d14cda..8d2acb3` and `git diff a60d732..688d6a2` both give 1a8f7ee2. So the
-  production code reviewed in round 2 is unchanged. Only `docs/` differs, because of the
-  ARCHITECTURE.md conflict.
-- `docs/ARCHITECTURE.md`: the resolution keeps main's "Indexes tab" section in full and adds the
-  task's "Explain plan viewer" section after it. The added text matches the pre-rebase text exactly.
-  Nothing was lost or duplicated.
-- Main changed `collection-view.ts/.html/.spec.ts` in the meantime (index-ui's "Indexes…" button).
-  The merged template keeps `query-explain` in the query bar and the `app-explain-panel` block
-  under the form, and the Indexes button sits separately in the bar. I found no interference.
+- Code reviewed in round 3 is unchanged: `git diff a60d732..e686724 -- packages apps test` and
+  `git diff ef8927e..4049309 -- packages apps test` both give `git patch-id --stable` f53878ca.
+- `git diff 4049309..7a06a56 -- packages apps test` changes exactly one line: the comment above
+  the `idx.create` request in `test/e2e/explain.e2e.ts:99`. No executable code changed.
+- Main between a60d732 and ef8927e brought OIDC work (backend `auth/oidc`, `connections`,
+  `contract`, desktop handlers, integration fixtures) and an ARCHITECTURE.md change. None of these
+  files is in the task diff, and the task's ARCHITECTURE.md section is a pure addition after the
+  "Indexes tab" section (`docs/ARCHITECTURE.md:612-629`), so nothing was lost or duplicated.
 
-## Round-3 test changes (e686724)
+## CR-4 fix verification
 
-I traced each new test against `collectSbe`/`planNode` (`explain.model.ts:148-201`) and against the
-target effect / `closeExplain()` in `aggregation-view.ts:262-268, 515-518`:
-- "slot-based ixscan reads are keys examined; zero reads stay 0": `ixscan` reads of node 1 count as
-  keys. The `seek` with `numReads: 0` gives `docsExamined` 0 on FETCH (through `addReads(undefined,
-  0)`), not undefined. The IXSCAN node has no docs examined. The expectations are correct and test a
-  real boundary (0 vs missing).
-- "stages without numReads, or that are not scans, add no keys/docs examined": the `numReads` of a
-  `filter` is ignored, and a `scan` without `numReads` leaves the value undefined. Correct.
-- "a stage without planNodeId or name is passed through": the walk continues below a stage without
-  an id, and a stage without a name adds no reads. Result: 4 docs examined. Correct.
-- "pointing the tab at another collection clears a refused Explain message": a target change calls
-  `closeExplain()`, which clears `explainError`. The test also asserts that no `agg.explain` was
-  sent. Correct, and it covers the A2/CR-3 path that was missing.
-
-The tests assert behaviour (summaries and DOM), not internals. No existing test was weakened or
-removed (the commit only adds lines to both spec files).
+- `docs/ARCHITECTURE.md:618-623` now says that, for slot-based plans, returned and time come from
+  the outermost SBE stage with the same `planNodeId`, and keys/docs examined are the summed
+  `numReads` of that node's `ixseek`/`ixscan`/`ixscan_generic` and `scan`/`seek` stages. This
+  matches `explain.model.ts:139-167`: `collectSbe` creates the entry from the first (outermost)
+  stage it meets for an id, with its `nReturned` and `executionTimeMillisEstimate`, and adds
+  `numReads` through `addReads` for names in `SBE_DOC_READS`/`SBE_KEY_READS`. `planNode`
+  (`explain.model.ts:182-205`) uses these values only when the `queryPlan` stage has none of its own.
+- `docs/ARCHITECTURE.md:626-628` says the e2e creates the index with `idx.create` over the bridge,
+  not through the Indexes tab. This matches `test/e2e/explain.e2e.ts:99-106` and the recorded
+  assumption, and the "until the Indexes tab exists" wording is gone.
+- The new e2e comment is accurate and no longer calls index-ui a pending task.
 
 ## P0 Critical
 
@@ -69,42 +63,36 @@ None.
 ## P2 Medium
 
 - [x] **CR-1 | Host-view Explain wiring has no unit tests (round 1). Resolved.**
-    - File: `packages/renderer/src/app/aggregation/aggregation-view.spec.ts:1371-1543`, `packages/renderer/src/app/collection/collection-view.spec.ts`
+    - File: `packages/renderer/src/app/aggregation/aggregation-view.spec.ts`, `packages/renderer/src/app/collection/collection-view.spec.ts`
     - Category: Tests
-    - Problem (round 1): no spec covered these behaviours: the `$out`/`$merge` switch to `queryPlanner`, the mapping from the query bar to the find target, the refusal of invalid input, and the panel reset when the target changes.
-    - Resolution: covered by the round-1 test-writer specs. Round 3 adds the "target change clears the refusal message" case.
+    - Problem (round 1): nothing covered the `$out`/`$merge` switch to `queryPlanner`, the query-bar-to-find mapping, the refusal of invalid input, and the panel reset on a target change.
+    - Resolution: covered by the round-1 and round-2 test-writer specs. Unchanged since round 3.
 
 ## P3 Low
 
-- [ ] **CR-4 | Architecture notes for the Explain viewer are out of date after the fix and the rebase**
-    - File: `docs/ARCHITECTURE.md:585-593`
-    - Category: Quality
-    - Problem: two statements no longer match the code:
-      1. "(the index is created with `idx.create` until the Indexes tab exists)". After the rebase, the Indexes tab exists: index-ui is `done`, and the "Indexes tab" section sits right above this one. The e2e still uses `idx.create`. That is fine (the recorded assumption covers it), but the "until" wording now describes a pending change that nothing tracks.
-      2. Slot-based plans take the "numbers of the outermost SBE stage with the same `planNodeId`". Since the CR-2 fix, that is only true for `nReturned` and time. Keys/docs examined are the summed `numReads` of the `scan`/`seek` and `ixseek`/`ixscan`/`ixscan_generic` stages of the node (`explain.model.ts:139-166`).
-    - Why it matters: ARCHITECTURE.md is what the next agents read before they touch this code. A wrong description of where the examined counts come from could lead to a "fix" that undoes CR-2.
-    - Suggested fix: state that keys/docs examined come from the summed `numReads` of the node's scan stages. Then either say the e2e creates the index over the bridge (no "until"), or switch the e2e to the Indexes tab. That would be a separate change, and the assumption should be updated with it.
-
 - [x] **CR-2 | Slot-based plans show no keys/docs examined per stage (round 1). Resolved.**
-    - File: `packages/renderer/src/app/explain/explain.model.ts:139-166`
+    - File: `packages/renderer/src/app/explain/explain.model.ts:139-167`
     - Category: Correctness
-    - Resolution: `collectSbe` adds up `numReads` per `planNodeId`. The round-3 tests add the zero-reads, non-scan and missing-id/name cases. The code is unchanged since round 2.
+    - Resolution: `collectSbe` sums `numReads` per `planNodeId`. Tested for zero reads, non-scan stages and stages without an id or name. Unchanged since round 3.
 
 - [x] **CR-3 | Explain with invalid input leaves the previous plan open and clears the builder's run result (round 1). Resolved.**
-    - File: `packages/renderer/src/app/collection/collection-view.ts`, `packages/renderer/src/app/aggregation/aggregation-view.ts:493-518`
+    - File: `packages/renderer/src/app/collection/collection-view.ts`, `packages/renderer/src/app/aggregation/aggregation-view.ts`
     - Category: Correctness
-    - Resolution: unchanged since round 2. The refusal shows in `agg-explain-error`, and the message clears on Explain, Close and a target change. The last case is now tested.
+    - Resolution: unchanged since round 3. The refusal shows in `agg-explain-error` and clears on Explain, Close and a target change (tested).
+
+- [x] **CR-4 | Architecture notes for the Explain viewer are out of date after the fix and the rebase (round 3). Resolved.**
+    - File: `docs/ARCHITECTURE.md:618-628`, `test/e2e/explain.e2e.ts:99`
+    - Category: Quality
+    - Resolution: fixed in 7a06a56 and checked against the code (see "CR-4 fix verification").
 
 ## Review conclusion
 
 No material issues found.
 
-The only open finding (CR-4) is a P3 documentation inaccuracy. It does not block completion, but it
-is cheap to fix. Both acceptance criteria are still addressed. `test/e2e/explain.e2e.ts` covers demo
-step 9. `explain-plan.spec.ts` renders the captured mongo 8.2 fixtures. The verify records
-(7ec485b, 6d14cda, 04:24) are newer than the fixer commit (04:23), so they describe the final
-production code. They were recorded before the rebase onto a60d732, which brought index-ui's
-changes to `collection-view`. The merge is clean, and the parent reports that `npm run check`
-passes at HEAD. I did not rerun the e2e myself. The parent may want to rerun
-`test/e2e/explain.e2e.ts` on the rebased code before `done`, because `done` only runs the unit
+Both acceptance criteria are still addressed: `test/e2e/explain.e2e.ts` covers demo step 9, and
+`explain-plan.spec.ts` renders the captured mongo 8.2 fixtures. The verify records (04:24) predate
+the rebases onto a60d732 and ef8927e. Production code has the same patch-id since then. Main's
+changes after a60d732 do not touch the renderer. The earlier rebase onto a60d732 brought index-ui's
+`collection-view` changes, and I did not rerun the e2e myself. As in round 3, the parent may want to
+rerun `test/e2e/explain.e2e.ts` on the final code before `done`, because `done` only runs the unit
 check.

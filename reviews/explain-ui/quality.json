@@ -1,0 +1,80 @@
+{
+  "schema": 1,
+  "task": "explain-ui",
+  "reviewed_revision": "7a06a568d0561f58932958c77142974b1e143c46",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/explain-ui/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/explain-ui/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/explain-ui/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "host-view Explain wiring tests added by test-writer (collection-view/aggregation-view specs)"
+    },
+    {
+      "id": "CR-2",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "slot-based plans: keys/docs examined from summed numReads of scan stages"
+    },
+    {
+      "id": "CR-3",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "Explain with invalid input closes the old plan and keeps the builder run result (same as A3)"
+    },
+    {
+      "id": "CR-4",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "stale ARCHITECTURE.md explain notes and e2e comment corrected"
+    },
+    {
+      "id": "TW-1",
+      "source": "test-writer",
+      "severity": "Low",
+      "disposition": "fixed",
+      "note": "ExplainRaw no longer throws on output that does not parse"
+    },
+    {
+      "id": "A1",
+      "source": "test-writer",
+      "severity": "Low",
+      "disposition": "accepted",
+      "note": "query-bar Explain explains the query as typed; recorded as task assumption"
+    },
+    {
+      "id": "A2",
+      "source": "test-writer",
+      "severity": "Low",
+      "disposition": "fixed",
+      "note": "builder explain panel closes when the tab's target changes"
+    },
+    {
+      "id": "A3",
+      "source": "test-writer",
+      "severity": "Low",
+      "disposition": "fixed",
+      "note": "same as CR-3"
+    }
+  ],
+  "validation": [
+    {
+      "command": "cd packages/renderer && npx ng test --include 'src/app/explain/**/*.spec.ts' --include 'src/app/collection/**/*.spec.ts' --include 'src/app/aggregation/**/*.spec.ts'",
+      "result": "pass"
+    },
+    {
+      "command": "npm run build -w packages/renderer && npm run build -w apps/desktop && npx playwright test test/e2e/explain.e2e.ts test/e2e/collection.e2e.ts test/e2e/aggregation.e2e.ts",
+      "result": "pass"
+    },
+    { "command": "npm run check", "result": "pass" }
+  ]
+}
