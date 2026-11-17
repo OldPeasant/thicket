@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "task": "packaged-hardening",
+  "reviewed_revision": "d11e7a1a67dd7fcdb9941f8895431a1447b17a1a",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/packaged-hardening/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/packaged-hardening/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/packaged-hardening/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "smoke script page selection race: first page + waitForURL leaving about: (d11e7a1); re-review confirmed"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "--remote-debugging-port residual risk documented in electron-builder.yml and ARCHITECTURE.md, recorded with tasks.py assume; blocking it is out of scope"}
+  ],
+  "validation": [
+    {"command": "npm run dist:dir -w apps/desktop && (cd apps/desktop && node scripts/smoke-packaged.mjs release/linux-unpacked/thicket)", "result": "pass"},
+    {"command": "cd apps/desktop && node release/unfused-control.mjs (fuses flipped back on, expected to fail)", "result": "pass"},
+    {"command": "npm run test:electron -w apps/desktop", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}

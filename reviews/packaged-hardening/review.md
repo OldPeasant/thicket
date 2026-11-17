@@ -4,29 +4,36 @@ Date: 2026-11-17
 
 Task: packaged-hardening - Harden the packaged app: Electron fuses (RunAsNode, NODE_OPTIONS, asar-only), ignore THICKET_DEV_SERVER/THICKET_RENDERER_DIR when packaged
 
-Scope: committed changes of the task, `git diff c74ea81..HEAD` (package-lock checked, only the new devDependency line). The parent named task commit 8cfeed8. HEAD is now 99416b5, and `git diff 8cfeed8 99416b5` only changes `tasks/packaged-hardening.md` (verify records), so the reviewed code is the same.
+Scope: second round, final code at d11e7a1. The whole task diff `git diff c74ea81..d11e7a1 -- . ':!package-lock.json'` was inspected. That range also contains other tasks merged from main (schema-analysis, raw-cmd-read-pref, other task files). Those changes are outside this task's scope and were not reviewed. In scope are the task commits ca33e962 (implementation), 8ce242e6 (test-writer tests and first-round reports; this is the rebased form of the f5cb02b tests the parent mentioned) and d11e7a1 (fixes for CR-1/CR-2). Files in scope: `apps/desktop/electron-builder.yml`, `apps/desktop/package.json`, `apps/desktop/scripts/smoke-packaged.mjs`, `apps/desktop/src/main/index.ts`, `apps/desktop/src/main/renderer-source.ts`, `apps/desktop/src/main/renderer-source.spec.ts`, `apps/desktop/src/packaging.spec.ts`, `docs/ARCHITECTURE.md` (Packaging paragraph), and the `@electron/fuses` devDependency entry in `package-lock.json`.
 
 Requirements:
-- tasks/packaged-hardening.md (acceptance criteria and recorded assumptions)
+- tasks/packaged-hardening.md (acceptance criteria and recorded assumptions, including the CR-2 remote-debugging-port assumption)
 - reviews/packaging/review.md CR-3 (origin)
 - SPEC.md / docs/ARCHITECTURE.md (Electron shell, Packaging)
 - AGENTS.md (Evidence, quality gate)
+- reviews/packaged-hardening/review.md (round 1) and fixes.md
 
 Git range:
 - Branch: main
-- HEAD: 99416b500287e066610070a85b6edd9be4304737
+- HEAD: d11e7a1a (reviewed revision d11e7a1)
 - Base/start: c74ea8166f401f147ac6917a4a7a5ec65cbc789d
-- Commits reviewed: 8 (1 code commit: 99416b5, a rebased copy of 1f59518/8cfeed8; the rest are tasks.py assume/heartbeat/verify commits)
-- Uncommitted changes: `apps/desktop/src/main/renderer-source.spec.ts` has 68 extra uncommitted lines, probably from the concurrent test-writer. They are not part of this review.
+- Commits reviewed: 3 task code commits (ca33e962, 8ce242e6, d11e7a1a); the remaining commits in the range are tasks.py bookkeeping or other tasks merged from main
+- Uncommitted changes: none
 
-Summary: 0 P0, 0 P1, 0 P2, 2 P3
+Summary: 0 P0, 0 P1, 0 P2, 0 P3
 
-## Verification notes
+## Verification of round-1 findings
 
-- AC1 (fuses): `electron-builder.yml` sets `runAsNode: false`, `enableNodeOptionsEnvironmentVariable: false`, `enableNodeCliInspectArguments: false`, `onlyLoadAppFromAsar: true` and `enableEmbeddedAsarIntegrityValidation: true`. In app-builder-lib 26.18 (`platformPackager.js` 254-300), the fuses are flipped after `afterPack` and before `doSignAfterPack`. So the mac ad-hoc signing (`identity: '-'`) and Windows `signAndEditExecutable` run on the already-fused binary. `@electron/fuses` 1.8.0 is already in the lock tree (it is a dependency of electron-builder). The new devDependency only lets the smoke script import it. The smoke script's `FUSE_STATES` byte map (48/49/114/144) and its `FuseV1Options` indices match `@electron/fuses/dist/constants.js` and `config.js`. `getCurrentFuseWire` resolves `Thicket.app/Contents/MacOS/Thicket` to the Electron Framework binary, so the fuse read also works on macOS. The inspect decision (off, smoke test rewritten for CDP) is recorded as an assumption, as the criterion asks.
-- AC2 (env overrides): `rendererSource` returns `resources/renderer` and no dev server when `packaged` is true, whatever the environment says. `index.ts` uses it for both `rendererDir` and the CSP (`contentSecurityPolicy(devServer)`), so a packaged app also cannot widen `connect-src`. Dev behaviour (`dev.mjs`, `dev.electron.spec.ts`) is unchanged. The unit tests cover packaged, dev and empty-string cases. The smoke run launches the app with a bogus `THICKET_DEV_SERVER` and `THICKET_RENDERER_DIR` and asserts a `thicket://app/` URL.
-- AC3 (dist:dir + smoke, run-as-node): the smoke script's run-as-node probe is equivalent to the criterion's `ELECTRON_RUN_AS_NODE=1 thicket -e 1` (a printed marker instead of `1`, so the result can be observed). The recorded evidence includes a negative control (fuses flipped back on: RAN, LISTENING, FAILED), which shows the probes can detect the failure case. I did not re-run the packaged binary in this review. The verification rests on the recorded evidence, which matches the code.
-- `packaging.spec.ts` now checks the packaged renderer path through `rendererSource` instead of a source-text match, and it asserts the fuse config and `asar !== false`. This is an improvement.
+- CR-1 (smoke page race): fixed. `smoke-packaged.mjs:171-173` now takes the app's first page (`context.pages()[0]`, otherwise `waitForEvent('page')`), waits with `page.waitForURL((url) => url.protocol !== 'about:')` and only then runs `waitForLoadState('load')`, the pings and the URL assertion. A target that is still on about:blank at attach time is now selected and waited on. The pings can no longer run on the blank document. An env-override regression (for example a load from `http://127.0.0.1:9`) still leaves about:, so it reaches the unchanged `thicket://app/` URL check and is reported with the wrong URL rather than as a bare timeout. The fixer reports a passing smoke run and a failing negative control after the change.
+- CR-2 (remote-debugging-port undocumented): fixed. The `electronFuses` comment in `electron-builder.yml:37-40` and the Packaging paragraph in `docs/ARCHITECTURE.md` state that `--remote-debugging-port` is not fuse-controlled, is still accepted by packaged builds, allows driving the renderer including `thicket.request`, is an accepted residual risk, and could be refused in a follow-up. The matching assumption is recorded in tasks/packaged-hardening.md (06:17), so humans can review it.
+
+## Verification notes (whole task at d11e7a1)
+
+- AC1 (fuses): `electron-builder.yml` sets `runAsNode: false`, `enableNodeOptionsEnvironmentVariable: false`, `enableNodeCliInspectArguments: false`, `onlyLoadAppFromAsar: true` and `enableEmbeddedAsarIntegrityValidation: true`. The inspect decision (off, smoke test moved to CDP) is recorded as an assumption, as the criterion asks. `packaging.spec.ts` asserts the exact fuse config and `asar !== false`. The smoke script's expected-fuse map and the fuse-wire byte decoding are unchanged since round 1, and I checked them against `@electron/fuses` then.
+- AC2 (env overrides): `rendererSource` ignores the environment when `packaged` is true. `index.ts:55-61` uses it for both `rendererDir` and the CSP's `devServer`, and no other read of the two variables remains in `index.ts` (only the doc comment mentions them). Dev behaviour is unchanged.
+- AC3 (dist:dir + smoke, run-as-node): the recorded evidence (smoke OK, run-as-node probe ignored, negative control with the fuses flipped back on failing) matches the code. I did not re-run the packaged binary. Bash execution of the build is outside this read-only review.
+- Tests added in 8ce242e6 (`renderer-source.spec.ts`): each override is ignored separately when packaged, the packaged path does not depend on `distDir`, each dev override applies separately, a packaged `THICKET_DEV_SERVER` cannot widen the CSP `connect-src` (this uses the real `contentSecurityPolicy`), and a source-text regression guard checks that `index.ts` reads the overrides only through `rendererSource({ packaged: app.isPackaged, ...`. The guard strips comments before matching. Its `//` stripping would also cut string literals that contain `://`, but that cannot hide a `THICKET_*` identifier read, so the guard stays effective. These tests assert behaviour. The source-text guard is a deliberate structural check and is documented as such in the test.
+- `THICKET_USER_DATA` is still honoured in packaged builds. The task names only `THICKET_DEV_SERVER` and `THICKET_RENDERER_DIR`, and that variable changes no loaded code, so this is not a finding.
 
 ## P0 Critical
 
@@ -42,20 +49,8 @@ None.
 
 ## P3 Low
 
-- [ ] **CR-1 | Smoke script page selection can miss the window when it is still on about:blank at attach time**
-    - File: `apps/desktop/scripts/smoke-packaged.mjs:167-171`
-    - Category: Tests
-    - Problem: After `connectOverCDP`, the script picks the page whose URL already starts with `thicket://`. Otherwise it waits for a new `page` event. `openWindow` creates the BrowserWindow first and calls `loadURL` afterwards. If the target already exists at attach time but is still on its initial blank URL, `find` returns undefined, no further `page` event arrives, and the run fails after the 60 s timeout. If instead the `page` event delivers the window before navigation, `waitForLoadState('load')` can resolve on the blank document. The following `page.evaluate(... globalThis.thicket ...)` then runs before the navigation (or during it, when the execution context is destroyed). Either way the result depends on timing, not on the app.
-    - Why it matters: this smoke test is the release-level evidence for AC2/AC3 and for future packaging tasks. A timing-dependent failure here would be mistaken for a hardening regression, or would lead people to distrust the script.
-    - Suggested fix: take the first page (`context.pages()[0] ?? await context.waitForEvent('page')`). Then wait for the expected origin with `await page.waitForURL(/^thicket:\/\/app\//, { timeout: TIMEOUT })`, or with a generic `waitForURL((u) => u.protocol !== 'about:')` followed by the existing URL assertion, so an env-override regression still reports the wrong URL rather than a timeout.
-
-- [ ] **CR-2 | Residual remote-debugging surface of the packaged app is not documented**
-    - File: `apps/desktop/electron-builder.yml:29-36`, `docs/ARCHITECTURE.md:399-409`
-    - Category: Security
-    - Problem: The hardening comment says the shipped executable "cannot be turned into a plain Node runtime". That is true. However, the packaged app still accepts Chromium's `--remote-debugging-port` (no fuse controls it), and the new smoke test depends on that. Anyone who can launch the binary with arguments can attach over CDP and drive the renderer. That includes calling the preload's `thicket.request` against the user's saved connections, whose secrets the backend fetches from the OS keychain under the app's identity. On macOS, keychain item access is tied to the app, so this is the same class of misuse that the RunAsNode and inspect fuses close for the main process. Neither the comment, ARCHITECTURE nor the assumption records this remaining gap as a known, accepted risk.
-    - Why it matters: readers of the hardening docs could conclude that the packaged binary can no longer be scripted, and a later task could make decisions on that basis (for example signing/notarization or keychain ACLs).
-    - Suggested fix: at minimum, state in the electron-builder.yml comment and in ARCHITECTURE "Packaging" that `--remote-debugging-port` stays available in packaged builds (used by the smoke test), and record it as an assumption for humans to confirm. Optionally add a follow-up task to refuse `remote-debugging-port` / `remote-debugging-pipe` in packaged builds (`app.commandLine.hasSwitch` early in main) and give the smoke test another attach path. Blocking it is outside this task's acceptance criteria.
+None.
 
 ## Review conclusion
 
-No material issues found. The acceptance criteria are implemented, and the recorded evidence matches the code. The two P3 findings are optional robustness and documentation improvements.
+No material issues found. Both round-1 findings (CR-1, CR-2) are resolved at d11e7a1. The acceptance criteria are implemented, and the recorded evidence matches the code.

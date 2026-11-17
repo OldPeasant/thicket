@@ -4,17 +4,47 @@ Date: 2026-11-17
 
 Task: packaged-hardening — Harden the packaged app: Electron fuses (RunAsNode, NODE_OPTIONS, asar-only), ignore THICKET_DEV_SERVER/THICKET_RENDERER_DIR when packaged
 
-Scope: `git diff c74ea8166f401f147ac6917a4a7a5ec65cbc789d..99416b500287e066610070a85b6edd9be4304737`
-(branch main). The parent named task commit 8cfeed8; while I worked it was rebased onto the
-`verify:` commits and is now 99416b5. `git diff 1f59518..99416b5` touches only
-`tasks/packaged-hardening.md`, so the code under test did not change. Uncommitted input: my edit to
-`apps/desktop/src/main/renderer-source.spec.ts` (sha256 below).
+Scope: `git diff c74ea8166f401f147ac6917a4a7a5ec65cbc789d..d11e7a1a67dd7fcdb9941f8895431a1447b17a1a`
+(branch main), round 2. Task code commits: ca33e962 (implementation), 8ce242e6 (tests and
+reports), d11e7a1a (fixer: CR-1 smoke page selection in `apps/desktop/scripts/smoke-packaged.mjs`,
+CR-2 comments in `apps/desktop/electron-builder.yml` and `docs/ARCHITECTURE.md`). Between round 1
+and d11e7a1a, nothing under `apps/desktop/src` changed. Their sha256 values are identical to the
+round-1 snapshot (listed under Coverage). The `electron-builder.yml` change adds comment lines only.
+No uncommitted inputs except `reviews/packaged-hardening/review.md`, which the reviewer is editing
+and which is not a test input.
 
 Requirements:
 - `tasks/packaged-hardening.md` acceptance criteria and recorded assumptions (inspect fuse off,
   CDP smoke test; NODE_OPTIONS checked by reading the fuse wire only)
 - `docs/ARCHITECTURE.md` ("Packaging", "Coverage")
 - `AGENTS.md` (Evidence)
+- `reviews/packaged-hardening/fixes.md` (round-2 changes)
+
+## Round 2 (revision d11e7a1a)
+
+I re-ran every validation on the final code. I added no new tests: the fixer only changed the
+smoke script, which is itself the test for CR-1, and documentation comments (CR-2) that have no
+behavior to test. The smoke run below exercises the new page selection (first page, then
+`waitForURL` until the URL leaves `about:`).
+
+| Command | Result |
+|---|---|
+| `npx --prefix apps/desktop vitest run --root apps/desktop src/main/renderer-source.spec.ts src/packaging.spec.ts` | Pass: 2 files, 30 tests (06:17:54) |
+| `node apps/desktop/scripts/smoke-packaged.mjs apps/desktop/release/linux-unpacked/thicket` | Pass: url `thicket://app/#/`, title `Thicket`, fuses RunAsNode/EnableNodeOptionsEnvironmentVariable/EnableNodeCliInspectArguments `DISABLE`, OnlyLoadAppFromAsar/EnableEmbeddedAsarIntegrityValidation `ENABLE`, `runAsNode":"ignored"`, `inspect":"ignored"`, mainPing and backendPing answered, `smoke: OK` |
+| `cd apps/desktop && node release/unfused-control.mjs` | Expected failure: fuses `ENABLE`, `runAsNode":"RAN"`, `inspect":"LISTENING"`, `smoke: wrong fuses`, `smoke: FAILED`, `exit=1` |
+| `npm run check` (repo root, same as `.taskcheck`) | Pass: lint and typecheck clean; root vitest 84 files / 4417 tests; renderer `ng test` 102 files / 3355 tests |
+
+Notes:
+- Packaged build: `apps/desktop/release/linux-unpacked` from 06:02. It contains everything that
+  goes into the package. Since then the only change to packaged inputs was comment lines in
+  `electron-builder.yml`. The smoke script runs from outside the asar. I did not re-run
+  `npm run dist:dir`.
+- I ran the smoke from the repo root, so it wrote its screenshot to `release/smoke.png` at the repo
+  root. That path is git-ignored.
+- The round-1 intermittent SSH failure in `packages/backend/src/ssh/tunnel.spec.ts` did not occur
+  this round.
+
+The round-1 sections follow. Results that changed in round 2 are noted inline.
 
 ## Test files changed
 
@@ -83,7 +113,8 @@ tests, pass.
 
 Result:
 
-Pass on the second run; the first run had the unrelated intermittent SSH failure above.
+Round 2: Pass on the first run (`npm run check`, 84/4417 root, 102/3355 renderer). Round 1: Pass
+on the second run; the first run had the unrelated intermittent SSH failure above.
 
 ## Bugs found
 
@@ -109,7 +140,7 @@ Evidence:
 - Run start/completion time and exit status: start 2026-11-17 06:08:51 +0100, report written 06:08:53; all tests passed and the summary was printed (exit 0)
 - Generated report paths and report hashes/run identifier: `apps/desktop/coverage/coverage-summary.json` sha256 b0c68534020c1e1c3070f3c9638b98ec5a7d03b2bc1a001933523b10996901db; `apps/desktop/coverage/lcov.info` sha256 3b945c89c5a06b671ad6b34f4adb6d2acb2d234b8d88c25015a5046768b727e3 (git-ignored)
 - Evidence outputs are fresh and inputs stayed unchanged: the report files were modified at 06:08:53, during this run, and the source hashes matched after all the runs
-- Final run after latest test additions and production fixes: yes. The run came after all test additions, and no production changes were made
+- Final run after latest test additions and production fixes: the coverage run is from round 1 (code at 99416b5). It is still current for d11e7a1a: the fixer changed no file in the coverage scope, and in round 2 `renderer-source.ts` (dabd9fb3…), `index.ts` (8e43d281…), `renderer-source.spec.ts` (39f1a3a1…) and `packaging.spec.ts` (d0dc2067…) hash the same as in round 1. In round 2, `electron-builder.yml` hashes to ded63434079f44d9…, changed by comments only, and `smoke-packaged.mjs` to 71df63ef1847340d…, the CR-1 fix. Both are outside the coverage scope
 
 Values below use covered/total (percentage).
 
@@ -142,7 +173,8 @@ No scoped file is missing from the report. The aggregate is dominated by the unt
 
 ## Summary
 
-Tests added and all validation passed. I found no production defects, and task-scoped coverage of
+Round 2 (d11e7a1a): all validation passed again on the final code, and no new tests were needed.
+Round 1: Tests added and all validation passed. I found no production defects, and task-scoped coverage of
 the new logic (`renderer-source.ts`) is 100%. The main-entry change is covered by a static guard and
 by the packaged smoke and electron runs. One intermittent failure, unrelated to this task, appeared
 in `packages/backend/src/ssh/tunnel.spec.ts`; it passed on rerun.
