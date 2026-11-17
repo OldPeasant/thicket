@@ -14,6 +14,7 @@ failed Create, switching a text/2d field to ascending leaves a stale message unt
 (reviews/index-ui/review.md CR-6, P3).
 
 ## Acceptance criteria
-- [ ] Component test: a collation error after Create with a text key disappears when the key type changes to ascending
+- [x] Component test: a collation error after Create with a text key disappears when the key type changes to ascending
+  - verified (2026-11-17 05:20+0100 by dell26/agent-2): cd packages/renderer && npx ng test --include='src/app/indexes/index-create-form.spec.ts' -> 29 passed; tests 'clears a collation error after Create with a text key when the type changes to ascending' and the $** text variant fail without the setType fix (checked by stashing it: 1 failed)
 
 ## Notes
