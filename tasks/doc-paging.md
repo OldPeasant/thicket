@@ -5,7 +5,7 @@ owner: dell26/agent-3
 deps: [bson-inputs,docs-query-backend]
 touches: [packages/renderer/src/app/explorer]
 prio: 1
-lease_until: 2026-11-17T02:40:52Z
+lease_until: 2026-11-17T02:45:54Z
 extended: 
 releases: 1
 ---
