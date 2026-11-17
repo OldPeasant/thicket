@@ -1269,6 +1269,69 @@ describe('AggregationView', () => {
     expect(live.textContent?.trim()).toMatch(/^Preview failed: [\s\S]*preview broke$/);
   });
 
+  it('the live region counts every previewed stage and is empty for stages without a preview', async () => {
+    await buildDemo();
+    // The fake answers one document per stage of the previewed pipeline.
+    expect(inStage(2, 'agg-preview-live').textContent?.trim()).toBe('3 documents from a sample');
+    const live = inStage(1, 'agg-preview-live');
+    expect(live.textContent?.trim()).toBe('2 documents from a sample');
+
+    // Disabled: nothing to announce, and the region stays in place.
+    await click(inStage(1, 'agg-stage-enabled'));
+    expect(inStage(1, 'agg-preview-live')).toBe(live);
+    expect(live.textContent?.trim()).toBe('');
+    expect(inStage(2, 'agg-preview-live').textContent?.trim()).toBe('2 documents from a sample');
+    // Enabled again: the count comes back in the same region.
+    await click(inStage(1, 'agg-stage-enabled'));
+    expect(inStage(1, 'agg-preview-live')).toBe(live);
+    expect(live.textContent?.trim()).toBe('2 documents from a sample');
+
+    // A syntax error: nothing to announce (the error is under the textarea).
+    await setBody(1, '{ _id: ');
+    expect(inStage(1, 'agg-preview-live')).toBe(live);
+    expect(live.textContent?.trim()).toBe('');
+
+    // $out and $merge are never previewed.
+    await click(get('agg-add-stage'));
+    await setOperator(3, '$out');
+    expect(inStage(3, 'agg-preview-live').textContent?.trim()).toBe('');
+    await setOperator(3, '$merge');
+    expect(inStage(3, 'agg-preview-live').textContent?.trim()).toBe('');
+    // Every stage has exactly one live region.
+    for (let i = 0; i < 4; i++) {
+      expect(inStage(i, 'agg-stage-preview').querySelectorAll('[aria-live]')).toHaveLength(1);
+    }
+  });
+
+  it('a Run refused for a full-text parse error sends nothing and keeps the text and stages', async () => {
+    await click(get('agg-run'));
+    const sent = runs().length;
+    const stagesBefore = view.stages();
+    await click(get('agg-mode-text'));
+    const area = get<HTMLTextAreaElement>('agg-text');
+    area.value = '[{ $match: { a: 1 } }, { $limit: }]';
+    area.dispatchEvent(new Event('input'));
+    await click(get('agg-run'));
+    expect(runs()).toHaveLength(sent);
+    expect(q('agg-cancel')).toBeNull();
+    expect(q('agg-results')).toBeNull();
+    expect(q('agg-next')).toBeNull();
+    // Still in text mode with the text as typed; the stage list is not replaced.
+    expect(get<HTMLTextAreaElement>('agg-text').value).toBe('[{ $match: { a: 1 } }, { $limit: }]');
+    expect(view.stages()).toBe(stagesBefore);
+
+    // Fixing the text runs it.
+    area.value = '[{ $match: { a: 1 } }]';
+    area.dispatchEvent(new Event('input'));
+    await click(get('agg-run'));
+    expect(runs()).toHaveLength(sent + 1);
+    expect(runs().at(-1)?.['pipeline']).toBe(
+      '[{"$match":{"a":{"$numberInt":"1"}}},{"$limit":{"$numberInt":"21"}}]',
+    );
+    expect(q('agg-text-error')).toBeNull();
+    expect(all('agg-result-doc')).toHaveLength(3);
+  });
+
   it('does not re-announce stage errors while typing', async () => {
     await setBody(0, '{ a: ');
     const error = inStage(0, 'agg-stage-error');
