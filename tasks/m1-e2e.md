@@ -5,7 +5,7 @@ owner: dell26/agent-3
 deps: [connection-ui,collection-view,doc-edit-save,conflict-ui,doc-paging,raw-editor,io-basic-ui]
 touches: [test/e2e/m1]
 prio: 1
-lease_until: 2026-11-17T03:11:04Z
+lease_until: 2026-11-17T03:16:05Z
 ---
 ## Goal
 One Playwright suite that walks SPEC demo steps 2–7 against the int-harness fixtures (TLS replica set instead of Atlas SRV).
