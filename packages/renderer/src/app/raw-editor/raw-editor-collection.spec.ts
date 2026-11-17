@@ -162,6 +162,27 @@ describe('Raw editor in a collection tab', () => {
     expect(q('doc-raw-toggle', docItem(1))?.getAttribute('aria-pressed')).toBe('false');
   });
 
+  it("shows each row's own document, not another's unapplied text, when the rows change order", async () => {
+    await start();
+    await click('doc-raw-toggle', docItem(0));
+    await click('doc-raw-toggle', docItem(1));
+    const first = editorOf(docItem(0));
+    first.dispatch({
+      changes: { from: 0, to: first.state.doc.length, insert: '{ _id: 1, total: 11 }' },
+      userEvent: 'input.type',
+    });
+    await settle();
+    expect(q('raw-dirty', docItem(0))).not.toBeNull();
+    // The same query answers in the other order: row 0 now holds document 2.
+    rows = [orderText(2), orderText(1)];
+    await click('query-run');
+    expect(editorOf(docItem(0)).state.doc.toString()).toBe('{\n  _id: 2,\n  total: 20\n}');
+    expect(q('raw-dirty', docItem(0))).toBeNull();
+    expect(q('raw-error', docItem(0))).toBeNull();
+    expect(editorOf(docItem(1)).state.doc.toString()).toBe('{\n  _id: 1,\n  total: 10\n}');
+    expect(q('edit-count')?.textContent ?? '').not.toMatch(/[1-9] change/);
+  });
+
   it('offers no raw editor for a document without _id', async () => {
     rows = ['{"total":{"$numberInt":"5"}}'];
     await start();

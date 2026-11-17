@@ -414,6 +414,62 @@ describe('RawEditor', () => {
       expect(edits.modified()).toBe(false);
     });
 
+    it('keeps the chosen format when another document comes in', async () => {
+      await click('raw-format-ejson');
+      await type(`{"_id":${ID},"mine":1}`);
+      expect(q('raw-dirty')).not.toBeNull();
+      const other = parseEJsonDocument('{"_id":{"$oid":"65a1b2c3d4e5f60718293a4c"},"name":"Lin"}');
+      host.doc.set(other);
+      await fixture.whenStable();
+      expect(button('raw-format-ejson').getAttribute('aria-pressed')).toBe('true');
+      expect(editor().format()).toBe('ejson');
+      expect(editor().value).toBe(stringifyEJson(other, 2));
+      expect(q('raw-dirty')).toBeNull();
+      // The new text is applied as the new document.
+      await type('{"_id":{"$oid":"65a1b2c3d4e5f60718293a4c"},"name":"Kay"}');
+      await click('raw-apply');
+      expect(q('raw-error')).toBeNull();
+      expect(edits.current(other)).toEqual(
+        parseEJsonDocument('{"_id":{"$oid":"65a1b2c3d4e5f60718293a4c"},"name":"Kay"}'),
+      );
+      expect(edits.current(DOC)).toEqual(DOC);
+    });
+
+    it('shows the unsaved edits of a document that comes in', async () => {
+      const other = parseEJsonDocument('{"_id":{"$oid":"65a1b2c3d4e5f60718293a4c"},"name":"Lin"}');
+      edits.edit(
+        other,
+        parseEJsonDocument('{"_id":{"$oid":"65a1b2c3d4e5f60718293a4c"},"name":"Edited"}'),
+      );
+      await type('{ _id: ObjectId("65a1b2c3d4e5f60718293a4b"), mine: 1 }');
+      host.doc.set(other);
+      await fixture.whenStable();
+      expect(editor().value).toBe(
+        '{\n  _id: ObjectId("65a1b2c3d4e5f60718293a4c"),\n  name: "Edited"\n}',
+      );
+      expect(q('raw-dirty')).toBeNull();
+    });
+
+    it('shows another document without _id instead of the unapplied text of the previous one', async () => {
+      host.doc.set(parseEJsonDocument('{"a":{"$numberInt":"1"}}'));
+      await fixture.whenStable();
+      await type('{ a: 2 }');
+      expect(q('raw-dirty')).not.toBeNull();
+      host.doc.set(parseEJsonDocument('{"b":{"$numberInt":"3"}}'));
+      await fixture.whenStable();
+      expect(editor().value).toBe('{\n  b: 3\n}');
+      expect(q('raw-dirty')).toBeNull();
+      expect(q('raw-no-id')).not.toBeNull();
+      // From a document without _id to one with an _id.
+      await type('{ b: 4 }');
+      host.doc.set(DOC);
+      await fixture.whenStable();
+      expect(editor().value).toContain('name: "Ada"');
+      expect(q('raw-dirty')).toBeNull();
+      expect(q('raw-no-id')).toBeNull();
+      expect(edits.modified()).toBe(false);
+    });
+
     it('reset discards unapplied changes', async () => {
       const before = editor().value;
       await type('{ broken');
