@@ -20,3 +20,4 @@ README with features, screenshots (both styles), install per OS including Gateke
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-17 05:30+0100 by dell26/agent-2): Install was verified with a locally built AppImage (same electron-builder config as release.yml), not one downloaded from a GitHub release (no release published yet); macOS Gatekeeper and Windows SmartScreen steps are written from current OS behavior (macOS 15 removed Control-click Open) and were not run here
