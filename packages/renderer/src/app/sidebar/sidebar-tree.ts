@@ -422,6 +422,12 @@ export class SidebarTree {
           run: () => this.tree.openCurrentOps(id),
         },
         {
+          id: 'server-stats',
+          label: 'Server stats',
+          disabled: !connected,
+          run: () => this.tree.openServerStats(id),
+        },
+        {
           id: 'create-db',
           label: 'Create database…',
           write: true,

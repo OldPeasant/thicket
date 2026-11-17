@@ -9,6 +9,7 @@ import {
 } from '@thicket/contract';
 
 import { currentOpTabId, type CurrentOpTabData } from '../admin/currentop/currentop-view';
+import { serverStatsTabId, type ServerStatsTabData } from '../admin/stats/server-stats-view';
 import { usersTabId, type UsersTabData } from '../admin/users/users-roles-view';
 import { gridfsTabId, type GridfsTabData } from '../gridfs/gridfs.model';
 import { ApiError, describeError } from '../api/api-error';
@@ -442,6 +443,20 @@ export class SidebarTreeService {
       id: currentOpTabId(profileId),
       kind: 'currentop',
       title: 'Current operations',
+      detail: profile?.name ?? profileId,
+      production: profile?.production === true,
+      data: { ...data },
+    });
+  }
+
+  /** Opens (or selects) the server stats dashboard of a connection. */
+  openServerStats(profileId: string): void {
+    const profile = this.profile(profileId);
+    const data: ServerStatsTabData = { profileId };
+    this.workspace.open({
+      id: serverStatsTabId(profileId),
+      kind: 'serverstats',
+      title: 'Server stats',
       detail: profile?.name ?? profileId,
       production: profile?.production === true,
       data: { ...data },

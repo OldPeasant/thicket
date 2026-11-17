@@ -1,0 +1,253 @@
+<section class="stats" aria-label="Server stats">
+  <header class="head">
+    <div class="who" data-testid="stats-server">
+      @if (sample(); as s) {
+        <span class="host code">{{ s.host }}</span>
+        <span class="meta">
+          {{ s.process || 'mongod' }} {{ s.version }} ·
+          <span data-testid="stats-role">{{ role() }}</span>
+          @if (s.storageEngine) {
+            · {{ s.storageEngine }}
+          }
+          · up {{ formatUptime(s.uptimeMs) }}
+        </span>
+      } @else if (!statusError()) {
+        <span class="meta">Reading serverStatus…</span>
+      }
+    </div>
+    <div class="actions">
+      @if (updatedAt(); as at) {
+        <span class="updated" data-testid="stats-updated"
+          >Updated {{ at.toLocaleTimeString() }}</span
+        >
+      }
+      <label class="auto">
+        Refresh every
+        <select
+          #interval
+          data-testid="stats-interval"
+          [value]="'' + refreshSecs()"
+          (change)="setRefresh(interval.value)"
+        >
+          @for (secs of intervals; track secs) {
+            <option [value]="'' + secs" [selected]="secs === refreshSecs()">
+              {{ secs === 0 ? 'never' : secs + ' s' }}
+            </option>
+          }
+        </select>
+      </label>
+      <button type="button" class="btn" data-testid="stats-refresh" (click)="refresh()">
+        Refresh
+      </button>
+    </div>
+  </header>
+
+  <div class="body">
+    @if (statusError(); as message) {
+      <p class="banner error" role="alert" data-testid="stats-error">{{ message }}</p>
+    }
+
+    <dl class="tiles" aria-label="Current values">
+      <div class="tile" data-testid="tile-ops">
+        <dt>Operations</dt>
+        <dd>{{ formatCount(totalOps()) }}<small>/s</small></dd>
+      </div>
+      <div class="tile" data-testid="tile-connections">
+        <dt>Connections</dt>
+        <dd>
+          @if (sample(); as s) {
+            {{ formatCount(s.connections.current) }}
+            <small>of {{ formatCount(s.connections.current + s.connections.available) }}</small>
+          } @else {
+            –
+          }
+        </dd>
+      </div>
+      <div class="tile" data-testid="tile-memory">
+        <dt>Resident memory</dt>
+        <dd>
+          @if (sample(); as s) {
+            {{ formatMebibytes(s.mem.resident) }}
+            @if (s.mem.virtual !== null) {
+              <small>{{ formatMebibytes(s.mem.virtual) }} virtual</small>
+            }
+          } @else {
+            –
+          }
+        </dd>
+      </div>
+      <div class="tile" data-testid="tile-network">
+        <dt>Network</dt>
+        <dd>
+          @if (latest(); as p) {
+            {{ formatBytes(p.bytesIn) }}<small>/s in</small> {{ formatBytes(p.bytesOut)
+            }}<small>/s out</small>
+          } @else {
+            –
+          }
+        </dd>
+      </div>
+    </dl>
+
+    <div class="charts">
+      <app-stats-chart
+        class="wide"
+        name="ops"
+        title="Operations per second"
+        [series]="opsSeries()"
+        [times]="times()"
+        [slots]="slots"
+        [format]="formatCount"
+      />
+      <app-stats-chart
+        name="connections"
+        title="Connections"
+        [series]="connectionSeries()"
+        [times]="times()"
+        [slots]="slots"
+        [format]="formatWhole"
+      />
+      <app-stats-chart
+        name="memory"
+        title="Resident memory"
+        [series]="memorySeries()"
+        [times]="times()"
+        [slots]="slots"
+        [format]="formatMib"
+      />
+      <app-stats-chart
+        class="wide"
+        name="network"
+        title="Network"
+        [series]="networkSeries()"
+        [times]="times()"
+        [slots]="slots"
+        [floor]="1024"
+        [format]="formatBytesRate"
+      />
+    </div>
+
+    <section class="panel" aria-label="Replica set" data-testid="stats-repl">
+      @switch (repl().state) {
+        @case ('loading') {
+          <h3>Replica set</h3>
+          <p class="muted">Reading the replica set status…</p>
+        }
+        @case ('none') {
+          <h3>Replica set</h3>
+          <p class="muted" data-testid="stats-repl-none">
+            Not a replica set member: the server runs without replication.
+          </p>
+        }
+        @case ('error') {
+          <h3>Replica set</h3>
+          <p class="banner error" data-testid="stats-repl-error">{{ replError() }}</p>
+        }
+        @case ('loaded') {
+          @if (replView(); as view) {
+            <h3>
+              Replica set <span class="code">{{ view.set }}</span>
+            </h3>
+            <table class="grid">
+              <thead>
+                <tr>
+                  <th scope="col">Member</th>
+                  <th scope="col">State</th>
+                  <th scope="col" class="num">Lag</th>
+                  <th scope="col" class="num">Ping</th>
+                  <th scope="col" class="num">Uptime</th>
+                  <th scope="col">Last optime</th>
+                  <th scope="col">Sync source</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (m of view.members; track m.id) {
+                  <tr data-testid="repl-member" [attr.data-member]="m.name">
+                    <td class="code">
+                      {{ m.name }}
+                      @if (m.self) {
+                        <span class="self">this server</span>
+                      }
+                    </td>
+                    <td>
+                      <span
+                        class="state"
+                        [attr.data-level]="memberLevel(m)"
+                        [title]="memberTitle(m)"
+                      >
+                        <span class="icon" aria-hidden="true">{{
+                          memberLevel(m) === 'good' ? '●' : memberLevel(m) === 'warn' ? '▲' : '✕'
+                        }}</span>
+                        {{ m.state }}{{ m.healthy ? '' : ' · unreachable' }}
+                      </span>
+                    </td>
+                    <td class="num" data-testid="repl-lag">{{ formatLag(m.lagSecs) }}</td>
+                    <td class="num">{{ m.pingMs === null ? '–' : m.pingMs + ' ms' }}</td>
+                    <td class="num">
+                      {{ formatUptime(m.uptimeSecs === null ? null : m.uptimeSecs * 1000) }}
+                    </td>
+                    <td>{{ formatTime(m.optime) }}</td>
+                    <td class="code">{{ m.syncSource || '–' }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          }
+        }
+      }
+    </section>
+
+    <section class="panel" aria-label="Databases" data-testid="stats-dbs">
+      <div class="panel-head">
+        <h3>Databases</h3>
+        <button type="button" class="btn" data-testid="stats-dbs-reload" (click)="loadDatabases()">
+          Reload
+        </button>
+      </div>
+      @switch (dbs().state) {
+        @case ('loading') {
+          <p class="muted">Reading dbStats…</p>
+        }
+        @case ('error') {
+          <p class="banner error" data-testid="stats-dbs-error">{{ dbError() }}</p>
+        }
+        @case ('loaded') {
+          <table class="grid">
+            <thead>
+              <tr>
+                <th scope="col">Database</th>
+                <th scope="col" class="num">Collections</th>
+                <th scope="col" class="num">Views</th>
+                <th scope="col" class="num">Documents</th>
+                <th scope="col" class="num">Data size</th>
+                <th scope="col" class="num">Storage</th>
+                <th scope="col" class="num">Indexes</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of dbRows(); track row.name) {
+                <tr data-testid="db-row" [attr.data-db]="row.name">
+                  <td class="code">{{ row.name }}</td>
+                  @if (row.stats; as s) {
+                    <td class="num">{{ s.collections }}</td>
+                    <td class="num">{{ s.views }}</td>
+                    <td class="num">{{ formatCount(s.objects) }}</td>
+                    <td class="num">{{ formatBytes(s.dataSize) }}</td>
+                    <td class="num">{{ formatBytes(s.storageSize) }}</td>
+                    <td class="num">{{ formatBytes(s.indexSize) }}</td>
+                  } @else {
+                    <td colspan="6" class="row-error">{{ row.error }}</td>
+                  }
+                </tr>
+              } @empty {
+                <tr>
+                  <td colspan="7" class="muted">No databases.</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        }
+      }
+    </section>
+  </div>
+</section>
