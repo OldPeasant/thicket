@@ -110,3 +110,90 @@ Values below use covered/total (percentage); zero-denominator or unsupported met
 ## Summary
 
 Tests and task-scoped coverage are sufficient; no production defects found. The TW-1 fix is covered by the existing close() tests: all close() lines are hit and the tests pass. The focused tests (282), the coverage run (111) and `npm run check` pass at 9ad19862 on Linux. AC1 still needs the Windows/macOS CI run.
+
+---
+
+# Round 3
+
+Date: 2026-11-17
+
+Task: ci-windows-macos - CI: unit tests pass on Windows and macOS again (round 3, renderer test timeout)
+
+Scope: commit e927c64c9290c91c1c2ee49894ae573a75db69d1 only (given by the parent), measured at HEAD 944771b4997264fad2487645156a999807b26a2f (merge of origin/main; clean working tree before this report was edited). The task commits from rounds 1-2 were rebased onto main and now have new hashes (04122a82, 298efe6d, 16c1b7c3, 10acaa1e); their production files are byte-identical to round 2 (socks.ts sha256 9147ff47..., tunnel.ts sha256 1701c024..., same as the hashes recorded above).
+
+Changed file: `packages/renderer/src/app/console/shell-console.spec.ts` (test only; sha256 0ec88eab98440513eba74a8143cf02fa31b9cede26876e4bdcd0848f8142236c). No production file is changed.
+
+Requirements:
+- `tasks/ci-windows-macos.md` (AC1: `check` green on all three OSes; AC2: each fix says whether the product or the test was wrong; AC3: `npm run check` passes locally)
+- AGENTS.md project notes (no timing-dependent asserts)
+- Parent instructions (Windows CI run 44129719492 timed out this test after 5 s; 849 ms locally; the still-running loop broke the following tests)
+
+## Check of the change
+
+- The only change is the third argument `60_000` to `it('keeps only the newest TRANSCRIPT_LIMIT runs', ...)` plus a comment. The renderer runs on Vitest 5.1.0 (via `ng test`), where the third `it` argument is the per-test timeout, so the change does what it says.
+- The test is not a timing assert: it awaits 3 macrotasks per run for 202 runs (`TRANSCRIPT_LIMIT` = 200, shell-console.ts:47) and then asserts on the final state. Its duration only depends on runner speed, so a longer timeout is the correct fix; the product behavior (keeping the newest 200 runs) is unchanged and still asserted (`streamNo`, `runs()` length 200, first `x = 3`, last `x = 202`, 200 `shell-run` rows).
+- The comment states the test, not the product, was wrong (AC2).
+- The explanation for the follow-on failures is plausible: Vitest does not cancel a timed-out async test body, so the loop kept calling `view.run()`/`fake.end()` while the next tests ran. With the 60 s limit (about 70x the local duration) the loop finishes inside its own test.
+- No other renderer spec uses a per-test timeout; this is the only one, which is appropriate for the only test with ~600 real macrotask waits.
+- No defect found; no test edited in round 3.
+
+## Test files changed
+
+- None by the test-writer in round 3. The parent's change in e927c64c was reviewed above.
+
+## Tests added or updated
+
+Count: 0 in round 3
+
+## Requirement coverage
+
+| Requirement | Tests | Command | Result |
+|---|---|---|---|
+| Shell console keeps only the newest TRANSCRIPT_LIMIT runs, and the test no longer times out on slow runners | `keeps only the newest TRANSCRIPT_LIMIT runs` (and the rest of the spec, which the old overrun broke) | `npx ng test --include src/app/console/shell-console.spec.ts` (in `packages/renderer`) | Pass on Linux: 1 file, 81 tests, 4.34 s |
+| AC1: `check` run green on ubuntu, macOS and Windows | - | - | Not run: no Windows/macOS here; the parent must use the CI `check` run of `wip/ci-windows-macos` that contains e927c64c |
+| AC2: the fix says the test was wrong | comment in the diff | `git show e927c64c` | Pass (by reading) |
+| AC3: `npm run check` passes locally | full suite | `npm --prefix <repo root> run check` | Pass |
+
+## Focused test execution
+
+Command:
+
+`npx ng test --include src/app/console/shell-console.spec.ts` (working directory `packages/renderer`)
+
+Result:
+
+Pass: 1 file, 81 tests, started 18:03:07, duration 4.34 s.
+
+## Full test execution
+
+Command:
+
+`npm run check` (repo root, run as `npm --prefix /home/eric/work/mongo-db-client-agents/agent-2 run check`)
+
+Result:
+
+Pass: eslint and prettier clean, typecheck clean for all workspaces, Vitest 99 files / 5219 tests (started 18:03:45), renderer 125 files / 4137 tests (started 18:04:03), exit 0.
+
+## .taskcheck
+
+Result:
+
+Not run separately: `.taskcheck` runs `npm run check`, which passed above at HEAD 944771b4.
+
+## Bugs found
+
+None in round 3.
+
+## Coverage
+
+Status: not applicable for round 3; the round-2 coverage above remains valid.
+
+Round 3 changes only a test timeout. It changes no production file and no test step or assertion, so it cannot change which production lines are executed. The task-changed production files (`packages/backend/src/ssh/socks.ts`, `tunnel.ts`) have the same sha256 hashes at HEAD 944771b4 as in the round-2 coverage run, and that run did not use the renderer spec. Coverage was therefore not re-measured: the round-2 numbers (aggregate statements 325/336, branches 130/143, functions 63/67, lines 299/303) still describe the current production code. Changed-line coverage for round 3: N/A (no production lines changed).
+
+## Unable to test
+
+- Whether 60 s is enough on the Windows CI runner (and that the follow-on failures are gone there) can only be shown by the Windows `check` run; only Linux is available here. Follow-up: the parent checks the CI run of `wip/ci-windows-macos` that includes e927c64c (the previous failing run was 44129719492).
+
+## Summary (round 3)
+
+Tests and task-scoped coverage are sufficient; no production defects found. The timeout-only change is correct and test-only, the shell-console spec (81 tests) and `npm run check` pass on Linux at HEAD 944771b4, and coverage is unchanged by a timeout-only change. AC1 still needs the Windows/macOS CI run.

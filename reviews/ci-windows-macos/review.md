@@ -61,3 +61,60 @@ None.
 ## Review conclusion
 
 No material issues found.
+
+---
+
+# Round 3
+
+Date: 2026-11-17
+
+Task: ci-windows-macos - CI: unit tests pass on Windows and macOS again
+
+Scope: commit e927c64c only (`git show e927c64c`), parent 0c93d4f8. It changes one file, `packages/renderer/src/app/console/shell-console.spec.ts`: the test 'keeps only the newest TRANSCRIPT_LIMIT runs' gets a 60 s timeout and a comment. Reason given by the parent: Windows CI run 44129719492 timed out this test after the 5 s default (849 ms locally), and the loop that kept running broke the tests after it. Rounds 1 and 2 (above) are not re-reviewed.
+
+Requirements:
+- tasks/ci-windows-macos.md (criterion 1: green `check` on all three OSes; criterion 2: each fix says whether the product or only the test was wrong)
+- AGENTS.md project notes (OS-neutral tests, no timing-dependent asserts)
+- docs/ARCHITECTURE.md (renderer tests run through `ng test`)
+
+Git range:
+- Branch: main
+- HEAD: 944771b4997264fad2487645156a999807b26a2f (the commits after e927c64c change no files under `packages/`)
+- Base/start: 0c93d4f88324886ffee557b7b7347419b4655957
+- Commits reviewed: 1 (e927c64c9290c91c1c2ee49894ae573a75db69d1); no uncommitted changes
+
+Summary: 0 P0, 0 P1, 0 P2, 1 P3
+
+## P0 Critical
+
+None.
+
+## P1 High
+
+None.
+
+## P2 Medium
+
+None.
+
+## P3 Low
+
+- [ ] **CR-3 | The comment names the wrong cause, and the leak into later tests is only made less likely**
+    - File: `packages/renderer/src/app/console/shell-console.spec.ts:476-492`
+    - Category: Tests
+    - Problem: The loop does 202 iterations (`TRANSCRIPT_LIMIT` is 200, `shell-console.ts:47`) with 3 `setTimeout(…, 0)` waits each, about 606 macrotask waits. On Windows a `setTimeout(0)` usually waits for the next system timer tick (about 15.6 ms by default), so the loop takes about 600 × 15.6 ms ≈ 9.5 s there. That is a fixed cost of the platform's timer resolution, not a "too slow" runner, so the comment's wording ("over the 5 s default on the Windows CI runner") hides why. The leak the comment describes comes from the loop using the outer `let` variables `fake`, `view` and `streamNo` (`spec.ts:27-30`), which `beforeEach` and `create()` of the next test reassign. After a timeout, the still-running loop calls `run()` on the next test's component and ends streams on the next test's fake. The 60 s timeout leaves about 6x margin, so this is fine for now, but a timeout would still cascade into unrelated failures.
+    - Why it matters: Low. The fix is test-only and correct. A future reader who sees this test slow down, or a later timeout with confusing failures in the following tests, has a misleading explanation to work from.
+    - Suggested fix: Optional. Say in the comment that Windows timer resolution (about 15 ms per `setTimeout(0)`) is the cause. To also remove the cascade, make the loop use local copies (`const f = fake, v = view`) and stop when the test has ended, or wait with fewer macrotasks per iteration (for example, wait for `evals()` to grow instead of three fixed `setTimeout(0)` calls).
+
+## Verification notes
+
+- Change: the only code change is the second argument `60_000` to `it(...)` (Vitest timeout per test) plus a three-line comment. Assertions, loop and product code are unchanged, so the test checks the same behavior as before (`runs()` capped at `TRANSCRIPT_LIMIT`, oldest dropped, DOM rows match). A timeout is not a timing-dependent assert, so this agrees with the AGENTS.md rule.
+- Product: `ShellConsole.run()` caps the transcript with `[...runs, run].slice(-TRANSCRIPT_LIMIT)` (`shell-console.ts:321`). That code is OS-neutral, so "product correct, test-only" is right.
+- Criterion 2: met for this fix. The commit subject says "test-only, product correct", and the test comment starts with "Test-only fix (the product was right)".
+- Scope: the task's `touches` list (`packages/backend/src/ssh`, `io/bson`, `auth/oidc`) does not include `packages/renderer`. The change is still within the task goal, because criterion 1 needs a green `check` on all three OSes. This is noted for the parent and is not a code finding.
+- Local run on Linux: `npx ng test --include src/app/console/shell-console.spec.ts` in `packages/renderer` gave 1 file and 81 tests passed in 3.96 s. Plain `npx vitest run` on that spec fails in TestBed setup because renderer specs need the Angular builder, which is expected and not related to this change.
+- Criterion 1 is still open. Whether run 44129719492's failure is gone on Windows can only be shown by a new `check` run of `wip/ci-windows-macos` (or main after done) that is green on ubuntu, macOS and Windows. I could not run `gh` here. The parent must record that run id or mark the criterion skipped with a reason.
+
+## Review conclusion
+
+No material issues found.
