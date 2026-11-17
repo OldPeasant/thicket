@@ -292,6 +292,17 @@ describe('analyzeSample', () => {
     expect(codes.map((c) => c.code)).toEqual(['c'.repeat(EXAMPLE_LENGTH_LIMIT - 2)]);
   });
 
+  it('leaves out code cut one character short to avoid splitting a surrogate pair', async () => {
+    // The cut at the limit would split the emoji, so the analyzer keeps limit - 1 characters.
+    const split = 'e'.repeat(EXAMPLE_LENGTH_LIMIT - 1) + '\u{1F600}';
+    const r = await analyzeSample([{ code: new Code(split) }, { code: new Code('return 2') }]);
+    const code = fieldOf(r.fields, 'code');
+    expect(typeOf(code, 'javascript').count).toBe(2);
+    expect((examplesOf(code, 'javascript') as BSON.Code[]).map((c) => c.code)).toEqual([
+      'return 2',
+    ]);
+  });
+
   it('keeps long code with scope as an example (the analyzer never cuts it)', async () => {
     const long = 'x'.repeat(5000);
     const r = await analyzeSample([{ fn: new Code(long, { k: 'v' }) }]);
