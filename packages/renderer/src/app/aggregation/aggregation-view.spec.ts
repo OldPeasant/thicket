@@ -1,12 +1,13 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
 import type { WorkspaceTab } from '../layout/workspace.service';
 import { ConfirmService } from '../safety/confirm.service';
 import { ProfileSafetyService } from '../safety/profile-safety.service';
-import { AggregationView, RESULT_PAGE_SIZE } from './aggregation-view';
+import { READ_ONLY_HINT } from '../safety/write-control.directive';
+import { AggregationView, PREVIEW_DEBOUNCE_MS, RESULT_PAGE_SIZE } from './aggregation-view';
 
 const TAB: WorkspaceTab = {
   id: 'aggregation:p1:shop.orders',
@@ -388,5 +389,547 @@ describe('AggregationView', () => {
     });
     expect(operators(sent['pipeline'])).toEqual(['$match', '$group', '$sort']);
     expect(get('agg-view-message').textContent).toContain('Created view shop.open_by_customer');
+  });
+
+  describe('preview requests in flight', () => {
+    /** Preview requests the fake has not answered yet, in the order they were sent. */
+    let pending: { id: string; ops: string[]; answer: (docs: string[]) => void }[];
+
+    beforeEach(() => {
+      pending = [];
+      fake.handle(
+        'agg.previewStage',
+        (params, request) =>
+          new Promise((resolve) => {
+            pending.push({
+              id: request.id,
+              ops: operators(params.pipeline),
+              answer: (d) => resolve({ docs: d }),
+            });
+          }),
+      );
+    });
+
+    const answer = async (index: number, d: string[]) => {
+      pending[index]?.answer(d);
+      await settle();
+    };
+
+    it('a stage edited again while its preview runs aborts the old preview; its late answer is ignored', async () => {
+      await setBody(0, '{ status: "open" }');
+      expect(pending).toHaveLength(1);
+      expect(inStage(0, 'agg-stage-preview').textContent).toContain('Loading preview');
+
+      await setBody(0, '{ status: "closed" }');
+      expect(pending).toHaveLength(2);
+      expect(fake.cancels).toContain(pending[0]?.id);
+      expect(fake.cancels).not.toContain(pending[1]?.id);
+
+      // The aborted (older) request answers first: still loading, its documents never show.
+      await answer(0, docs(1, 5));
+      expect(inStage(0, 'agg-stage-preview').textContent).toContain('Loading preview');
+      expect(inStage(0, 'agg-stage-preview').querySelectorAll('pre')).toHaveLength(0);
+
+      await answer(1, docs(1, 2));
+      expect(inStage(0, 'agg-stage-preview').querySelectorAll('pre')).toHaveLength(2);
+    });
+
+    it('an aborted preview that answers after the newer one does not overwrite it', async () => {
+      await setBody(0, '{ status: "open" }');
+      await setBody(0, '{ status: "closed" }');
+      await answer(1, docs(1, 2));
+      await answer(0, docs(1, 7));
+      expect(inStage(0, 'agg-stage-preview').querySelectorAll('pre')).toHaveLength(2);
+    });
+
+    it('an aborted preview that fails does not show its error', async () => {
+      fake.handle(
+        'agg.previewStage',
+        (params, request) =>
+          new Promise((resolve) => {
+            pending.push({
+              id: request.id,
+              ops: operators(params.pipeline),
+              answer: (d) =>
+                resolve(
+                  d.length === 0
+                    ? { error: { code: 'SERVER_ERROR', message: 'stale failure' } }
+                    : { docs: d },
+                ),
+            });
+          }),
+      );
+      await setBody(0, '{ status: "open" }');
+      await setBody(0, '{ status: "closed" }');
+      await answer(1, docs(1, 1));
+      await answer(0, []);
+      expect(q('agg-preview-error')).toBeNull();
+      expect(inStage(0, 'agg-stage-preview').querySelectorAll('pre')).toHaveLength(1);
+    });
+
+    it('removing a stage cancels its running preview at once and drops it', async () => {
+      await click(get('agg-add-stage'));
+      // Only the new stage is previewed: the first stage's pipeline did not change.
+      expect(pending.map((p) => p.ops)).toEqual([['$match', '$match']]);
+      const id = view.stages()[1]?.id ?? -1;
+
+      await click(inStage(1, 'agg-stage-remove'));
+      expect(fake.cancels).toContain(pending[0]?.id);
+      expect(view.previews().has(id)).toBe(false);
+
+      await answer(0, docs(1, 3));
+      expect(view.previews().has(id)).toBe(false);
+      expect(all('agg-stage')).toHaveLength(1);
+      expect(inStage(0, 'agg-stage-preview').querySelectorAll('pre')).toHaveLength(1);
+    });
+
+    it('disabling a stage cancels its running preview', async () => {
+      await click(get('agg-add-stage'));
+      await click(inStage(1, 'agg-stage-enabled'));
+      expect(fake.cancels).toContain(pending[0]?.id);
+      await answer(0, docs(1, 3));
+      expect(inStage(1, 'agg-stage-preview').textContent).toContain('Disabled');
+      expect(inStage(1, 'agg-stage-preview').querySelectorAll('pre')).toHaveLength(0);
+    });
+
+    it('a stage turning invalid cancels its running preview', async () => {
+      await click(get('agg-add-stage'));
+      await setBody(1, '{ a: ');
+      expect(fake.cancels).toContain(pending[0]?.id);
+      await answer(0, docs(1, 3));
+      expect(inStage(1, 'agg-preview-blocked')).not.toBeNull();
+    });
+
+    it('closing the tab cancels running previews', async () => {
+      await setBody(0, '{ status: "open" }');
+      fixture.destroy();
+      expect(fake.cancels).toContain(pending[0]?.id);
+    });
+
+    it('a stage whose pipeline did not change is not previewed again', async () => {
+      await click(get('agg-add-stage'));
+      await answer(0, docs(1, 1));
+      // Whitespace only: the parsed pipeline is the same.
+      await setBody(1, '  {  }  ');
+      expect(pending).toHaveLength(1);
+    });
+  });
+
+  describe('preview debounce', () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      view.debounceMs = PREVIEW_DEBOUNCE_MS;
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const tick = async (ms: number) => {
+      await vi.advanceTimersByTimeAsync(ms);
+      await fixture.whenStable();
+    };
+    const typeBody = async (text: string) => {
+      const area = inStage<HTMLTextAreaElement>(0, 'agg-stage-body');
+      area.value = text;
+      area.dispatchEvent(new Event('input'));
+      await tick(0);
+    };
+
+    it('asks for previews only once the typing has paused, with the last text', async () => {
+      const before = previews().length;
+      await typeBody('{ a: 1 }');
+      await tick(PREVIEW_DEBOUNCE_MS - 100);
+      await typeBody('{ a: 12 }');
+      await tick(PREVIEW_DEBOUNCE_MS - 100);
+      await typeBody('{ a: 123 }');
+      await tick(PREVIEW_DEBOUNCE_MS - 1);
+      expect(previews()).toHaveLength(before);
+
+      await tick(1);
+      expect(previews()).toHaveLength(before + 1);
+      expect(previews().at(-1)?.['pipeline']).toBe('[{"$match":{"a":{"$numberInt":"123"}}}]');
+    });
+  });
+
+  it('a failed preview stops loading and is asked again when the stage is re-enabled', async () => {
+    fake.fail('agg.previewStage', { code: 'NOT_CONNECTED', message: 'gone' });
+    await setBody(0, '{ a: 1 }');
+    expect(inStage(0, 'agg-preview-error')).not.toBeNull();
+    expect(inStage(0, 'agg-stage-preview').textContent).not.toContain('Loading preview');
+
+    fake.respond('agg.previewStage', { docs: docs(1, 1) });
+    const before = previews().length;
+    await click(inStage(0, 'agg-stage-enabled'));
+    await click(inStage(0, 'agg-stage-enabled'));
+    expect(previews()).toHaveLength(before + 1);
+    expect(inStage(0, 'agg-stage-preview').querySelectorAll('pre')).toHaveLength(1);
+  });
+
+  it('previews against the new collection when the tab is pointed elsewhere', async () => {
+    const before = previews().length;
+    fixture.componentRef.setInput('tab', {
+      ...TAB,
+      data: { profileId: 'p1', db: 'shop', coll: 'invoices', type: 'collection' },
+    });
+    await settle();
+    expect(previews()).toHaveLength(before + 1);
+    expect(previews().at(-1)).toMatchObject({ coll: 'invoices' });
+  });
+
+  it('previews nothing without a profile', async () => {
+    const before = previews().length;
+    fixture.componentRef.setInput('tab', { ...TAB, data: undefined });
+    await settle();
+    await click(get('agg-add-stage'));
+    expect(previews()).toHaveLength(before);
+    // The collection name falls back to the tab title.
+    expect(el().querySelector('.ns')?.textContent).toContain('orders aggregation');
+  });
+
+  it('names every stage left out of a preview', async () => {
+    await buildDemo();
+    await click(get('agg-add-stage'));
+    await setBody(0, '{ a: ');
+    await setBody(1, '{ b: ');
+    expect(inStage(3, 'agg-stage-preview').textContent).toContain(
+      'Without stages 1, 2: they have errors.',
+    );
+    expect(inStage(2, 'agg-stage-preview').textContent).toContain(
+      'Without stages 1, 2: they have errors.',
+    );
+  });
+
+  it('disabling the stage with an error lets Run, Export and Create view use the pipeline', async () => {
+    await buildDemo();
+    await setBody(1, '{ _id: ');
+    await click(inStage(1, 'agg-stage-enabled'));
+    await click(get('agg-run'));
+    expect(q('agg-run-error')).toBeNull();
+    expect(operators(runs().at(-1)?.['pipeline'])).toEqual(['$match', '$sort', '$limit']);
+    await click(get('agg-export'));
+    expect(get('agg-code').textContent).not.toContain('$group');
+    // The disabled stage still shows its error.
+    expect(inStage(1, 'agg-stage-error')).not.toBeNull();
+  });
+
+  it('changing the operator replaces an untouched argument but keeps an edited one', async () => {
+    await setOperator(0, '$group');
+    expect(view.stages()[0]?.body).toBe('{ _id: "$field", count: { $sum: 1 } }');
+    await setOperator(0, '$limit');
+    expect(view.stages()[0]?.body).toBe('10');
+    await setBody(0, '25');
+    await setOperator(0, '$skip');
+    expect(view.stages()[0]?.body).toBe('25');
+  });
+
+  it('an operator outside the templates is shown in the picker', async () => {
+    await click(get('agg-mode-text'));
+    const area = get<HTMLTextAreaElement>('agg-text');
+    area.value = '[{ $densify: { field: "t", range: { step: 1, bounds: "full" } } }]';
+    area.dispatchEvent(new Event('input'));
+    await click(get('agg-mode-stages'));
+    expect(inStage<HTMLSelectElement>(0, 'agg-stage-operator').value).toBe('$densify');
+  });
+
+  it('an empty stage list runs every document and exports an empty pipeline', async () => {
+    await click(inStage(0, 'agg-stage-remove'));
+    expect(el().textContent).toContain('No stages: the pipeline returns every document.');
+    await click(get('agg-run'));
+    expect(operators(runs().at(-1)?.['pipeline'])).toEqual(['$limit']);
+    expect(all('agg-result-doc')).toHaveLength(3);
+    await click(get('agg-export'));
+    expect(get('agg-code').textContent).toContain('.aggregate(');
+    await click(get('agg-mode-text'));
+    expect(get<HTMLTextAreaElement>('agg-text').value).toBe('[]');
+  });
+
+  it('full-text mode refuses a value that is not an array of one-operator stages', async () => {
+    await click(get('agg-mode-text'));
+    const area = get<HTMLTextAreaElement>('agg-text');
+    area.value = '{ $match: {} }';
+    area.dispatchEvent(new Event('input'));
+    await click(get('agg-mode-stages'));
+    expect(get('agg-text-error').textContent).toContain('must be an array');
+    // Typing clears the error.
+    area.value = '[{ $match: {}, $limit: 1 }]';
+    area.dispatchEvent(new Event('input'));
+    await settle();
+    expect(q('agg-text-error')).toBeNull();
+    await click(get('agg-mode-stages'));
+    expect(get('agg-text-error').textContent).toContain('Stage 1 must be a document');
+    expect(view.mode()).toBe('text');
+  });
+
+  it('Run in full-text mode runs the edited text', async () => {
+    await click(get('agg-mode-text'));
+    const area = get<HTMLTextAreaElement>('agg-text');
+    area.value = '[{ $match: {} }, { $sort: { a: 1 } }]';
+    area.dispatchEvent(new Event('input'));
+    await click(get('agg-run'));
+    expect(operators(runs().at(-1)?.['pipeline'])).toEqual(['$match', '$sort', '$limit']);
+    expect(view.mode()).toBe('text');
+  });
+
+  it('a failed run shows the error and Run works again', async () => {
+    fake.handle('agg.run', () => {
+      setTimeout(() => fake.failStream('s-bad', { code: 'SERVER_ERROR', message: 'bad $group' }));
+      return { streamId: 's-bad' };
+    });
+    await click(get('agg-run'));
+    expect(get('agg-run-error').textContent).toContain('bad $group');
+    expect(q('agg-cancel')).toBeNull();
+    expect(q('agg-results')).toBeNull();
+
+    fake.handle('agg.run', () => {
+      setTimeout(() => {
+        fake.data('agg.run', 's-ok', { docs: docs(1, 1) });
+        fake.end('s-ok', { delivered: 1 });
+      });
+      return { streamId: 's-ok' };
+    });
+    await click(get('agg-run'));
+    expect(q('agg-run-error')).toBeNull();
+    expect(all('agg-result-doc')).toHaveLength(1);
+  });
+
+  it('Cancel stops a running aggregation', async () => {
+    fake.handle('agg.run', () => ({ streamId: 's-slow' }));
+    await click(get('agg-run'));
+    expect(q('agg-run')).toBeNull();
+    await click(get('agg-cancel'));
+    expect(fake.cancels).toContain('s-slow');
+    expect(q('agg-run')).not.toBeNull();
+    // A late answer of the cancelled stream shows nothing.
+    fake.data('agg.run', 's-slow', { docs: docs(1, 2) });
+    fake.end('s-slow', { delivered: 2 });
+    await settle();
+    expect(q('agg-results')).toBeNull();
+  });
+
+  it('closing the tab cancels a running aggregation', async () => {
+    fake.handle('agg.run', () => ({ streamId: 's-slow' }));
+    await click(get('agg-run'));
+    fixture.destroy();
+    expect(fake.cancels).toContain('s-slow');
+  });
+
+  it('a document that cannot be read is shown as a note, the others as usual', async () => {
+    fake.respond('agg.previewStage', { docs: ['{"_id":', ...docs(1, 1)] });
+    await setBody(0, '{ a: 1 }');
+    const shown = all('agg-preview-doc').map((d) => d.textContent ?? '');
+    expect(shown).toHaveLength(2);
+    expect(shown[0]).toBe('// unreadable document');
+    expect(shown[1]).toContain('_id: 1');
+  });
+
+  it('a later page that came back empty says there are no more documents', async () => {
+    total = RESULT_PAGE_SIZE + 1;
+    await click(get('agg-run'));
+    // The data shrank between the pages.
+    total = RESULT_PAGE_SIZE;
+    await click(get('agg-next'));
+    expect(get('agg-result-rows').textContent).toContain('No more documents');
+    expect(get<HTMLButtonElement>('agg-prev').disabled).toBe(false);
+  });
+
+  it('an empty result says so', async () => {
+    total = 0;
+    await click(get('agg-run'));
+    expect(get('agg-result-rows').textContent).toContain('No documents');
+    expect(get<HTMLButtonElement>('agg-next').disabled).toBe(true);
+  });
+
+  it('a page of exactly the page size has no next page', async () => {
+    total = RESULT_PAGE_SIZE;
+    await click(get('agg-run'));
+    expect(all('agg-result-doc')).toHaveLength(RESULT_PAGE_SIZE);
+    expect(get<HTMLButtonElement>('agg-next').disabled).toBe(true);
+    expect(runs()[0]).toMatchObject({ batchSize: RESULT_PAGE_SIZE + 1 });
+  });
+
+  it('a $merge pipeline asks first too; cancelling sends nothing and shows no error', async () => {
+    const confirms = TestBed.inject(ConfirmService);
+    let asked = 0;
+    confirms.confirm = () => {
+      asked++;
+      return Promise.resolve(false);
+    };
+    await click(get('agg-add-stage'));
+    await setOperator(1, '$merge');
+    expect(inStage(1, 'agg-stage-preview').textContent).toContain('Merges the result');
+    await click(get('agg-run'));
+    expect(asked).toBe(1);
+    expect(runs()).toHaveLength(0);
+    expect(q('agg-run-error')).toBeNull();
+  });
+
+  describe('read-only profile', () => {
+    beforeEach(async () => {
+      TestBed.inject(ProfileSafetyService).set({
+        id: 'p1',
+        name: 'Reporting',
+        readOnly: true,
+        production: false,
+      });
+      await settle();
+    });
+
+    it('disables Create view and its submit button', async () => {
+      const button = get<HTMLButtonElement>('agg-create-view');
+      expect(button.disabled).toBe(true);
+      expect(button.hasAttribute('data-readonly')).toBe(true);
+      expect(button.title).toBe(READ_ONLY_HINT);
+      // Opened through the component (e.g. before the flag changed): submit is disabled too.
+      view['viewOpen'].set(true);
+      await settle();
+      expect(get<HTMLButtonElement>('agg-view-submit').disabled).toBe(true);
+    });
+
+    it('still runs and previews a pipeline that only reads', async () => {
+      await setBody(0, '{ status: "open" }');
+      expect(operators(previews().at(-1)?.['pipeline'])).toEqual(['$match']);
+      await click(get('agg-run'));
+      expect(runs()).toHaveLength(1);
+      expect(all('agg-result-doc')).toHaveLength(3);
+    });
+
+    it('refuses a $out run without asking and without sending it', async () => {
+      const confirms = TestBed.inject(ConfirmService);
+      let asked = 0;
+      confirms.confirm = () => {
+        asked++;
+        return Promise.resolve(true);
+      };
+      await click(get('agg-add-stage'));
+      await setOperator(1, '$out');
+      await click(get('agg-run'));
+      expect(asked).toBe(0);
+      expect(runs()).toHaveLength(0);
+      expect(get('agg-run-error').textContent).toContain('read-only');
+    });
+
+    it('refuses to create a view even when the form is submitted', async () => {
+      view['viewOpen'].set(true);
+      view['viewName'].set('v1');
+      await settle();
+      await view['createView']();
+      await settle();
+      expect(fake.requestsFor('agg.createView')).toHaveLength(0);
+      expect(get('agg-view-message').textContent).toContain('read-only');
+    });
+  });
+
+  describe('create view', () => {
+    const openForm = async (name: string) => {
+      await click(get('agg-create-view'));
+      const input = get<HTMLInputElement>('agg-view-name');
+      input.value = name;
+      input.dispatchEvent(new Event('input'));
+      await settle();
+    };
+
+    it('refuses a pipeline with $out or $merge', async () => {
+      await click(get('agg-add-stage'));
+      await setOperator(1, '$out');
+      await openForm('v1');
+      await click(get('agg-view-submit'));
+      expect(get('agg-view-message').textContent).toContain('cannot contain $out or $merge');
+      expect(fake.requestsFor('agg.createView')).toHaveLength(0);
+    });
+
+    it('refuses a pipeline with an error', async () => {
+      await setBody(0, '{ a: ');
+      await openForm('v1');
+      await click(get('agg-view-submit'));
+      expect(get('agg-view-message').textContent).toContain('Fix stage 1 first');
+      expect(fake.requestsFor('agg.createView')).toHaveLength(0);
+    });
+
+    it('a blank name is refused and the name is trimmed', async () => {
+      await openForm('   ');
+      await click(get('agg-view-submit'));
+      expect(get('agg-view-message').textContent).toContain('Type a name');
+      expect(fake.requestsFor('agg.createView')).toHaveLength(0);
+      const input = get<HTMLInputElement>('agg-view-name');
+      input.value = '  v1  ';
+      input.dispatchEvent(new Event('input'));
+      await click(get('agg-view-submit'));
+      expect(fake.requestsFor('agg.createView')[0]?.params).toMatchObject({ view: 'v1' });
+    });
+
+    it('shows the server error of a failed create', async () => {
+      fake.fail('agg.createView', { code: 'SERVER_ERROR', message: 'view already exists' });
+      await openForm('v1');
+      await click(get('agg-view-submit'));
+      expect(get('agg-view-message').textContent).toContain('view already exists');
+      expect(get('agg-view-message').classList).toContain('error');
+    });
+
+    it('asks first on a production profile; cancelling sends nothing and shows nothing', async () => {
+      TestBed.inject(ProfileSafetyService).set({
+        id: 'p1',
+        name: 'Live',
+        readOnly: false,
+        production: true,
+      });
+      const confirms = TestBed.inject(ConfirmService);
+      let asked = 0;
+      confirms.confirm = () => {
+        asked++;
+        return Promise.resolve(false);
+      };
+      await openForm('v1');
+      await click(get('agg-view-submit'));
+      expect(asked).toBe(1);
+      expect(fake.requestsFor('agg.createView')).toHaveLength(0);
+      expect(q('agg-view-message')).toBeNull();
+    });
+  });
+
+  describe('export', () => {
+    it('falls back to the default URI when the profile cannot be read', async () => {
+      fake.fail('profiles.get', { code: 'NOT_FOUND', message: 'no profile' });
+      await click(get('agg-export'));
+      await click(get('agg-lang-node'));
+      expect(get('agg-code').textContent).toContain('mongodb://localhost');
+    });
+
+    it('reads the profile URI only once', async () => {
+      await click(get('agg-export'));
+      await click(get('agg-export'));
+      await click(get('agg-export'));
+      expect(fake.requestsFor('profiles.get')).toHaveLength(1);
+    });
+
+    it('copies the code and disables Copy while the pipeline has an error', async () => {
+      let copied = '';
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText: (text: string) => {
+            copied = text;
+            return Promise.resolve();
+          },
+        },
+      });
+      await click(get('agg-export'));
+      await click(get('agg-copy'));
+      expect(copied).toContain('.aggregate(');
+      expect(get('agg-copy').textContent).toContain('Copied');
+
+      await setBody(0, '{');
+      expect(get<HTMLButtonElement>('agg-copy').disabled).toBe(true);
+    });
+
+    it('a refused clipboard does not claim the code was copied', async () => {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText: () => Promise.reject(new Error('denied')) },
+      });
+      await click(get('agg-export'));
+      await click(get('agg-copy'));
+      expect(get('agg-copy').textContent).toContain('Copy');
+      expect(get('agg-copy').textContent).not.toContain('Copied');
+    });
   });
 });
