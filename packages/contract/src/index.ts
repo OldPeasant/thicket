@@ -9,6 +9,7 @@ import { connMethods } from './conn';
 import { dbMethods } from './db';
 import type { MethodDef, Route } from './define';
 import { docsMethods } from './docs';
+import { historyMethods } from './history';
 import type { ErrorInfo } from './errors';
 import { idxMethods } from './idx';
 import { ioMethods } from './io';
@@ -28,6 +29,7 @@ export * from './define';
 export * from './docs';
 export * from './envelope';
 export * from './errors';
+export * from './history';
 export * from './idx';
 export * from './io';
 export * from './profiles';
@@ -47,6 +49,7 @@ export const methods = {
   ...ioMethods,
   ...shellMethods,
   ...adminMethods,
+  ...historyMethods,
   ...appMethods,
   ...backendMethods,
 } as const satisfies Record<string, MethodDef>;
