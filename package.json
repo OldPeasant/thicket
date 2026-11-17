@@ -23,6 +23,7 @@
     "test": "vitest run && npm run test -w packages/renderer",
     "test:int": "vitest run --config test/integration/vitest.config.ts",
     "test:e2e": "npm run build -w packages/renderer && npm run build -w apps/desktop && playwright test",
+    "test:smoke": "playwright test -c test/e2e/smoke/playwright.config.ts",
     "test:electron": "npm run build -w packages/renderer && npm run test:electron -w apps/desktop",
     "dev": "npm run dev -w apps/desktop",
     "start": "npm run build -w packages/renderer && npm run start -w apps/desktop",

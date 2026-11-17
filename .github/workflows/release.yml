@@ -5,6 +5,7 @@ name: release
 #   Linux x64 + arm64: AppImage, deb, rpm
 #   macOS:             dmg (arm64 + x64, both built on one Apple Silicon runner)
 #   Windows x64:       NSIS installer + portable zip
+# Each build job then smoke-tests its installer (npm run test:smoke, test/e2e/smoke).
 on:
   push:
     tags: ['v*']
@@ -54,10 +55,10 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      # rpmbuild for the rpm target (deb and AppImage need nothing extra).
+      # rpmbuild for the rpm target (deb and AppImage need nothing extra); xvfb for the smoke test.
       - name: Install rpm tooling
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y rpm
+        run: sudo apt-get update && sudo apt-get install -y rpm xvfb
 
       - name: Install
         run: npm ci
@@ -93,6 +94,51 @@ jobs:
           name: installers-${{ matrix.name }}
           path: out/*
           if-no-files-found: error
+          retention-days: 7
+
+      # Ubuntu 24.04 restricts unprivileged user namespaces (AppArmor), which Chromium's sandbox
+      # needs; the AppImage can't ship a setuid chrome-sandbox. Allow them rather than starting
+      # the app with --no-sandbox, so the smoke test runs the app as users do.
+      - name: Allow user namespaces for the Chromium sandbox
+        if: runner.os == 'Linux'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      # Smoke test (test/e2e/smoke): start the packaged app from its installer with Playwright,
+      # the welcome screen shows; on Linux it also connects to a MongoDB container (Docker).
+      # A failure fails the job, so no draft release is made from broken installers.
+      - name: Smoke test installer
+        env:
+          RUNNER_OS_NAME: ${{ runner.os }}
+        run: |
+          shopt -s nullglob
+          case "$RUNNER_OS_NAME" in
+            Linux) files=(out/*.AppImage) ;;
+            # macos-latest is Apple Silicon: test the arm64 dmg (the x64 one would run under Rosetta).
+            macOS) files=(out/*-arm64.dmg) ;;
+            # The NSIS installer; the portable zip holds the same app.
+            Windows) files=(out/*.exe) ;;
+          esac
+          if [ "${#files[@]}" -ne 1 ]; then
+            echo "expected one installer to smoke-test, found: ${files[*]}" >&2
+            exit 1
+          fi
+          export THICKET_SMOKE_INSTALLER="${files[0]}"
+          if [ "$RUNNER_OS_NAME" = Linux ]; then
+            # No FUSE on the runner: the AppImage runtime extracts itself instead of mounting.
+            export APPIMAGE_EXTRACT_AND_RUN=1
+            export THICKET_SMOKE_MONGO=1
+            xvfb-run -a npm run test:smoke
+          else
+            npm run test:smoke
+          fi
+
+      - name: Upload smoke test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-results-${{ matrix.name }}
+          path: test-results/smoke
+          if-no-files-found: ignore
           retention-days: 7
 
   release:

@@ -777,6 +777,7 @@ Windows: run `.taskcheck` and npm scripts from Git for Windows' bash (TFP runs t
 | `npm run start` | build renderer + bundles, start Electron | |
 | `npm run test:electron` | the built app under Playwright's Electron driver | ~10 s, not in the check |
 | `npm run dist` | installers for the current OS into `dist/` | |
+| `npm run test:smoke` | Playwright against the packaged app from its installer | after `dist`; release CI |
 
 ## Integration tests
 - `npm run test:int` runs `test/integration/**/*.int.spec.ts` (config `test/integration/vitest.config.ts`,
@@ -817,6 +818,15 @@ Windows: run `.taskcheck` and npm scripts from Git for Windows' bash (TFP runs t
   (`realUserDataDir()`, Electron's `appData` + app name) is unchanged.
 - On failure the harness saves a PNG of every window (`failure-window-<n>.png`) and the app output to
   the test's folder under `test-results/` (git-ignored).
+- Installer smoke test: `npm run test:smoke` (`test/e2e/smoke/playwright.config.ts`, not part of
+  `test:e2e`) starts the packaged app from the installer in `THICKET_SMOKE_INSTALLER` (default: the
+  newest `.AppImage`/`.dmg`/`.exe` for this OS in `apps/desktop/release/`, so run `npm run dist`
+  first). `installed-app.ts` makes it runnable as a user would: AppImage as is, dmg mounted with
+  `hdiutil`, NSIS installed silently into a temp folder (and uninstalled). It checks the welcome
+  screen and connects to the `mongo8` fixture through the connection editor (skipped without
+  Docker/Podman; `THICKET_SMOKE_MONGO=1` makes that a failure). `release.yml` runs it after every
+  build: Linux under `xvfb-run` with `APPIMAGE_EXTRACT_AND_RUN=1` and MongoDB, macOS on the arm64
+  dmg, Windows on the NSIS installer.
 
 ## Coverage
 - Tool: Vitest with `@vitest/coverage-v8`, reporters `text-summary`, `json-summary`, `lcov`.
