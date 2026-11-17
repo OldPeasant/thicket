@@ -3,7 +3,13 @@ import type { Document, MongoClientOptions } from 'mongodb';
 import { describe, expect, it, vi } from 'vitest';
 
 import { RpcError } from '../server/rpc';
-import { ConnectionManager, readServerInfo, topologyOf, type ClientLike } from './manager';
+import {
+  ConnectionManager,
+  isOpenClient,
+  readServerInfo,
+  topologyOf,
+  type ClientLike,
+} from './manager';
 
 /** Fictitious secrets; none of them is a real credential. */
 const STORED_PASSWORD = 'fictitious-stored-Pw1';
@@ -1131,6 +1137,36 @@ describe('ConnectionManager proxy and X.509 (task x509-proxy)', () => {
       tlsCertificateKeyFilePassword: PASSPHRASE,
     });
     expect(JSON.stringify(created[0]?.options)).not.toContain(STORED_PASSWORD);
+    await manager.close('p1');
+  });
+});
+
+describe('isOpenClient', () => {
+  it('is true only for the client of the open connection of that profile', async () => {
+    const { manager, created } = setup();
+    await manager.open('p1', undefined);
+    const client = created[0]?.client;
+    expect(isOpenClient(manager, 'p1', client)).toBe(true);
+    expect(isOpenClient(manager, 'p1', fakeClient())).toBe(false);
+    expect(isOpenClient(manager, 'p2', client)).toBe(false);
+    await manager.close('p1');
+  });
+
+  it('is false (does not throw) for a profile that was never opened', () => {
+    const { manager } = setup();
+    expect(isOpenClient(manager, 'p1', fakeClient())).toBe(false);
+    expect(isOpenClient(manager, 'unknown', undefined)).toBe(false);
+  });
+
+  it('is false for a client after its connection was closed, and after a reopen', async () => {
+    const { manager, created } = setup();
+    await manager.open('p1', undefined);
+    const first = created[0]?.client;
+    await manager.close('p1');
+    expect(isOpenClient(manager, 'p1', first)).toBe(false);
+    await manager.open('p1', undefined);
+    expect(isOpenClient(manager, 'p1', first)).toBe(false);
+    expect(isOpenClient(manager, 'p1', created[1]?.client)).toBe(true);
     await manager.close('p1');
   });
 });

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { ClientLike } from '../connections/manager';
 import { DEFAULT_EVENT_BATCH, buildFind } from '../docs/query/query';
+import { WRITING_STAGES, pipelineWrites } from '../guard/guard';
 import { RpcError } from '../server/rpc';
 import {
   DEFAULT_EXPLAIN_VERBOSITY,
@@ -169,6 +170,16 @@ describe('writesTo', () => {
     // Only the stage name counts, not field names inside a stage.
     expect(writesTo([{ $project: { $out: 1 } }])).toBe(false);
   });
+
+  it('agrees with the guard: every stage in its WRITING_STAGES list writes, for both', () => {
+    expect([...WRITING_STAGES].sort()).toEqual(['$merge', '$out']);
+    for (const name of WRITING_STAGES) {
+      const pipeline = [match, { [name]: 'archive' }];
+      expect(writesTo(pipeline)).toBe(true);
+      expect(pipelineWrites(ejson(pipeline))).toBe(true);
+      expect(() => previewPipeline(pipeline)).toThrow(RpcError);
+    }
+  });
 });
 
 describe('previewPipeline', () => {
@@ -222,6 +233,31 @@ describe('previewPipeline', () => {
     const nested = { $match: { $or: [{ $text: { $search: 'x' } }] } };
     expect(previewPipeline([match, group], 10, 4)[0]).toEqual({ $limit: 10 });
     expect(previewPipeline([nested], 10, 4)).toEqual([{ $limit: 10 }, nested, { $limit: 4 }]);
+  });
+
+  it.each([
+    ['null', null],
+    ['an array', [{ $text: { $search: 'x' } }]],
+    ['a string', '$text'],
+    ['a BSON value', new BSON.ObjectId('64b7f0a1e4b0c1a2b3c4d5e6')],
+  ])('a first $match whose filter is %s keeps the sample first (no throw)', (_what, filter) => {
+    const odd = { $match: filter };
+    expect(previewPipeline([odd], 10, 4)).toEqual([{ $limit: 10 }, odd, { $limit: 4 }]);
+  });
+
+  it('a $text key in a first stage other than $match does not move the sample', () => {
+    const project = { $project: { $text: 1 } };
+    expect(previewPipeline([project], 10, 4)).toEqual([{ $limit: 10 }, project, { $limit: 4 }]);
+  });
+
+  it('a $text $match later in the pipeline does not move the sample', () => {
+    const text = { $match: { $text: { $search: 'coffee' } } };
+    expect(previewPipeline([match, text], 10, 4)).toEqual([
+      { $limit: 10 },
+      match,
+      text,
+      { $limit: 4 },
+    ]);
   });
 
   it('a must-be-first stage later in the pipeline does not move the sample', () => {
@@ -479,6 +515,18 @@ describe('previewStage', () => {
       maxTimeMS: 900,
     });
     expect(String(client.sent[0]?.command['comment'])).toMatch(/^thicket:/);
+  });
+
+  it('sends a leading $text $match as the first stage, the sample $limit after it', async () => {
+    const client = fakeClient(() => cursorReply(0, docs(1)));
+    const text = { $match: { $text: { $search: 'coffee' } } };
+    await previewStage(client, previewParams([text, group], { sampleSize: 7, limit: 2 }));
+    expect(client.sent[0]?.command['pipeline']).toEqual([
+      text,
+      { $limit: 7 },
+      group,
+      { $limit: 2 },
+    ]);
   });
 
   it('uses the default sample and limit and sends no maxTimeMS when not given', async () => {
