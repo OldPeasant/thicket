@@ -20,7 +20,8 @@ Fix the code where Windows behaviour is wrong for users (e.g. paths), and the te
 - [ ] A `check` run of this task's commits (branch `wip/ci-windows-macos`, or main after done) is green on ubuntu, macOS and Windows; record the run id
 - [x] Each fix says in the commit or a test comment whether the product or only the test was wrong on that OS
   - verified (2026-11-17 17:42+0100 by dell26/agent-2): git log 442cca40..HEAD commit 20e804e4 body + test comments in socks.ts, tunnel.spec.ts, known-hosts.spec.ts, flows.spec.ts, bson.spec.ts -> socks close and Windows SSH_AUTH_SOCK: product wrong; known-hosts ENOENT, oidc late-redirect race, bson native separators: only tests wrong
-- [ ] `npm run check` passes locally
+- [x] `npm run check` passes locally
+  - verified (2026-11-17 17:42+0100 by dell26/agent-2): npm run check at 9ad19862 on Linux (Node 24) -> lint+prettier+typecheck clean, 5219 backend/main + 4137 renderer tests passed
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
