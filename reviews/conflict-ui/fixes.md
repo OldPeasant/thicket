@@ -313,3 +313,83 @@ Notes for the parent worker:
 ## Final status
 
 All validated findings fixed and validation passed.
+
+# Fix Report (round 3)
+
+Date: 2026-11-17
+
+Task: conflict-ui - M1: Conflict resolution view
+
+Scope: current task. Finding TW-3 from the round-3 section of `reviews/conflict-ui/tests.md`, with the direction
+approved by the parent worker (apply the "unset a path not in the loaded original" refusal only to edit entries
+flagged `hidesSubFields`). Rounds 1 and 2 above are unchanged.
+
+## Fixed findings
+
+### TW-3 — Overwrite / Merge refused when the server added a sub-field to a field loaded in full
+
+Files changed:
+- `packages/renderer/src/app/document/document-actions.service.ts`
+- `packages/renderer/src/app/document/document-actions.service.spec.ts`
+
+Problem:
+The round-2 defense-in-depth check in `send` (`unsetsUnloaded`) ran for every partial document. Under a
+top-level-only projection such as `{total:1, addr:1}`, `addr` is loaded whole, so a server-added `addr.street` is a
+server change the user is shown; Overwrite / Merge (offered, `resolveBlocker` null) were nevertheless refused with
+the misleading "would replace data the projection hides" message.
+
+Fix:
+`send`'s `loaded` parameter is now optional and only passed (as `entry.original`) by `save` and `resolveWith` when the
+edit entry is flagged `hidesSubFields`; `unsetsUnloaded` runs only when it is given. Both production `edits.edit(`
+call sites (`CollectionView`, `RawEditor`) set that flag for a projection that is not top-level-only, so under a
+top-level-only projection Overwrite / Merge now write the local version and `$unset` sub-fields only the server has
+within a loaded field (assumption 1). Flagged entries are still refused (by `resolveBlocker` first, and by the
+unset check as defense in depth).
+
+Tests:
+- Replaced the round-2 test "refuses an overwrite of a partial document that would unset a sub-field it never
+  loaded" (it asserted the wrong behaviour) with an `it.each` for overwrite and merge: "%s under a top-level
+  projection unsets a sub-field the server added to a loaded field" - projection `{total:1, addr:1}`, server adds
+  `addr.street`; the resolve succeeds and sends exactly `{"$set":{"addr.city":"Berlin"},"$unset":{"addr.street":""}}`.
+- The round-2 TW-2 `it.each` "%s never unsets a sub-field hidden by a dotted projection after a top-level one is
+  run" recorded its edit with `partial` only, a state no production call site produces any more (both pass
+  `hidesSubFields` under a dotted projection). It now records the edit as production does (`edit(..., true, true)`),
+  so it covers "a flagged entry still refuses" (overwrite and merge, no write touching `street`). Its assertions are
+  unchanged. "keeps Overwrite and Merge blocked for an edit made under a dotted projection" also still passes.
+
+Validation:
+- `cd packages/renderer && npx ng test --include='src/app/document/**/*.spec.ts' --include='src/app/collection/**/*.spec.ts' --include='src/app/raw-editor/**/*.spec.ts'`
+  — Pass: 13 files, 684 tests.
+
+## Not fixed
+
+None.
+
+## Validation summary
+
+Focused tests:
+- Command above — Pass: 13 files, 684 tests (was 683; one test replaced by a two-case `it.each`).
+
+Full test suite:
+- `npm run check` (repo root) — Pass: eslint (`--max-warnings 0`), prettier `--check`, typecheck, root vitest
+  55 files / 3264 tests, renderer `ng test` 72 files / 2145 tests.
+
+Lint/type-check/build:
+- Included in `npm run check` above — Pass. `prettier --write` was run on both changed files.
+
+`.taskcheck`:
+- Pass by equivalence: it runs `npm run check`, the same run as above (not invoked separately).
+
+E2E:
+- Not re-run by the fixer (`test/e2e/conflict.e2e.ts` uses no projection; the change only affects projected
+  documents).
+
+Remaining unresolved findings:
+0
+
+Notes for the parent worker:
+- Production code changed after review: test-writer and code-reviewer must run again on the final code.
+
+## Final status
+
+All validated findings fixed and validation passed.

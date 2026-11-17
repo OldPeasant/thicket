@@ -110,8 +110,13 @@ export class DocumentActions {
     if (entry === undefined || this.isBusy(key)) return false;
     const sent = entry.current;
     // What was sent is the new baseline; edits made since then stay unsaved.
-    return this.send(key, entry.original, sent, this.isPartial(key), () =>
-      this.edits.rebase(key, sent),
+    return this.send(
+      key,
+      entry.original,
+      sent,
+      this.isPartial(key),
+      () => this.edits.rebase(key, sent),
+      entry.hidesSubFields ? entry.original : undefined,
     );
   }
 
@@ -263,14 +268,23 @@ export class DocumentActions {
       await this.keepServer(key);
       return true;
     }
-    return this.send(key, base, local, partial, saved, entry?.original ?? base);
+    return this.send(
+      key,
+      base,
+      local,
+      partial,
+      saved,
+      entry?.hidesSubFields ? entry.original : undefined,
+    );
   }
 
   /**
    * Saves `current` as the minimal diff from `original`, with `original`'s values as the conflict
    * check (`docs.update`, or `docs.replace` when the diff needs it), then reads it back and calls
    * `saved`. Nothing in the edit session changes before the write succeeded. `loaded`: the
-   * document as the user loaded it (for a partial document, nothing it lacks is unset).
+   * document as the user loaded it under a projection that may hide parts of fields (nothing it
+   * lacks is unset); under a top-level-only projection whole fields were loaded, so sub-fields
+   * only the server has within them are unset like any other difference.
    */
   private async send(
     key: string,
@@ -278,7 +292,7 @@ export class DocumentActions {
     current: BsonDocument,
     partial: boolean,
     saved: () => void,
-    loaded: BsonDocument = original,
+    loaded?: BsonDocument,
   ): Promise<boolean> {
     const host = this.requireHost();
     const pending = pendingSave({ original, current });
@@ -295,7 +309,11 @@ export class DocumentActions {
       id: stringifyEJson(id),
     };
     const diff = pending.diff;
-    if (partial && (overwritesHiddenData(diff, original) || unsetsUnloaded(diff, loaded))) {
+    if (
+      partial &&
+      (overwritesHiddenData(diff, original) ||
+        (loaded !== undefined && unsetsUnloaded(diff, loaded)))
+    ) {
       this.messageState.set({ kind: 'error', text: PROJECTION_REFUSED });
       return false;
     }

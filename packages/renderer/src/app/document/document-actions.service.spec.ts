@@ -1055,6 +1055,8 @@ describe('DocumentActions', () => {
 
     // TW-2: the projection check looks only at the projection active now, not at the one the
     // document was loaded with. Recorded assumption: hidden (sub-)fields are never unset.
+    // The edit is recorded as CollectionView and RawEditor do under a dotted projection
+    // (hidesSubFields), which still refuses once a top-level projection is run (TW-3).
     it.each([
       ['overwrite', () => actions.overwrite(keyOf(1))],
       ['merge', () => actions.saveMerged(keyOf(1), addrEdited)],
@@ -1068,7 +1070,7 @@ describe('DocumentActions', () => {
           message: 'x',
           detail: { current: addrServer },
         });
-        edits.edit(addrLoaded, addrEdited, true);
+        edits.edit(addrLoaded, addrEdited, true, true);
         expect(await actions.save(keyOf(1))).toBe(false);
         expect(actions.resolveBlocker(keyOf(1))).toBe('projection');
         fake.respond('docs.update', { modified: true });
@@ -1101,20 +1103,34 @@ describe('DocumentActions', () => {
       expect(edits.get(keyOf(1))?.current).toBe(addrEdited);
     });
 
-    // TW-2 defense in depth: without that flag, the write still never unsets an unloaded path.
-    it('refuses an overwrite of a partial document that would unset a sub-field it never loaded', async () => {
-      projection = '{"addr":{"$numberInt":"1"}}';
-      fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: addrServer } });
-      edits.edit(addrLoaded, addrEdited, true);
-      expect(await actions.save(keyOf(1))).toBe(false);
-      expect(actions.resolveBlocker(keyOf(1))).toBeNull();
-      fake.respond('docs.update', { modified: true });
-      fake.requests.length = 0;
-      expect(await actions.overwrite(keyOf(1))).toBe(false);
-      expect(fake.requests).toHaveLength(0);
-      expect(actions.message()?.text).toMatch(/^Not saved: with a projection active/);
-      expect(edits.get(keyOf(1))?.current).toBe(addrEdited);
-    });
+    // TW-3: under a top-level projection addr was loaded whole, so a sub-field only the server has
+    // is a server change the user is shown: Overwrite and Merge write the local version and unset it.
+    it.each([
+      ['overwrite', () => actions.overwrite(keyOf(1))],
+      ['merge', () => actions.saveMerged(keyOf(1), addrEdited)],
+    ])(
+      '%s under a top-level projection unsets a sub-field the server added to a loaded field',
+      async (_name, resolve) => {
+        projection = '{"total":{"$numberInt":"1"},"addr":{"$numberInt":"1"}}';
+        fake.fail('docs.update', {
+          code: 'CONFLICT',
+          message: 'x',
+          detail: { current: addrServer },
+        });
+        edits.edit(addrLoaded, addrEdited, true);
+        expect(await actions.save(keyOf(1))).toBe(false);
+        expect(actions.resolveBlocker(keyOf(1))).toBeNull();
+        fake.respond('docs.update', { modified: true });
+        fake.requests.length = 0;
+        expect(await resolve()).toBe(true);
+        expect(params('docs.replace')).toHaveLength(0);
+        const [update] = params('docs.update');
+        expect(update?.['update']).toBe(
+          '{"$set":{"addr.city":"Berlin"},"$unset":{"addr.street":""}}',
+        );
+        expect(actions.message()?.text).not.toMatch(/projection/);
+      },
+    );
 
     it('still unsets a loaded sub-field the user removed, under a top-level projection', async () => {
       projection = '{"addr":{"$numberInt":"1"}}';
