@@ -231,3 +231,16 @@ Other commands: `list`, `status`, `check` (validates deps/cycles), `graph` (writ
   certificates and keys at test time.
 - MongoDB Enterprise-only or Atlas-only features (LDAP, OIDC, AWS IAM) are verified against the
   container fixtures named in the task; AWS IAM against Atlas is a human task.
+- Thicket runs on Linux, macOS and Windows, but `.taskcheck` here runs only on Linux. CI (`check`
+  workflow) runs it on all three for every push, including the runner's `wip/<id>` backups. So:
+  - Write OS-neutral code and tests: build paths with `path.join`/`path.resolve` and compare them
+    with `path` too (never hard-coded `/`), no Unix-only assumptions (file permissions,
+    `SSH_AUTH_SOCK`, signals, `/tmp`, line endings), no timing-dependent asserts (poll or await the
+    event instead). A test that can't apply on one OS is skipped there with the reason in the test.
+  - Before `done`, look at the latest `check` run of your branch:
+    `gh run list -w check -b wip/<id> -L 1`, details with `gh run view <run id>`, logs with
+    `gh run view <run id> --log-failed`. Fix macOS/Windows failures your task caused. If the run is
+    still going, don't wait for it more than ~10 min; record it with `tasks.py assume`.
+  - If `check` on main fails on any OS for reasons outside your task and no task covers it, add one
+    (`tasks.py new`) naming the run id and failing tests.
+  - If `gh` is refused or not logged in, record that with `tasks.py assume` and go on.
