@@ -11,7 +11,8 @@ lease_until: 2026-11-17T07:37:23Z
 Create/edit/drop users and roles, grant/revoke, through the guard.
 
 ## Acceptance criteria
-- [ ] Integration tests for each operation
+- [x] Integration tests for each operation
+  - verified (2026-11-17 08:18+0100 by dell26/agent-1): npx vitest run --config test/integration/vitest.config.ts test/integration/users-edit.int.spec.ts (mongo8 container fixture; create/update/drop user+role, grant/revoke to user and role, SCRAM sign-in of new password, guard read-only/production) at f9a32cf8 -> 16 passed
 - [ ] e2e: create user, grant role, connect as that user
 
 ## Notes
