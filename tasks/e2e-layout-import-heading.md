@@ -14,7 +14,8 @@ import/export page's h1 has no `page-heading` test id and reads 'Import and expo
 ## Acceptance criteria
 - [x] The import/export page h1 carries `data-testid="page-heading"` like the other pages
   - verified (2026-11-17 06:41+0100 by felix/agent-2): import-export-page.html h1 has data-testid=page-heading; cd packages/renderer && npx ng test --include=src/app/connections/import/import-export-page.spec.ts -> 18 passed (new test: exactly one page-heading, an H1, text 'Import and export connections')
-- [ ] `test/e2e/layout.e2e.ts` expects the real heading text and passes (`npm run test:e2e -- layout.e2e.ts`)
+- [x] `test/e2e/layout.e2e.ts` expects the real heading text and passes (`npm run test:e2e -- layout.e2e.ts`)
+  - verified (2026-11-17 06:41+0100 by felix/agent-2): npm run test:e2e -- layout.e2e.ts (Electron build, Playwright) -> 6 passed, incl. 'welcome buttons navigate to the connection editor and the Compass import'
 - [ ] `npm run check` passes
 
 ## Notes
