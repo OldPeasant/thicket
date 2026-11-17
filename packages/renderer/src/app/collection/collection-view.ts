@@ -44,7 +44,8 @@ import { PanelService } from '../explorer/services/panel.service';
 import { RevealService } from '../explorer/services/reveal.service';
 import { SchemaService } from '../explorer/services/schema.service';
 import { TableOrientationService } from '../explorer/services/table-orientation.service';
-import type { WorkspaceTab } from '../layout/workspace.service';
+import { WorkspaceService, type WorkspaceTab } from '../layout/workspace.service';
+import { aggregationTabId } from '../aggregation/aggregation-view';
 import { RawEditor } from '../raw-editor/raw-editor';
 import { ProfileSafetyService } from '../safety/profile-safety.service';
 import type { CollectionTabData } from '../sidebar/sidebar-tree.service';
@@ -127,6 +128,7 @@ export class CollectionView {
   private readonly editMode = inject(EditModeService);
   private readonly numbers = inject(NumberDefaultService);
   private readonly safety = inject(ProfileSafetyService);
+  private readonly workspace = inject(WorkspaceService);
   protected readonly display = inject(BsonDisplayService);
   protected readonly pageSizes = PAGE_SIZES;
   protected readonly labels = FIELD_LABELS;
@@ -426,6 +428,20 @@ export class CollectionView {
   private documentChanged(key: string, doc: string | null): void {
     const index = this.docs().findIndex((d) => d !== null && documentKey(d) === key);
     if (index !== -1) this.results.patchDocument(index, doc);
+  }
+
+  /** Opens the aggregation builder of this collection in its own tab. */
+  protected openAggregation(): void {
+    const tab = this.tab();
+    const { profileId, db, coll } = this.target();
+    this.workspace.open({
+      id: aggregationTabId(profileId, db, coll),
+      kind: 'aggregation',
+      title: `${coll} aggregation`,
+      detail: tab.detail,
+      production: tab.production,
+      data: { ...tab.data },
+    });
   }
 
   protected toggleIo(panel: 'export' | 'import'): void {
