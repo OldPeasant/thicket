@@ -5,7 +5,7 @@ owner: felix/agent-2
 deps: [shell-syntax,bson-display]
 touches: [packages/renderer/src/app/raw-editor]
 prio: 2
-lease_until: 2026-11-17T00:57:33Z
+lease_until: 2026-11-17T01:02:39Z
 ---
 ## Goal
 Text editor for a whole document (CodeMirror 6) in shell syntax with a toggle to canonical EJSON; syntax errors with position; applying the text updates the edit session.
