@@ -5,7 +5,7 @@ owner: felix/agent-2
 deps: [agg-ui]
 touches: [packages/renderer/src/app/explain,packages/renderer/src/app/collection/explain-button,packages/renderer/src/app/aggregation/explain-button]
 prio: 2
-lease_until: 2026-11-17T03:29:07Z
+lease_until: 2026-11-17T03:34:11Z
 ---
 ## Goal
 Explain button on the query bar and the pipeline builder; tree of stages with keys/docs examined, time, index used; raw explain output in the document viewer.
