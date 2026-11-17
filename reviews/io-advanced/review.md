@@ -4,34 +4,49 @@ Date: 2026-11-17
 
 Task: io-advanced - M3: CSV import/export and BSON dump
 
-Scope: `git diff 9a67d703..HEAD -- packages test` (task commits 59084815, 62fd2bd4, a916613b, 7d4dac24, c444be1c; these are the rebased forms of 6e109223..e6f67d16, and `git diff e6f67d16 HEAD -- packages test docs` is empty). Committed changes only. Second review, after the fixer addressed CR-1..CR-3 of the first review.
+Scope: `git diff 9a67d703..HEAD -- packages test`, committed changes only. Task commits: 59084815, 62fd2bd4, a916613b, 7d4dac24, c444be1c and 2d5955db. The first five are the rebased forms of 6e109223..e6f67d16 (`git diff e6f67d16 c444be1c -- packages test docs` is empty). 2d5955db adds tests only: `git diff c444be1c 2d5955db -- packages test` touches csv.spec.ts, convert.spec.ts, import.spec.ts, contract methods.spec.ts, renderer io.util.spec.ts and test/integration/io-advanced.int.spec.ts, and no production file. This is the second review. The fixer addressed CR-1..CR-3 of the first review.
 
 Requirements:
-- tasks/io-advanced.md acceptance criteria and its five recorded assumptions (CSV types, CSV export columns, BSON dump metadata, strict CSV dates, repeated/overlapping CSV headers)
-- SPEC.md Import/export ("CSV (with field mapping and type per column) and as BSON dump (mongodump-compatible .bson per collection, no oplog)")
+- tasks/io-advanced.md: acceptance criteria and its five recorded assumptions (CSV types, CSV export columns, BSON dump metadata, strict CSV dates, repeated/overlapping CSV headers)
+- SPEC.md Import/export: "CSV (with field mapping and type per column) and as BSON dump (mongodump-compatible .bson per collection, no oplog)"
 - docs/ARCHITECTURE.md, AGENTS.md
-- Parent instructions (verify the fixes in reviews/io-advanced/fixes.md, then review the whole final implementation)
+- Parent instructions: verify the fixes in reviews/io-advanced/fixes.md, review the whole final implementation, then review the test-writer's added tests in 2d5955db
 
 Git range:
 - Branch: main
-- HEAD: c444be1c08bcd81bbe8673aac5fae7754f7a678c (same code as e6f67d16)
+- HEAD: 2d5955dbd96f3fb903c622297e66bfee5f86a51a (production code identical to c444be1c / e6f67d16)
 - Base/start: 9a67d70390f2ca7b0e8b4a2ff7c301ffba46de1e
-- Commits reviewed: 5
+- Commits reviewed: 6
 
 Summary: 0 P0, 0 P1, 0 P2, 4 P3
 
 ## Verification of the previous findings
 
-- CR-1 (preview of repeated or overlapping headers) is fixed. `defaultMapping` (`packages/backend/src/io/csv/convert.ts:238`) is lenient and never throws. `resolveMapping(header, undefined)` uses it, so the preview works for `a,a` and `a,a.b`. Explicit entries can carry `index` (`columnIndex`, convert.ts:253). A repeated name without an index is refused. The renderer's `defaultCsvRows` applies the same rule, and `csvMapping` sends the header index (`packages/renderer/src/app/io/io.util.ts:52-106`). Tests cover all of this.
-- CR-2 (the record limit ignored separators) is fixed. `separator()` counts each comma (`packages/backend/src/io/csv/csv.ts:136`), and tests cover lines made only of commas and of `"",`.
-- CR-3 (lenient date parsing) is fixed. `date()` (convert.ts:125) accepts only epoch millis or strict ISO 8601, reads a missing offset as UTC, and refuses rolled-over parts. The rule is recorded as an assumption.
-- The test-writer's documented bugs are fixed: CR-only line counting inside quotes, Timestamp cells written as Extended JSON, and metadata that is not a plain object.
+- **CR-1 (preview of repeated or overlapping headers): fixed.**
+    - `defaultMapping` (`packages/backend/src/io/csv/convert.ts:238`) is lenient and never throws. `resolveMapping(header, undefined)` uses it, so the preview works for `a,a` and `a,a.b`.
+    - Explicit mapping entries can carry `index` (`columnIndex`, convert.ts:253). A repeated name without an index is refused.
+    - The renderer's `defaultCsvRows` applies the same rule, and `csvMapping` sends the header index (`packages/renderer/src/app/io/io.util.ts:52-106`).
+    - Tests cover all of the above.
+- **CR-2 (the record limit ignored separators): fixed.** `separator()` counts each comma (`packages/backend/src/io/csv/csv.ts:136`). Tests cover lines made only of commas and of `"",`.
+- **CR-3 (lenient dates): fixed.** `date()` (convert.ts:125) accepts only epoch millis or strict ISO 8601, reads a date-time without an offset as UTC, and refuses rolled-over parts. The rule is recorded as an assumption.
+- **The test-writer's documented bugs: fixed.** These were CR-only line counting inside quotes, Timestamp cells written as Extended JSON, and metadata that is not a plain object.
 
-Checks run:
-- `npx vitest run packages/backend/src/io`: 7 files, 418 tests, all pass.
+## Review of the added tests (c444be1c..2d5955db)
+
+The tests check behavior, not internals. They match the recorded assumptions, and no existing test was weakened or removed. They cover:
+- **Dates (`convert.spec.ts`):** leap years, the last valid time parts, offsets that move the instant to another UTC day or year, a comma as the decimal sign, years below 100, trimming, the limits of epoch millis, and independence from the host time zone. The time-zone test changes `process.env.TZ` at runtime, which takes effect in the default `forks` pool. The parser only uses UTC methods, so the assertion holds anyway. Its value is as a regression guard against local-time parsing.
+- **Mappings (`convert.spec.ts`, `io.util.spec.ts`):** the default mapping skips a parent name that follows its nested names, and takes a name that follows an invalid one. Unique and unnamed columns can be named by index, and both columns of a repeated name can be imported. A renderer test checks that `defaultCsvRows` includes the same columns as the backend `defaultMapping` for the same header.
+- **Record limit (`csv.spec.ts`):** quotes are not counted, many small chunks are counted, and the count restarts with each record.
+- **Import (`import.spec.ts`):** a preview with `sampleSize` above the row cap, the sample for a repeated or overlapping header, a mismatched index refused before any insert, and an aborted signal for CSV and BSON imports.
+- **Contract (`methods.spec.ts`):** all `CSV_TYPES` are accepted. An index that is negative, fractional or text is refused, and so are an unknown type, an empty path, an unknown key, an empty `csvMapping`, empty `csvFields` and an empty field path.
+- **Integration (`io-advanced.int.spec.ts`):** a CSV export of mixed-shape documents previews and imports back, with `auto` and with a `json` mapping. It covers the scenario of the first review's CR-1. The second of two equally named columns imports by its index, and by name alone it is refused before any insert.
+
+These tests found no new production defects.
+
+Checks run at HEAD 2d5955db:
+- `npx vitest run packages/backend/src/io packages/contract/src/methods.spec.ts`: 8 files, 783 tests, all pass.
 - `npx ng test --include='src/app/io/**/*.spec.ts'` in `packages/renderer`: 3 files, 123 tests, all pass.
-
-Both runs used the working tree. A test-writer may be adding uncommitted tests to it in parallel.
+- `npx vitest run --config test/integration/vitest.config.ts test/integration/io-advanced.int.spec.ts`: 10 tests, all pass. This includes the CSV round trip with types, both mongorestore/mongodump directions, the mixed-shape CSV test and the repeated-column test.
 
 ## P0 Critical
 
@@ -79,7 +94,9 @@ None.
 
 No material issues found.
 
-The four P3 findings are optional cleanups. The previous P2 and P3 findings and the documented test-writer bugs are fixed and tested. Other areas I checked showed no defects:
+The four P3 findings are optional cleanups. The previous P2 and P3 findings and the documented test-writer bugs are fixed and tested. The test-only commit 2d5955db adds meaningful coverage and changes no production code.
+
+Other areas I checked showed no defects:
 - BSON export and import keep every type (cursor batches decoded with `DECODE`)
 - the metadata file matches the mongodump shape
 - partial files are removed when an export fails or is cancelled
