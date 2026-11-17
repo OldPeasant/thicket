@@ -19,3 +19,4 @@ array with the whole server document and blames a projection for the missing Ove
 
 ## Notes
 See SPEC.md, docs/ARCHITECTURE.md "Paging inside documents", conflict-ui task.
+- ASSUMPTION (2026-11-17 05:08+0100 by felix/agent-2): resolveBlocker returns the new 'partial' only for documents with cut arrays (stored on the SaveConflict at conflict time), even under a top-level projection; documents edited under a since-cleared projection keep the existing, more specific projection wording. Re-insert uses the partial wording when cut or when no projection is active.
