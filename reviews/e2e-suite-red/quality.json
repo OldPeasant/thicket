@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "task": "e2e-suite-red",
+  "reviewed_revision": "728e730481aace55a0e1a3f56d63e50fab006c21",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/e2e-suite-red/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/e2e-suite-red/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/e2e-suite-red/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "accepted",
+     "note": "Evidence for criterion 1 states where the tests passed (here, display and headless) and that ldap.e2e skips on kernels 6.19.0-7.0.13; the kernel attribution is recorded as an assumption for humans to confirm"},
+    {"id": "CR-2-round1", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "document pointer listeners attached only during a splitter drag (fixer, fixes.md CR-2)"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "duplicated listener-counting code in app-shell.spec.ts; test-only cleanup, not worth another review round"}
+  ],
+  "validation": [
+    {"command": "npm run test:e2e (real display)", "result": "pass"},
+    {"command": "npx playwright test with DISPLAY/WAYLAND_DISPLAY removed from env (headless)", "result": "pass"},
+    {"command": "cd packages/renderer && npx ng test --include=src/app/layout/app-shell.spec.ts", "result": "pass"},
+    {"command": "npx vitest run --config test/integration/vitest.config.ts ldap-fixture", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}
