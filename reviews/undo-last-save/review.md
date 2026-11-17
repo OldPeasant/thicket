@@ -2,37 +2,35 @@
 
 Date: 2026-11-17
 
-Task: undo-last-save - M1 (Should): Undo last save
+Task: undo-last-save - M1 (Should): Undo last save (round 2, final code after the round-1 fixes)
 
-Scope: production code of the task commits e49f4b8f and 3e07e41b (`git diff 92135866..3e07e41b -- packages test`), plus the test files present in the working tree at review time (the test-writer was adding `history/apply-update.spec.ts`, `history/save-history.spec.ts` and changes to `history/undo-last-save.spec.ts` in parallel; those were not reviewed in depth).
+Scope: `git diff 0442cdc7..HEAD -- packages test` (commits 4723b115, 01422a65, df47b4a4), committed changes only
 
 Requirements:
-- tasks/undo-last-save.md (acceptance criteria and the four recorded assumptions)
-- SPEC.md "Editing and saving" ("Undo last save": keeps the pre-save version and writes it back with the same conflict check)
-- docs/ARCHITECTURE.md, AGENTS.md, docs/QUALITY.md
-- Parent instructions (focus: conflict filter, projection/partial handling, safety of the replace fallback, busy handling, history recorded only after success, integration with conflict view/Overwrite/Merge, write guard)
+- tasks/undo-last-save.md (2 acceptance criteria, 4 assumptions)
+- SPEC.md "Undo last save" (Should: keep the pre-save version and write it back with the same conflict check)
+- docs/ARCHITECTURE.md, AGENTS.md
+- Parent instructions: focus on the whole-document conflict check of the order-restoring replace (MongoDB `$eq` semantics for arrays and embedded documents), the `savedVersion` model through `applyUpdate`, and whether the backend accepts the `expected` filter
+- Round-1 report and reviews/undo-last-save/fixes.md (CR-1/TW-1, CR-3)
 
 Git range:
 - Branch: main
-- HEAD: 3e07e41b
-- Base/start: 92135866b7a38de086eb5412b793c93c16d39c7f
-- Commits reviewed: 2
+- HEAD: df47b4a4e0e42ec86d8e9eec4bb34573ecd103d1
+- Base/start: 0442cdc7c2550cf32bb0a49c96e8b3af67687f6c
+- Commits reviewed: 3
+- Uncommitted changes: none at review start
 
-Summary: 0 P0, 1 P1, 1 P2, 1 P3
+Summary: 0 P0, 0 P1, 1 P2, 0 P3
 
-Commands run (read-only):
-- `git log`, `git diff 92135866..3e07e41b`, reading the changed files in full plus `edit-session.ts`, `core/src/diff/diff.ts`, `collection-view.ts`
-- `cd packages/renderer && npx ng test --include='src/app/document/**/*.spec.ts'` -> 10 files, 313 tests passed (includes the test-writer's uncommitted spec files)
-- `python tasks.py verify undo-last-save` -> both criteria still unverified (no evidence recorded yet; the e2e suite was not run by this review)
+## What was checked
 
-What was checked and found correct:
-- Conflict filter: the undo is `send(after -> before)`, so `expected` comes from `after`'s values of exactly the fields the save changed (absent ones as `$exists: false`); confirmed in `diff.ts` `conflict()` and the unit test.
-- History is recorded only inside the `saved` callback, which runs after the write and read-back succeeded (Save, Overwrite, Merge manually); a cancelled, refused or failed write records nothing. Reinsert of a deleted document does not record (matches the assumption). Delete drops the entry.
-- Busy handling: `undoSave` returns early while the key is busy; `save`/`overwrite`/`delete` likewise check `isBusy`; the header button is disabled while busy or modified. Undo is refused with unsaved edits (entries exist only while modified, so no stale edit baseline remains after an undo).
-- Write guard: both `docs.update` and `docs.replace` go through `WriteGuard.run`; read-only refuses (history kept), production confirms (unit-tested).
-- Projection/partial: `last.partial`/`hidesSubFields` captured at save time; `keepingOrder` is skipped for partial documents (cut large documents are flagged partial by `collection-view.ts` `isPartial`), and `overwritesHiddenData`/`unsetsUnloaded` still apply.
-- Conflict on undo bypasses the conflict view via `onConflict` and leaves no conflict entry; other failures go through `failed()` with the `Not undone` prefix; `CANCELLED` stays silent.
-- Existing Save messages are unchanged (`Not saved: ` + text), existing spec assertions still pass.
+- Read in full: `document-actions.service.ts` (save, overwrite, saveMerged, resolveWith, send, write, delete, readBack), `history/apply-update.ts`, `history/save-history.ts`, `document-header.ts`, the unit specs (`undo-last-save.spec.ts`, `apply-update.spec.ts`, `save-history.spec.ts`, `document-header.spec.ts`), `test/e2e/undo-last-save.e2e.ts`, `packages/core/src/diff/diff.ts` (the conflict check Save uses), and `packages/backend/src/docs/write/write.ts` / `packages/contract/src/docs.ts` (`docs.update` / `docs.replace`).
+- CR-1 (round 1) is fixed: on the replace path the conflict check now covers every top-level field of the saved version plus the top-level field count, so a field changed, added or removed on the server since the save conflicts. The minimal-update path still uses Save's changed-fields check, which cannot overwrite fields it does not write, so it does not lose other server changes.
+- `savedVersion` (`applyUpdate(before, ops)` when the save was an update, otherwise `after`) matches what MongoDB stores: `$set` of an existing path keeps its place, a new path is appended to its parent, `$unset` removes, `$push` appends. Top-level order does not matter to the check (one `$eq` per field); nested order does (`$eq` on embedded documents is order-sensitive), and the model gives MongoDB's nested order for a save from the loaded document. When the model is wrong, the check only conflicts when it should not (fails safe), it never lets an overwrite through.
+- Backend: `replaceDocument` parses `expected` as any document and matches `{$and: [{_id: {$eq: id}}, expected]}`, so the `$expr` field count is accepted; the e2e replace-path tests ran against real MongoDB (fixes.md).
+- CR-3 wording fixed (`UNDO_WITH_EDITS_REFUSED`, the header tooltip).
+- Unit tests run by this review: `cd packages/renderer && npx ng test --include='src/app/document/**/*.spec.ts'` -> 11 files, 330 passed.
+- MongoDB semantics checked read-only on a mongo:8.2 container with `$documents` (no collection read or written): `{a: {$eq: [1,2]}}` matches `a: [1,2]` and `a: [[1,2],3]`; `{a: {$eq: 5}}` matches `a: [5,7]`; `{a: {$type: "null"}}` matches `a: [null,1]`; `{a: {$eq: {x:1}}}` matches `a: [{x:1},2]`; `{$expr: {$eq: ["$a", {$literal: [1,2]}]}}` matches only `a: [1,2]`.
 
 ## P0 Critical
 
@@ -40,31 +38,23 @@ None.
 
 ## P1 High
 
-- [ ] **CR-1 | Field-order replace fallback silently overwrites server changes the conflict check does not cover, including fields the user never loaded**
-    - File: `packages/renderer/src/app/document/document-actions.service.ts:426-427` and `:684-692` (`keepingOrder`)
-    - Category: Correctness
-    - Problem: When the save added or removed a non-trailing top-level field (for example it removed `status` from `{_id, status, total}`), `keepingOrder` turns the undo into `replaceOne(before)` but keeps the minimal update's `expected`, which only checks the fields the save changed. `before` is the document as it was loaded (possibly long before the save), not the server's current state. Concrete case: loaded `{_id, status, total}`; another client sets `total` or adds `extra` (before or after the user's save; neither is in the filter); user saves without `status` (`$unset status`, succeeds); user clicks Undo -> diff is `$set status`, which would append it, so a replace is sent with `expected {status: {$exists: false}}`; the filter matches and the replace writes the stale `total` and deletes `extra`, with the message "Undid the last save of 1.". The read-back after the save even showed the user the newer values, so they cannot tell they are being reverted. Save itself does not have this exposure here: it sent only `$unset status`.
-    - Why it matters: Data loss of other clients' changes (and of fields added after the load that the user never saw), triggered automatically for a purely cosmetic goal (field order) that the task's assumption already accepts losing under a projection. It contradicts the intent of "the same conflict check": a change on the server since the save should be reported, not overwritten.
-    - Suggested fix: Either drop the replace fallback and always send the minimal update (accept the appended field order, as the assumption already does for partial documents), or only replace when the whole server document is known to equal `after`: e.g. extend `expected` to every top-level field of `after` with `$eq` plus an `$expr` that the server document has exactly that many fields (`$size` of `$objectToArray: '$$ROOT'`), so any other change conflicts. Add a unit test (and ideally an e2e case against MongoDB) where an unrelated field is changed and a new field is added on the server between load/save and undo, asserting nothing is lost.
+None.
 
 ## P2 Medium
 
-- [ ] **CR-2 | The replace (field-order) path is never exercised against a real MongoDB**
-    - File: `test/e2e/undo-last-save.e2e.ts:104-110`
-    - Category: Tests
-    - Problem: Both e2e tests save value changes only (`total`, `qty`), so the undo is always a plain `$set` update. The `keepingOrder` replace path, its `$exists: false` filter on `docs.replace`, and the "same field order" claim in the first test's comment are only verified against the in-memory fake in `undo-last-save.spec.ts`, whose matcher and `$set` semantics are hand-written.
-    - Why it matters: The replace fallback is the riskiest part of the change (see CR-1) and the one whose MongoDB semantics (append order, replace filter) the implementation relies on; the fake cannot show they hold on the real server.
-    - Suggested fix: If the replace fallback is kept (after fixing CR-1), add an e2e case that removes or adds a non-trailing field, undoes, and compares canonical EJSON from the driver, plus the concurrent-unrelated-change case from CR-1.
+- [ ] **CR-1 | The whole-document check of the order-restoring replace lets through a server change that turned a field into an array containing the saved value**
+    - File: `packages/renderer/src/app/document/document-actions.service.ts:731` (`wholeDocumentCheck`, the `$eq` / `$type` per field at lines 735-742), used by `keepingOrder` at line 700
+    - Category: Correctness
+    - Problem: Each top-level field is checked as `{field: {$eq: value}}` (or `{$type: "null"/"undefined"}`). In a MongoDB query both operators also match an array field when one of its elements matches. Verified on mongo:8.2: `{a: {$eq: [1,2]}}` matches a server document with `a: [[1,2],3]`, `{a: {$eq: 5}}` matches `a: [5,7]`, `{a: {$type: "null"}}` matches `a: [null,1]`. The field count stays the same, so the `$expr` does not catch it either. If another client changes such a field between the save and the undo (a scalar becomes an array that contains it, an array gets wrapped or nested, a null becomes an array with a null), the replace matches and overwrites that change with the pre-save value without reporting a conflict. The doc comment ("matches only a document equal to `saved`") claims more than the query does. The unit spec's fake server (`undo-last-save.spec.ts:77-91`) compares `$eq` with `bsonEquals`, so it cannot show this behavior.
+    - Why it matters: Acceptance criterion 2 says an undo must report a conflict instead of overwriting when the document changed on the server. The replace writes the whole document, so a wrong match here loses another client's change to a field neither the save nor the undo touched. That is the kind of loss CR-1 of round 1 fixed. The cases are narrow (the new value must be an array that contains the saved value), so this is P2, not P1. The minimal-update path inherits the same `$eq` semantics from Save's check in `packages/core/src/diff/diff.ts` (`queryFieldCheck`). There it only affects fields the undo itself writes, which is the "same conflict check" SPEC.md asks for, so it is outside this task. If the project wants that fixed too, it needs its own task.
+    - Suggested fix: Build the per-field checks of `wholeDocumentCheck` as aggregation comparisons inside the `$expr` it already sends, e.g. `{$and: [{$eq: [{$getField: {field: {$literal: k}, input: "$$ROOT"}}, {$literal: v}]}, ..., <field count>]}`. Use `$type` comparisons for null and undefined, as `exprFieldCheck` in core diff already does. Aggregation `$eq` compares arrays and embedded documents as whole values, with no element matching. This also takes care of unaddressable top-level names, so the `isAddressableKey` fallback could go (duplicate keys still need it). Add a regression test against real MongoDB (e2e or `test:int`): save a removal that makes the undo a replace, change another field on the server from `x` to `[x, y]`, undo, and expect `Not undone` with the server document unchanged. The fake server's matcher cannot show this case.
 
 ## P3 Low
 
-- [ ] **CR-3 | Undo's projection/partial refusal text tells the user to "edit again"**
-    - File: `packages/renderer/src/app/document/document-actions.service.ts:433-437`, `:705-713`
-    - Category: Quality
-    - Problem: The refusal for an undo under a projection or partial load reuses Save's texts, producing e.g. "Not undone: with a projection active, this edit would replace data the projection hides. Clear the projection and edit again." For an undo there is no edit to redo, and clearing the projection does not help (the recorded `partial` flag sticks).
-    - Why it matters: Misleading guidance in a rare path; the undo stays offered but cannot succeed.
-    - Suggested fix: Use an undo-specific text for this case (e.g. that this save cannot be undone because the document was loaded only partly) and consider dropping the history entry when it can never succeed.
+None.
 
 ## Review conclusion
 
-Material issues found; fix before completing the task. CR-1 (P1) can lose concurrent server data on a common undo path and must be fixed (or the replace fallback removed) with a regression test. Acceptance-criterion evidence (`tasks.py verify`) was not yet recorded at review time; the e2e tests named by criteria 1 and 2 must actually be run against the Electron app and MongoDB container before they are claimed.
+Material issues found; fix before completing the task.
+
+CR-1 is a P2 resilience gap in the conflict check added in round 1 (narrow cases, real data loss when it happens). The parent worker decides whether to fix it in this task or accept it with a recorded disposition. Both acceptance criteria are covered by unit tests and by e2e tests against MongoDB (see fixes.md). They have not been recorded with `tasks.py verify` yet. That is the parent worker's next step, not a finding.

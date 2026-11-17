@@ -531,4 +531,124 @@ describe('Undo last save', () => {
       '{"_id":{"$numberInt":"1"},"a.b":{"$numberInt":"1"},"status":"open"}',
     );
   });
+
+  // Added by the test-writer (round 2): the whole-document check of the replace path.
+
+  const TYPED =
+    '{"_id":{"$numberInt":"1"},"status":"open",' +
+    '"placed":{"$date":{"$numberLong":"1768471200000"}},' +
+    '"ref":{"$oid":"650000000000000000000001"},' +
+    '"total":{"$numberDecimal":"10.50"},' +
+    '"addr":{"city":"Springfield","zip":"12345"},' +
+    '"tags":["gift","rush"]}';
+  const TYPED_SAVED =
+    '{"_id":{"$numberInt":"1"},' +
+    '"placed":{"$date":{"$numberLong":"1768471200000"}},' +
+    '"ref":{"$oid":"650000000000000000000001"},' +
+    '"total":{"$numberDecimal":"10.50"},' +
+    '"addr":{"city":"Springfield","zip":"12345"},' +
+    '"tags":["gift","rush"]}';
+
+  /** Loads TYPED, removes status (not the last field) and saves: the undo must be a replace. */
+  async function saveTypedWithoutStatus(): Promise<void> {
+    server.stored = doc(TYPED);
+    edits.edit(doc(TYPED), doc(TYPED_SAVED));
+    expect(await actions.save(ID)).toBe(true);
+    expect(stringifyEJson(server.stored as BsonDocument)).toBe(TYPED_SAVED);
+  }
+
+  it('checks Date, ObjectId, Decimal128, embedded document and array values by $eq with their BSON types', async () => {
+    await saveTypedWithoutStatus();
+
+    expect(await actions.undoSave(ID)).toBe(true);
+
+    expect(stringifyEJson(server.stored as BsonDocument)).toBe(TYPED);
+    expect(replaces()).toHaveLength(1);
+    expect(JSON.parse(replaces()[0]?.['expected'] as string)).toEqual({
+      placed: { $eq: { $date: { $numberLong: '1768471200000' } } },
+      ref: { $eq: { $oid: '650000000000000000000001' } },
+      total: { $eq: { $numberDecimal: '10.50' } },
+      addr: { $eq: { city: 'Springfield', zip: '12345' } },
+      tags: { $eq: ['gift', 'rush'] },
+      $expr: { $eq: [{ $size: { $objectToArray: '$$ROOT' } }, { $numberInt: '6' }] },
+    });
+  });
+
+  it.each([
+    ['a sub-field of an embedded document', 'addr', '{"city":"Shelbyville","zip":"12345"}'],
+    ['the order of an embedded document', 'addr', '{"zip":"12345","city":"Springfield"}'],
+    ['a Date', 'placed', '{"$date":{"$numberLong":"1769904000000"}}'],
+    ['an ObjectId', 'ref', '{"$oid":"650000000000000000000002"}'],
+    ['an array item', 'tags', '["gift"]'],
+  ])(
+    'reports a conflict on the replace path when %s changed on the server',
+    async (_what, key, value) => {
+      await saveTypedWithoutStatus();
+      server.set(key, parseEJsonDocument(`{"v":${value}}`).fields[0]?.value as BsonValue);
+      const changedOnServer = stringifyEJson(server.stored as BsonDocument);
+
+      expect(await actions.undoSave(ID)).toBe(false);
+
+      expect(stringifyEJson(server.stored as BsonDocument)).toBe(changedOnServer);
+      expect(actions.message()?.text).toMatch(
+        /^Not undone: the document was changed on the server/,
+      );
+      expect(actions.canUndoSave(ID)).toBe(false);
+    },
+  );
+
+  it('reports a conflict on the replace path when a field the save did not touch was removed on the server', async () => {
+    await saveTypedWithoutStatus();
+    const stored = server.stored as BsonDocument;
+    server.stored = { type: 'object', fields: stored.fields.filter((f) => f.key !== 'tags') };
+    const changedOnServer = stringifyEJson(server.stored);
+
+    expect(await actions.undoSave(ID)).toBe(false);
+
+    expect(stringifyEJson(server.stored as BsonDocument)).toBe(changedOnServer);
+    expect(actions.canUndoSave(ID)).toBe(false);
+  });
+
+  // A save that only reorders top-level fields is a replace whose own conflict check is empty (no
+  // value changed): its undo must still check the whole saved version.
+  it('checks the whole saved version when undoing a save that only reordered fields', async () => {
+    const reordered = '{"_id":{"$numberInt":"1"},"total":{"$numberInt":"10"},"status":"open"}';
+    await saveAs(reordered);
+    expect(stringifyEJson(server.stored as BsonDocument)).toBe(reordered);
+    expect(replaces()).toHaveLength(1);
+
+    expect(await actions.undoSave(ID)).toBe(true);
+
+    expect(stringifyEJson(server.stored as BsonDocument)).toBe(ORIGINAL);
+    expect(JSON.parse(replaces()[1]?.['expected'] as string)).toEqual({
+      total: { $eq: { $numberInt: '10' } },
+      status: { $eq: 'open' },
+      $expr: { $eq: [{ $size: { $objectToArray: '$$ROOT' } }, { $numberInt: '3' }] },
+    });
+  });
+
+  it('reports a conflict instead of undoing a reorder over a newer server change', async () => {
+    await saveAs('{"_id":{"$numberInt":"1"},"total":{"$numberInt":"10"},"status":"open"}');
+    server.set('status', { type: 'string', value: 'shipped' });
+    const changedOnServer = stringifyEJson(server.stored as BsonDocument);
+
+    expect(await actions.undoSave(ID)).toBe(false);
+
+    expect(stringifyEJson(server.stored as BsonDocument)).toBe(changedOnServer);
+    expect(actions.message()?.text).toMatch(/^Not undone: the document was changed on the server/);
+  });
+
+  it('counts a field the save added in the whole-document check', async () => {
+    // status removed (the undo is a replace) and note added: the saved version has 3 fields.
+    await saveAs('{"_id":{"$numberInt":"1"},"total":{"$numberInt":"10"},"note":"rush"}');
+
+    expect(await actions.undoSave(ID)).toBe(true);
+
+    expect(stringifyEJson(server.stored as BsonDocument)).toBe(ORIGINAL);
+    expect(JSON.parse(replaces()[0]?.['expected'] as string)).toEqual({
+      total: { $eq: { $numberInt: '10' } },
+      note: { $eq: 'rush' },
+      $expr: { $eq: [{ $size: { $objectToArray: '$$ROOT' } }, { $numberInt: '3' }] },
+    });
+  });
 });

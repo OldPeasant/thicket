@@ -235,3 +235,164 @@ test('Undo last save of a removed field does not overwrite a newer change to ano
 
   expect(await storedText(mongo.uri, coll, 1)).toBe(changed);
 });
+
+// Added by the test-writer (round 2): the whole-document conflict check of the replace path
+// (CR-1/TW-1 fix) on a real MongoDB, with BSON-typed values in its `$eq` checks.
+
+/** A document with a numeric `_id` and any other fields. */
+type AnyDoc = { _id: number } & Record<string, unknown>;
+
+/** `{_id: i, status, addr: {city}, placed: Date, ref: ObjectId, tags, total: Decimal128, qty}`. */
+async function seedTyped(uri: string, coll: string): Promise<void> {
+  const client = new MongoClient(uri, { serverSelectionTimeoutMS: 10_000 });
+  try {
+    const c = client.db(DB).collection<AnyDoc>(coll);
+    await c.drop().catch(() => undefined);
+    await c.insertMany(
+      [1, 2, 3].map((i) => ({
+        _id: i,
+        status: 'open',
+        addr: { city: 'Springfield' },
+        placed: new Date(`2026-01-1${i}T10:00:00.000Z`),
+        ref: new BSON.ObjectId(`65000000000000000000000${i}`),
+        tags: ['gift', 'rush'],
+        total: Decimal128.fromString(`${i}0.50`),
+        qty: new Int32(i),
+      })),
+    );
+  } finally {
+    await client.close();
+  }
+}
+
+/** Another client's update of the first document. */
+async function changeOnServer(
+  uri: string,
+  coll: string,
+  update: Record<string, unknown>,
+): Promise<void> {
+  const client = new MongoClient(uri, { serverSelectionTimeoutMS: 10_000 });
+  try {
+    await client.db(DB).collection<AnyDoc>(coll).updateOne({ _id: 1 }, update);
+  } finally {
+    await client.close();
+  }
+}
+
+test('Undo last save of a removed field restores Date, ObjectId, Decimal128, nested and array values', async ({
+  window,
+  mongo,
+}) => {
+  test.setTimeout(90_000);
+  const coll = 'orders_undo_typed';
+  await seedTyped(mongo.uri, coll);
+  const original = await storedText(mongo.uri, coll, 1);
+  await window.setViewportSize({ width: 1400, height: 900 });
+  await saveProfile(window, mongo.uri);
+  await openCollection(window, coll);
+
+  // status is not the last field: the undo is a replace, checked against every saved value.
+  await removeFieldAndSave(window, 'status');
+  await window.getByTestId('result-doc').first().getByTestId('doc-undo-save').click();
+  await expect(window.getByTestId('edit-message')).toHaveText('Undid the last save of 1.');
+  expect(await storedText(mongo.uri, coll, 1)).toBe(original);
+});
+
+const SERVER_CHANGES: readonly (readonly [string, Record<string, unknown>])[] = [
+  ['a field added on the server', { $set: { note: 'call first' } }],
+  ['a nested sub-field changed on the server', { $set: { 'addr.city': 'Shelbyville' } }],
+  ['an untouched field removed on the server', { $unset: { tags: '' } }],
+  ['a Date changed on the server', { $set: { placed: new Date('2026-02-01T00:00:00.000Z') } }],
+];
+
+for (const [what, update] of SERVER_CHANGES) {
+  test(`Undo last save of a removed field reports a conflict for ${what}`, async ({
+    window,
+    mongo,
+  }) => {
+    test.setTimeout(90_000);
+    const coll = 'orders_undo_whole_check';
+    await seedTyped(mongo.uri, coll);
+    await window.setViewportSize({ width: 1400, height: 900 });
+    await saveProfile(window, mongo.uri);
+    await openCollection(window, coll);
+
+    await removeFieldAndSave(window, 'status');
+    await changeOnServer(mongo.uri, coll, update);
+    const changed = await storedText(mongo.uri, coll, 1);
+
+    const undo = window.getByTestId('result-doc').first().getByTestId('doc-undo-save');
+    await undo.click();
+    await expect(window.getByTestId('edit-message')).toContainText(
+      'Not undone: the document was changed on the server since the save.',
+    );
+    // Nothing was overwritten, and the undo is no longer offered.
+    expect(await storedText(mongo.uri, coll, 1)).toBe(changed);
+    await expect(undo).toHaveCount(0);
+  });
+}
+
+// A save that adds two sub-fields to an embedded document. `$eq` on an embedded document compares
+// its field order too, so the undo's check must expect the order MongoDB stored them in.
+test('Undo last save of two sub-fields added to an embedded document restores the original', async ({
+  window,
+  mongo,
+}) => {
+  test.setTimeout(90_000);
+  const coll = 'orders_undo_nested_added';
+  await seedTyped(mongo.uri, coll);
+  const original = await storedText(mongo.uri, coll, 1);
+  await window.setViewportSize({ width: 1400, height: 900 });
+  await saveProfile(window, mongo.uri);
+  await openCollection(window, coll);
+
+  const addKey = window
+    .getByTestId('result-doc')
+    .first()
+    .locator('.field[data-node$=".addr"] .add-input')
+    .first();
+  await addKey.fill('zip');
+  await addKey.press('Enter');
+  await addKey.fill('apt');
+  await addKey.press('Enter');
+  await expect(window.getByTestId('edit-count')).toHaveText('2 changes');
+  await window.getByTestId('edit-save').click();
+  await expect(window.getByTestId('edit-message')).toHaveText('Saved 1.');
+  const saved = await withColl(mongo.uri, coll, (c) => c.findOne({ _id: 1 }));
+  expect(Object.keys((saved as unknown as { addr: object }).addr).sort()).toEqual([
+    'apt',
+    'city',
+    'zip',
+  ]);
+
+  await window.getByTestId('result-doc').first().getByTestId('doc-undo-save').click();
+  await expect(window.getByTestId('edit-message')).toHaveText('Undid the last save of 1.');
+  expect(await storedText(mongo.uri, coll, 1)).toBe(original);
+});
+
+// The last two fields, total then qty (not in name order), removed in one save: the undo's $set
+// adds both back at the end, and they must come back in their original order.
+test('Undo last save of the last two fields restores them in their original order', async ({
+  window,
+  mongo,
+}) => {
+  test.setTimeout(90_000);
+  const coll = 'orders_undo_last_two';
+  await seedTyped(mongo.uri, coll);
+  const original = await storedText(mongo.uri, coll, 1);
+  await window.setViewportSize({ width: 1400, height: 900 });
+  await saveProfile(window, mongo.uri);
+  await openCollection(window, coll);
+
+  const first = window.getByTestId('result-doc').first();
+  await first.locator('.field[data-node$=".total"] .del-btn').first().click();
+  await first.locator('.field[data-node$=".qty"] .del-btn').first().click();
+  await expect(window.getByTestId('edit-count')).toHaveText('2 changes');
+  await window.getByTestId('edit-save').click();
+  await expect(window.getByTestId('edit-message')).toHaveText('Saved 1.');
+
+  await first.getByTestId('doc-undo-save').click();
+  await expect(window.getByTestId('edit-message')).toHaveText('Undid the last save of 1.');
+  // Same fields, types and order (total before qty again).
+  expect(await storedText(mongo.uri, coll, 1)).toBe(original);
+});
