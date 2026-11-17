@@ -180,6 +180,8 @@ export class AggregationView {
   readonly previews = signal<ReadonlyMap<number, StagePreview>>(new Map());
   private readonly previewRuns = new Map<number, { key: string; abort: AbortController }>();
   private previewTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Debounce of the previews (tests set it to 0). */
+  debounceMs = PREVIEW_DEBOUNCE_MS;
 
   /** Results of Run. */
   protected readonly running = signal(false);
@@ -344,7 +346,7 @@ export class AggregationView {
         this.previewRuns.set(id, { key, abort });
         void this.preview(id, plan.pipeline, target, abort.signal);
       }
-    }, PREVIEW_DEBOUNCE_MS);
+    }, this.debounceMs);
   }
 
   private async preview(

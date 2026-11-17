@@ -117,7 +117,9 @@ export function printPipeline(stages: readonly Stage[]): string {
       : `{ ${stage.operator}: ${stage.body} }`;
     const indented = `${text},`.split('\n').map((line) => `  ${line}`);
     lines.push(
-      ...(stage.enabled ? indented : indented.map((line) => `${DISABLED_PREFIX}${line.slice(2)}`)),
+      ...(stage.enabled
+        ? indented
+        : indented.map((line) => `  ${DISABLED_PREFIX}${line.slice(2)}`)),
     );
   }
   lines.push(']');
