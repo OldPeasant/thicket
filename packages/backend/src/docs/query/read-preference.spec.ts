@@ -200,8 +200,11 @@ describe('Operation reads and writes (profile read preference / write concern)',
     await op.run({ count: 'orders' });
     expect(await op.open({ find: 'orders' })).toEqual(docs(1));
     await op.close();
-    expect(client.sent[0]?.options?.readPreference).toBe('primary');
-    expect(client.cursors[0]?.options).toEqual({ raw: true, readPreference: 'primary' });
+    expect(client.sent[0]?.options?.readPreference).toBe(ReadPreference.primary);
+    expect(client.cursors[0]?.options).toEqual({
+      raw: true,
+      readPreference: ReadPreference.primary,
+    });
   });
 
   it('open()/more() use one driver cursor with the read preference, comment and batch size', async () => {
@@ -375,7 +378,10 @@ describe('Operation cancel with a driver cursor', () => {
     controller.abort();
     expect((await rejection(opening)).code).toBe('CANCELLED');
     await vi.waitFor(() => expect(commandsOf(client)).toContain('killOp'));
-    expect(client.sent.map((s) => s.options?.readPreference)).toEqual(['primary', 'primary']);
+    expect(client.sent.map((s) => s.options?.readPreference)).toEqual([
+      ReadPreference.primary,
+      ReadPreference.primary,
+    ]);
     first.resolve({ docs: [], more: false });
     await op.close();
   });
@@ -481,7 +487,10 @@ describe('countDocuments options', () => {
     await expect(countDocuments(client, params, undefined, { primary: true })).resolves.toEqual({
       count: 3,
     });
-    expect(client.cursors.map((c) => c.options?.readPreference)).toEqual([SECONDARY, 'primary']);
+    expect(client.cursors.map((c) => c.options?.readPreference)).toEqual([
+      SECONDARY,
+      ReadPreference.primary,
+    ]);
     expect(client.cursors.every((c) => c.calls.at(-1) === 'close')).toBe(true);
   });
 });

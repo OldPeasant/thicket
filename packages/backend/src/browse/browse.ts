@@ -3,7 +3,7 @@ import type { CollectionInfo, DatabaseInfo, ResultOf } from '@thicket/contract';
 import {
   BSON,
   type Document,
-  type ReadPreferenceLike,
+  type ReadPreference,
   type RunCommandOptions,
   type RunCursorCommandOptions,
 } from 'mongodb';
@@ -142,9 +142,14 @@ export function canonical(doc: Document): string {
  * (create, drop, rename, `collMod`, indexes) and users/roles stay on the primary as they were.
  */
 
+/** Command options: {@link RAW} plus `readPreference`, if any (none: the primary). */
+export function rawOptions(readPreference: ReadPreference | undefined): RunCommandOptions {
+  return readPreference === undefined ? RAW : { ...RAW, readPreference };
+}
+
 /** Command options for a read: {@link RAW} plus the database's (the profile's) read preference. */
 export function readOptions(db: DbLike): RunCommandOptions {
-  return db.readPreference === undefined ? RAW : { ...RAW, readPreference: db.readPreference };
+  return rawOptions(db.readPreference);
 }
 
 /**
@@ -161,7 +166,8 @@ export function withWriteConcern(db: DbLike, command: Document): Document {
   return Object.keys(field).length === 0 ? command : { ...command, writeConcern: field };
 }
 
-const isOpenCursor = (id: unknown): boolean =>
+/** True for the id of a cursor the server still holds (not missing, not 0). */
+export const isOpenCursor = (id: unknown): boolean =>
   id !== undefined && id !== null && toNumber(id) !== 0;
 
 /**
@@ -182,7 +188,7 @@ export class ReadCursor {
     private readonly collection: string,
     private readonly comment?: unknown,
     /** Overrides the database's read preference (e.g. `primary` for reads around a write). */
-    private readonly readPreference: ReadPreferenceLike | undefined = db.readPreference,
+    private readonly readPreference: ReadPreference | undefined = db.readPreference,
   ) {}
 
   /** Runs the cursor command and answers its first batch. */
@@ -240,10 +246,8 @@ export class ReadCursor {
   }
 
   private async command(cmd: Document): Promise<Document> {
-    const options =
-      this.readPreference === undefined ? RAW : { ...RAW, readPreference: this.readPreference };
     try {
-      return await this.db.command(cmd, options);
+      return await this.db.command(cmd, rawOptions(this.readPreference));
     } catch (error) {
       throw toBrowseError(error);
     }

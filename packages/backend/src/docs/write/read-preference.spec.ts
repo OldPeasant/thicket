@@ -153,7 +153,7 @@ describe('reads that belong to a write go to the primary', () => {
     );
     expect(error.code).toBe('CONFLICT');
     expect(client.opened.map((o) => Object.keys(o.command)[0])).toEqual(['find']);
-    expect(readPreferences(client)).toEqual(['primary']);
+    expect(readPreferences(client)).toEqual([ReadPreference.primary]);
   });
 
   it('docs.delete with expected values reads the conflict detail from the primary', async () => {
@@ -162,7 +162,7 @@ describe('reads that belong to a write go to the primary', () => {
       deleteDocument(client, { ...target, id: ID, expected: '{"a":0}' }),
     );
     expect(error.code).toBe('CONFLICT');
-    expect(readPreferences(client)).toEqual(['primary']);
+    expect(readPreferences(client)).toEqual([ReadPreference.primary]);
   });
 
   it('docs.previewMany counts and samples on the primary', async () => {
@@ -171,7 +171,7 @@ describe('reads that belong to a write go to the primary', () => {
     expect(preview.matched).toBe(2);
     expect(preview.sample).toHaveLength(2);
     expect(client.opened.map((o) => Object.keys(o.command)[0])).toEqual(['aggregate', 'find']);
-    expect(readPreferences(client)).toEqual(['primary', 'primary']);
+    expect(readPreferences(client)).toEqual([ReadPreference.primary, ReadPreference.primary]);
     expect(client.sent).toEqual([]);
   });
 
@@ -184,7 +184,7 @@ describe('reads that belong to a write go to the primary', () => {
       expectedCount: 3,
     });
     await deleteMany(client, { ...target, filter: '{}', expectedCount: 3 });
-    expect(readPreferences(client)).toEqual(['primary', 'primary']);
+    expect(readPreferences(client)).toEqual([ReadPreference.primary, ReadPreference.primary]);
     const refused = await rejection(
       deleteMany(client, { ...target, filter: '{}', expectedCount: 2 }),
     );

@@ -164,6 +164,39 @@ describe('docs.find follows the read preference', () => {
     expect(await openCursorsOn(SECONDARY_HOST)).toBe(before);
   });
 
+  it('cancelling while a getMore runs on rs-b kills it and its cursor there', async () => {
+    const coll = await seeded('cancel_getmore', 35);
+    const p = proxied('find-cancel-getmore', { readPreference: 'secondaryPreferred' });
+    const { client, take } = await openMonitored(p);
+    const before = await openCursorsOn(SECONDARY_HOST);
+    take();
+    const abort = new AbortController();
+    // A slow filter (50 ms per document): every batch of 10 takes about half a second, so the
+    // getMore after the first batch is still running on rs-b when the cancel comes.
+    const params = { ...findParams(p.id, coll, 10), filter: '{"$where": "sleep(50) || true"}' };
+    let batches = 0;
+    const running = streamFind(
+      client,
+      params,
+      () => {
+        batches += 1;
+        if (batches === 1) setTimeout(() => abort.abort(), 150);
+      },
+      abort.signal,
+    );
+    // streamFind awaits the cancel cleanup (op.close) before it rejects.
+    await expect(running).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(batches).toBe(1);
+    const sent = take('find', 'getMore', 'currentOp', 'killOp', 'killCursors');
+    expect(sent[0]).toEqual(['find', SECONDARY_HOST]);
+    expect(sent).toContainEqual(['getMore', SECONDARY_HOST]);
+    const kills = sent.filter(([name]) => name === 'killOp' || name === 'killCursors');
+    expect(kills.length).toBeGreaterThan(0);
+    expect(sent.every(([, address]) => address === SECONDARY_HOST)).toBe(true);
+    // No cursor of this find is left open on rs-b.
+    expect(await openCursorsOn(SECONDARY_HOST)).toBe(before);
+  });
+
   it('primary (the default): the find and its getMores run on rs-a', async () => {
     const coll = await seeded('primary', 15);
     const p = proxied('find-primary');

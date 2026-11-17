@@ -12,12 +12,13 @@ import {
   type PageRequest,
   type SortSpec,
 } from '@thicket/core';
-import { BSON, MongoWriteConcernError, type Document, type ReadPreferenceLike } from 'mongodb';
+import { BSON, MongoWriteConcernError, ReadPreference, type Document } from 'mongodb';
 
 import {
-  RAW,
   ReadCursor,
   canonical,
+  isOpenCursor,
+  rawOptions,
   toBrowseError,
   toNumber,
   withWriteConcern,
@@ -91,11 +92,10 @@ async function command(
   client: ClientLike,
   db: string,
   cmd: Document,
-  readPreference?: ReadPreferenceLike,
+  readPreference?: ReadPreference,
 ): Promise<Document> {
   try {
-    const options = readPreference === undefined ? RAW : { ...RAW, readPreference };
-    return await client.db(db).command(cmd, options);
+    return await client.db(db).command(cmd, rawOptions(readPreference));
   } catch (error) {
     // A write the server applied but could not acknowledge with the requested write concern:
     // the driver throws, but its reply (`n`, `writeErrors`, `writeConcernError`) is the answer.
@@ -121,7 +121,7 @@ function isUnauthorized(error: unknown): boolean {
 export async function killOperations(
   client: ClientLike,
   comment: string,
-  readPreference?: ReadPreferenceLike,
+  readPreference?: ReadPreference,
 ): Promise<number> {
   let reply: Document;
   try {
@@ -154,8 +154,6 @@ export async function killOperations(
   return ids.length;
 }
 
-const isOpen = (id: unknown): boolean => id !== undefined && id !== null && toNumber(id) !== 0;
-
 /** Options of an {@link Operation}. */
 export interface OperationOptions {
   /**
@@ -177,7 +175,7 @@ export class Operation {
   private cursor: ReadCursor | undefined;
   private readonly cleanups: Promise<void>[] = [];
   private readonly target: DbLike;
-  private readonly readPreference: ReadPreferenceLike | undefined;
+  private readonly readPreference: ReadPreference | undefined;
 
   constructor(
     private readonly client: ClientLike,
@@ -187,7 +185,8 @@ export class Operation {
     options: OperationOptions = {},
   ) {
     this.target = client.db(db);
-    this.readPreference = options.primary === true ? 'primary' : this.target.readPreference;
+    this.readPreference =
+      options.primary === true ? ReadPreference.primary : this.target.readPreference;
   }
 
   /**
@@ -204,10 +203,7 @@ export class Operation {
     return this.send(withWriteConcern(this.target, cmd), undefined);
   }
 
-  private async send(
-    cmd: Document,
-    readPreference: ReadPreferenceLike | undefined,
-  ): Promise<Document> {
+  private async send(cmd: Document, readPreference: ReadPreference | undefined): Promise<Document> {
     if (this.signal?.aborted) throw cancelled();
     const pending = command(
       this.client,
@@ -217,7 +213,7 @@ export class Operation {
     );
     return this.guard(pending, readPreference, async (reply) => {
       const id = (reply?.['cursor'] as Document | undefined)?.['id'];
-      if (isOpen(id)) await this.killCursorId(id, readPreference);
+      if (isOpenCursor(id)) await this.killCursorId(id, readPreference);
     });
   }
 
@@ -228,7 +224,7 @@ export class Operation {
    */
   private async guard<T>(
     pending: Promise<T>,
-    readPreference: ReadPreferenceLike | undefined,
+    readPreference: ReadPreference | undefined,
     onSettled: (reply: T | undefined) => Promise<void>,
   ): Promise<T> {
     try {
@@ -252,7 +248,7 @@ export class Operation {
    */
   private async cleanUp<T>(
     pending: Promise<T>,
-    readPreference: ReadPreferenceLike | undefined,
+    readPreference: ReadPreference | undefined,
     onSettled: (reply: T | undefined) => Promise<void>,
   ): Promise<void> {
     let settled = false;
@@ -314,7 +310,7 @@ export class Operation {
 
   private async killCursorId(
     id: unknown,
-    readPreference: ReadPreferenceLike | undefined,
+    readPreference: ReadPreference | undefined,
   ): Promise<void> {
     await command(
       this.client,

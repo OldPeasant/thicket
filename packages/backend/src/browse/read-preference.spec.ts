@@ -1,5 +1,6 @@
 import {
   BSON,
+  Long,
   MongoServerError,
   ReadPreference,
   WriteConcern,
@@ -11,13 +12,16 @@ import { describe, expect, it } from 'vitest';
 
 import type { ClientLike, CursorLike, DbLike } from '../connections/manager';
 import {
+  RAW,
   ReadCursor,
   collectionStats,
   createCollection,
   databaseStats,
   dropCollection,
+  isOpenCursor,
   listCollections,
   listDatabases,
+  rawOptions,
   readOptions,
   renameCollection,
   withWriteConcern,
@@ -199,6 +203,23 @@ describe('readOptions / withWriteConcern', () => {
     expect(readOptions(db()).fieldsAsRaw).toEqual({ firstBatch: true, nextBatch: true });
   });
 
+  it('rawOptions adds an explicit read preference, none means the primary (RAW as is)', () => {
+    expect(rawOptions(undefined)).toBe(RAW);
+    expect(rawOptions(ReadPreference.primary)).toEqual({
+      ...RAW,
+      readPreference: ReadPreference.primary,
+    });
+    expect(readOptions(db(SECONDARY))).toEqual(rawOptions(SECONDARY));
+  });
+
+  it('isOpenCursor is false for a missing or zero cursor id', () => {
+    expect(isOpenCursor(undefined)).toBe(false);
+    expect(isOpenCursor(null)).toBe(false);
+    expect(isOpenCursor(0)).toBe(false);
+    expect(isOpenCursor(Long.ZERO)).toBe(false);
+    expect(isOpenCursor(Long.fromNumber(42))).toBe(true);
+  });
+
   it('withWriteConcern maps w / journal / wtimeoutMS to the command field', () => {
     const cmd = { insert: 'c', documents: [] };
     expect(withWriteConcern(db(undefined, new WriteConcern('majority', 500, true)), cmd)).toEqual({
@@ -255,10 +276,13 @@ describe('ReadCursor', () => {
       () => ({ ok: 1 }),
       () => [[{ _id: 1 }]],
     );
-    await new ReadCursor(client.db('shop'), 'orders', undefined, 'primary').first({
+    await new ReadCursor(client.db('shop'), 'orders', undefined, ReadPreference.primary).first({
       find: 'orders',
     });
-    expect(client.opened[0]?.options).toEqual({ raw: true, readPreference: 'primary' });
+    expect(client.opened[0]?.options).toEqual({
+      raw: true,
+      readPreference: ReadPreference.primary,
+    });
   });
 
   it('without a read preference the driver cursor gets none (client default: primary)', async () => {
