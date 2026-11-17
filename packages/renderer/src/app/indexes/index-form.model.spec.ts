@@ -494,6 +494,17 @@ describe('buildIndex: options', () => {
       ).toEqual({ collation: message });
     });
 
+    it('reports the 2d position and the 2d collation refusal together', () => {
+      expect(
+        errorsOf(
+          draft({ fields: key(['cat', '1'], ['pos', '2d']), collation: '{ locale: "en" }' }),
+        ),
+      ).toEqual({
+        fields: 'A 2d field must be the first field of the key.',
+        collation: 'A 2d index does not support a collation.',
+      });
+    });
+
     it('refuses a collation on the wildcard text index', () => {
       expect(
         errorsOf(draft({ fields: one('$**', 'text'), collation: '{ locale: "en" }' })),

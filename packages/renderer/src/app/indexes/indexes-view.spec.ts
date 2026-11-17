@@ -182,6 +182,34 @@ describe('IndexesView', () => {
       );
     });
 
+    it('renders a text index with its text fields, the language tag and the wildcard projection tag', async () => {
+      const textKey = '{"shop":{"$numberInt":"1"},"_fts":"text","_ftsx":{"$numberInt":"1"}}';
+      const wildKey = '{"$**":{"$numberInt":"1"}}';
+      list = [
+        ID,
+        info('shop_text', textKey, {
+          raw: `{"key":${textKey},"name":"shop_text","weights":{"title":{"$numberInt":"10"},"body":{"$numberInt":"1"}},"default_language":"german"}`,
+        }),
+        info('$**_1', wildKey, {
+          raw: `{"key":${wildKey},"name":"$**_1","wildcardProjection":{"secret":{"$numberInt":"0"}}}`,
+        }),
+      ];
+      await click(get('idx-refresh'));
+      const parts = [...get('idx-key', row('shop_text')).querySelectorAll<HTMLElement>('.part')];
+      expect(parts.map((p) => [p.firstChild?.textContent, p.dataset['kind']])).toEqual([
+        ['shop', 'asc'],
+        ['title', 'text'],
+        ['body', 'text'],
+      ]);
+      expect(text(get('idx-key', row('shop_text')))).not.toContain('_fts');
+      const textTags = all('idx-tag', row('shop_text'));
+      expect(textTags.map(text)).toEqual(['language german']);
+      expect(textTags[0]?.getAttribute('title')).toBe('default_language');
+      const wildTags = all('idx-tag', row('$**_1'));
+      expect(wildTags.map(text)).toEqual(['wildcard projection']);
+      expect(wildTags[0]?.getAttribute('title')).toBe('{ secret: 0 }');
+    });
+
     it('Refresh reads the list again', async () => {
       list = [ID, TTL];
       await click(get('idx-refresh'));
@@ -665,6 +693,29 @@ describe('toRows', () => {
       { field: '_fts', kind: 'text' },
       { field: '_ftsx', kind: 'asc' },
     ]);
+  });
+
+  it('keeps the raw _fts/_ftsx key parts when the raw spec has no weights', () => {
+    const key = '{"_fts":"text","_ftsx":{"$numberInt":"1"}}';
+    const [r] = toRows([info('t', key)], null);
+    expect(r?.keys).toEqual([
+      { field: '_fts', kind: 'text' },
+      { field: '_ftsx', kind: 'asc' },
+    ]);
+  });
+
+  it('does not tag a default_language that is not a string', () => {
+    const key = '{"_fts":"text","_ftsx":{"$numberInt":"1"}}';
+    const [r] = toRows(
+      [
+        info('t', key, {
+          raw: `{"key":${key},"weights":{"body":{"$numberInt":"1"}},"default_language":{"$numberInt":"1"}}`,
+        }),
+      ],
+      null,
+    );
+    expect(r?.keys).toEqual([{ field: 'body', kind: 'text' }]);
+    expect(r?.tags).toEqual([]);
   });
 
   it('tags a wildcard projection with the projection in shell syntax', () => {

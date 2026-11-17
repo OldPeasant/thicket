@@ -324,6 +324,51 @@ describe('IndexCreateForm', () => {
     expect(get<HTMLButtonElement>('idx-create-cancel').disabled).toBe(false);
   });
 
+  it('enables Cancel again after a failed create', async () => {
+    let fail!: () => void;
+    fake.handle(
+      'idx.create',
+      () =>
+        new Promise((_, reject) => {
+          fail = () => reject({ code: 'SERVER_ERROR', message: 'Index already exists' });
+        }),
+    );
+    await type('idx-key-field', 'a');
+    await submit();
+    expect(get<HTMLButtonElement>('idx-create-cancel').disabled).toBe(true);
+    fail();
+    await settle();
+    expect(get('idx-create-error').textContent).toContain('Index already exists');
+    expect(get<HTMLButtonElement>('idx-create-cancel').disabled).toBe(false);
+    await click('idx-create-cancel');
+    expect(cancelled).toBe(1);
+  });
+
+  it('greys out the wildcard projection only while $** is not a text field', async () => {
+    await click('idx-more');
+    const label = () =>
+      el().querySelector(`label[for="${get('idx-wildcard-projection').id}"]`)?.classList;
+    expect(label()?.contains('off')).toBe(true);
+    await type('idx-key-field', '$**');
+    expect(label()?.contains('off')).toBe(false);
+    await select('idx-key-type', 'text');
+    expect(label()?.contains('off')).toBe(true);
+    await select('idx-key-type', '-1');
+    expect(label()?.contains('off')).toBe(false);
+  });
+
+  it('shows the 2d position error as a whole-key error', async () => {
+    await type('idx-key-field', 'cat');
+    await click('idx-key-add');
+    await type('idx-key-field', 'pos', 1);
+    await select('idx-key-type', '2d', 1);
+    await submit();
+    expect(get('idx-error-fields').textContent).toContain(
+      'A 2d field must be the first field of the key.',
+    );
+    expect(sent()).toEqual([]);
+  });
+
   it('creates a wildcard text index with weights and language, without a wildcard projection', async () => {
     await type('idx-key-field', '$**');
     await select('idx-key-type', 'text');
