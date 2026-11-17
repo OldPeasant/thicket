@@ -5,7 +5,7 @@ owner: felix/agent-2
 deps: [doc-paging,conflict-merge-close]
 touches: [packages/renderer/src/app/document/conflict,packages/renderer/src/app/document/document-actions.service.ts]
 prio: 2
-lease_until: 2026-11-17T04:44:58Z
+lease_until: 2026-11-17T04:50:02Z
 ---
 ## Goal
 Follow-up of doc-paging (reviews/doc-paging/tests.md TW-1, TW-2): when a save conflict hits a large
