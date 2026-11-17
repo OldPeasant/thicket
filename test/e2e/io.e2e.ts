@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ElectronApplication, Locator, Page } from '@playwright/test';
-import { Decimal128, Long, MongoClient, ObjectId } from 'mongodb';
+import { BSON, Decimal128, Long, MongoClient, ObjectId } from 'mongodb';
 
 import { expect, screenshot, test } from './harness';
 
@@ -170,6 +170,95 @@ test('export the fixture, import it into a new collection: counts and documents 
     await expect(window.getByTestId('import-count')).toHaveText(group1.toLocaleString('en-US'));
     expect(await countOf(mongo.uri, 'group1')).toBe(group1);
   } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('CSV import with a type per column: the documents get the mapped types', async ({
+  electronApp,
+  window,
+  mongo,
+}) => {
+  test.setTimeout(120_000);
+  const csvDb = 'io_csv_e2e';
+  const client = new MongoClient(mongo.uri, { serverSelectionTimeoutMS: 10_000 });
+  const dir = await mkdtemp(join(tmpdir(), 'thicket-csv-e2e-'));
+  try {
+    await client
+      .db(csvDb)
+      .dropDatabase()
+      .catch(() => undefined);
+    await client.db(csvDb).collection('existing').insertOne({ seeded: true });
+    const file = join(dir, 'products.csv');
+    await writeFile(
+      file,
+      [
+        'code,qty,price,added,active,city,notes',
+        '00042,3,19.90,2026-03-01T10:00:00Z,yes,Basel,first',
+        '00043,4000000000,5,2026-03-02T11:30:00Z,no,Zürich,"with, comma"',
+        '',
+      ].join('\n'),
+    );
+
+    await window.setViewportSize({ width: 1400, height: 900 });
+    await saveProfile(window, 'CSV', mongo.uri);
+    await window.getByTestId('sidebar-refresh').click();
+    const conn = treeNode(window, 'conn', 'CSV');
+    await conn.click();
+    await expect(conn).toHaveAttribute('data-state', 'connected');
+    await treeNode(window, 'db', csvDb).click();
+    await treeNode(window, 'coll', 'existing').click();
+
+    await stubDialogs(electronApp, file);
+    await window.getByTestId('io-import').click();
+    await window.getByTestId('import-format-csv').check();
+    await window.getByTestId('import-choose').click();
+    await expect(window.getByTestId('import-file')).toContainText('products.csv');
+    const column = (name: string) => window.getByTestId(`import-column-${name}`);
+    await expect(window.getByTestId('import-mapping').locator('tbody tr')).toHaveCount(7);
+    await expect(column('code').locator('.example')).toHaveText('00042');
+
+    // Leading zeros stay (auto would read a number), yes/no become booleans, city moves into a
+    // sub-document, notes is left out.
+    await column('code').getByTestId('import-column-type').selectOption('string');
+    await column('qty').getByTestId('import-column-type').selectOption('long');
+    await column('price').getByTestId('import-column-type').selectOption('decimal');
+    await column('added').getByTestId('import-column-type').selectOption('date');
+    await column('active').getByTestId('import-column-type').selectOption('bool');
+    await column('city').getByTestId('import-column-path').fill('address.city');
+    await column('notes').getByTestId('import-column-include').uncheck();
+    await expect(column('notes').getByTestId('import-column-path')).toBeDisabled();
+    await window.getByTestId('import-coll').fill('products');
+    await mkdir(SHOTS, { recursive: true });
+    await screenshot(electronApp, window, join(SHOTS, 'io-csv-mapping.png'));
+
+    // A field used by two columns blocks the import until it is fixed.
+    await column('qty').getByTestId('import-column-path').fill('code');
+    await expect(window.getByTestId('import-mapping-error')).toContainText('used by two columns');
+    await expect(window.getByTestId('import-start')).toBeDisabled();
+    await column('qty').getByTestId('import-column-path').fill('qty');
+    await expect(window.getByTestId('import-mapping-error')).toHaveCount(0);
+
+    await window.getByTestId('import-start').click();
+    await expect(window.getByTestId('import-count')).toHaveText('2');
+    await expect(treeNode(window, 'coll', 'products')).toBeVisible();
+
+    const docs = await client
+      .db(csvDb)
+      .collection('products')
+      .find({}, { projection: { _id: 0 }, promoteValues: false, promoteLongs: false })
+      .sort({ code: 1 })
+      .toArray();
+    expect(docs.map((d) => BSON.EJSON.stringify(d, { relaxed: false }))).toEqual([
+      '{"code":"00042","qty":{"$numberLong":"3"},"price":{"$numberDecimal":"19.90"},' +
+        `"added":{"$date":{"$numberLong":"${String(Date.parse('2026-03-01T10:00:00Z'))}"}},` +
+        '"active":true,"address":{"city":"Basel"}}',
+      '{"code":"00043","qty":{"$numberLong":"4000000000"},"price":{"$numberDecimal":"5"},' +
+        `"added":{"$date":{"$numberLong":"${String(Date.parse('2026-03-02T11:30:00Z'))}"}},` +
+        '"active":false,"address":{"city":"Zürich"}}',
+    ]);
+  } finally {
+    await client.close();
     await rm(dir, { recursive: true, force: true });
   }
 });

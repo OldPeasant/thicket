@@ -290,3 +290,149 @@ svg {
   stroke-width: 1.5;
   stroke-linecap: round;
 }
+
+/* CSV export columns: the field paths as checkable chips, in file order. */
+.fields {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.fields legend {
+  float: left;
+  margin-right: 0.5rem;
+  padding: 0;
+  color: var(--text-muted);
+}
+
+.field-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.1rem 0.5rem 0.1rem 0.3rem;
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.field-chip:has(input:not(:checked)) {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
+.add-field {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.add-field input,
+.path-input,
+.type select {
+  padding: 0.15rem 0.375rem;
+  font: inherit;
+  font-family: var(--font-mono);
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.add-field input {
+  width: 16rem;
+}
+
+/* CSV import mapping: column → field path → BSON type, with the first row's cell beside it. */
+.mapping-wrap {
+  max-height: 18rem;
+  overflow: auto;
+}
+
+.mapping {
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+
+.mapping caption {
+  padding-bottom: 0.375rem;
+  text-align: left;
+}
+
+.mapping th,
+.mapping td {
+  padding: 0.15rem 0.5rem 0.15rem 0;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.mapping thead th {
+  position: sticky;
+  top: 0;
+  font-weight: 400;
+  color: var(--text-muted);
+  background: var(--bg-panel);
+}
+
+.mapping .col-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.path-input {
+  width: 13rem;
+}
+
+/* The type's theme color as a tick at the select's left edge (as in the document view). */
+.type {
+  display: inline-flex;
+  border-left: 3px solid var(--type-color);
+  border-radius: 3px;
+}
+
+.type select {
+  border-left: none;
+  border-radius: 0 3px 3px 0;
+}
+
+.mapping .example {
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  color: var(--text-faint);
+}
+
+.mapping tr.off .col-name,
+.mapping tr.off .example {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
+.path-input:focus-visible,
+.type select:focus-visible,
+.add-field input:focus-visible,
+.field-chip:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.field-chip input:focus-visible {
+  outline: none;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

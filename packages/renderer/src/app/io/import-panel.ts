@@ -10,7 +10,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import type { IoProgress, ResultOf } from '@thicket/contract';
+import type { CsvType, IoProgress, ResultOf } from '@thicket/contract';
 import type { Subscription } from 'rxjs';
 
 import { ApiError, ApiService, describeError } from '../api';
@@ -20,9 +20,14 @@ import { SidebarTreeService, collNameProblem } from '../sidebar/sidebar-tree.ser
 import {
   type IoTarget,
   NO_PROGRESS,
-  TEXT_FORMATS,
-  type TextFormat,
+  CSV_TYPE_OPTIONS,
+  type CsvColumnRow,
+  FILE_FORMATS,
+  type FileFormat,
   collRef,
+  csvMapping,
+  csvMappingProblem,
+  defaultCsvRows,
   formatBytes,
   formatNumber,
   printSample,
@@ -43,8 +48,9 @@ export const PREVIEW_SHOWN = 5;
 let nextUid = 0;
 
 /**
- * Imports a JSON or JSON Lines file into a collection of the tab's database: choose the file
- * (`io.previewImport`, the backend's open dialog) and see its first documents, pick the target
+ * Imports a JSON, JSON Lines, CSV or BSON dump file into a collection of the tab's database:
+ * choose the file (`io.previewImport`, the backend's open dialog) and see its first documents
+ * (CSV: map each column to a field path and a BSON type, or leave it out), pick the target
  * collection (a new name creates it), ordered or unordered, stop or continue on errors, then
  * Import (`io.import` through `WriteGuard`: production asks first) with progress and the first
  * failures. Never offered for read-only profiles: the collection view hides it, and the panel
@@ -70,10 +76,11 @@ export class ImportPanel {
   private readonly safety = inject(ProfileSafetyService);
   private readonly sidebar = inject(SidebarTreeService);
 
-  protected readonly formats = TEXT_FORMATS;
+  protected readonly formats = FILE_FORMATS;
+  protected readonly csvTypes = CSV_TYPE_OPTIONS;
   protected readonly uid = `import-${++nextUid}`;
 
-  protected readonly format = signal<TextFormat>('json');
+  protected readonly format = signal<FileFormat>('json');
   protected readonly collName = signal('');
   protected readonly ordered = signal(true);
   protected readonly stopOnError = signal(true);
@@ -81,6 +88,11 @@ export class ImportPanel {
   protected readonly preview = signal<ImportPreview | null>(null);
   protected readonly progress = signal<IoProgress>(NO_PROGRESS);
   protected readonly error = signal<string | null>(null);
+  /** CSV: the mapping of every column of the chosen file. */
+  protected readonly csvRows = signal<readonly CsvColumnRow[]>([]);
+  protected readonly mappingProblem = computed(() =>
+    this.preview()?.csvColumns !== undefined ? csvMappingProblem(this.csvRows()) : null,
+  );
   /** Whether the target name was edited since the last Import attempt (hides its error). */
   protected readonly nameTouched = signal(false);
 
@@ -105,7 +117,8 @@ export class ImportPanel {
     formatNumber(Math.max(0, this.progress().processed - this.progress().failed)),
   );
   protected readonly canImport = computed(
-    () => this.preview() !== null && !this.busy() && !this.readOnly(),
+    () =>
+      this.preview() !== null && !this.busy() && !this.readOnly() && this.mappingProblem() === null,
   );
 
   private subscription: Subscription | null = null;
@@ -135,7 +148,7 @@ export class ImportPanel {
   }
 
   protected setFormat(event: Event): void {
-    this.format.set((event.target as HTMLInputElement).value as TextFormat);
+    this.format.set((event.target as HTMLInputElement).value as FileFormat);
     // A file chosen for the other format would be parsed differently: choose it again.
     if (this.preview() !== null && !this.busy()) {
       this.preview.set(null);
@@ -146,6 +159,32 @@ export class ImportPanel {
   protected setName(event: Event): void {
     this.collName.set((event.target as HTMLInputElement).value);
     this.nameTouched.set(true);
+  }
+
+  /** Changes one column of the CSV mapping. */
+  protected setColumn(
+    index: number,
+    change: Partial<Pick<CsvColumnRow, 'include' | 'path' | 'type'>>,
+  ): void {
+    this.csvRows.update((rows) => rows.map((r, i) => (i === index ? { ...r, ...change } : r)));
+  }
+
+  protected setInclude(index: number, event: Event): void {
+    this.setColumn(index, { include: (event.target as HTMLInputElement).checked });
+  }
+
+  protected setPath(index: number, event: Event): void {
+    this.setColumn(index, { path: (event.target as HTMLInputElement).value });
+  }
+
+  protected setType(index: number, event: Event): void {
+    this.setColumn(index, { type: (event.target as HTMLSelectElement).value as CsvType });
+  }
+
+  /** The theme color of a CSV type (the tick beside its select). */
+  protected typeColor(type: CsvType): string {
+    const token = CSV_TYPE_OPTIONS.find((t) => t.value === type)?.token ?? '--text-faint';
+    return `var(${token})`;
   }
 
   protected setOrdered(event: Event): void {
@@ -176,6 +215,7 @@ export class ImportPanel {
         return;
       }
       this.preview.set(preview);
+      this.csvRows.set(defaultCsvRows(preview.csvColumns ?? [], preview.csvRows ?? []));
       this.progress.set(NO_PROGRESS);
       this.phase.set('previewed');
     } catch (error) {
@@ -192,6 +232,7 @@ export class ImportPanel {
   async start(): Promise<void> {
     const preview = this.preview();
     if (preview === null || this.busy() || this.readOnly() || this.approveAbort) return;
+    if (this.mappingProblem() !== null) return;
     this.nameTouched.set(false);
     if (this.nameProblem() !== null) return;
     const { profileId, db } = this.target();
@@ -210,6 +251,7 @@ export class ImportPanel {
           fileToken: preview.fileToken,
           ordered: this.ordered(),
           stopOnError: this.stopOnError(),
+          ...(preview.csvColumns !== undefined ? { csvMapping: csvMapping(this.csvRows()) } : {}),
         },
         {
           detail: `From ${preview.fileName} (${this.sizeText()}).`,

@@ -111,7 +111,84 @@
         <p class="message error" role="alert" [id]="uid + '-name-error'">{{ problem }}</p>
       }
 
-      @if (phase() === 'previewed') {
+      @if (phase() === 'previewed' && p.csvColumns !== undefined) {
+        <div class="mapping-wrap" data-testid="import-mapping">
+          <table class="mapping">
+            <caption class="note">
+              Each column of
+              {{
+                p.fileName
+              }}
+              becomes a field. Its type decides how the cells are read; blank cells leave the field
+              out (strings keep them as "").
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col"><span class="sr-only">Import</span></th>
+                <th scope="col">Column</th>
+                <th scope="col">Field</th>
+                <th scope="col">Type</th>
+                <th scope="col">First row</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of csvRows(); track $index; let i = $index) {
+                <tr [class.off]="!row.include" [attr.data-testid]="'import-column-' + row.column">
+                  <td>
+                    <input
+                      type="checkbox"
+                      [checked]="row.include"
+                      [attr.aria-label]="'Import column ' + row.column"
+                      data-testid="import-column-include"
+                      (change)="setInclude(i, $event)"
+                    />
+                  </td>
+                  <th scope="row" class="col-name">{{ row.column || '(no name)' }}</th>
+                  <td>
+                    <input
+                      type="text"
+                      class="path-input"
+                      spellcheck="false"
+                      autocomplete="off"
+                      data-testid="import-column-path"
+                      [attr.aria-label]="'Field path for column ' + row.column"
+                      [value]="row.path"
+                      [disabled]="!row.include"
+                      (input)="setPath(i, $event)"
+                    />
+                  </td>
+                  <td>
+                    <span class="type" [style.--type-color]="typeColor(row.type)">
+                      <select
+                        data-testid="import-column-type"
+                        [attr.aria-label]="'Type for column ' + row.column"
+                        [disabled]="!row.include"
+                        (change)="setType(i, $event)"
+                      >
+                        @for (t of csvTypes; track t.value) {
+                          <option [value]="t.value" [selected]="row.type === t.value">
+                            {{ t.label }}
+                          </option>
+                        }
+                      </select>
+                    </span>
+                  </td>
+                  <td class="example" [title]="row.example">{{ row.example }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+        @if (mappingProblem(); as problem) {
+          <p class="message error" role="alert" data-testid="import-mapping-error">{{ problem }}</p>
+        }
+      } @else if (phase() === 'previewed') {
+        @if (p.metadataFile; as meta) {
+          <p class="note" data-testid="import-metadata">
+            Indexes from <span class="path">{{ meta }}</span> are created after the documents (and
+            its collection options are used when the collection is new).
+          </p>
+        }
         <div class="preview" data-testid="import-preview">
           <p class="note">
             First {{ sample().length }} of the {{ p.sample.length }} documents read for the preview:
@@ -129,8 +206,19 @@
     <p class="status" role="status" data-testid="import-status" [attr.data-phase]="phase()">
       @switch (phase()) {
         @case ('idle') {
-          Choose a JSON array or JSON Lines file. You see its first documents before anything is
-          written.
+          @switch (format()) {
+            @case ('csv') {
+              Choose a CSV file with a header row. You map its columns before anything is written.
+            }
+            @case ('bson') {
+              Choose a .bson file from mongodump or Thicket. You see its first documents before
+              anything is written.
+            }
+            @default {
+              Choose a JSON array or JSON Lines file. You see its first documents before anything is
+              written.
+            }
+          }
         }
         @case ('choosing') {
           Choose the file to import…
@@ -167,7 +255,8 @@
       <ul class="failures" data-testid="import-failures">
         @for (f of progress().errors; track f.index) {
           <li>
-            <span class="line">Line {{ f.index }}</span> {{ f.error.code }}: {{ f.error.message }}
+            <span class="line">{{ format() === 'bson' ? 'Document' : 'Line' }} {{ f.index }}</span>
+            {{ f.error.code }}: {{ f.error.message }}
           </li>
         }
       </ul>

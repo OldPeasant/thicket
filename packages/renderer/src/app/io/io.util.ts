@@ -1,18 +1,141 @@
 import type { BsonDocument } from '@thicket/core/bson';
 import { parseEJsonDocument } from '@thicket/core/bson';
-import type { IoProgress, ParamsOf } from '@thicket/contract';
+import type { CsvType, IoProgress, ParamsOf } from '@thicket/contract';
 import { printShellSyntax } from '@thicket/core/shellsyntax';
 
 import type { ParsedQuery } from '../collection/query.util';
 
-/** File formats the basic import/export dialogs offer (CSV and BSON come with io-advanced). */
-export type TextFormat = 'json' | 'jsonl';
+/** File formats of the import and export panels. */
+export type FileFormat = 'json' | 'jsonl' | 'csv' | 'bson';
 export type EjsonMode = 'relaxed' | 'canonical';
 
-export const TEXT_FORMATS: readonly { value: TextFormat; label: string; hint: string }[] = [
+export const FILE_FORMATS: readonly { value: FileFormat; label: string; hint: string }[] = [
   { value: 'json', label: 'JSON', hint: 'One array of documents' },
   { value: 'jsonl', label: 'JSON Lines', hint: 'One document per line' },
+  { value: 'csv', label: 'CSV', hint: 'One row per document, one column per field' },
+  {
+    value: 'bson',
+    label: 'BSON dump',
+    hint: 'mongodump-compatible .bson file with its .metadata.json',
+  },
 ];
+
+/** The types a CSV column can be imported as, in the order the mapping offers them. */
+export const CSV_TYPE_OPTIONS: readonly { value: CsvType; label: string; token: string }[] = [
+  { value: 'auto', label: 'Auto', token: '--text-faint' },
+  { value: 'string', label: 'String', token: '--bson-string' },
+  { value: 'int', label: 'Int32', token: '--bson-int' },
+  { value: 'long', label: 'Int64', token: '--bson-long' },
+  { value: 'double', label: 'Double', token: '--bson-double' },
+  { value: 'decimal', label: 'Decimal128', token: '--bson-decimal' },
+  { value: 'bool', label: 'Boolean', token: '--bson-bool' },
+  { value: 'date', label: 'Date', token: '--bson-date' },
+  { value: 'objectId', label: 'ObjectId', token: '--bson-object-id' },
+  { value: 'json', label: 'Extended JSON', token: '--bson-object' },
+];
+
+/** One CSV column in the import mapping (what the panel edits). */
+export interface CsvColumnRow {
+  column: string;
+  include: boolean;
+  path: string;
+  type: CsvType;
+  /** The cell of the first row, as written in the file. */
+  example: string;
+}
+
+/** The default mapping: every named column under its own name, `auto`. */
+export function defaultCsvRows(
+  columns: readonly string[],
+  rows: readonly string[][],
+): CsvColumnRow[] {
+  const seen = new Set<string>();
+  return columns.map((column, i) => {
+    // A repeated header name maps to its first column only (the backend maps by name).
+    const usable = column.trim() !== '' && !seen.has(column);
+    seen.add(column);
+    return { column, include: usable, path: column, type: 'auto', example: rows[0]?.[i] ?? '' };
+  });
+}
+
+/**
+ * The first problem of a mapping (no column, an empty or repeated path, overlapping paths), or
+ * `null` when it can be sent.
+ */
+export function csvMappingProblem(rows: readonly CsvColumnRow[]): string | null {
+  const used = rows.filter((r) => r.include);
+  if (used.length === 0) return 'Choose at least one column to import.';
+  const paths = new Set<string>();
+  for (const row of used) {
+    const path = row.path.trim();
+    if (path === '' || path.split('.').some((s) => s === '')) {
+      return `Column ${JSON.stringify(row.column)} needs a field path such as name or address.city.`;
+    }
+    if (paths.has(path)) return `Field ${JSON.stringify(path)} is used by two columns.`;
+    paths.add(path);
+  }
+  for (const a of paths) {
+    for (const b of paths) {
+      if (b.startsWith(`${a}.`)) {
+        return `Fields ${JSON.stringify(a)} and ${JSON.stringify(b)} overlap: ${a} would be both a value and a document.`;
+      }
+    }
+  }
+  return null;
+}
+
+/** `io.import`'s `csvMapping` for the included columns. */
+export function csvMapping(
+  rows: readonly CsvColumnRow[],
+): NonNullable<ParamsOf<'io.import'>['csvMapping']> {
+  return rows
+    .filter((r) => r.include)
+    .map((r) => ({ column: r.column, path: r.path.trim(), bsonType: r.type }));
+}
+
+/** An object of canonical EJSON that is a type wrapper (`{"$oid": …}`), not a document. */
+function isWrapper(value: object): boolean {
+  const keys = Object.keys(value);
+  return keys.length > 0 && keys.every((k) => k.startsWith('$'));
+}
+
+function collect(value: Record<string, unknown>, prefix: string, paths: Set<string>): void {
+  for (const [key, v] of Object.entries(value)) {
+    const path = prefix + key;
+    if (
+      typeof v === 'object' &&
+      v !== null &&
+      !Array.isArray(v) &&
+      !isWrapper(v) &&
+      Object.keys(v).length > 0
+    ) {
+      collect(v as Record<string, unknown>, `${path}.`, paths);
+    } else {
+      paths.add(path);
+    }
+  }
+}
+
+/**
+ * The CSV columns of documents (canonical EJSON texts, e.g. the page shown): their field paths
+ * in the order first seen, nested documents flattened to `a.b`; arrays stay one column.
+ * Unreadable texts are skipped.
+ */
+export function csvFieldsOf(docs: readonly string[]): string[] {
+  const paths = new Set<string>();
+  for (const text of docs) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      continue;
+    }
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      collect(parsed as Record<string, unknown>, '', paths);
+    }
+  }
+  return [...paths];
+}
 
 export const EJSON_MODES: readonly { value: EjsonMode; label: string; hint: string }[] = [
   { value: 'relaxed', label: 'Relaxed', hint: 'Plain numbers and dates where lossless' },
@@ -30,8 +153,9 @@ export interface IoTarget {
 export function exportParams(
   target: IoTarget,
   query: ParsedQuery,
-  format: TextFormat,
+  format: FileFormat,
   ejsonMode: EjsonMode,
+  csvFields?: readonly string[],
 ): ParamsOf<'io.export'> {
   const source: Extract<ParamsOf<'io.export'>['source'], { kind: 'find' }> = {
     kind: 'find',
@@ -48,6 +172,9 @@ export function exportParams(
     source,
     format,
     ejsonMode,
+    ...(format === 'csv' && csvFields !== undefined && csvFields.length > 0
+      ? { csvFields: [...csvFields] }
+      : {}),
   };
 }
 

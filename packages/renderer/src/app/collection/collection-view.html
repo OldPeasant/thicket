@@ -322,6 +322,7 @@
       <app-export-panel
         [target]="target()"
         [query]="results.query()"
+        [sampleDocs]="results.page()?.docs ?? []"
         (closed)="ioPanel.set(null)"
       />
     }

@@ -31,34 +31,83 @@
         </label>
       }
     </fieldset>
-    <fieldset class="choice" [disabled]="running()">
-      <legend>Extended JSON</legend>
-      @for (m of modes; track m.value) {
-        <label [title]="m.hint">
-          <input
-            type="radio"
-            [name]="uid + '-mode'"
-            [value]="m.value"
-            [checked]="mode() === m.value"
-            [attr.data-testid]="'export-mode-' + m.value"
-            (change)="setMode($event)"
-          />
-          {{ m.label }}
-        </label>
-      }
-    </fieldset>
+    @if (format() !== 'bson') {
+      <fieldset class="choice" [disabled]="running()">
+        <legend>{{ format() === 'csv' ? 'Nested values as' : 'Extended JSON' }}</legend>
+        @for (m of modes; track m.value) {
+          <label [title]="m.hint">
+            <input
+              type="radio"
+              [name]="uid + '-mode'"
+              [value]="m.value"
+              [checked]="mode() === m.value"
+              [attr.data-testid]="'export-mode-' + m.value"
+              (change)="setMode($event)"
+            />
+            {{ m.label }}
+          </label>
+        }
+      </fieldset>
+    }
     <span class="actions">
       @if (running()) {
         <button type="button" class="btn stop" data-testid="export-cancel" (click)="cancel()">
           Cancel
         </button>
       } @else {
-        <button type="button" class="btn run" data-testid="export-start" (click)="start()">
+        <button
+          type="button"
+          class="btn run"
+          data-testid="export-start"
+          [disabled]="noFields()"
+          (click)="start()"
+        >
           Choose file and export
         </button>
       }
     </span>
   </div>
+
+  @if (format() === 'csv') {
+    <fieldset class="fields" [disabled]="running()" data-testid="export-fields">
+      <legend>Columns</legend>
+      @for (f of csvFields(); track f.path) {
+        <label class="field-chip">
+          <input
+            type="checkbox"
+            [checked]="f.checked"
+            [attr.data-testid]="'export-field-' + f.path"
+            (change)="toggleField(f.path, $event)"
+          />
+          {{ f.path }}
+        </label>
+      } @empty {
+        <span class="note">Taken from the first 1,000 exported documents.</span>
+      }
+      <form class="add-field" (submit)="addField($event)">
+        <input
+          type="text"
+          data-testid="export-field-new"
+          aria-label="Field path to add as a column"
+          placeholder="Add field, e.g. address.city"
+          spellcheck="false"
+          autocomplete="off"
+          [value]="newField()"
+          (input)="setNewField($event)"
+        />
+        <button type="submit" class="btn" data-testid="export-field-add">Add</button>
+      </form>
+    </fieldset>
+    @if (noFields()) {
+      <p class="message error" role="alert">Check at least one column to export.</p>
+    }
+  }
+  @if (format() === 'bson') {
+    <p class="note">
+      Writes the documents as a .bson file, and the collection's indexes and options as a
+      .metadata.json file next to it, the way mongodump does. mongorestore reads both.
+    </p>
+  }
 
   <p class="status" role="status" data-testid="export-status" [attr.data-phase]="phase()">
     @switch (phase()) {
