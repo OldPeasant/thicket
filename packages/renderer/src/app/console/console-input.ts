@@ -27,9 +27,7 @@ export function isInputComplete(code: string): boolean {
       continue;
     }
     if (ch === '"' || ch === "'") {
-      const end = stringEnd(code, i, ch);
-      if (end < 0) return false;
-      i = end;
+      i = stringEnd(code, i, ch);
       continue;
     }
     if (ch === '`') {
@@ -49,18 +47,20 @@ export function isInputComplete(code: string): boolean {
   return stack.length === 0;
 }
 
-/** Index after the closing quote of the string at `start`, -1 when it is not closed on its line. */
+/**
+ * Index after the closing quote of the string at `start`, or of its line end when it is not
+ * closed: an unterminated string is a syntax error that mongosh reports, so the input runs.
+ */
 function stringEnd(code: string, start: number, quote: string): number {
   let i = start + 1;
   while (i < code.length) {
     const ch = code[i];
     if (ch === '\\') i += 2;
     else if (ch === quote) return i + 1;
-    else if (ch === '\n')
-      return i; // an unterminated string: a syntax error mongosh reports
+    else if (ch === '\n') return i;
     else i++;
   }
-  return -1;
+  return code.length;
 }
 
 /** Index after the closing backtick of the template literal at `start`, -1 when it is open. */
