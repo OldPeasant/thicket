@@ -5,7 +5,7 @@ owner: felix/agent-2
 deps: [app-layout,api-client,profiles-store,uri-model,safety-ui]
 touches: [packages/renderer/src/app/connections]
 prio: 1
-lease_until: 2026-11-17T00:37:21Z
+lease_until: 2026-11-17T00:42:27Z
 ---
 ## Goal
 Profile list (folders, colors), editor with form and connection-string tabs kept in sync, SCRAM and TLS fields, secrets options (save / ask each time, weak-keychain warning), read-only and production flags, Test connection with explained errors. Use the frontend-design skill for the visual direction; respect the Business and Tron tokens (no hard-coded colors).
