@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "task": "schema-analysis",
+  "reviewed_revision": "738dbc166c2b4b1d1ea271d8abc8506307b2d599",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/schema-analysis/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/schema-analysis/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/schema-analysis/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "examples that may have been cut by the analyzer are dropped (isCut), regression tests added"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "unit specs for backend analyze, model, panel and collection-view wiring added by test-writer"},
+    {"id": "CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "accepted", "note": "schema.analyze contract has no collation param; limitation recorded as task assumption"},
+    {"id": "CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "switched to @mongodb-js/mongodb-schema"},
+    {"id": "CR-5", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "aria-pressed removed from the Schema button"},
+    {"id": "CR-6", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "assumptions for the 1000 limit, library change and collation recorded with tasks.py assume"}
+  ],
+  "validation": [
+    {"command": "cd packages/backend && npx vitest run src/schema", "result": "pass"},
+    {"command": "npx vitest run --config test/integration/vitest.config.ts test/integration/schema.int.spec.ts", "result": "pass"},
+    {"command": "npm run build -w packages/renderer && npm run build -w apps/desktop && npx playwright test test/e2e/schema-analysis.e2e.ts", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}
