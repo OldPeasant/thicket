@@ -584,8 +584,8 @@ Contract layout (`packages/contract/src/`):
   error blocks only its own preview; later stages are previewed without it and say so.
   `$out`/`$merge` stages are not previewed. No previews are read in full-text mode (loading ones
   are aborted); applying the text keeps each stage's id by position, so back in the stage list
-  only stages whose prefix changed are read again. Each stage's polite live region announces
-  "Stage N: <count> from a sample" or the error, and is empty while loading.
+  only stages whose prefix changed, or whose preview failed, are read again. Each stage's polite
+  live region announces "Stage N: <count> from a sample" or the error, and is empty while loading.
 - Run: `agg.run` with `$skip`/`$limit` appended (20 per page + 1 to know whether there is a next
   page); a pipeline with `$out`/`$merge` runs unpaged through `WriteGuard.approve` with
   `alwaysConfirm`. Export: core's `generateCode` (`@thicket/core/codegen`) for shell, Node,

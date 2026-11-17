@@ -1524,9 +1524,11 @@ describe('AggregationView', () => {
       await click(get('agg-run'));
       expect(previews()).toHaveLength(before);
       await click(get('agg-mode-stages'));
-      // The stages whose previews succeeded are not read again.
-      expect(sentSince(before)).not.toContain('$match');
-      expect(sentSince(before)).not.toContain('$match $group');
+      // Only the failed stage is read again; the stages whose previews succeeded are kept.
+      expect(sentSince(before)).toEqual(['$match $group $sort']);
+      expect(inStage(2, 'agg-preview-live').textContent?.trim()).toBe(
+        'Stage 3: 3 documents from a sample',
+      );
     });
 
     it('a collection change in text mode reads nothing until the stage list is back', async () => {
