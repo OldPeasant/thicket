@@ -1,10 +1,11 @@
 ---
 title: M5: Connection editor for LDAP, OIDC and AWS
-status: todo
-owner:
+status: in_progress
+owner: felix/agent-1
 deps: [ldap-auth,oidc-auth,aws-auth,conn-ui-m2,profiles-import-export]
 touches: [packages/renderer/src/app/connections]
 prio: 3
+lease_until: 2026-11-17T03:54:08Z
 ---
 ## Goal
 Auth mechanism choices and their fields in the connection editor; OIDC 'sign in' state.
