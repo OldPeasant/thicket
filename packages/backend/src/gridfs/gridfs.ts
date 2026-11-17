@@ -287,9 +287,7 @@ export async function uploadFile(
 
 /** Deletes the files document of `id` and its chunks; `true` when the files document existed. */
 async function removeFile(db: Db, bucket: string, id: unknown): Promise<boolean> {
-  const { deletedCount } = await db
-    .collection(`${bucket}${FILES_SUFFIX}`)
-    .deleteOne(byId(id));
+  const { deletedCount } = await db.collection(`${bucket}${FILES_SUFFIX}`).deleteOne(byId(id));
   await db.collection(`${bucket}${CHUNKS_SUFFIX}`).deleteMany({ files_id: { $eq: id } });
   return deletedCount > 0;
 }
