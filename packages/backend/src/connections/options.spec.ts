@@ -159,7 +159,7 @@ describe('clientConfig', () => {
     expect(options.auth).toBeUndefined();
   });
 
-  it.each(['PLAIN', 'GSSAPI', 'MONGODB-OIDC', 'MONGODB-AWS'] as const)(
+  it.each(['PLAIN', 'GSSAPI', 'MONGODB-OIDC'] as const)(
     'answers UNSUPPORTED for mechanism %s',
     (mechanism) => {
       const error = errorOf(() =>
@@ -171,6 +171,38 @@ describe('clientConfig', () => {
       expect(error?.message).toContain(mechanism);
     },
   );
+
+  it('maps MONGODB-AWS explicit keys to a credential provider, never to auth or the URI', async () => {
+    const profile = draft({
+      auth: { mechanism: 'MONGODB-AWS', username: 'AKIAFICTITIOUS', secretMode: 'saved' },
+    });
+    const { uri, options } = clientConfig(profile, {
+      awsSecretAccessKey: 'fictitious-secret-key',
+      awsSessionToken: 'fictitious-session-token',
+    });
+    expect(uri).toBe(profile.connectionString);
+    expect(options.auth).toBeUndefined();
+    expect(options.authMechanism).toBe('MONGODB-AWS');
+    expect(options.authSource).toBe('$external');
+    expect(await options.authMechanismProperties?.AWS_CREDENTIAL_PROVIDER?.()).toEqual({
+      accessKeyId: 'AKIAFICTITIOUS',
+      secretAccessKey: 'fictitious-secret-key',
+      sessionToken: 'fictitious-session-token',
+    });
+    // The driver accepts the options as they are.
+    new MongoClient(uri, options);
+  });
+
+  it('maps MONGODB-AWS without an access key ID to the default credential chain', () => {
+    const { uri, options } = clientConfig(
+      draft({ auth: { mechanism: 'MONGODB-AWS', secretMode: 'none' } }),
+      { password: PASSWORD },
+    );
+    expect(options.auth).toBeUndefined();
+    expect(options.authMechanism).toBe('MONGODB-AWS');
+    expect(options.authMechanismProperties).toBeUndefined();
+    new MongoClient(uri, options);
+  });
 
   it('answers UNSUPPORTED for SSH tunnels, before looking at auth', () => {
     const error = errorOf(() =>

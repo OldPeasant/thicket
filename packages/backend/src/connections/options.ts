@@ -4,6 +4,7 @@ import type { ProfileDraft } from '@thicket/contract';
 import { parseConnectionString } from '@thicket/core';
 import type { MongoClientOptions, W } from 'mongodb';
 
+import { awsAuthOptions } from '../auth/aws';
 import { RpcError } from '../server/rpc';
 
 /** Secrets a connect may use, by `SecretKind` (from `secrets.get` or the request). */
@@ -18,8 +19,14 @@ export interface ClientConfig {
 /** `appName` when the profile sets none, so server logs show who connected. */
 export const DEFAULT_APP_NAME = 'Thicket';
 
-/** Mechanisms this build connects with; the others belong to later tasks (LDAP, OIDC, AWS, Kerberos). */
-const SUPPORTED_MECHANISMS = new Set(['NONE', 'SCRAM-SHA-1', 'SCRAM-SHA-256', 'MONGODB-X509']);
+/** Mechanisms this build connects with; the others belong to later tasks (LDAP, OIDC, Kerberos). */
+const SUPPORTED_MECHANISMS = new Set([
+  'NONE',
+  'SCRAM-SHA-1',
+  'SCRAM-SHA-256',
+  'MONGODB-X509',
+  'MONGODB-AWS',
+]);
 
 /**
  * Builds the driver configuration of a profile. The connection string stays as saved (hosts,
@@ -40,7 +47,9 @@ export function clientConfig(profile: ProfileDraft, secrets: ConnectSecrets): Cl
       `Authentication mechanism ${auth.mechanism} is not supported by this build yet`,
     );
   }
-  if (auth?.mechanism !== 'NONE' && auth?.mechanism !== 'MONGODB-X509') {
+  if (auth?.mechanism === 'MONGODB-AWS') {
+    Object.assign(options, awsAuthOptions(auth, secrets, uriUsername(profile.connectionString)));
+  } else if (auth?.mechanism !== 'NONE' && auth?.mechanism !== 'MONGODB-X509') {
     const username = auth?.username ?? uriUsername(profile.connectionString);
     const needsPassword = auth !== undefined && auth.secretMode !== 'none';
     const password = auth?.secretMode === 'none' ? undefined : secrets['password'];

@@ -49,7 +49,8 @@ const AUTH_SERVER_CODES = new Set([18, 334]);
  */
 const USER_NOT_FOUND = 11;
 
-const AUTH_NAMES = new Set(['MongoMissingCredentialsError']);
+/** `MongoAWSError`: the AWS credential chain found no credentials (or failed to load them). */
+const AUTH_NAMES = new Set(['MongoMissingCredentialsError', 'MongoAWSError']);
 const TIMEOUT_NAMES = new Set([
   'MongoServerSelectionError',
   'MongoNetworkTimeoutError',
