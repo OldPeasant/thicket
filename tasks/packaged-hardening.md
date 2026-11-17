@@ -1,10 +1,11 @@
 ---
 title: Harden the packaged app: Electron fuses (RunAsNode, NODE_OPTIONS, asar-only), ignore THICKET_DEV_SERVER/THICKET_RENDERER_DIR when packaged
-status: todo
-owner:
+status: in_progress
+owner: dell26/agent-3
 deps: [packaging]
 touches: [apps/desktop/electron-builder.yml,apps/desktop/src/main]
 prio: 3
+lease_until: 2026-11-17T05:20:22Z
 ---
 ## Goal
 From the packaging review (reviews/packaging/review.md, CR-3): the packaged app keeps Electron's
