@@ -1,10 +1,11 @@
 ---
 title: M3: CSV import/export and BSON dump
-status: todo
-owner:
+status: in_progress
+owner: dell26/agent-2
 deps: [io-basic-ui]
 touches: [packages/backend/src/io/csv,packages/backend/src/io/bson,packages/renderer/src/app/io]
 prio: 3
+lease_until: 2026-11-17T05:50:44Z
 ---
 ## Goal
 CSV export with field selection/flattening; CSV import with field mapping and a BSON type per column; export and import a collection as mongodump-compatible `.bson` (+ metadata JSON).
