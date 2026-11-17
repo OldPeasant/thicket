@@ -18,6 +18,7 @@ The complete SPEC demo script as one e2e suite (steps 2–11, fixtures instead o
 - [x] Screenshots of every step in Business light and Tron dark committed under reviews/final-demo/
   - verified (2026-11-17 05:48+0100 by dell26/agent-1): same run wrote test-results/demo/{business-light,tron-dark}/step-01..step-11 (22 PNGs per theme); copied to reviews/final-demo/{business-light,tron-dark}/ and committed in a751b3d; spot-checked step-02 (password masked), step-09 IXSCAN (tron dark), step-11 shell count 40000 (business light)
   - verified (2026-11-17 05:58+0100 by dell26/agent-1): same run wrote test-results/demo/{business-light,tron-dark}/step-01..step-11 (22 PNGs per theme), copied to reviews/final-demo/{business-light,tron-dark}/ and committed (287f9b8); checked step-02 password masked, tron-dark step-02-production shows checked Production box, step-09 IXSCAN, step-11 count 40000
+  - verified (2026-11-17 06:03+0100 by dell26/agent-1): same run wrote 22 PNGs per theme (step-01..step-11) to test-results/demo/{business-light,tron-dark}; copied to reviews/final-demo/{business-light,tron-dark}/ and committed; checked password masked (step-02), tron-dark step-02-production shows checked Production, step-09 IXSCAN, step-11 count 40000
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
