@@ -9,9 +9,11 @@ import {
   signal,
   untracked,
 } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
 import {
   READ_PREFERENCES,
+  type FilePurpose,
   type Profile,
   type ProfileDraft,
   type ResultOf,
@@ -35,10 +37,18 @@ import {
   folderNames,
   newEditorState,
   profileDraftFromState,
+  PROXY_DEFAULT_PORT,
+  SSH_DEFAULT_PORT,
+  formatTagSet,
+  parseTagSet,
+  parseW,
+  usedSecretKinds,
   usesPassword,
   type EditorState,
+  type ExtraSecretKind,
   type ProfileMechanism,
   type SecretMode,
+  type SshMethod,
 } from './connection-form.model';
 
 type EditorTab = 'form' | 'uri';
@@ -67,6 +77,20 @@ const MECHANISM_LABELS: Readonly<Record<ProfileMechanism, string>> = {
   GSSAPI: 'Kerberos (GSSAPI)',
 };
 
+/** What each extra secret is called in messages. */
+const SECRET_LABELS: Readonly<Record<ExtraSecretKind, string>> = {
+  sshPassword: 'SSH password',
+  sshKeyPassphrase: 'SSH key passphrase',
+  tlsKeyPassphrase: 'client key passphrase',
+  proxyPassword: 'proxy password',
+};
+
+const SSH_METHOD_LABELS: Readonly<Record<SshMethod, string>> = {
+  password: 'Password',
+  privateKey: 'Private key',
+  agent: 'SSH agent',
+};
+
 const READ_PREFERENCE_LABELS: Readonly<Record<ReadPreferenceMode, string>> = {
   primary: 'Primary',
   primaryPreferred: 'Primary preferred',
@@ -84,7 +108,7 @@ const READ_PREFERENCE_LABELS: Readonly<Record<ReadPreferenceMode, string>> = {
 @Component({
   selector: 'app-connection-editor',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink],
+  imports: [NgTemplateOutlet, RouterLink],
   templateUrl: './connection-editor.html',
   styleUrl: './connection-editor.css',
 })
@@ -102,6 +126,11 @@ export class ConnectionEditor {
   protected readonly readPreferences = READ_PREFERENCES;
   protected readonly readPreferenceLabels = READ_PREFERENCE_LABELS;
   protected readonly mechanismLabels = MECHANISM_LABELS;
+  protected readonly sshMethods: readonly SshMethod[] = ['password', 'privateKey', 'agent'];
+  protected readonly sshMethodLabels = SSH_METHOD_LABELS;
+  protected readonly sshDefaultPort = SSH_DEFAULT_PORT;
+  protected readonly proxyDefaultPort = PROXY_DEFAULT_PORT;
+  protected readonly formatTagSet = formatTagSet;
 
   protected readonly load = signal<LoadState>({ status: 'loading' });
   protected readonly state = signal<EditorState>(newEditorState('ask'));
@@ -112,6 +141,8 @@ export class ConnectionEditor {
   protected readonly uriInput = signal('');
   protected readonly uriError = signal<string | null>(null);
   protected readonly showPassword = signal(false);
+  /** "Copied" feedback of the copy button (cleared by the next edit). */
+  protected readonly copied = signal<'idle' | 'ok' | 'failed'>('idle');
   protected readonly test = signal<TestState>({ status: 'idle' });
   protected readonly saving = signal(false);
   protected readonly saveError = signal<string | null>(null);
@@ -144,6 +175,20 @@ export class ConnectionEditor {
     () => this.storedSecrets().includes('password') && this.state().secretMode === 'saved',
   );
   protected readonly canSave = computed(() => this.storage()?.level !== 'unavailable');
+  /** Extra secrets the current settings use (their fields are shown, and stored on save). */
+  protected readonly secretKinds = computed(() => usedSecretKinds(this.state()));
+  /** The SSH tunnel or proxy is on: drawn as the route the connection takes. */
+  protected readonly route = computed(() => {
+    const s = this.state();
+    const hosts = s.model.hosts.map((h) => h.host || '…');
+    const target = s.model.scheme === 'mongodb+srv' ? `${hosts[0] ?? '…'} (SRV)` : hosts.join(', ');
+    if (s.ssh.enabled) {
+      return { via: `${s.ssh.username || '…'}@${s.ssh.host || '…'}`, kind: 'SSH', target };
+    }
+    const proxy = s.model.proxy.host?.trim();
+    if (proxy) return { via: proxy, kind: 'SOCKS5', target };
+    return null;
+  });
 
   constructor() {
     this.tree.start();
@@ -214,6 +259,7 @@ export class ConnectionEditor {
   private update(change: (state: EditorState) => EditorState): void {
     this.state.update(change);
     this.savedNotice.set(false);
+    this.copied.set('idle');
     if (this.test().status !== 'running') this.test.set({ status: 'idle' });
   }
 
@@ -384,6 +430,169 @@ export class ConnectionEditor {
     }
   }
 
+  protected async chooseFile(purpose: FilePurpose, apply: (path: string) => void): Promise<void> {
+    try {
+      const { path } = await this.api.request('profiles.chooseFile', { purpose });
+      if (path !== null) apply(path);
+    } catch (error) {
+      this.saveError.set(describeError(error));
+    }
+  }
+
+  protected setCertificateFile(path: string): void {
+    this.updateModel((m) => {
+      if (path.trim() === '') delete m.tls.certificateKeyFile;
+      else m.tls.certificateKeyFile = path;
+    });
+  }
+
+  protected setTlsKeyFile(path: string): void {
+    this.update((s) => {
+      const next = { ...s };
+      if (path.trim() === '') delete next.tlsKeyFile;
+      else next.tlsKeyFile = path;
+      return next;
+    });
+  }
+
+  protected setSecret(kind: ExtraSecretKind, value: string): void {
+    this.update((s) => ({ ...s, secrets: { ...s.secrets, [kind]: value } }));
+  }
+
+  protected secretSaved(kind: ExtraSecretKind): boolean {
+    return this.storedSecrets().includes(kind);
+  }
+
+  protected secretValue(kind: ExtraSecretKind): string {
+    return this.state().secrets[kind] ?? '';
+  }
+
+  protected chooseCertificateFile(): Promise<void> {
+    return this.chooseFile('tlsCertificateKeyFile', (path) => this.setCertificateFile(path));
+  }
+
+  protected chooseTlsKeyFile(): Promise<void> {
+    return this.chooseFile('tlsCertificateKeyFile', (path) => this.setTlsKeyFile(path));
+  }
+
+  protected chooseSshKeyFile(): Promise<void> {
+    return this.chooseFile('sshPrivateKeyFile', (path) => this.setSshKeyFile(path));
+  }
+
+  // ---- SSH ----
+
+  protected setSshEnabled(on: boolean): void {
+    this.update((s) => ({ ...s, ssh: { ...s.ssh, enabled: on } }));
+  }
+
+  protected setSshText(key: 'host' | 'username', text: string): void {
+    this.update((s) => ({ ...s, ssh: { ...s.ssh, [key]: text.trim() } }));
+  }
+
+  protected setSshPort(text: string): void {
+    this.update((s) => {
+      const ssh = { ...s.ssh };
+      if (text.trim() === '') delete ssh.port;
+      else ssh.port = Number(text.trim());
+      return { ...s, ssh };
+    });
+  }
+
+  protected setSshMethod(method: SshMethod): void {
+    this.update((s) => ({ ...s, ssh: { ...s.ssh, method } }));
+  }
+
+  protected setSshKeyFile(path: string): void {
+    this.update((s) => {
+      const ssh = { ...s.ssh };
+      if (path.trim() === '') delete ssh.privateKeyFile;
+      else ssh.privateKeyFile = path;
+      return { ...s, ssh };
+    });
+  }
+
+  // ---- proxy ----
+
+  protected setProxyText(key: 'host' | 'username', text: string): void {
+    this.updateModel((m) => {
+      if (text.trim() === '') Reflect.deleteProperty(m.proxy, key);
+      else m.proxy[key] = text.trim();
+    });
+  }
+
+  protected setProxyPort(text: string): void {
+    this.updateModel((m) => {
+      if (text.trim() === '') delete m.proxy.port;
+      else m.proxy.port = Number(text.trim());
+    });
+  }
+
+  // ---- read preference tags and write concern ----
+
+  protected addTagSet(): void {
+    this.updateModel((m) => {
+      m.readPreference.tags = [...(m.readPreference.tags ?? []), {}];
+    });
+  }
+
+  protected setTagSet(index: number, text: string): void {
+    this.updateModel((m) => {
+      const tags = [...(m.readPreference.tags ?? [])];
+      if (index < tags.length) tags[index] = parseTagSet(text);
+      m.readPreference.tags = tags;
+    });
+  }
+
+  protected removeTagSet(index: number): void {
+    this.updateModel((m) => {
+      const tags = (m.readPreference.tags ?? []).filter((_, i) => i !== index);
+      if (tags.length === 0) delete m.readPreference.tags;
+      else m.readPreference.tags = tags;
+    });
+  }
+
+  protected setW(text: string): void {
+    this.updateModel((m) => {
+      const w = parseW(text);
+      if (w === undefined) delete m.writeConcern.w;
+      else m.writeConcern.w = w;
+    });
+  }
+
+  protected setJournal(value: string): void {
+    this.updateModel((m) => {
+      if (value === '') delete m.writeConcern.journal;
+      else m.writeConcern.journal = value === 'true';
+    });
+  }
+
+  protected setWtimeout(text: string): void {
+    this.updateModel((m) => {
+      const n = Number(text.trim());
+      if (text.trim() !== '' && Number.isInteger(n) && n >= 0) m.writeConcern.wtimeoutMS = n;
+      else delete m.writeConcern.wtimeoutMS;
+    });
+  }
+
+  protected journalValue(): string {
+    const journal = this.state().model.writeConcern.journal;
+    return journal === undefined ? '' : String(journal);
+  }
+
+  // ---- copy ----
+
+  /** Copies the connection string as shown: the password stays masked. */
+  protected async copyUri(): Promise<void> {
+    const uri = this.uri();
+    if (uri.error !== undefined) return;
+    try {
+      await navigator.clipboard.writeText(uri.text);
+      this.copied.set('ok');
+    } catch {
+      this.copied.set('failed');
+    }
+  }
+
   protected setReadPreference(mode: string): void {
     this.updateModel((m) => {
       if (mode === '') delete m.readPreference.mode;
@@ -526,8 +735,12 @@ export class ConnectionEditor {
       const fallback = this.storage()?.defaultSecretMode ?? 'ask';
       const adopted: EditorState = { ...editorStateFromProfile(profile, fallback), password: '' };
       if (state.droppedSecrets) adopted.droppedSecrets = state.droppedSecrets;
-      // Keeps the typed password until it is stored.
-      const pending: EditorState = { ...adopted, password: state.password };
+      // Keeps the typed password and other secrets until they are stored.
+      const pending: EditorState = {
+        ...adopted,
+        password: state.password,
+        secrets: state.secrets,
+      };
       if (current()) {
         this.state.set(pending);
         this.loadedDraft = this.draftKey(adopted);
@@ -558,6 +771,12 @@ export class ConnectionEditor {
         this.storedSecrets.update((kinds) => kinds.filter((k) => k !== 'password'));
       }
       if (!current()) return;
+      const failed = await this.storeSecrets(profile.id, state, current);
+      if (!current()) return;
+      if (failed.length > 0) {
+        this.saveError.set(`Saved, but ${failed.join('; ')}`);
+        return;
+      }
       // Edits made while the password was being stored stay, and are not reported as saved.
       const unchanged = this.state() === pending;
       if (unchanged) this.state.set(adopted);
@@ -573,6 +792,32 @@ export class ConnectionEditor {
     } finally {
       this.saving.set(false);
     }
+  }
+
+  /**
+   * Stores the extra secrets typed for the current settings. Returns what failed, as text.
+   * Already stored secrets that the settings no longer use are left alone (the backend ignores
+   * them); a typed field is cleared once its secret is stored.
+   */
+  private async storeSecrets(
+    profileId: string,
+    state: EditorState,
+    current: () => boolean,
+  ): Promise<string[]> {
+    const failed: string[] = [];
+    for (const kind of usedSecretKinds(state)) {
+      const value = state.secrets[kind];
+      if (value === undefined || value === '') continue;
+      try {
+        await this.api.request('profiles.setSecret', { profileId, kind, value });
+      } catch (error) {
+        failed.push(`the ${SECRET_LABELS[kind]} could not be stored: ${describeError(error)}`);
+        continue;
+      }
+      if (!current()) return failed;
+      this.storedSecrets.update((kinds) => (kinds.includes(kind) ? kinds : [...kinds, kind]));
+    }
+    return failed;
   }
 
   protected hostLabel(index: number): string {

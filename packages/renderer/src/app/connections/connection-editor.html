@@ -14,6 +14,32 @@
     </div>
   }
   @default {
+    <ng-template #secretField let-kind="kind" let-label="label">
+      <label class="field grow">
+        <span class="label">{{ label }}</span>
+        <input
+          type="password"
+          autocomplete="new-password"
+          spellcheck="false"
+          [attr.data-testid]="'field-secret-' + kind"
+          [placeholder]="secretSaved(kind) ? 'Saved; type to replace it' : 'none'"
+          [value]="secretValue(kind)"
+          [disabled]="!canSave()"
+          (input)="setSecret(kind, value($event))"
+        />
+      </label>
+    </ng-template>
+    <ng-template #copyButton>
+      <button
+        type="button"
+        class="btn copy"
+        data-testid="copy-uri"
+        [disabled]="uri().error !== undefined"
+        (click)="copyUri()"
+      >
+        {{ copied() === 'ok' ? 'Copied' : 'Copy' }}
+      </button>
+    </ng-template>
     <form
       class="editor"
       novalidate
@@ -102,7 +128,7 @@
         @if (state().droppedSecrets; as dropped) {
           <p class="warning" role="note" data-testid="dropped-secrets">
             Not stored: {{ dropped.join(', ') }} from the connection string. Thicket keeps secrets
-            only in the OS keychain, and this editor does not save these yet.
+            only in the OS keychain: enter them in the proxy password or key passphrase field.
           </p>
         }
         @if (saveError(); as error) {
@@ -152,13 +178,25 @@
 
       @if (tab() === 'form') {
         <div class="panel" role="tabpanel" id="conn-panel-form" aria-labelledby="conn-tab-form">
-          <p
-            class="uri-strip"
-            data-testid="uri-preview"
-            [class.invalid]="uri().error !== undefined"
-          >
-            {{ uri().error ?? uri().text }}
-          </p>
+          <div class="uri-line">
+            <p
+              class="uri-strip"
+              data-testid="uri-preview"
+              [class.invalid]="uri().error !== undefined"
+            >
+              {{ uri().error ?? uri().text }}
+            </p>
+            <ng-container [ngTemplateOutlet]="copyButton" />
+          </div>
+          @if (copied() !== 'idle') {
+            <p class="hint copy-state" role="status" data-testid="copy-state">
+              {{
+                copied() === 'ok'
+                  ? 'Copied, with the password masked.'
+                  : 'The connection string could not be copied.'
+              }}
+            </p>
+          }
 
           <section class="group" aria-labelledby="g-server">
             <h2 id="g-server" class="group-title">Server</h2>
@@ -261,6 +299,183 @@
             </div>
           </section>
 
+          <section class="group" aria-labelledby="g-tunnel">
+            <h2 id="g-tunnel" class="group-title">Tunnel and proxy</h2>
+            <div class="fields">
+              @if (route(); as r) {
+                <p class="route" data-testid="route">
+                  <span class="hop">Thicket</span>
+                  <span class="leg" aria-hidden="true"></span>
+                  <span class="hop via"
+                    ><span class="kind">{{ r.kind }}</span> {{ r.via }}</span
+                  >
+                  <span class="leg" aria-hidden="true"></span>
+                  <span class="hop">{{ r.target }}</span>
+                </p>
+              }
+              <label class="check">
+                <input
+                  type="checkbox"
+                  data-testid="field-ssh"
+                  [checked]="state().ssh.enabled"
+                  (change)="setSshEnabled(checked($event))"
+                />
+                Connect through an SSH tunnel
+              </label>
+              @if (state().ssh.enabled) {
+                <div class="sub" data-testid="ssh-fields">
+                  <div class="row">
+                    <label class="field grow">
+                      <span class="label">SSH server</span>
+                      <input
+                        data-testid="field-ssh-host"
+                        autocomplete="off"
+                        spellcheck="false"
+                        placeholder="bastion.example.com"
+                        [value]="state().ssh.host"
+                        [attr.aria-invalid]="attempted() && state().ssh.host.trim() === ''"
+                        (change)="setSshText('host', value($event))"
+                      />
+                    </label>
+                    <label class="field port">
+                      <span class="label">Port</span>
+                      <input
+                        data-testid="field-ssh-port"
+                        inputmode="numeric"
+                        autocomplete="off"
+                        [placeholder]="sshDefaultPort"
+                        [value]="portText(state().ssh.port)"
+                        (change)="setSshPort(value($event))"
+                      />
+                    </label>
+                    <label class="field">
+                      <span class="label">SSH user</span>
+                      <input
+                        data-testid="field-ssh-username"
+                        autocomplete="off"
+                        spellcheck="false"
+                        [value]="state().ssh.username"
+                        [attr.aria-invalid]="attempted() && state().ssh.username.trim() === ''"
+                        (change)="setSshText('username', value($event))"
+                      />
+                    </label>
+                  </div>
+                  <fieldset class="choice">
+                    <legend>Sign in with</legend>
+                    @for (m of sshMethods; track m) {
+                      <label>
+                        <input
+                          type="radio"
+                          name="sshMethod"
+                          [attr.data-testid]="'ssh-method-' + m"
+                          [checked]="state().ssh.method === m"
+                          (change)="setSshMethod(m)"
+                        />
+                        {{ sshMethodLabels[m] }}
+                      </label>
+                    }
+                  </fieldset>
+                  @switch (state().ssh.method) {
+                    @case ('password') {
+                      <ng-container
+                        [ngTemplateOutlet]="secretField"
+                        [ngTemplateOutletContext]="{ kind: 'sshPassword', label: 'SSH password' }"
+                      />
+                    }
+                    @case ('privateKey') {
+                      <div class="file-row">
+                        <label class="field grow">
+                          <span class="label">Private key file</span>
+                          <input
+                            data-testid="field-ssh-key-file"
+                            autocomplete="off"
+                            spellcheck="false"
+                            placeholder="~/.ssh/id_ed25519"
+                            [value]="state().ssh.privateKeyFile ?? ''"
+                            [attr.aria-invalid]="attempted() && !state().ssh.privateKeyFile"
+                            (change)="setSshKeyFile(value($event))"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          class="btn"
+                          data-testid="choose-ssh-key"
+                          (click)="chooseSshKeyFile()"
+                        >
+                          Choose…
+                        </button>
+                      </div>
+                      <ng-container
+                        [ngTemplateOutlet]="secretField"
+                        [ngTemplateOutletContext]="{
+                          kind: 'sshKeyPassphrase',
+                          label: 'Key passphrase (if the key is encrypted)',
+                        }"
+                      />
+                    }
+                    @case ('agent') {
+                      <p class="hint">
+                        Thicket asks the running SSH agent (SSH_AUTH_SOCK, or Pageant on Windows)
+                        for the key.
+                      </p>
+                    }
+                  }
+                  <p class="hint" data-testid="ssh-hint">
+                    The first time, Thicket shows the server's host key fingerprint and asks whether
+                    to trust it. Test connection uses the saved SSH password or passphrase, so save
+                    the connection before testing it.
+                  </p>
+                </div>
+              }
+
+              <div class="row">
+                <label class="field grow">
+                  <span class="label">SOCKS5 proxy</span>
+                  <input
+                    data-testid="field-proxy-host"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="none"
+                    [value]="state().model.proxy.host ?? ''"
+                    (change)="setProxyText('host', value($event))"
+                  />
+                </label>
+                <label class="field port">
+                  <span class="label">Port</span>
+                  <input
+                    data-testid="field-proxy-port"
+                    inputmode="numeric"
+                    autocomplete="off"
+                    [placeholder]="proxyDefaultPort"
+                    [value]="portText(state().model.proxy.port)"
+                    (change)="setProxyPort(value($event))"
+                  />
+                </label>
+              </div>
+              @if (state().model.proxy.host || state().model.proxy.username) {
+                <div class="row">
+                  <label class="field">
+                    <span class="label">Proxy user</span>
+                    <input
+                      data-testid="field-proxy-username"
+                      autocomplete="off"
+                      spellcheck="false"
+                      placeholder="none"
+                      [value]="state().model.proxy.username ?? ''"
+                      (change)="setProxyText('username', value($event))"
+                    />
+                  </label>
+                  @if (secretKinds().includes('proxyPassword')) {
+                    <ng-container
+                      [ngTemplateOutlet]="secretField"
+                      [ngTemplateOutletContext]="{ kind: 'proxyPassword', label: 'Proxy password' }"
+                    />
+                  }
+                </div>
+              }
+            </div>
+          </section>
+
           <section class="group" aria-labelledby="g-auth">
             <h2 id="g-auth" class="group-title">Authentication</h2>
             <div class="fields">
@@ -283,24 +498,35 @@
                       autocomplete="off"
                       spellcheck="false"
                       [value]="state().model.username ?? ''"
+                      [placeholder]="
+                        state().mechanism === 'MONGODB-X509' ? 'from the certificate' : ''
+                      "
                       [attr.aria-invalid]="
                         attempted() && needsPassword() && !state().model.username
                       "
                       (input)="setUsername(value($event))"
                     />
                   </label>
-                  <label class="field">
-                    <span class="label">Authentication database</span>
-                    <input
-                      data-testid="field-auth-source"
-                      autocomplete="off"
-                      spellcheck="false"
-                      placeholder="admin"
-                      [value]="state().model.auth.source ?? ''"
-                      (change)="setAuthSource(value($event))"
-                    />
-                  </label>
+                  @if (state().mechanism !== 'MONGODB-X509') {
+                    <label class="field">
+                      <span class="label">Authentication database</span>
+                      <input
+                        data-testid="field-auth-source"
+                        autocomplete="off"
+                        spellcheck="false"
+                        placeholder="admin"
+                        [value]="state().model.auth.source ?? ''"
+                        (change)="setAuthSource(value($event))"
+                      />
+                    </label>
+                  }
                 </div>
+                @if (state().mechanism === 'MONGODB-X509') {
+                  <p class="hint" data-testid="x509-hint">
+                    The server takes the user from the client certificate (choose it under TLS).
+                    Enter a user name only to check it against the certificate's subject.
+                  </p>
+                }
               }
               @if (needsPassword()) {
                 <div class="password-row">
@@ -409,6 +635,64 @@
                     Choose…
                   </button>
                 </div>
+                <div class="file-row">
+                  <label class="field grow">
+                    <span class="label">Client certificate (PEM, with or without its key)</span>
+                    <input
+                      data-testid="field-cert-file"
+                      autocomplete="off"
+                      spellcheck="false"
+                      placeholder="none"
+                      [value]="state().model.tls.certificateKeyFile ?? ''"
+                      [attr.aria-invalid]="
+                        attempted() &&
+                        !state().model.tls.certificateKeyFile &&
+                        (state().mechanism === 'MONGODB-X509' || !!state().tlsKeyFile)
+                      "
+                      (change)="setCertificateFile(value($event))"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    class="btn"
+                    data-testid="choose-cert"
+                    (click)="chooseCertificateFile()"
+                  >
+                    Choose…
+                  </button>
+                </div>
+                @if (state().model.tls.certificateKeyFile || state().tlsKeyFile) {
+                  <div class="file-row">
+                    <label class="field grow">
+                      <span class="label">Private key file (if not in the certificate file)</span>
+                      <input
+                        data-testid="field-key-file"
+                        autocomplete="off"
+                        spellcheck="false"
+                        placeholder="in the certificate file"
+                        [value]="state().tlsKeyFile ?? ''"
+                        (change)="setTlsKeyFile(value($event))"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      class="btn"
+                      data-testid="choose-key"
+                      (click)="chooseTlsKeyFile()"
+                    >
+                      Choose…
+                    </button>
+                  </div>
+                }
+                @if (secretKinds().includes('tlsKeyPassphrase')) {
+                  <ng-container
+                    [ngTemplateOutlet]="secretField"
+                    [ngTemplateOutletContext]="{
+                      kind: 'tlsKeyPassphrase',
+                      label: 'Key passphrase (if the key is encrypted)',
+                    }"
+                  />
+                }
                 <label class="check">
                   <input
                     type="checkbox"
@@ -475,6 +759,79 @@
                   />
                 </label>
               </div>
+              @if (state().model.readPreference.tags; as tagSets) {
+                <div class="hosts" data-testid="tag-sets">
+                  @for (set of tagSets; track $index; let i = $index) {
+                    <div class="host-row">
+                      <label class="field grow">
+                        <span class="label">{{
+                          i === 0 ? 'Prefer members tagged' : 'Otherwise members tagged'
+                        }}</span>
+                        <input
+                          data-testid="field-tag-set"
+                          autocomplete="off"
+                          spellcheck="false"
+                          placeholder="any member"
+                          [value]="formatTagSet(set)"
+                          (change)="setTagSet(i, value($event))"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        class="icon-btn"
+                        data-testid="remove-tag-set"
+                        [attr.aria-label]="'Remove tag set ' + (i + 1)"
+                        (click)="removeTagSet(i)"
+                      >
+                        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 8h8" /></svg>
+                      </button>
+                    </div>
+                  }
+                  <p class="hint">
+                    Tags as name:value, separated by commas (dc:east, rack:1). Sets are tried in
+                    order; an empty set matches any member.
+                  </p>
+                </div>
+              }
+              <button type="button" class="link" data-testid="add-tag-set" (click)="addTagSet()">
+                Add read preference tags
+              </button>
+              <div class="row">
+                <label class="field">
+                  <span class="label">Write concern (w)</span>
+                  <input
+                    data-testid="field-w"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="server default"
+                    [value]="state().model.writeConcern.w ?? ''"
+                    (change)="setW(value($event))"
+                  />
+                </label>
+                <label class="field">
+                  <span class="label">Journal</span>
+                  <select data-testid="field-journal" (change)="setJournal(value($event))">
+                    <option value="" [selected]="journalValue() === ''">Server default</option>
+                    <option value="true" [selected]="journalValue() === 'true'">
+                      Wait for the journal
+                    </option>
+                    <option value="false" [selected]="journalValue() === 'false'">
+                      Don't wait
+                    </option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span class="label">Write timeout (ms)</span>
+                  <input
+                    data-testid="field-wtimeout"
+                    inputmode="numeric"
+                    autocomplete="off"
+                    placeholder="none"
+                    [value]="state().model.writeConcern.wtimeoutMS ?? ''"
+                    (change)="setWtimeout(value($event))"
+                  />
+                </label>
+              </div>
               <div class="row">
                 <label class="field">
                   <span class="label">Connect timeout (ms)</span>
@@ -521,6 +878,18 @@
           @if (uriError(); as error) {
             <p class="field-problem" role="alert" data-testid="uri-error">{{ error }}</p>
           }
+          <div class="uri-copy">
+            <ng-container [ngTemplateOutlet]="copyButton" />
+            @if (copied() !== 'idle') {
+              <span class="hint" role="status" data-testid="copy-state">
+                {{
+                  copied() === 'ok'
+                    ? 'Copied, with the password masked.'
+                    : 'The connection string could not be copied.'
+                }}
+              </span>
+            }
+          </div>
           <p id="uri-help" class="hint">
             Paste or edit a mongodb:// or mongodb+srv:// string; the form follows it. A password you
             paste moves to the password field and shows here as ****.
