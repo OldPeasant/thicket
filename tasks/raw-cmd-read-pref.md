@@ -27,3 +27,4 @@ pinning the server), not whatever the read preference selects next.
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md ("Connections").
 - ASSUMPTION (2026-11-17 05:35+0100 by felix/agent-1): Cancelling a command still in flight finds it with currentOp/killOp sent with the same read preference; with several eligible secondaries that may reach a different member (the driver has no public API to target one server for a raw command). Open cursors are always killed on their own server (driver cursor).
+- ASSUMPTION (2026-11-17 05:35+0100 by felix/agent-1): Schema/index/user commands (create, drop, rename, collMod, createIndexes, usersInfo) stay on the primary without the profile write concern; only document writes (docs.*, io.import) carry it. Reads tied to a write (previewMany, expectedCount check, conflict detail) read from the primary.
