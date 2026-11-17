@@ -503,6 +503,108 @@ describe('Editing documents in a collection tab', () => {
       expect(text('conflict-server', changed[0])).toContain('total: 123');
     });
 
+    describe('when the conflict being merged goes away or changes (CR-7)', () => {
+      /** Opens the merge editor and types `text` into it. */
+      const startMerge = async (text: string) => {
+        await click('conflict-merge');
+        const area = get<HTMLTextAreaElement>('conflict-merge-text');
+        area.value = text;
+        area.dispatchEvent(new Event('input'));
+        await settle();
+      };
+      /** The conflict view offers the three resolutions, not the merge editor. */
+      const expectResolutions = () => {
+        expect(q('conflict-merge-text')).toBeNull();
+        expect(q('conflict-merge-cancel')).toBeNull();
+        expect(q('conflict-merge-save')).toBeNull();
+        expect(q('conflict-keep-server')).not.toBeNull();
+        expect(q('conflict-overwrite')).not.toBeNull();
+        expect(q('conflict-merge')).not.toBeNull();
+      };
+      /** Edits total of order 1 to `total` and saves into a conflict with server total 99. */
+      const conflictAgain = async (total: string) => {
+        fake.fail('docs.update', {
+          code: 'CONFLICT',
+          message: 'x',
+          detail: { current: orderText(1, 99, 1) },
+        });
+        await typeInto(0, 'total', total);
+        await click('edit-save');
+        fake.respond('docs.update', { modified: true });
+      };
+
+      it('closes on a revert from the document header; a later conflict starts afresh', async () => {
+        await conflict();
+        await startMerge('{ _id: 1, total: 15, qty: 77 }');
+        await click('doc-revert', docItem(0));
+        expect(q('conflict-view')).toBeNull();
+
+        await conflictAgain('16');
+        expect(q('conflict-view')).not.toBeNull();
+        expectResolutions();
+        await click('conflict-merge');
+        const area = get<HTMLTextAreaElement>('conflict-merge-text');
+        expect(area.value).toContain('total: 16');
+        expect(area.value).not.toContain('qty: 77');
+        expect(q('conflict-merge-error')).toBeNull();
+      });
+
+      it('closes on Revert all from the edit bar', async () => {
+        await conflict();
+        await startMerge('{ _id: 1, total: 15, qty: 77 }');
+        await click('edit-revert');
+        expect(q('conflict-view')).toBeNull();
+
+        await conflictAgain('17');
+        expectResolutions();
+        await click('conflict-merge');
+        expect(get<HTMLTextAreaElement>('conflict-merge-text').value).toContain('total: 17');
+      });
+
+      it('closes when a save from the edit bar succeeds', async () => {
+        await conflict();
+        await startMerge('{ _id: 1, total: 15, qty: 77 }');
+        await click('edit-save');
+        expect(updates()).toHaveLength(2);
+        expect(q('conflict-view')).toBeNull();
+        expect(q('edit-count')).toBeNull();
+
+        await conflictAgain('18');
+        expectResolutions();
+        await click('conflict-merge');
+        const area = get<HTMLTextAreaElement>('conflict-merge-text');
+        expect(area.value).toContain('total: 18');
+        expect(area.value).not.toContain('qty: 77');
+      });
+
+      it('closes when Save merged finds the document deleted, offering the deleted actions', async () => {
+        await conflict();
+        await startMerge('{ _id: 1, total: 15, qty: 77 }');
+        fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: null } });
+        await click('conflict-merge-save');
+        expect(updates()).toHaveLength(2);
+        expect(text('conflict-title')).toBe('Deleted on the server since you loaded it');
+        expect(q('conflict-merge-text')).toBeNull();
+        expect(q('conflict-merge-save')).toBeNull();
+        expect(q('conflict-merge-cancel')).toBeNull();
+        expect(text('conflict-keep-server')).toBe('Keep it deleted');
+        expect(q('conflict-merge')).toBeNull();
+      });
+
+      it('closes when Save merged finds a server version it cannot read', async () => {
+        await conflict();
+        await startMerge('{ _id: 1, total: 15, qty: 77 }');
+        fake.fail('docs.get', { code: 'SERVER_ERROR', message: 'connection reset' });
+        fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail: { current: 42 } });
+        await click('conflict-merge-save');
+        expect(updates()).toHaveLength(2);
+        expect(text('conflict-title')).toMatch(/could not be read/);
+        expect(q('conflict-merge-text')).toBeNull();
+        expect(q('conflict-merge-save')).toBeNull();
+        expect(text('conflict-keep-server')).toBe('Keep server version');
+      });
+    });
+
     it('lists one conflict view per conflicting document', async () => {
       fake.fail('docs.update', {
         code: 'CONFLICT',

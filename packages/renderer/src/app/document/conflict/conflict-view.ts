@@ -1,4 +1,13 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  input,
+  signal,
+  untracked,
+} from '@angular/core';
 import { type BsonDocument, parseEJson } from '@thicket/core/bson';
 import { parseShellSyntaxDocument, printShellSyntax } from '@thicket/core/shellsyntax';
 
@@ -109,7 +118,7 @@ function lines(doc: BsonDocument | null): string[] {
           </div>
         }
 
-        @if (mergeKey() === item.key) {
+        @if (merging(item)) {
           <div class="merge">
             <label class="merge-label" [for]="uid() + '-merge-' + $index">
               Merged document (shell syntax): it replaces the server version
@@ -133,7 +142,7 @@ function lines(doc: BsonDocument | null): string[] {
         }
 
         <div class="actions">
-          @if (mergeKey() === item.key) {
+          @if (merging(item)) {
             <button
               type="button"
               class="btn"
@@ -351,6 +360,23 @@ export class ConflictView {
     [...this.actions.conflicts().values()].map((c) => this.item(c)),
   );
 
+  constructor() {
+    // The merge editor belongs to one "changed" conflict: it closes when that conflict goes away
+    // (revert, a save from the edit bar) or its server version is no longer a document (a merged
+    // save found it deleted), so a later conflict on the same document starts afresh.
+    effect(() => {
+      const key = this.mergeKey();
+      if (key === null) return;
+      const conflict = this.actions.conflicts().get(key);
+      if (conflict === undefined || !isChanged(conflict)) untracked(() => this.closeMerge());
+    });
+  }
+
+  /** The merge editor is open for this conflict (only while its server version is a document). */
+  protected merging(item: ConflictItem): boolean {
+    return this.mergeKey() === item.key && item.state === 'changed';
+  }
+
   protected countText(item: ConflictItem): string {
     if (item.state !== 'changed') return '';
     if (item.local === null) return 'No unsaved edits left';
@@ -392,6 +418,7 @@ export class ConflictView {
 
   protected closeMerge(): void {
     this.mergeKey.set(null);
+    this.mergeText.set('');
     this.mergeError.set(null);
   }
 
@@ -437,6 +464,10 @@ export class ConflictView {
       differences: rows.filter((r) => r.kind !== 'same').length,
     };
   }
+}
+
+function isChanged(conflict: SaveConflict): boolean {
+  return conflict.current !== undefined && conflict.current !== null;
 }
 
 function idText(key: string): string {
