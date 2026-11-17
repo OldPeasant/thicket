@@ -1,13 +1,13 @@
 ---
 title: Release: README and user docs
-status: in_progress
+status: done
 owner: dell26/agent-2
 deps: [m1-e2e]
 touches: [README.md,docs/user]
 quality: exempt
 quality_reason: documentation only
 prio: 2
-lease_until: 2026-11-17T04:50:54Z
+lease_until: 
 ---
 ## Goal
 README with features, screenshots (both styles), install per OS including Gatekeeper and SmartScreen instructions for unsigned builds, build-from-source, contributing; trademark note.
@@ -22,3 +22,4 @@ README with features, screenshots (both styles), install per OS including Gateke
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 05:30+0100 by dell26/agent-2): Install was verified with a locally built AppImage (same electron-builder config as release.yml), not one downloaded from a GitHub release (no release published yet); macOS Gatekeeper and Windows SmartScreen steps are written from current OS behavior (macOS 15 removed Control-click Open) and were not run here
 - ASSUMPTION (2026-11-17 05:30+0100 by dell26/agent-2): README feature list describes only done tasks; unfinished ones (schema analysis, CSV/BSON dump, multi-doc edit, query history, currentOp, update notice) are listed as Planned and must move up when they land
+- done by dell26/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 62s on 5d202c050; criteria verified 2/2
