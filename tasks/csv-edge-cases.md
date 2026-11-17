@@ -5,7 +5,7 @@ owner: dell26/agent-2
 deps: [io-advanced]
 touches: [packages/backend/src/io/csv,packages/backend/src/io/export.ts,docs/ARCHITECTURE.md]
 prio: 2
-lease_until: 2026-11-17T06:47:00Z
+lease_until: 2026-11-17T06:52:09Z
 ---
 ## Goal
 Fix the P3 findings deferred from io-advanced (reviews/io-advanced/review.md CR-1..CR-4).
