@@ -1,0 +1,324 @@
+{
+  "host": "e64ac6ac4426",
+  "version": "8.2.12",
+  "process": "mongod",
+  "pid": {
+    "$numberLong": "1"
+  },
+  "uptime": {
+    "$numberInt": "23"
+  },
+  "uptimeMillis": {
+    "$numberLong": "22607"
+  },
+  "localTime": {
+    "$date": {
+      "$numberLong": "1794897900965"
+    }
+  },
+  "asserts": {
+    "regular": {
+      "$numberInt": "0"
+    },
+    "warning": {
+      "$numberInt": "0"
+    },
+    "msg": {
+      "$numberInt": "0"
+    },
+    "user": {
+      "$numberInt": "6"
+    },
+    "tripwire": {
+      "$numberInt": "0"
+    },
+    "rollovers": {
+      "$numberInt": "0"
+    }
+  },
+  "connections": {
+    "current": {
+      "$numberInt": "2"
+    },
+    "available": {
+      "$numberInt": "209713"
+    },
+    "totalCreated": {
+      "$numberInt": "4"
+    },
+    "rejected": {
+      "$numberInt": "0"
+    },
+    "active": {
+      "$numberInt": "2"
+    },
+    "queuedForEstablishment": {
+      "$numberLong": "0"
+    },
+    "establishmentRateLimit": {
+      "rejected": {
+        "$numberLong": "0"
+      },
+      "exempted": {
+        "$numberLong": "0"
+      },
+      "interruptedDueToClientDisconnect": {
+        "$numberLong": "0"
+      }
+    },
+    "threaded": {
+      "$numberInt": "2"
+    },
+    "exhaustIsMaster": {
+      "$numberLong": "0"
+    },
+    "exhaustHello": {
+      "$numberLong": "0"
+    },
+    "awaitingTopologyChanges": {
+      "$numberLong": "1"
+    },
+    "loadBalanced": {
+      "$numberLong": "0"
+    }
+  },
+  "mem": {
+    "bits": {
+      "$numberInt": "64"
+    },
+    "resident": {
+      "$numberInt": "217"
+    },
+    "virtual": {
+      "$numberInt": "3693"
+    },
+    "supported": true,
+    "secureAllocByteCount": {
+      "$numberInt": "0"
+    },
+    "secureAllocBytesInPages": {
+      "$numberInt": "0"
+    }
+  },
+  "network": {
+    "bytesIn": {
+      "$numberLong": "19136"
+    },
+    "bytesOut": {
+      "$numberLong": "128791"
+    },
+    "physicalBytesIn": {
+      "$numberLong": "19136"
+    },
+    "physicalBytesOut": {
+      "$numberLong": "128791"
+    },
+    "egress": {
+      "bytesIn": {
+        "$numberLong": "0"
+      },
+      "bytesOut": {
+        "$numberLong": "0"
+      },
+      "physicalBytesIn": {
+        "$numberLong": "0"
+      },
+      "physicalBytesOut": {
+        "$numberLong": "0"
+      },
+      "numRequests": {
+        "$numberLong": "0"
+      }
+    },
+    "numSlowDNSOperations": {
+      "$numberLong": "0"
+    },
+    "numSlowSSLOperations": {
+      "$numberLong": "0"
+    },
+    "numRequests": {
+      "$numberLong": "102"
+    },
+    "tcpFastOpen": {
+      "kernelSetting": {
+        "$numberLong": "1"
+      },
+      "serverSupported": false,
+      "clientSupported": false,
+      "accepted": {
+        "$numberLong": "0"
+      }
+    },
+    "compression": {
+      "snappy": {
+        "compressor": {
+          "bytesIn": {
+            "$numberLong": "0"
+          },
+          "bytesOut": {
+            "$numberLong": "0"
+          }
+        },
+        "decompressor": {
+          "bytesIn": {
+            "$numberLong": "0"
+          },
+          "bytesOut": {
+            "$numberLong": "0"
+          }
+        }
+      },
+      "zstd": {
+        "compressor": {
+          "bytesIn": {
+            "$numberLong": "0"
+          },
+          "bytesOut": {
+            "$numberLong": "0"
+          }
+        },
+        "decompressor": {
+          "bytesIn": {
+            "$numberLong": "0"
+          },
+          "bytesOut": {
+            "$numberLong": "0"
+          }
+        }
+      },
+      "zlib": {
+        "compressor": {
+          "bytesIn": {
+            "$numberLong": "0"
+          },
+          "bytesOut": {
+            "$numberLong": "0"
+          }
+        },
+        "decompressor": {
+          "bytesIn": {
+            "$numberLong": "0"
+          },
+          "bytesOut": {
+            "$numberLong": "0"
+          }
+        }
+      }
+    },
+    "ingressRequestRateLimiter": {
+      "rejectedAdmissions": {
+        "$numberLong": "0"
+      },
+      "successfulAdmissions": {
+        "$numberLong": "102"
+      },
+      "exemptedAdmissions": {
+        "$numberLong": "0"
+      },
+      "attemptedAdmissions": {
+        "$numberLong": "102"
+      },
+      "totalAvailableTokens": {
+        "$numberLong": "9223372036854776000"
+      }
+    },
+    "serviceExecutors": {
+      "passthrough": {
+        "threadsRunning": {
+          "$numberInt": "2"
+        },
+        "clientsInTotal": {
+          "$numberInt": "2"
+        },
+        "clientsRunning": {
+          "$numberInt": "2"
+        },
+        "clientsWaitingForData": {
+          "$numberInt": "0"
+        }
+      },
+      "inline": {
+        "threadsRunning": {
+          "$numberInt": "0"
+        },
+        "clientsInTotal": {
+          "$numberInt": "0"
+        },
+        "clientsRunning": {
+          "$numberInt": "0"
+        },
+        "clientsWaitingForData": {
+          "$numberInt": "0"
+        }
+      }
+    },
+    "listenerProcessingTime": {
+      "durationMicros": {
+        "$numberLong": "1002"
+      }
+    },
+    "connsRejectedDueToMaxPendingProxyProtocolHeader": {
+      "$numberLong": "0"
+    }
+  },
+  "opcounters": {
+    "insert": {
+      "$numberLong": "140"
+    },
+    "query": {
+      "$numberLong": "40"
+    },
+    "update": {
+      "$numberLong": "10"
+    },
+    "delete": {
+      "$numberLong": "4"
+    },
+    "getmore": {
+      "$numberLong": "0"
+    },
+    "command": {
+      "$numberLong": "10"
+    }
+  },
+  "opcountersRepl": {
+    "insert": {
+      "$numberLong": "0"
+    },
+    "query": {
+      "$numberLong": "0"
+    },
+    "update": {
+      "$numberLong": "0"
+    },
+    "delete": {
+      "$numberLong": "0"
+    },
+    "getmore": {
+      "$numberLong": "0"
+    },
+    "command": {
+      "$numberLong": "0"
+    }
+  },
+  "storageEngine": {
+    "name": "wiredTiger",
+    "supportsCommittedReads": true,
+    "oldestRequiredTimestampForCrashRecovery": {
+      "$timestamp": {
+        "t": 0,
+        "i": 0
+      }
+    },
+    "dropPendingIdents": {
+      "$numberLong": "0"
+    },
+    "supportsSnapshotReadConcern": true,
+    "readOnly": false,
+    "persistent": true,
+    "backupCursorOpen": false
+  },
+  "ok": {
+    "$numberInt": "1"
+  }
+}

@@ -57,6 +57,12 @@ export const adminMethods = defineMethods({
     params: z.strictObject({ profileId }),
     result: z.object({ status: ejsonDocument('serverStatus output') }),
   },
+  'admin.replSetStatus': {
+    summary: 'replSetGetStatus output; null when the server is not a replica set member',
+    route: 'backend',
+    params: z.strictObject({ profileId }),
+    result: z.object({ status: ejsonDocument('replSetGetStatus output').nullable() }),
+  },
   'admin.watch': {
     summary: 'Watch a deployment, database or collection; change events arrive on the stream',
     route: 'backend',

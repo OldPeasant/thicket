@@ -252,6 +252,7 @@ const SAMPLES: { [M in MethodName]: { valid: ParamsOf<M>; invalid: unknown } } =
     invalid: { profileId: P, db: 'admin', builtin: 'no' },
   },
   'admin.serverStatus': { valid: { profileId: P }, invalid: {} },
+  'admin.replSetStatus': { valid: { profileId: P }, invalid: { profileId: P, all: true } },
   'admin.watch': {
     valid: { profileId: P, db: 'shop', fullDocument: 'updateLookup' },
     invalid: { profileId: P, fullDocument: 'all' },

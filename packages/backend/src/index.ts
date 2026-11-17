@@ -2,6 +2,7 @@
 export const WORKSPACE = '@thicket/backend';
 
 export * from './admin/currentop';
+export * from './admin/stats';
 export * from './admin/users';
 export * from './agg';
 export {

@@ -342,6 +342,7 @@ const RESULTS: { [M in MethodName]: { valid: ResultOf<M>; invalid: unknown } } =
   'admin.users': { valid: { users: [] }, invalid: { users: [{ user: 'example' }] } },
   'admin.roles': { valid: { roles: ['{"role":"read"}'] }, invalid: { roles: ['read'] } },
   'admin.serverStatus': { valid: { status: '{"ok":1}' }, invalid: { status: { ok: 1 } } },
+  'admin.replSetStatus': { valid: { status: null }, invalid: { status: { set: 'rs0' } } },
   'admin.watch': { valid: { streamId: 's6' }, invalid: { stream: 's6' } },
 
   'pipelines.list': {

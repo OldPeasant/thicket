@@ -1,0 +1,296 @@
+{
+  "set": "rs0",
+  "date": {
+    "$date": {
+      "$numberLong": "1794897901281"
+    }
+  },
+  "myState": {
+    "$numberInt": "1"
+  },
+  "term": {
+    "$numberLong": "1"
+  },
+  "syncSourceHost": "",
+  "syncSourceId": {
+    "$numberInt": "-1"
+  },
+  "heartbeatIntervalMillis": {
+    "$numberLong": "2000"
+  },
+  "majorityVoteCount": {
+    "$numberInt": "1"
+  },
+  "writeMajorityCount": {
+    "$numberInt": "1"
+  },
+  "votingMembersCount": {
+    "$numberInt": "1"
+  },
+  "writableVotingMembersCount": {
+    "$numberInt": "1"
+  },
+  "optimes": {
+    "lastCommittedOpTime": {
+      "ts": {
+        "$timestamp": {
+          "t": 1794897901,
+          "i": 17
+        }
+      },
+      "t": {
+        "$numberLong": "1"
+      }
+    },
+    "lastCommittedWallTime": {
+      "$date": {
+        "$numberLong": "1794897901069"
+      }
+    },
+    "readConcernMajorityOpTime": {
+      "ts": {
+        "$timestamp": {
+          "t": 1794897901,
+          "i": 17
+        }
+      },
+      "t": {
+        "$numberLong": "1"
+      }
+    },
+    "appliedOpTime": {
+      "ts": {
+        "$timestamp": {
+          "t": 1794897901,
+          "i": 17
+        }
+      },
+      "t": {
+        "$numberLong": "1"
+      }
+    },
+    "durableOpTime": {
+      "ts": {
+        "$timestamp": {
+          "t": 1794897901,
+          "i": 17
+        }
+      },
+      "t": {
+        "$numberLong": "1"
+      }
+    },
+    "writtenOpTime": {
+      "ts": {
+        "$timestamp": {
+          "t": 1794897901,
+          "i": 17
+        }
+      },
+      "t": {
+        "$numberLong": "1"
+      }
+    },
+    "lastAppliedWallTime": {
+      "$date": {
+        "$numberLong": "1794897901069"
+      }
+    },
+    "lastDurableWallTime": {
+      "$date": {
+        "$numberLong": "1794897901069"
+      }
+    },
+    "lastWrittenWallTime": {
+      "$date": {
+        "$numberLong": "1794897901069"
+      }
+    }
+  },
+  "lastStableRecoveryTimestamp": {
+    "$timestamp": {
+      "t": 1794897901,
+      "i": 1
+    }
+  },
+  "electionCandidateMetrics": {
+    "lastElectionReason": "electionTimeout",
+    "lastElectionDate": {
+      "$date": {
+        "$numberLong": "1794897901019"
+      }
+    },
+    "electionTerm": {
+      "$numberLong": "1"
+    },
+    "lastCommittedOpTimeAtElection": {
+      "ts": {
+        "$timestamp": {
+          "t": 1794897901,
+          "i": 1
+        }
+      },
+      "t": {
+        "$numberLong": "-1"
+      }
+    },
+    "lastSeenWrittenOpTimeAtElection": {
+      "ts": {
+        "$timestamp": {
+          "t": 1794897901,
+          "i": 1
+        }
+      },
+      "t": {
+        "$numberLong": "-1"
+      }
+    },
+    "lastSeenOpTimeAtElection": {
+      "ts": {
+        "$timestamp": {
+          "t": 1794897901,
+          "i": 1
+        }
+      },
+      "t": {
+        "$numberLong": "-1"
+      }
+    },
+    "numVotesNeeded": {
+      "$numberInt": "1"
+    },
+    "priorityAtElection": {
+      "$numberInt": "1"
+    },
+    "electionTimeoutMillis": {
+      "$numberLong": "10000"
+    },
+    "newTermStartDate": {
+      "$date": {
+        "$numberLong": "1794897901036"
+      }
+    },
+    "wMajorityWriteAvailabilityDate": {
+      "$date": {
+        "$numberLong": "1794897901122"
+      }
+    }
+  },
+  "members": [
+    {
+      "_id": {
+        "$numberInt": "0"
+      },
+      "name": "localhost:27017",
+      "health": {
+        "$numberInt": "1"
+      },
+      "state": {
+        "$numberInt": "1"
+      },
+      "stateStr": "PRIMARY",
+      "uptime": {
+        "$numberInt": "23"
+      },
+      "optime": {
+        "ts": {
+          "$timestamp": {
+            "t": 1794897901,
+            "i": 17
+          }
+        },
+        "t": {
+          "$numberLong": "1"
+        }
+      },
+      "optimeDate": {
+        "$date": {
+          "$numberLong": "1794897901000"
+        }
+      },
+      "optimeWritten": {
+        "ts": {
+          "$timestamp": {
+            "t": 1794897901,
+            "i": 17
+          }
+        },
+        "t": {
+          "$numberLong": "1"
+        }
+      },
+      "optimeWrittenDate": {
+        "$date": {
+          "$numberLong": "1794897901000"
+        }
+      },
+      "lastAppliedWallTime": {
+        "$date": {
+          "$numberLong": "1794897901069"
+        }
+      },
+      "lastDurableWallTime": {
+        "$date": {
+          "$numberLong": "1794897901069"
+        }
+      },
+      "lastWrittenWallTime": {
+        "$date": {
+          "$numberLong": "1794897901069"
+        }
+      },
+      "syncSourceHost": "",
+      "syncSourceId": {
+        "$numberInt": "-1"
+      },
+      "infoMessage": "Could not find member to sync from",
+      "electionTime": {
+        "$timestamp": {
+          "t": 1794897901,
+          "i": 2
+        }
+      },
+      "electionDate": {
+        "$date": {
+          "$numberLong": "1794897901000"
+        }
+      },
+      "configVersion": {
+        "$numberInt": "1"
+      },
+      "configTerm": {
+        "$numberInt": "1"
+      },
+      "self": true,
+      "lastHeartbeatMessage": ""
+    }
+  ],
+  "ok": {
+    "$numberInt": "1"
+  },
+  "$clusterTime": {
+    "clusterTime": {
+      "$timestamp": {
+        "t": 1794897901,
+        "i": 17
+      }
+    },
+    "signature": {
+      "hash": {
+        "$binary": {
+          "base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "subType": "00"
+        }
+      },
+      "keyId": {
+        "$numberLong": "0"
+      }
+    }
+  },
+  "operationTime": {
+    "$timestamp": {
+      "t": 1794897901,
+      "i": 17
+    }
+  }
+}
