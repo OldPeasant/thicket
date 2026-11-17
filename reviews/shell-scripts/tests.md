@@ -113,3 +113,84 @@ Values below use covered/total (percentage).
 ## Summary
 
 Tests added and all validation passed. Task-scoped coverage is sufficient (changed lines 51/51), and no production defects were found.
+
+# Round 2
+
+Date: 2026-11-17
+
+Task: shell-scripts — M4 (Should): Run a script file in the shell
+
+Scope: base `c1d702aa77c62dfdf6e705dbfba7f6bfdda09a92` .. HEAD `dc96c1f1470f060d6ddb2f05a56382bc870c7e6e`. The task code commits are `e6f99bee` (the implementation), `45897b54` (round-1 tests and reports) and `dc96c1f1` (fixes for CR-1, CR-2 and TW-2; see `reviews/shell-scripts/fixes.md`). The measurement also includes one uncommitted spec change made in this round (listed below). The production files are the same as in round 1: `script-file.ts` and `shell-console.ts`, plus `shell-console.html` and `.css`.
+
+Requirements: same as round 1, plus the fixed behaviour from `fixes.md`. That covers CR-1 (when a script is not run because the session closed or a run started while the file was read, the user is told why), CR-2 (a script run does not keep its text in `Run.code`) and TW-2 (the exact "larger than 5 MB" message).
+
+## Review of the fix tests
+
+| Fixed behaviour | Tests (in dc96c1f1 unless marked new) | Assessment |
+|---|---|---|
+| CR-1, busy: a run started while the file was read | `says why when a run started while the file was read` (deferred `text()`, typed run during the read; asserts one eval, `role="alert"`, "slow.js was not run: the shell is busy"); `is disabled while something runs and sends no second run` (now also asserts the busy message) | Adequate |
+| CR-1, session not open: the session ended while the file was read | `says why when the session ended while the file was read` (`NOT_FOUND` on the eval stream during the read; asserts nothing more is sent and the message "the session is not open") | Adequate |
+| CR-1, the destroyed tab stays silent | `sends nothing when the tab goes away while the file is read` (unchanged) | Adequate |
+| CR-1, retry after a busy refusal: the message clears and the same file runs | **new:** `runs the same file once the busy run ends, and the busy message goes away` | This gap was found in this round. The test passes. |
+| CR-2: `code` is empty for script runs, and the text is still sent | `shows the file name and its lines in the transcript instead of the code` (`runs()[0].code === ''`); `runs the file text in the session with shell.eval` (full text sent); typed runs still keep `code` (the existing tests at spec lines 486/487) | Adequate |
+| TW-2: exact limit message | `accepts a script of exactly the size limit and refuses one byte more` (`MAX_SCRIPT_BYTES + 1` and 12 MB both give "…larger than 5 MB") | Adequate |
+
+## Test files changed (round 2)
+
+- `packages/renderer/src/app/console/shell-console.spec.ts`: one new test in `ShellConsole` > `script files`. No existing test was changed.
+
+Count: 1 added.
+
+## Focused test execution
+
+Command: `cd packages/renderer && npx ng test --include='src/app/console/**/*.spec.ts'`
+
+Result: Pass. 3 files, 143 tests (142 from the fixer plus 1 new).
+
+`npx prettier --check` and `npx eslint` on `shell-console.spec.ts`: Pass.
+
+## Full test execution / .taskcheck
+
+Not run by the test-writer in round 2. Permission to run `sh .taskcheck` was denied in this session. The fixer reported `npm run check` and `.taskcheck` passing on dc96c1f1 without the new test. The parent should run `.taskcheck` with the new test included.
+
+## Bugs found
+
+None. The new test passed against the production code at dc96c1f1.
+
+## Coverage (round 2)
+
+Status: verified
+
+Metric: whole-file coverage of task-changed production files.
+Changed-line coverage: I intersected the lcov `DA`/`BRDA` records with the added and modified lines of `git diff -U0 c1d702aa dc96c1f1` for each file. `script-file.ts` is all new and has 20/20 lines and 10/10 branches. The changed lines in `shell-console.ts` are 31, 66–70, 107–108, 116, 147–151, 189–191, 262–310 and 312–322. Their executable lines are 35/35, and the branches on them are 23/24. The only uncovered branch is `:291` branch 1, which is `String(error)` for a throw that is not an `Error`. Total changed lines: 55/55 (100%). Changed branches: 33/34.
+
+Evidence:
+- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: `shell-scripts`; base `c1d702aa77c62dfdf6e705dbfba7f6bfdda09a92` (from the parent); HEAD `dc96c1f1470f060d6ddb2f05a56382bc870c7e6e`. The task code commits are `e6f99bee`, `45897b54` and `dc96c1f1`, as supplied by the parent and confirmed with `git show --stat`.
+- Source/test snapshot identifier (sha256, the same before and after the run): `script-file.ts` 8a0e8a4c…2b54e5 and `shell-console.ts` 1735c95e…955f23, both identical to HEAD; `script-file.spec.ts` 3bac3606…edaa, identical to HEAD; `shell-console.spec.ts` 13ee2613…2c2039, uncommitted (+1 test).
+- Exact included files and exclusions: included `packages/renderer/src/app/console/scripts/script-file.ts` and `packages/renderer/src/app/console/shell-console.ts`. The exclusions are the same as in round 1: the html template, which v8 does not instrument separately and which the DOM tests cover; the css; and the e2e test and its fixture. No files were renamed or deleted.
+- Provider/version, command, working directory, and test selection: `@vitest/coverage-v8` via `@angular/build:unit-test`, vitest 5.1.0. Command: `npx ng test --include='src/app/console/**/*.spec.ts' --coverage --coverage-include='src/app/console/scripts/script-file.ts' --coverage-include='src/app/console/shell-console.ts'` in `packages/renderer`. Test selection: the console specs (3 files, 143 tests).
+- Run start/completion time and exit status: started 2026-11-17 06:55:31 +01:00, report written 06:55:36 +01:00. 143 passed; the coverage summary was printed.
+- Generated report paths and hashes: `packages/renderer/coverage/renderer/coverage-summary.json` (sha256 c89a510f…3c4cc064) and `packages/renderer/coverage/renderer/lcov.info` (sha256 c1eb2a5b…3562d).
+- Evidence outputs are fresh and inputs stayed unchanged: yes. The file mtimes are 06:55:36, which is this run, and they replaced round 1's 06:49 report. The totals also differ from round 1's: `script-file.ts` went from 14 to 10 branches after `formatSize` was removed.
+- Final run after latest test additions and production fixes: yes. It ran after dc96c1f1 and after the new test.
+
+| Changed file | Statements | Branches | Functions | Lines |
+|---|---:|---:|---:|---:|
+| `packages/renderer/src/app/console/scripts/script-file.ts` | 24/24 (100%) | 10/10 (100%) | 4/4 (100%) | 20/20 (100%) |
+| `packages/renderer/src/app/console/shell-console.ts` | 293/301 (97.34%) | 194/205 (94.63%) | 58/62 (93.54%) | 248/250 (99.20%) |
+| Aggregate (summed counters, both files; html/css excluded as above) | 317/325 (97.53%) | 204/215 (94.88%) | 62/66 (93.93%) | 268/270 (99.25%) |
+
+| File and uncovered lines/branch locations | Required behavior or risk | Action/test added or reason left uncovered |
+|---|---|---|
+| `script-file.ts` | — | Fully covered. The round-1 gap in `formatSize` was removed by the TW-2 fix. |
+| `shell-console.ts:291` branch 1 (`String(error)` for a throw that is not an `Error`) | none | Defensive code. `readScriptFile` only throws `Error`, and `throws Error instances` asserts that. This is a justified gap. |
+| `shell-console.ts:158`, `:160`, `:216`, `:235`, `:348`, `:361`, `:366`, `:463`, `:504`, `:552` and the 4 uncovered functions | Code that existed before this task (the round-1 gaps, with line numbers shifted by the fix) | Outside the task's changed lines. No tests were added. |
+
+## Unable to test (round 2)
+
+- The AC1 e2e is re-run by the parent and was not run here.
+- `.taskcheck` and the full suite: permission was denied in this session (see above).
+
+## Summary (round 2)
+
+Tests added. The focused console suite passes (143 tests), and no production defects were found. The fixes for CR-1, CR-2 and TW-2 are covered by tests. Changed-line coverage is 55/55 lines and 33/34 branches. `.taskcheck` was not run by the test-writer in this round, so the parent must run it.

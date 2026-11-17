@@ -1135,6 +1135,24 @@ describe('ShellConsole', () => {
       );
     });
 
+    it('runs the same file once the busy run ends, and the busy message goes away', async () => {
+      await create();
+      const { slow, file } = slowSource('slow.js');
+      const pending = view.runScript(file);
+      await type('sleep(100000)');
+      await key('Enter');
+      slow.release('x = 1');
+      await pending;
+      await settle();
+      expect(q('shell-script-problem')).not.toBeNull();
+      fake.end('st1');
+      await settle();
+      await runScript(source('slow.js', 'x = 1'));
+      expect(q('shell-script-problem')).toBeNull();
+      expect(evals().map((e) => e.code)).toEqual(['sleep(100000)', 'x = 1']);
+      expect(view.runs().at(-1)?.script).toEqual({ name: 'slow.js', lines: 1 });
+    });
+
     it('says why when the session ended while the file was read', async () => {
       await create();
       const { slow, file } = slowSource('slow.js');
