@@ -97,7 +97,7 @@ async function seeded(name: string, n: number): Promise<string> {
   const coll = `${name}_${run}`;
   await admin
     .db(DB)
-    .collection(coll)
+    .collection<{ _id: number; pad: string }>(coll)
     .insertMany(Array.from({ length: n }, (_, i) => ({ _id: i, pad: 'x'.repeat(64) })));
   return coll;
 }

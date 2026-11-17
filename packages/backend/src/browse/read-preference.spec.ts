@@ -1,5 +1,6 @@
 import {
   BSON,
+  MongoServerError,
   ReadPreference,
   WriteConcern,
   type Document,
@@ -119,6 +120,18 @@ describe('browse reads honour the profile read preference', () => {
     expect(client.sent[0]?.options?.readPreference).toBe(SECONDARY);
   });
 
+  it('a failing db.stats read is a SERVER_ERROR with the server code', async () => {
+    const client = fakeClient(() => {
+      throw new MongoServerError({ ok: 0, code: 13, codeName: 'Unauthorized', errmsg: 'denied' });
+    });
+    const error = await databaseStats(client, 'shop').catch((e: unknown) => e);
+    expect(error).toMatchObject({
+      code: 'SERVER_ERROR',
+      detail: { serverCode: 13, codeName: 'Unauthorized' },
+    });
+    expect(client.sent[0]?.options?.readPreference).toBe(SECONDARY);
+  });
+
   it('listCollections runs as a driver cursor with the read preference and reads every batch from it', async () => {
     const client = fakeClient(
       () => {
@@ -198,6 +211,14 @@ describe('readOptions / withWriteConcern', () => {
     });
   });
 
+  it('withWriteConcern sends only the parts the profile sets (journal only; nothing set)', () => {
+    const cmd = { insert: 'c', documents: [] };
+    expect(
+      withWriteConcern(db(undefined, new WriteConcern(undefined, undefined, true)), cmd),
+    ).toEqual({ ...cmd, writeConcern: { j: true } });
+    expect(withWriteConcern(db(undefined, new WriteConcern()), cmd)).toBe(cmd);
+  });
+
   it('withWriteConcern leaves the command alone without a write concern or with its own', () => {
     const cmd = { insert: 'c', documents: [] };
     expect(withWriteConcern(db(), cmd)).toBe(cmd);
@@ -238,6 +259,40 @@ describe('ReadCursor', () => {
       find: 'orders',
     });
     expect(client.opened[0]?.options).toEqual({ raw: true, readPreference: 'primary' });
+  });
+
+  it('without a read preference the driver cursor gets none (client default: primary)', async () => {
+    const calls: string[] = [];
+    const opened: (RunCursorCommandOptions | undefined)[] = [];
+    const target: DbLike = {
+      command: () => Promise.resolve({ ok: 1 }),
+      runCursorCommand: (_command, options) => {
+        opened.push(options);
+        return fakeCursor([[{ _id: 1 }]], calls);
+      },
+    };
+    const cursor = new ReadCursor(target, 'orders');
+    await cursor.first({ find: 'orders' });
+    expect(opened).toEqual([{ raw: true }]);
+    // Exhausted: next() answers nothing without another hasNext.
+    expect(await cursor.next()).toEqual([]);
+    expect(calls).toEqual(['hasNext']);
+  });
+
+  it('close() ignores a failing driver cursor close', async () => {
+    const calls: string[] = [];
+    const failing: CursorLike = {
+      ...fakeCursor([[{ _id: 1 }], [{ _id: 2 }]], calls),
+      id: BSON.Long.fromNumber(42),
+      close: () => Promise.reject(new Error('connection gone')),
+    };
+    const target: DbLike = {
+      command: () => Promise.resolve({ ok: 1 }),
+      runCursorCommand: () => failing,
+    };
+    const cursor = new ReadCursor(target, 'orders');
+    await cursor.first({ find: 'orders' });
+    await expect(cursor.close()).resolves.toBeUndefined();
   });
 
   it('without runCursorCommand: plain commands carry the read preference, getMore included', async () => {

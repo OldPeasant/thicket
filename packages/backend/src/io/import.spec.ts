@@ -3,7 +3,17 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import type { IoProgress } from '@thicket/contract';
-import { BSON, Decimal128, Double, Int32, Long, ObjectId, type Document } from 'mongodb';
+import {
+  BSON,
+  Decimal128,
+  Double,
+  Int32,
+  Long,
+  ObjectId,
+  ReadPreference,
+  WriteConcern,
+  type Document,
+} from 'mongodb';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ClientLike } from '../connections/manager';
@@ -759,5 +769,28 @@ describe('importFile', () => {
     });
     expect(result).toMatchObject({ code: 'CANCELLED' });
     expect(server.inserts).toEqual([]);
+  });
+
+  it('inserts carry the profile write concern and no read preference (raw-cmd-read-pref)', async () => {
+    const file = await fileWith('wc.jsonl', '{"_id":1}\n{"_id":2}\n');
+    const sent: { command: Document; readPreference: unknown }[] = [];
+    const client: ClientLike = {
+      connect: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+      db: () => ({
+        readPreference: ReadPreference.secondaryPreferred,
+        writeConcern: new WriteConcern('majority'),
+        command: (command, options) => {
+          sent.push({ command, readPreference: options?.readPreference });
+          const documents = command['documents'] as Document[] | undefined;
+          return Promise.resolve({ n: documents?.length ?? 0, ok: 1 });
+        },
+      }),
+    };
+    const { result } = await runImport(client, file, 'jsonl');
+    expect(result).toMatchObject({ inserted: 2, failed: 0 });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.command['writeConcern']).toEqual({ w: 'majority' });
+    expect(sent[0]?.readPreference).toBeUndefined();
   });
 });
