@@ -177,8 +177,13 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   and passes the form fields and secrets as driver options (`auth`, `authMechanism`
   SCRAM-SHA-1/256, `authSource`, `tls`, `tlsCAFile`, `tlsCertificateKeyFile` + passphrase,
   allow-invalid flags, read preference, `appName` (default `Thicket`), timeouts), so passwords
-  never enter the URI; the other mechanisms (LDAP, OIDC, AWS, Kerberos) answer `UNSUPPORTED`
+  never enter the URI; the other mechanisms (OIDC, Kerberos) answer `UNSUPPORTED`
   until their tasks.
+  LDAP (`PLAIN`, task ldap-auth, `packages/backend/src/auth/ldap/`): user name from the profile, else
+  the connection string, and the `password` secret go to the driver as `auth`, always with
+  `authSource: '$external'`; no user name, no password or `secretMode: 'none'` → `AUTH_FAILED`.
+  Integration fixture `test/integration/fixtures/ldap.ts`: MongoDB Enterprise 8.0 + OpenLDAP
+  (`osixia/openldap`) on a private network, user-to-DN mapping, simple bind, generated passwords.
   MONGODB-X509 (task x509-proxy) needs TLS with a client certificate (`AUTH_FAILED` otherwise),
   always uses `authSource: '$external'`, and sends a user name only when the profile has one
   (else the server takes the certificate subject). The client certificate is a PEM bundle

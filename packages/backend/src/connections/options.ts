@@ -5,6 +5,7 @@ import { parseConnectionString } from '@thicket/core';
 import type { MongoClientOptions, W } from 'mongodb';
 
 import { awsAuthOptions } from '../auth/aws';
+import { ldapAuthOptions } from '../auth/ldap';
 import { RpcError } from '../server/rpc';
 import type { TunnelProxy } from '../ssh/tunnel';
 
@@ -20,13 +21,14 @@ export interface ClientConfig {
 /** `appName` when the profile sets none, so server logs show who connected. */
 export const DEFAULT_APP_NAME = 'Thicket';
 
-/** Mechanisms this build connects with; the others belong to later tasks (LDAP, OIDC, Kerberos). */
+/** Mechanisms this build connects with; the others belong to later tasks (OIDC, Kerberos). */
 const SUPPORTED_MECHANISMS = new Set([
   'NONE',
   'SCRAM-SHA-1',
   'SCRAM-SHA-256',
   'MONGODB-X509',
   'MONGODB-AWS',
+  'PLAIN',
 ]);
 
 /**
@@ -61,6 +63,8 @@ export function clientConfig(
   }
   if (auth?.mechanism === 'MONGODB-AWS') {
     Object.assign(options, awsAuthOptions(auth, secrets, uriUsername(profile.connectionString)));
+  } else if (auth?.mechanism === 'PLAIN') {
+    Object.assign(options, ldapAuthOptions(auth, secrets, uriUsername(profile.connectionString)));
   } else if (auth?.mechanism !== 'NONE' && auth?.mechanism !== 'MONGODB-X509') {
     const username = auth?.username ?? uriUsername(profile.connectionString);
     const needsPassword = auth !== undefined && auth.secretMode !== 'none';

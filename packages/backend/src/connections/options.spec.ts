@@ -159,7 +159,24 @@ describe('clientConfig', () => {
     expect(options.auth).toBeUndefined();
   });
 
-  it.each(['PLAIN', 'GSSAPI', 'MONGODB-OIDC'] as const)(
+  it('maps PLAIN (LDAP) to $external with the user and password as driver options', () => {
+    const { uri, options } = clientConfig(
+      draft({
+        auth: { mechanism: 'PLAIN', username: 'alice', secretMode: 'saved', authSource: 'admin' },
+      }),
+      { password: PASSWORD },
+    );
+    expect(uri).not.toContain(PASSWORD);
+    expect(options).toMatchObject({
+      authMechanism: 'PLAIN',
+      authSource: '$external',
+      auth: { username: 'alice', password: PASSWORD },
+    });
+    // The real driver accepts the mapping.
+    expect(() => new MongoClient(uri, options)).not.toThrow();
+  });
+
+  it.each(['GSSAPI', 'MONGODB-OIDC'] as const)(
     'answers UNSUPPORTED for mechanism %s',
     (mechanism) => {
       const error = errorOf(() =>
