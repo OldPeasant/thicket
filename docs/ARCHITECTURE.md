@@ -162,6 +162,13 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   none, and switching `secretMode` away from `saved` clears the saved password.
   `profilesHandlers` serve `profiles.list/get/save/delete/duplicate` and gate
   `profiles.setSecret` on the profile existing (`NOT_FOUND`).
+- Saved pipelines (`src/pipelines/`): `PipelinesStore` keeps `pipelines.json` in `userData` —
+  `{ version: 1, pipelines: [SavedPipeline…] }` (contract `savedPipeline`: `pipelineId`, `name`,
+  `profileId`/`db`/`coll`, `stages: [{ stage: <canonical EJSON>, enabled }]`, `updatedAt`).
+  Names are unique per collection ignoring case: `pipelines.save` under a taken name replaces
+  that pipeline (keeps its id), `pipelines.rename` to a taken name answers `CONFLICT`. Missing,
+  corrupt, unreadable and newer files and the atomic writes behave like `connections.json`.
+  `pipelinesHandlers` serve `pipelines.list/save/rename/delete`.
 - Import/export (`src/profiles/import/`): `importExportHandlers` serve `profiles.importCompass`
   (a file chosen with the native open dialog in `main`, at most `MAX_IMPORT_FILE_BYTES`),
   `profiles.importUris` and `profiles.export` (native save dialog; the renderer never names a
@@ -602,7 +609,11 @@ Contract layout (`packages/contract/src/`):
   page); a pipeline with `$out`/`$merge` runs unpaged through `WriteGuard.approve` with
   `alwaysConfirm`. Export: core's `generateCode` (`@thicket/core/codegen`) for shell, Node,
   Python and Java, with the profile's connection string. Create view: `agg.createView` through
-  `WriteGuard.run`. Saving pipelines is task `saved-pipelines`. e2e:
+  `WriteGuard.run`. Saved… opens a panel for the collection's saved pipelines
+  (`pipelines.list`, read when opened): Save stores every stage, disabled ones too, as canonical
+  EJSON (refused while any stage has an error; in full-text mode the text is applied first);
+  Open replaces the builder's stages (arguments reprinted in shell syntax, back in the stage
+  list); Rename inline; Delete after a second click. e2e:
   `test/e2e/aggregation.e2e.ts` (demo step 8).
 
 ## Indexes tab (`packages/renderer/src/app/indexes`)
