@@ -7,6 +7,7 @@ import { UsersRolesView } from './admin/users';
 import { App } from './app';
 import { appConfig } from './app.config';
 import { ShellConsole } from './console';
+import { GridfsView } from './gridfs';
 import { IndexesView } from './indexes';
 import { TAB_VIEWS } from './layout/tab-views';
 
@@ -61,6 +62,13 @@ describe('App', () => {
     const views = TestBed.inject(TAB_VIEWS);
 
     expect(views.find((view) => view.kind === 'currentop')?.component).toBe(CurrentOpView);
+  });
+
+  it('registers the GridFS view for the gridfs tab kind', () => {
+    TestBed.configureTestingModule({ providers: appConfig.providers });
+    const views = TestBed.inject(TAB_VIEWS);
+
+    expect(views.find((view) => view.kind === 'gridfs')?.component).toBe(GridfsView);
   });
 
   it('runs zoneless: zone.js is not loaded', () => {

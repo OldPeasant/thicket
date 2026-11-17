@@ -511,6 +511,25 @@ describe('SidebarTree', () => {
       });
     });
 
+    it('opens the GridFS tab of a database from its context menu', async () => {
+      await start();
+      await click(node('conn', 'Profile p1'));
+      await menu(node('db', 'shop'));
+      const ids = [...must('tree-menu').querySelectorAll<HTMLElement>('[role="menuitem"]')].map(
+        (item) => item.dataset['testid'],
+      );
+      expect(ids.filter((id) => id === 'menu-gridfs')).toHaveLength(1);
+      const item = must('menu-gridfs') as HTMLButtonElement;
+      expect(item.textContent).toContain('GridFS files');
+      await click(item);
+      expect(byTestId('tree-menu')).toBeNull();
+      expect(TestBed.inject(WorkspaceService).active()).toMatchObject({
+        id: 'gridfs:p1:shop',
+        kind: 'gridfs',
+        data: { profileId: 'p1', db: 'shop' },
+      });
+    });
+
     it('offers both Open shell and Users and roles on a database; each opens its own tab', async () => {
       await start();
       await click(node('conn', 'Profile p1'));
@@ -710,6 +729,8 @@ describe('SidebarTree', () => {
       expect((must('menu-stats') as HTMLButtonElement).disabled).toBe(false);
       // Viewing users and roles is a read: allowed on a read-only profile.
       expect((must('menu-users') as HTMLButtonElement).disabled).toBe(false);
+      // Listing and downloading GridFS files are reads: the tab opens on a read-only profile.
+      expect((must('menu-gridfs') as HTMLButtonElement).disabled).toBe(false);
 
       await click(node('db', 'shop'));
       await menu(node('coll', 'orders'));

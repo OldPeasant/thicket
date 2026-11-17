@@ -316,6 +316,95 @@ describe('gridfs', () => {
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
+  it('a cancelled download ends CANCELLED and removes the partial local file', async () => {
+    const source = path.join(dir, 'download-cancel.bin');
+    await writeFile(source, randomBytes(40 * MB));
+    const { outcome } = await upload(source, 'dlcancel');
+    const id = outcome.progress.at(-1)?.fileId ?? '';
+    expect(id).not.toBe('');
+
+    const target = path.join(dir, 'download-cancel.copy');
+    chosen.push(target);
+    const download = await backend.call('gridfs.download', {
+      profileId: PROFILE.id,
+      db: DB,
+      bucket: 'dlcancel',
+      id,
+    });
+    expect(download.path).toBe(target);
+    const streamId = download.streamId ?? '';
+    backend.cancel(streamId);
+    const got = await backend.finished(streamId);
+    expect(got.error?.code).toBe('CANCELLED');
+    await expect(stat(target)).rejects.toMatchObject({ code: 'ENOENT' });
+    // The stored file is untouched.
+    const { files } = await backend.call('gridfs.files', {
+      profileId: PROFILE.id,
+      db: DB,
+      bucket: 'dlcancel',
+    });
+    expect(files.map((f) => f.length)).toEqual([40 * MB]);
+  });
+
+  it('round-trips an empty file (no chunks) with a final progress event', async () => {
+    const source = path.join(dir, 'empty.txt');
+    await writeFile(source, '');
+    const { result, outcome } = await upload(source, 'empty');
+    expect(outcome.error).toBeUndefined();
+    expect(result.sizeBytes).toBe(0);
+    const last = outcome.progress.at(-1);
+    expect(last).toMatchObject({ bytes: 0, totalBytes: 0 });
+    expect(last?.fileId).toMatch(/^\{"\$oid":"[0-9a-f]{24}"\}$/);
+
+    const { files } = await backend.call('gridfs.files', {
+      profileId: PROFILE.id,
+      db: DB,
+      bucket: 'empty',
+    });
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatchObject({ filename: 'empty.txt', length: 0 });
+
+    const target = path.join(dir, 'empty.copy');
+    chosen.push(target);
+    const download = await backend.call('gridfs.download', {
+      profileId: PROFILE.id,
+      db: DB,
+      bucket: 'empty',
+      id: last?.fileId ?? '',
+    });
+    const got = await backend.finished(download.streamId ?? '');
+    expect(got.error).toBeUndefined();
+    expect(got.progress.at(-1)).toEqual({ bytes: 0, totalBytes: 0 });
+    expect((await stat(target)).size).toBe(0);
+  });
+
+  it('a download into a folder that does not exist fails as INTERNAL "Could not write …"', async () => {
+    const source = path.join(dir, 'unwritable.txt');
+    await writeFile(source, 'fictitious');
+    const { outcome } = await upload(source, 'unwritable');
+    const target = path.join(dir, 'no-such-folder', 'copy.txt');
+    chosen.push(target);
+    const download = await backend.call('gridfs.download', {
+      profileId: PROFILE.id,
+      db: DB,
+      bucket: 'unwritable',
+      id: outcome.progress.at(-1)?.fileId ?? '',
+    });
+    const got = await backend.finished(download.streamId ?? '');
+    expect(got.error?.code).toBe('INTERNAL');
+    expect(got.error?.message).toContain(`Could not write ${target}`);
+    await expect(stat(target)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('gridfs.files rejects a limit above MAX_GRIDFS_FILES and a bucket with "$"', async () => {
+    await expect(
+      backend.call('gridfs.files', { profileId: PROFILE.id, db: DB, bucket: 'fs', limit: 1001 }),
+    ).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
+    await expect(
+      backend.call('gridfs.files', { profileId: PROFILE.id, db: DB, bucket: 'a$b' }),
+    ).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
+  });
+
   it('a cancelled upload leaves no files document and no chunks behind', async () => {
     const source = path.join(dir, 'cancel.bin');
     await writeFile(source, randomBytes(40 * MB));

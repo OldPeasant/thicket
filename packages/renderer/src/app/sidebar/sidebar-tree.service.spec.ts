@@ -921,6 +921,35 @@ describe('SidebarTreeService', () => {
       expect(ws.active()).toMatchObject({ detail: 'gone / shop', production: false });
     });
 
+    it('openGridfs opens the GridFS tab of a database with the production flag', () => {
+      tree.openGridfs('prod', 'shop');
+      expect(ws.active()).toEqual({
+        id: 'gridfs:prod:shop',
+        kind: 'gridfs',
+        title: 'shop files',
+        detail: 'Profile prod / shop',
+        production: true,
+        data: { profileId: 'prod', db: 'shop' },
+      });
+    });
+
+    it('openGridfs twice selects the existing tab; another database gets its own tab', () => {
+      tree.openGridfs('p1', 'shop');
+      tree.openGridfs('p1', 'other');
+      tree.openGridfs('p1', 'shop');
+      expect(ws.tabs().map((t) => t.id)).toEqual(['gridfs:p1:shop', 'gridfs:p1:other']);
+      expect(ws.active()?.id).toBe('gridfs:p1:shop');
+    });
+
+    it('openGridfs of an unknown profile falls back to its id', () => {
+      tree.openGridfs('gone', 'shop');
+      expect(ws.active()).toMatchObject({
+        id: 'gridfs:gone:shop',
+        detail: 'gone / shop',
+        production: false,
+      });
+    });
+
     it('openCurrentOps opens the current operations tab of a connection with the production flag', () => {
       tree.openCurrentOps('prod');
       expect(ws.active()).toEqual({

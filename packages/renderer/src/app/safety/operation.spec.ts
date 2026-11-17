@@ -221,6 +221,42 @@ describe('describeWrite', () => {
     ).toContain('ISODate("2025-01-01T00:00:00');
   });
 
+  it('gridfs.upload shows the bucket and the stored name, or a placeholder for the chosen file', () => {
+    const B = 'db.getSiblingDB("shop").getGridFSBucket({ bucketName: "fs" })';
+    expect(describeWrite('gridfs.upload', { profileId: 'p', db: 'shop', bucket: 'fs' })).toBe(
+      `// Upload the chosen file\n${B}.openUploadStream(<file name>)`,
+    );
+    expect(
+      describeWrite('gridfs.upload', {
+        profileId: 'p',
+        db: 'shop',
+        bucket: 'fs',
+        filename: 'report "Q1".pdf',
+      }),
+    ).toBe(`// Upload the chosen file\n${B}.openUploadStream("report \\"Q1\\".pdf")`);
+  });
+
+  it('gridfs.delete prints the file id in shell syntax, whatever its BSON type', () => {
+    const B = 'db.getSiblingDB("shop").getGridFSBucket({ bucketName: "images" })';
+    const p = { profileId: 'p', db: 'shop', bucket: 'images' };
+    expect(describeWrite('gridfs.delete', { ...p, id: OID })).toBe(
+      `${B}.delete(ObjectId("64b7f0c2a1b2c3d4e5f60718"))`,
+    );
+    expect(describeWrite('gridfs.delete', { ...p, id: '"my-id"' })).toBe(`${B}.delete("my-id")`);
+    expect(describeWrite('gridfs.delete', { ...p, id: '{"$numberInt":"7"}' })).toBe(
+      `${B}.delete(7)`,
+    );
+  });
+
+  it('gridfs escapes database and bucket names as string literals', () => {
+    expect(
+      describeWrite('gridfs.delete', { profileId: 'p', db: 'we"ird', bucket: 'a\\b', id: OID }),
+    ).toBe(
+      'db.getSiblingDB("we\\"ird").getGridFSBucket({ bucketName: "a\\\\b" })' +
+        '.delete(ObjectId("64b7f0c2a1b2c3d4e5f60718"))',
+    );
+  });
+
   it('shell() indents by two by default and leaves invalid EJSON as it is', () => {
     expect(shell('{"a":1}')).toBe('{\n  a: 1\n}');
     expect(shell('{"a":', 0)).toBe('{"a":');
