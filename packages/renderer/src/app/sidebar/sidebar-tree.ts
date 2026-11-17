@@ -416,6 +416,12 @@ export class SidebarTree {
           run: () => this.tree.openShell(id),
         },
         {
+          id: 'current-ops',
+          label: 'Current operations',
+          disabled: !connected,
+          run: () => this.tree.openCurrentOps(id),
+        },
+        {
           id: 'create-db',
           label: 'Create database…',
           write: true,

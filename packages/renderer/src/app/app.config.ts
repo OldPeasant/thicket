@@ -5,6 +5,7 @@ import {
 } from '@angular/core';
 import { provideRouter, withComponentInputBinding, withHashLocation } from '@angular/router';
 
+import { CurrentOpView } from './admin/currentop';
 import { UsersRolesView } from './admin/users';
 import { AggregationView } from './aggregation';
 import { routes } from './app.routes';
@@ -26,6 +27,7 @@ export const appConfig: ApplicationConfig = {
     provideTabView('aggregation', AggregationView),
     provideTabView('indexes', IndexesView),
     provideTabView('users', UsersRolesView),
+    provideTabView('currentop', CurrentOpView),
     provideTabView('shell', ShellConsole),
     provideTabView('validator', ValidatorView),
   ],

@@ -8,6 +8,7 @@ import {
   type ResultOf,
 } from '@thicket/contract';
 
+import { currentOpTabId, type CurrentOpTabData } from '../admin/currentop/currentop-view';
 import { usersTabId, type UsersTabData } from '../admin/users/users-roles-view';
 import { ApiError, describeError } from '../api/api-error';
 import { ApiService } from '../api/api.service';
@@ -413,6 +414,20 @@ export class SidebarTreeService {
       kind: 'users',
       title: `${db} users`,
       detail: `${profile?.name ?? profileId} / ${db}`,
+      production: profile?.production === true,
+      data: { ...data },
+    });
+  }
+
+  /** Opens (or selects) the current operations tab of a connection. */
+  openCurrentOps(profileId: string): void {
+    const profile = this.profile(profileId);
+    const data: CurrentOpTabData = { profileId };
+    this.workspace.open({
+      id: currentOpTabId(profileId),
+      kind: 'currentop',
+      title: 'Current operations',
+      detail: profile?.name ?? profileId,
       production: profile?.production === true,
       data: { ...data },
     });

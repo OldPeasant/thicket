@@ -1,0 +1,179 @@
+<section class="cop" aria-label="Current operations">
+  <header class="head">
+    <span class="code call" data-testid="currentop-call">{{ call() }}</span>
+    <div class="actions">
+      <label class="auto">
+        Refresh every
+        <select
+          #interval
+          data-testid="currentop-interval"
+          [value]="'' + refreshSecs()"
+          (change)="setRefresh(interval.value)"
+        >
+          @for (secs of intervals; track secs) {
+            <option [value]="'' + secs" [selected]="secs === refreshSecs()">
+              {{ secs === 0 ? 'never' : secs + ' s' }}
+            </option>
+          }
+        </select>
+      </label>
+      <button type="button" class="btn" data-testid="currentop-refresh" (click)="refresh()">
+        Refresh
+      </button>
+    </div>
+  </header>
+
+  <form class="filters" aria-label="Filter operations" (submit)="$event.preventDefault()">
+    <label class="field ns">
+      <span>Namespace</span>
+      <input
+        #nsBox
+        type="search"
+        data-testid="currentop-ns"
+        placeholder="db or db.collection"
+        spellcheck="false"
+        [value]="filter().ns"
+        (change)="setNamespace(nsBox.value)"
+        (keydown.enter)="setNamespace(nsBox.value)"
+      />
+    </label>
+    <label class="field secs">
+      <span>Running at least</span>
+      <span class="unit">
+        <input
+          #secsBox
+          type="number"
+          min="0"
+          step="1"
+          data-testid="currentop-secs"
+          [value]="filter().minSecs || ''"
+          placeholder="0"
+          (change)="setMinSecs(secsBox.value)"
+        />
+        s
+      </span>
+    </label>
+    <label class="field">
+      <span>Type</span>
+      <select
+        #typeBox
+        data-testid="currentop-type"
+        [value]="filter().opType"
+        (change)="setFilter({ opType: typeBox.value })"
+      >
+        <option value="">any</option>
+        @for (t of opTypes; track t) {
+          <option [value]="t" [selected]="t === filter().opType">{{ t }}</option>
+        }
+      </select>
+    </label>
+    <label class="check">
+      <input
+        #allBox
+        type="checkbox"
+        data-testid="currentop-all"
+        [checked]="filter().all"
+        (change)="setFilter({ all: allBox.checked })"
+      />
+      Idle and system operations
+    </label>
+  </form>
+
+  @if (notice(); as n) {
+    <p
+      class="note"
+      [class.error]="n.error"
+      [attr.role]="n.error ? 'alert' : 'status'"
+      data-testid="currentop-notice"
+    >
+      {{ n.text }}
+    </p>
+  }
+
+  @if (error(); as message) {
+    <p class="note error" role="alert" data-testid="currentop-error">{{ message }}</p>
+  } @else if (items(); as list) {
+    @if (list.length === 0) {
+      <p class="note" data-testid="currentop-empty">
+        No operations match. Clear a filter or include idle and system operations.
+      </p>
+    } @else {
+      <div class="scroll">
+        <table class="ops" data-testid="currentop-table">
+          <thead>
+            <tr>
+              <th scope="col" class="num">opid</th>
+              <th scope="col">Type</th>
+              <th scope="col">Namespace</th>
+              <th scope="col" class="time">Running</th>
+              <th scope="col">Client</th>
+              <th scope="col">Command</th>
+              <th scope="col"><span class="sr">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (op of list; track op.opId ?? $index) {
+              <tr
+                data-testid="currentop-row"
+                [attr.data-opid]="op.opIdLabel"
+                [attr.data-ns]="op.ns"
+                [class.idle]="!op.active"
+              >
+                <td class="num code">{{ op.opIdLabel }}</td>
+                <td class="type">
+                  {{ op.op }}
+                  @if (op.waitingForLock) {
+                    <span class="tag" title="Waiting for a lock">lock</span>
+                  }
+                </td>
+                <td class="code ns-cell" [title]="op.ns">{{ op.ns }}</td>
+                <td class="time" [attr.data-level]="durationLevel(op.secs)">
+                  <span class="dur">{{ formatDuration(op.secs) }}</span>
+                  <span class="bar" aria-hidden="true"
+                    ><span class="fill" [style.width.%]="durationShare(op)"></span
+                  ></span>
+                </td>
+                <td class="client">
+                  <span class="code">{{ op.client || op.desc }}</span>
+                  @if (op.appName) {
+                    <span class="app">{{ op.appName }}</span>
+                  }
+                  @if (op.users.length) {
+                    <span class="app">{{ op.users.join(', ') }}</span>
+                  }
+                </td>
+                <td class="code cmd" [title]="op.command">
+                  {{ op.command }}
+                  @if (op.planSummary) {
+                    <span class="plan">{{ op.planSummary }}</span>
+                  }
+                </td>
+                <td class="act">
+                  @if (op.opId !== null && op.active) {
+                    <button
+                      type="button"
+                      class="btn quiet small danger"
+                      data-testid="currentop-kill"
+                      [appWriteControl]="profileId()"
+                      [disabledWhen]="killing() !== null"
+                      [attr.aria-label]="'Kill operation ' + op.opIdLabel"
+                      (click)="kill(op)"
+                    >
+                      Kill…
+                    </button>
+                  }
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+    <p class="foot" aria-live="off">
+      {{ list.length }} {{ list.length === 1 ? 'operation' : 'operations' }}, read at
+      {{ updatedAt() }}
+    </p>
+  } @else {
+    <p class="note" data-testid="currentop-loading">Reading operations…</p>
+  }
+</section>
