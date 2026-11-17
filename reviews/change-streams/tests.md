@@ -4,45 +4,52 @@ Date: 2026-11-17
 
 Task: change-streams - M6 (Could): Watch changes
 
-Scope: `git diff a9dcfb7b7cfc684b2abbb11befe0e654f53623e4..91cbb5a4d16b36931757fdbf578669ea9398c30e` on branch `main`
-(task commits 4fcdf4c3, 7673013e, 91cbb5a4, supplied by the parent worker and confirmed with
-`git log a9dcfb7b..HEAD`), plus the uncommitted test files listed below.
+Scope: `git diff e0c5399eb4626056de8746d47a1ed811c95cad96..8b6b6966825bc17e0e8e1f4a1003bac43db396cd` on
+branch `main` (task commits d1e63bcc, 810ef00c, b7c8e438, 90daa343, 8b6b6966, as given by the parent
+worker and confirmed with `git log e0c5399e..HEAD`), plus the two uncommitted test files listed
+below. This is a re-run after the fixes for review findings CR-1/CR-2 (commit 8b6b6966). It focuses on
+the changed driver-cursor path in `packages/backend/src/admin/watch/watch.ts` and the optional
+`CursorLike` members in `packages/backend/src/connections/manager.ts`. Behaviour that was already
+tested is re-validated, not retested.
 
 Requirements:
 - `tasks/change-streams.md` acceptance criteria and recorded assumptions (raw `$changeStream` +
-  getMore loop, standalone refused via `hello` with `UNSUPPORTED` / `{ reason: 'needsReplicaSet' }`,
-  "open document" via `docs.get`, newest 1000 events)
-- `SPEC.md` M6 "Could" (watch changes), `docs/ARCHITECTURE.md` "Coverage" and conventions
-- Parent worker instructions (missing backend unit tests and sidebar tests)
+  getMore loop on the primary, no auto-resume; standalone refused via `hello` with `UNSUPPORTED` /
+  `{ reason: 'needsReplicaSet' }`; "open document" via `docs.get`)
+- `reviews/change-streams/review.md` CR-1 (getMore/killCursors pinned to the opening server) and CR-2
+  (cancel during the opening aggregate leaves no cursor), `reviews/change-streams/fixes.md`
+- `SPEC.md` M6, `docs/ARCHITECTURE.md` "Watch changes" and "Coverage"
+- Parent worker instructions for this run
 
 ## Test files changed
 
-- `packages/backend/src/admin/watch/watch.spec.ts` (new)
-- `packages/backend/src/admin/watch/handlers.spec.ts` (new)
-- `packages/renderer/src/app/watch/watch-view.spec.ts` (extended)
-- `packages/renderer/src/app/sidebar/sidebar-tree.service.spec.ts` (extended)
-- `packages/renderer/src/app/sidebar/sidebar-tree.spec.ts` (extended)
+- `packages/backend/src/admin/watch/watch.spec.ts` (extended, uncommitted)
+- `test/integration/change-streams.int.spec.ts` (extended, uncommitted)
 
 ## Tests added or updated
 
-Count: 65 (backend 45: `watch.spec.ts` 34, `handlers.spec.ts` 11; renderer 20: `watch-view.spec.ts` 9,
-`sidebar-tree.service.spec.ts` 5, `sidebar-tree.spec.ts` 6). No existing test was changed or removed.
+Count: 3 new tests. No existing test was changed or removed.
+
+- `streamChanges with a driver cursor (runCursorCommand) > a send that throws ends the stream with that error and closes the cursor` (unit)
+- `streamChanges with a driver cursor (runCursorCommand) > keeps going over empty rounds (no events yet) until events arrive` (unit)
+- `streamChanges cursor cleanup on a replica set > runs getMores and the kill through the cursor the aggregate opened, waiting WATCH_AWAIT_MS per round` (integration, real driver on `mongo8rs`). It uses command monitoring to check the following:
+  - exactly one `aggregate` is sent;
+  - every `getMore` continues that one cursor id on the test's dedicated `killed_*` collection, carries `maxTimeMS: 1000` and goes to the aggregate's server address;
+  - an idle stream does not end on empty batches and does not spin: over a 2.5 s idle window it sends at most ceil(idle/1000)+1 getMores;
+  - an event inserted after the idle rounds is still delivered;
+  - the cancel sends exactly one `killCursors` for that cursor id, on the same address, and the server then holds no cursors.
 
 ## Requirement coverage
 
 | Requirement | Tests | Command | Result |
 |---|---|---|---|
-| AC1: insert/update/delete events received in order (integration, real replica set) | `admin.watch on a replica set > receives insert, update and delete events of a collection in order` (+ 5 more in the file: database + pipeline, deployment, invalidate on drop, connection close, invalid params) | `npx vitest run --config test/integration/vitest.config.ts test/integration/change-streams.int.spec.ts` (Podman containers) | Pass (7/7) |
-| AC1 (unit): events of the first batch and every getMore batch go out one by one in server order; ends on a closed cursor (invalidate) | `streamChanges > sends the first batch and each getMore batch in server order, then ends on a closed cursor`; `watchHandlers > streams insert, update and delete in order until the server closes the cursor` | `cd packages/backend && npx vitest run src/admin/watch` | Pass |
-| AC2: standalone server shows a clear 'needs replica set' message (integration) | `admin.watch on a standalone server > refuses with a clear 'needs replica set' message` | integration command above | Pass |
-| AC2 (backend unit): standalone refused before any stream opens, `UNSUPPORTED` + `{ reason: 'needsReplicaSet' }`; server code 40573 / `Location40573` mapped the same way | `assertWatchable > refuses a standalone server (...)` (2 cases), `the message clearly names the replica set requirement...`, `streamChanges > maps the server's $changeStream refusal (...)` (2 cases), `watchHandlers > refuses a standalone server before a stream exists...`, `watchHandlers > maps the server's own replica-set refusal on the aggregate...` | backend command above | Pass |
-| AC2 (renderer): dedicated notice | existing `WatchView > shows a clear 'needs replica set' message for a standalone server` | `cd packages/renderer && npx ng test --include='src/app/watch/**/*.spec.ts' --include='src/app/sidebar/**/*.spec.ts'` | Pass |
-| Command shapes: collection / database (`aggregate: 1`) / deployment (`admin`, `allChangesForCluster`), `fullDocument`, user stages after `$changeStream`, invalid params | `watchCommand > ...` (9 cases), `streamChanges > refuses invalid params before any command is sent`, `watchHandlers > refuses invalid params before asking the server anything` | backend command | Pass |
-| Replica set / sharded / load-balanced pass `hello`; hello errors mapped; cancel during hello | `assertWatchable > lets ... pass` (3), `maps a failing hello...`, `answers CANCELLED ...` (2) | backend command | Pass |
-| Cancel kills the server cursor (`killCursors` on the right namespace), late getMore answers deliver nothing; failing killCursors does not hide the cancel; getMore failure kills the open cursor; lossless EJSON from raw BSON batches | `streamChanges > cancel while a getMore waits...`, `cancel of a database stream kills the cursor on $cmd.aggregate`, `a signal aborted between batches...`, `a cancel before the aggregate answers...`, `a failing killCursors does not hide the cancel`, `a failing getMore ends the stream...`, `decodes raw BSON batches losslessly...`; `watchHandlers > a stream cancel kills the server cursor...`, `closing the connection ends the stream CANCELLED...` | backend command | Pass |
-| Handler wiring: only `admin.watch`, `NOT_CONNECTED`, `INTERNAL` without streaming server, cancelled request opens no stream, aggregate only after the response | `watchHandlers > serves exactly admin.watch`, `answers NOT_CONNECTED...`, `answers INTERNAL...`, `a cancelled request opens no stream`, `returns the stream id, and the stream sends each event as { event } canonical EJSON` | backend command | Pass |
-| Sidebar: "Watch changes" on connection (only while connected), database, collection (disabled on views), read-only profiles allowed; `openWatch` tab id/title/detail/production/data, dedupe | `SidebarTree > watch changes > ...` (6), `SidebarTreeService > openWatch ...` (5) | renderer command | Pass |
-| Watch tab ordering: stale stream events/errors after restart ignored; `docs.get` answers in reverse order (success and failure) keep the newest document; closing the panel while loading; load failure shown; lookup switch while stopped/back on; collapse; no profile -> no start | `WatchView > ignores events and errors of a stream replaced by a restart`, `opening documents in quick succession > ...` (4), `switching the lookup while stopped...`, `switching the lookup back on...`, `collapses an expanded event on a second click`, `does not start without a profile` | renderer command | Pass |
+| AC1: insert/update/delete events received in order (integration, real replica set) | `admin.watch on a replica set > receives insert, update and delete events of a collection in order` (+ database/pipeline, deployment, invalidate on drop, connection close, invalid params) | `npx vitest run --config test/integration/vitest.config.ts test/integration/change-streams.int.spec.ts` (repo root, Podman fixtures `mongo8rs`/`mongo8`) | Pass (10/10, 3 consecutive runs 08:06-08:07) |
+| AC1 (unit): batches delivered in order through the driver cursor, including after empty rounds; ends on a closed cursor (invalidate) | `streamChanges with a driver cursor > runs the stream as one pinned raw cursor ... in order`, `keeps going over empty rounds ...`, plus the plain-command suite `streamChanges > sends the first batch and each getMore batch in server order ...` | `cd packages/backend && npx vitest run src/admin/watch` | Pass (2 files, 59 tests) |
+| AC2: standalone server shows a clear 'needs replica set' message | integration `admin.watch on a standalone server > refuses with a clear 'needs replica set' message`; unit `assertWatchable > refuses a standalone ...`, `streamChanges with a driver cursor > maps the server's $changeStream refusal to UNSUPPORTED needsReplicaSet`; renderer `WatchView > shows a clear 'needs replica set' message for a standalone server` | integration and backend commands above; renderer: `cd packages/renderer && npx ng test --include='src/app/watch/**/*.spec.ts' --include='src/app/sidebar/**/*.spec.ts'` | Pass |
+| CR-1: getMores and the kill go through the cursor the aggregate opened (pinned), each getMore waits `WATCH_AWAIT_MS` | new integration `runs getMores and the kill through the cursor the aggregate opened ...`; unit `runs the stream as one pinned raw cursor ...` (exactly one `runCursorCommand` with `{ raw: true }`, no separate commands) | integration + backend commands | Pass |
+| CR-2: cancel during the opening aggregate / during a getMore leaves no server cursor | integration `kills the cursor after a cancel while a getMore waits`, `kills the cursor after a cancel while the opening aggregate is in flight`; unit `cancel while a getMore waits ...`, `a cancel while the opening aggregate is in flight closes the cursor once it opened`, `a cancelled round that then fails still closes the cursor` | integration + backend commands | Pass |
+| Cursor closed on every other exit: server error, failing getMore, failing close, throwing `send`, abort between rounds | unit `maps the server's $changeStream refusal ...`, `a failing getMore ends the stream with the mapped error and closes the cursor`, `a failing close does not hide the result`, `a send that throws ...` (new), `a signal aborted between rounds ...` | backend command | Pass |
+| Handler wiring, sidebar entries, watch tab state (unchanged since the previous report) | `handlers.spec.ts` (11), renderer watch/sidebar specs | backend + renderer commands | Pass |
 
 ## Focused test execution
 
@@ -52,120 +59,136 @@ Command:
 
 Result:
 
-Pass (2 files, 45 tests, exit 0)
+Pass (2 files, 59 tests, 08:06)
 
 Command:
 
-`cd packages/renderer && npx ng test --include='src/app/watch/**/*.spec.ts' --include='src/app/sidebar/**/*.spec.ts'`
+`npx vitest run --config test/integration/vitest.config.ts test/integration/change-streams.int.spec.ts` (repo root, Podman)
 
 Result:
 
-Pass (4 files, 243 tests, exit 0)
+Pass (10 tests; 3 consecutive runs after the final test edit, at 08:06:32, 08:06:52 and 08:07:08, all 10/10).
+The first run of the new integration test failed because of a test bug: it read the cursor id from
+the `commandSucceeded` reply, which is not a plain document for a raw cursor. I fixed the test to
+take the id from the first `getMore`. No production problem was involved.
 
 Command:
 
-`npx vitest run --config test/integration/vitest.config.ts test/integration/change-streams.int.spec.ts`
+`cd packages/renderer && npx ng test --include='src/app/watch/**/*.spec.ts' --include='src/app/sidebar/**/*.spec.ts'` (run with coverage, see below)
 
 Result:
 
-Pass (7 tests, 2026-11-17 07:39:55-07:40:04 +01:00, Podman)
+Pass (4 files, 243 tests)
+
+`npx prettier --check` and `npx eslint` on both changed test files: Pass.
 
 ## Full test execution
 
 Command:
 
-`npm run check` (lint, type check, all unit tests)
+`npm run check` (repo root: eslint, prettier, tsc for all workspaces, root vitest, renderer `ng test`)
 
 Result:
 
-Pass (exit 0; root vitest 93 files / 4816 tests, renderer 112 files / 3754 tests in the logged run)
+Pass (completed 08:12; root vitest 94 files / 4915 tests, renderer 113 files / 3779 tests; the
+`&&` chain ran to the end and the tool reported no error)
 
 ## .taskcheck
 
 Result:
 
-Pass (`.taskcheck` runs `npm run check`; run after the final test edits, exit 0)
+Pass. `.taskcheck` runs `npm run check` when `package.json` exists, and the run above passed. Running
+`sh .taskcheck` directly needed sandbox approval, so the equivalent command was run instead.
 
 ## Bugs found
 
-None. No production defect was found; no test fails.
+None. No production defect found; no test fails.
 
 ## Coverage
 
 Status: verified
 
 Metric: whole-file coverage of task-changed production files.
-Changed-line coverage: not measured as a separate number. For the wholly new files (`watch.ts`,
-`handlers.ts`, `watch-view.ts`, `watch.model.ts`) changed lines equal the whole file. For the
-modified files, inspecting the provider's uncovered locations shows no uncovered statement or branch
-in the added lines (`sidebar-tree.ts` 424-429, 467-471, 496-501; `sidebar-tree.service.ts` is 100%).
+Changed-line coverage: `watch.ts` and `handlers.ts` are new in this task, so their changed lines are
+the whole file (`watch.ts` lines 77/77). The `manager.ts` change adds only optional interface
+members, so it has no executable lines. The renderer files are unchanged since the previous run.
+The earlier report found no uncovered location in their added lines; that inspection still holds
+because the reports are identical (same hashes). No separate changed-line tool was run.
 
 Evidence:
 - Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: `change-streams`;
-  base `a9dcfb7b7cfc684b2abbb11befe0e654f53623e4`; HEAD `91cbb5a4d16b36931757fdbf578669ea9398c30e`;
-  commits 4fcdf4c3, 7673013e, 91cbb5a4 from the parent worker, matching `git log a9dcfb7b..HEAD`
-  and the task's `touches`.
-- Source/test snapshot identifier (including uncommitted inputs): sha256 of the files at measurement
-  time: `watch.ts` 742e0fc6..., `handlers.ts` a25a437f..., `watch.spec.ts` 38749c42...,
-  `handlers.spec.ts` (backend) 94245dcf..., `watch-view.ts` 79af91a3..., `watch.model.ts` af2b84eb...,
-  `watch-view.spec.ts` 9af1891a..., `watch.model.spec.ts` e889ecb1..., `sidebar-tree.ts` d357367f...,
-  `sidebar-tree.service.ts` 971da2f1..., `sidebar-tree.spec.ts` 3ad94719...,
-  `sidebar-tree.service.spec.ts` 6125d638...; combined hash of the listing after the runs
-  52880ce1... (unchanged during measurement).
-- Exact included files; renamed/deleted/excluded files and reasons: included
-  `packages/backend/src/admin/watch/watch.ts`, `packages/backend/src/admin/watch/handlers.ts`,
-  `packages/renderer/src/app/watch/watch-view.ts`, `packages/renderer/src/app/watch/watch.model.ts`,
-  `packages/renderer/src/app/sidebar/sidebar-tree.ts`, `packages/renderer/src/app/sidebar/sidebar-tree.service.ts`.
-  Excluded: `admin/watch/index.ts`, `renderer/.../watch/index.ts`, `backend/src/index.ts` (re-export
-  barrels, no behavior); `layout/workspace.service.ts` (type-only union member); `app.config.ts` and
-  `backend/src/server/backend.ts` (one registration line each in large pre-existing files: whole-file
-  numbers would describe unrelated code; the backend registration is exercised by the integration
-  test through the real backend); `watch-view.html`/`.css` (template/style, exercised by the
-  component tests); `docs/ARCHITECTURE.md` (docs); `test/integration/...` (test). No renames or deletions.
-- Provider/version, command, working directory, and test selection: Vitest 5.1.0 with v8
-  (`@vitest/coverage-v8`). Backend, in `packages/backend`:
-  `npx vitest run src/admin/watch --coverage --coverage.include='src/admin/watch/watch.ts' --coverage.include='src/admin/watch/handlers.ts' --coverage.reportsDirectory=coverage/change-streams-final --coverage.reporter=json-summary --coverage.reporter=json --coverage.reporter=text-summary`.
-  Renderer, in `packages/renderer`:
+  base `e0c5399eb4626056de8746d47a1ed811c95cad96`; HEAD `8b6b6966825bc17e0e8e1f4a1003bac43db396cd`;
+  commits d1e63bcc, 810ef00c, b7c8e438, 90daa343, 8b6b6966 from the parent, matching
+  `git log e0c5399e..HEAD` and the task's `touches`.
+- Source/test snapshot identifier (including uncommitted inputs): sha256 identical before and after
+  all runs: `watch.ts` 8133e9ea8a13..., `handlers.ts` a25a437f4f72..., `manager.ts` 1012982831d5...,
+  `watch.spec.ts` (uncommitted) b8a23ffcd7ad..., `handlers.spec.ts` 94245dcf7a64...,
+  `change-streams.int.spec.ts` (uncommitted) 301ec7b805cf.... Renderer sources are unchanged at HEAD.
+  `git status`: only the two test files are modified.
+- Exact included files:
+  - `packages/backend/src/admin/watch/watch.ts`
+  - `packages/backend/src/admin/watch/handlers.ts`
+  - `packages/renderer/src/app/watch/watch-view.ts`
+  - `packages/renderer/src/app/watch/watch.model.ts`
+  - `packages/renderer/src/app/sidebar/sidebar-tree.ts`
+  - `packages/renderer/src/app/sidebar/sidebar-tree.service.ts`
+- Excluded files and reasons:
+  - `connections/manager.ts`: type-only change, no executable code;
+  - the `index.ts` barrels: re-exports only;
+  - `backend.ts` and `app.config.ts`: one registration line each in large pre-existing files; the backend registration is exercised by the integration test;
+  - `workspace.service.ts`: type union member;
+  - `watch-view.html`/`.css`: template and styles;
+  - docs and tests.
+  - No renames or deletions.
+- Provider/version, command, working directory, and test selection: Vitest 5.1.0 with
+  `@vitest/coverage-v8`. Backend in `packages/backend`:
+  `npx vitest run src/admin/watch --coverage --coverage.include='src/admin/watch/watch.ts' --coverage.include='src/admin/watch/handlers.ts' --coverage.reportsDirectory=coverage/change-streams-r3 --coverage.reporter=json-summary --coverage.reporter=json --coverage.reporter=text`.
+  Renderer in `packages/renderer`:
   `npx ng test --include='src/app/watch/**/*.spec.ts' --include='src/app/sidebar/**/*.spec.ts' --coverage --coverage-include='src/app/watch/watch-view.ts' --coverage-include='src/app/watch/watch.model.ts' --coverage-include='src/app/sidebar/sidebar-tree.ts' --coverage-include='src/app/sidebar/sidebar-tree.service.ts' --coverage-reporters=json-summary --coverage-reporters=json`.
-- Run start/completion time and exit status: backend 2026-11-17 07:43:28-07:43:29 +01:00, exit 0
-  (45 tests pass); renderer 07:43:36-07:43:48 +01:00, exit 0.
-- Generated report paths and report hashes/run identifier (git-ignored):
-  `packages/backend/coverage/change-streams-final/coverage-summary.json` sha256 41a4bcee...,
-  `coverage-final.json` 88a1add3...; `packages/renderer/coverage/renderer/coverage-summary.json`
-  sha256 c681a73c..., `coverage-final.json` 39b127b8...
-- Evidence outputs are fresh and inputs stayed unchanged: backend into a new directory created by
-  this run (07:43 mtimes); renderer report regenerated by the run (07:43 mtimes, hashes differ from
-  the earlier 07:40 run); source/test hashes identical before and after.
-- Final run after latest test additions and production fixes: yes (no production changes; last test
-  edit preceded both runs).
+  Unit tests only: the integration run is not instrumented, because the project's coverage setup covers the workspace unit runs.
+- Run start/completion time and exit status: backend 08:07:35-08:07:37 +01:00, 59 tests pass, exit 0;
+  renderer 08:12:43-08:12:58 +01:00, 243 tests pass, exit 0.
+- Generated report paths and report hashes (git-ignored):
+  - `packages/backend/coverage/change-streams-r3/coverage-summary.json` sha256 8e9dce694925...
+  - `packages/backend/coverage/change-streams-r3/coverage-final.json` afdad5388...
+  - `packages/renderer/coverage/renderer/coverage-summary.json` c681a73cd85e...
+  - `packages/renderer/coverage/renderer/coverage-final.json` 39b127b8885f...
+  - The renderer reports are byte-identical to the previous run's, as expected for unchanged code and tests.
+- Evidence outputs are fresh and inputs stayed unchanged: the backend report went into a new directory
+  created by this run (08:07 mtimes). The renderer report was rewritten by this run (08:12:58 mtimes).
+  The input hashes were the same before and after.
+- Final run after latest test additions and production fixes: yes. The fix commit 8b6b6966 and the
+  last test edit both came before these runs.
 
 Values below use covered/total (percentage).
 
 | Changed file | Statements | Branches | Functions | Lines |
 |---|---:|---:|---:|---:|
-| `packages/backend/src/admin/watch/watch.ts` | 56/56 (100%) | 30/30 (100%) | 10/10 (100%) | 49/49 (100%) |
+| `packages/backend/src/admin/watch/watch.ts` | 90/90 (100%) | 47/48 (97.9%) | 18/18 (100%) | 77/77 (100%) |
 | `packages/backend/src/admin/watch/handlers.ts` | 12/12 (100%) | 2/2 (100%) | 5/5 (100%) | 10/10 (100%) |
 | `packages/renderer/src/app/watch/watch-view.ts` | 109/113 (96.5%) | 61/70 (87.1%) | 29/29 (100%) | 93/93 (100%) |
 | `packages/renderer/src/app/watch/watch.model.ts` | 61/62 (98.4%) | 73/81 (90.1%) | 12/12 (100%) | 48/49 (98.0%) |
 | `packages/renderer/src/app/sidebar/sidebar-tree.ts` | 405/414 (97.8%) | 236/272 (86.8%) | 97/97 (100%) | 347/348 (99.7%) |
 | `packages/renderer/src/app/sidebar/sidebar-tree.service.ts` | 245/245 (100%) | 117/117 (100%) | 70/70 (100%) | 198/198 (100%) |
-| **Aggregate (summed counters, 6 measured files; exclusions listed above)** | 888/902 (98.4%) | 519/572 (90.7%) | 223/223 (100%) | 745/747 (99.7%) |
+| **Aggregate (summed counters, 6 measured files; exclusions listed above)** | 922/936 (98.5%) | 536/590 (90.8%) | 231/231 (100%) | 773/775 (99.7%) |
 
 | File and uncovered lines/branch locations | Required behavior or risk | Action/test added or reason left uncovered |
 |---|---|---|
-| `watch-view.ts:143,148` (stale-subscription `return` in `complete`/`error`) | Late completion/error of a replaced stream | Defensive: an unsubscribed rxjs subscription never calls back; the observable behavior is covered by `ignores events and errors of a stream replaced by a restart`. Left uncovered. |
-| `watch-view.ts:154` (`subscription.closed` true arm), `:137` (onStart of a replaced stream) | Synchronous settle during subscribe / start after replacement | `ApiService.stream` answers asynchronously; not reachable with the real service. Left uncovered. |
-| `watch-view.ts:189` (non-openable entry), `:200` (aborted after a resolved `docs.get`) | Guard for events without `documentKey._id`; abort race | The template only offers "Open" for openable entries; an aborted request rejects (CANCELLED) and is covered via the catch path in the reverse-order tests. Left uncovered. |
-| `watch-view.ts:94,98,102` (`''` arms of computed messages) | Empty-string fallbacks | Trivial. Left uncovered. |
-| `watch.model.ts:73` (fallback when a value cannot be printed as shell syntax), branches 87-116 (alternative wallTime formats, invalid dates, non-array `removedFields`, truncation) | Robustness for malformed events | Low risk display fallbacks; existing `keeps an unreadable event as a row` covers the main fallback. Left uncovered. |
-| `sidebar-tree.ts` 307, 335-371, 544-810 (36 branches, 9 statements) | Pre-existing sidebar code | Outside this task's change; the added watch menu entries have no uncovered location. |
+| `watch.ts:130` (false arm of `hasNext()` in the fake-only fallback for cursors without `tryNext`) | None for the product: the real driver cursor always has `tryNext`, and that path (including empty rounds) is covered by unit and integration tests | Left uncovered: this is test-fake glue, not production behaviour. |
+| `watch-view.ts:137,143,148,154,189,200,94,98,102`; `watch.model.ts:73` and branches 87-116 | Defensive stale-subscription guards, unreachable synchronous settle, empty-string fallbacks, display fallbacks for malformed events | Unchanged since the previous report; justified there. The observable behaviour is covered by the component tests. Left uncovered. |
+| `sidebar-tree.ts` 307, 335-371, 544-810 | Pre-existing sidebar code | Outside this task's change; the added watch menu entries have no uncovered location. |
 
 ## Unable to test
 
-- Running the watch tab end-to-end in the browser/Electron against a real replica set was not
-  done: neither acceptance criterion names an e2e run, and the criteria are covered by the
-  integration test (backend) plus component tests (renderer notice). No follow-up required for the criteria.
-- Automatic resume after failover is deliberately not implemented (recorded assumption), so it is not tested.
+- Pinning on a sharded cluster with several mongos, or in load-balanced mode (the actual CR-1
+  scenario): there is no such fixture. The integration test checks the mechanism on the replica set:
+  every getMore and the kill continue the aggregate's cursor id through the driver cursor, on the
+  same server address. The driver's `RunCommandCursor` pins later operations to the server that
+  answered (`getMore` uses `this.server`). Follow-up is only needed if a sharded or load-balanced
+  fixture is added.
+- Browser/Electron end-to-end run of the watch tab: neither criterion names one (unchanged from the
+  previous report).
+- Automatic resume after failover: deliberately not implemented (recorded assumption).
 
 ## Summary
 

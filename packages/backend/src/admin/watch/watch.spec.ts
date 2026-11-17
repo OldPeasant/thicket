@@ -719,6 +719,42 @@ describe('streamChanges with a driver cursor (runCursorCommand)', () => {
     expect(calls.at(-1)).toBe('close');
   });
 
+  it('a send that throws ends the stream with that error and closes the cursor', async () => {
+    const { client, calls } = cursorClient([
+      { docs: [event(1)], id: long(9) },
+      { docs: [event(2)], id: long(9) },
+    ]);
+    const failure = new Error('port closed');
+    await expect(
+      streamChanges(
+        client,
+        collParams,
+        () => {
+          throw failure;
+        },
+        new AbortController().signal,
+      ),
+    ).rejects.toBe(failure);
+    // No further getMore after the failed delivery; the cursor is closed before the call settles.
+    expect(calls).toEqual([`setMaxTimeMS ${WATCH_AWAIT_MS}`, 'tryNext', 'close']);
+  });
+
+  it('keeps going over empty rounds (no events yet) until events arrive', async () => {
+    const { client, calls } = cursorClient([
+      { docs: [], id: long(11) },
+      { docs: [], id: long(11) },
+      { docs: [], id: long(11) },
+      { docs: [event(1)], id: long(0) },
+    ]);
+    const events: string[] = [];
+    await expect(
+      streamChanges(client, collParams, (e) => events.push(e), new AbortController().signal),
+    ).resolves.toBe(1);
+    expect(events.map(parse).map((e) => e['operationType'])).toEqual(['insert']);
+    expect(calls.filter((c) => c === 'tryNext')).toHaveLength(4);
+    expect(calls.at(-1)).toBe('close');
+  });
+
   it('falls back to hasNext for cursors without tryNext', async () => {
     const { client, calls } = cursorClient(
       [

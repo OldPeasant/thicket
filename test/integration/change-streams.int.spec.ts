@@ -11,6 +11,7 @@ import {
   connHandlers,
   serve,
   streamChanges,
+  WATCH_AWAIT_MS,
   watchHandlers,
 } from '@thicket/backend';
 import {
@@ -368,6 +369,76 @@ describe('streamChanges cursor cleanup on a replica set', () => {
       }
     }
     await noCursorsLeft();
+  });
+
+  it('runs getMores and the kill through the cursor the aggregate opened, waiting WATCH_AWAIT_MS per round', async () => {
+    interface Seen {
+      name: string;
+      command: Document;
+      address: string;
+    }
+    const started: Seen[] = [];
+    const onStart = (event: { commandName: string; command: Document; address: string }) => {
+      if (['aggregate', 'getMore', 'killCursors'].includes(event.commandName)) {
+        started.push({ name: event.commandName, command: event.command, address: event.address });
+      }
+    };
+    client.on('commandStarted', onStart);
+    const controller = new AbortController();
+    const got: Document[] = [];
+    try {
+      const done = streamChanges(client, ns, (e) => got.push(parse(e)), controller.signal).catch(
+        (error: unknown) => error,
+      );
+      // An idle stream: empty rounds must neither end it nor spin (each getMore waits ~1 s).
+      const idleFrom = Date.now();
+      await new Promise((resolve) => setTimeout(resolve, 2_500));
+      const idleMs = Date.now() - idleFrom;
+      const idleGetMores = started.filter((s) => s.name === 'getMore').length;
+      expect(got).toEqual([]);
+      expect(idleGetMores).toBeGreaterThanOrEqual(1);
+      expect(idleGetMores).toBeLessThanOrEqual(Math.ceil(idleMs / WATCH_AWAIT_MS) + 1);
+
+      // After the empty rounds the stream still delivers.
+      const marker = `pinned-${run}`;
+      await direct.db(ns.db).collection(ns.coll).insertOne({ marker });
+      const deadline = Date.now() + 10_000;
+      while (!got.some((c) => c['fullDocument']?.['marker'] === marker) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(got.map((c) => c['fullDocument']?.['marker'])).toContain(marker);
+
+      controller.abort();
+      expect(await done).toMatchObject({ code: 'CANCELLED' });
+      await noCursorsLeft();
+    } finally {
+      client.off('commandStarted', onStart);
+    }
+
+    const aggregates = started.filter((s) => s.name === 'aggregate');
+    const getMores = started.filter((s) => s.name === 'getMore');
+    const kills = started.filter((s) => s.name === 'killCursors');
+    expect(aggregates).toHaveLength(1);
+    expect(aggregates[0]?.command['aggregate']).toBe(ns.coll);
+    expect(aggregates[0]?.command['pipeline']?.[0]).toHaveProperty('$changeStream');
+    // Every getMore continues the one cursor the aggregate opened, with the await time, on its
+    // server (one aggregate, so the cursor id of the first getMore is that cursor).
+    expect(getMores.length).toBeGreaterThan(1);
+    const id = BSON.Long.fromValue(getMores[0]?.command['getMore'] as BSON.Long);
+    expect(id.isZero()).toBe(false);
+    for (const getMore of getMores) {
+      expect(BSON.Long.fromValue(getMore.command['getMore']).equals(id)).toBe(true);
+      expect(getMore.command['collection']).toBe(ns.coll);
+      expect(getMore.command['maxTimeMS']).toBe(WATCH_AWAIT_MS);
+      expect(getMore.address).toBe(aggregates[0]?.address);
+    }
+    // The cancel closes exactly that cursor, on that server.
+    expect(kills).toHaveLength(1);
+    expect(kills[0]?.command['killCursors']).toBe(ns.coll);
+    expect(
+      (kills[0]?.command['cursors'] as unknown[]).map((c) => BSON.Long.fromValue(c as BSON.Long)),
+    ).toEqual([id]);
+    expect(kills[0]?.address).toBe(aggregates[0]?.address);
   });
 });
 
