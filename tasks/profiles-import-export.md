@@ -13,7 +13,8 @@ Import Compass's exported connections JSON (plain and encrypted-without-passphra
 ## Acceptance criteria
 - [x] Unit tests with Compass export fixtures (write them from Compass's documented format; record source with `assume`)
   - verified (2026-11-17 04:17+0100 by dell26/agent-2): cd apps/desktop && npx vitest run src/profiles/import -> 74 passed (Compass plain/encrypted fixtures in src/profiles/import/fixtures; source recorded via assume)
-- [ ] Export file contains no password/passphrase/token (test greps the output)
+- [x] Export file contains no password/passphrase/token (test greps the output)
+  - verified (2026-11-17 04:17+0100 by dell26/agent-2): cd apps/desktop && npx vitest run src/profiles/import -t 'without secrets' -> 2 passed (greps export output for passwords/passphrases/tokens); e2e test also greps the exported file
 - [ ] e2e: import → profiles appear in the sidebar
 
 ## Notes
