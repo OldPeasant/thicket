@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "task": "m1-e2e",
+  "reviewed_revision": "aa212b676132096eb77c88869ab2b8503ed4962f",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/m1-e2e/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/m1-e2e/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/m1-e2e/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "demo document _id generated after the bulk seed, so step 4 proves the sort"
+    },
+    {
+      "id": "CR-2",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "step-4 table screenshot on page 3; new step-2-production.png"
+    },
+    {
+      "id": "CR-3",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "follow-up task ui-polish-m1 created for the unrounded latency and the status bar"
+    },
+    {
+      "id": "TW-1",
+      "source": "test-writer",
+      "severity": "Low",
+      "disposition": "fixed",
+      "note": "the total > 100 filter is proven by an exact count equal to the driver's count"
+    }
+  ],
+  "validation": [
+    { "command": "npm run test:e2e -- m1", "result": "pass" },
+    { "command": "npx eslint test/e2e/m1 --max-warnings 0", "result": "pass" },
+    { "command": "npx prettier --check test/e2e/m1", "result": "pass" },
+    { "command": "npm run check", "result": "pass" }
+  ]
+}
