@@ -139,6 +139,11 @@ async function lastEval(worker: FakeWorker, count = 1) {
   return worker.of('eval').at(-1) as Extract<ToWorker, { type: 'eval' }>;
 }
 
+/** The host's pending opens by profile (private; checked for leaks). */
+function openingOf(host: ShellHost): Map<string, Set<AbortController>> {
+  return (host as unknown as { opening: Map<string, Set<AbortController>> }).opening;
+}
+
 afterEach(() => {
   vi.useRealTimers();
 });
@@ -1257,6 +1262,116 @@ describe('ShellHost.close / closeProfile / closeAll', () => {
     expect(error.message).not.toContain('connection was closed');
     expect(worker.terminated).toBe(1);
     await host.closeProfile('p1');
+  });
+
+  it('closeProfile cancels every pending open of the profile and terminates each worker', async () => {
+    const pending = [new FakeWorker(false), new FakeWorker(false), new FakeWorker(false)];
+    const { host } = setup({ workers: pending });
+    const openings = pending.map(() => host.open('p1', CONFIG, undefined));
+    await vi.waitFor(() => {
+      for (const worker of pending) expect(worker.of('open')).toHaveLength(1);
+    });
+    await host.closeProfile('p1');
+    for (const opening of openings) {
+      const error = await rejection(opening);
+      expect(error.code).toBe('CANCELLED');
+      expect(error.message).toContain('connection was closed');
+    }
+    for (const worker of pending) expect(worker.terminated).toBe(1);
+    for (const worker of pending) worker.reply({ type: 'opened', db: 'test' });
+    await Promise.resolve();
+    expect(host.sessionIds()).toEqual([]);
+    expect(openingOf(host).size).toBe(0);
+  });
+
+  it('closeProfile at any point after the worker answered leaves no session and no live worker', async () => {
+    // The abort can land before `abortable` saw the answer, after it (the open's continuation has
+    // not run yet), or after the open registered its session: every case ends closed.
+    let lateAborts = 0;
+    for (let ticks = 0; ticks <= 8; ticks++) {
+      const worker = new FakeWorker(false);
+      const { host, logs } = setup({ workers: [worker] });
+      const opening = host.open('p1', CONFIG, undefined);
+      opening.catch(() => undefined);
+      await vi.waitFor(() => expect(worker.of('open')).toHaveLength(1));
+      worker.reply({ type: 'opened', db: 'test' });
+      for (let i = 0; i < ticks; i++) await Promise.resolve();
+      await host.closeProfile('p1');
+      const outcome = await opening.then(
+        () => 'opened' as const,
+        (error: unknown) => error as RpcError,
+      );
+      if (outcome !== 'opened') {
+        expect(outcome.code).toBe('CANCELLED');
+        expect(outcome.message).toContain('connection was closed');
+        // No "open failed" log: the worker had answered, the continuation saw the abort.
+        if (!logs.some((line) => line.includes('open failed'))) lateAborts++;
+      }
+      expect(worker.terminated, `ticks=${ticks}`).toBeGreaterThanOrEqual(1);
+      expect(host.sessionIds(), `ticks=${ticks}`).toEqual([]);
+      expect(openingOf(host).size, `ticks=${ticks}`).toBe(0);
+    }
+    // At least one timing hit the window between the answer and the open's continuation.
+    expect(lateAborts).toBeGreaterThan(0);
+  });
+
+  it('a new open of the profile started while a cancelled one settles is still tracked', async () => {
+    const first = new FakeWorker(false);
+    const second = new FakeWorker(false);
+    const { host } = setup({ workers: [first, second] });
+    const firstOpening = host.open('p1', CONFIG, undefined);
+    await vi.waitFor(() => expect(first.of('open')).toHaveLength(1));
+    const closing = host.closeProfile('p1');
+    // Reopened before the cancelled open's cleanup ran.
+    const secondOpening = host.open('p1', CONFIG, undefined);
+    expect((await rejection(firstOpening)).code).toBe('CANCELLED');
+    await closing;
+    await vi.waitFor(() => expect(second.of('open')).toHaveLength(1));
+    // The first open's cleanup must not have dropped the second one's registration.
+    expect(openingOf(host).get('p1')?.size).toBe(1);
+    await host.closeProfile('p1');
+    const error = await rejection(secondOpening);
+    expect(error.code).toBe('CANCELLED');
+    expect(error.message).toContain('connection was closed');
+    expect(second.terminated).toBe(1);
+    expect(host.sessionIds()).toEqual([]);
+  });
+
+  it('pending opens are forgotten once they settle (opened, failed or cancelled)', async () => {
+    const failing = new FakeWorker(false);
+    const hanging = new FakeWorker(false);
+    const { host } = setup({ workers: [new FakeWorker(), failing, hanging] });
+    await host.open('p1', CONFIG, undefined);
+    expect(openingOf(host).size).toBe(0);
+    const failed = host.open('p2', CONFIG, undefined);
+    await vi.waitFor(() => expect(failing.of('open')).toHaveLength(1));
+    failing.reply({
+      type: 'openFailed',
+      error: { name: 'MongoServerError', message: 'Authentication failed', code: 18 },
+    });
+    expect((await rejection(failed)).code).not.toBe('CANCELLED');
+    expect(openingOf(host).size).toBe(0);
+    const controller = new AbortController();
+    const opening = host.open('p3', CONFIG, undefined, controller.signal);
+    await vi.waitFor(() => expect(hanging.of('open')).toHaveLength(1));
+    expect([...openingOf(host).keys()]).toEqual(['p3']);
+    controller.abort();
+    await rejection(opening);
+    expect(openingOf(host).size).toBe(0);
+  });
+
+  it('an open whose signal is already aborted answers CANCELLED without posting', async () => {
+    const worker = new FakeWorker();
+    const { host } = setup({ workers: [worker] });
+    const controller = new AbortController();
+    controller.abort();
+    const error = await rejection(host.open('p1', CONFIG, undefined, controller.signal));
+    expect(error.code).toBe('CANCELLED');
+    expect(error.message).not.toContain('connection was closed');
+    expect(worker.posted).toEqual([]);
+    expect(worker.terminated).toBe(1);
+    expect(host.sessionIds()).toEqual([]);
+    expect(openingOf(host).size).toBe(0);
   });
 
   it('closes the client in the worker, then terminates it; the id is gone', async () => {
