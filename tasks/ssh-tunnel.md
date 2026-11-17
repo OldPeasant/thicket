@@ -5,7 +5,7 @@ owner: dell26/agent-2
 deps: [conn-manager]
 touches: [packages/backend/src/ssh,test/integration/fixtures/ssh]
 prio: 2
-lease_until: 2026-11-17T02:24:14Z
+lease_until: 2026-11-17T02:29:14Z
 extended: 
 releases: 1
 ---
@@ -19,6 +19,7 @@ ssh2-based tunnels with password, private key (+passphrase) or SSH agent; known_
   - verified (2026-11-17 03:07+0100 by dell26/agent-2): npm run test:int -- ssh -> 'a changed host key → refused with a clear error, without asking' passed (15/15)
 - [x] Tunnels closed when the connection closes (no leaked sockets: test checks server connection count)
   - verified (2026-11-17 03:07+0100 by dell26/agent-2): npm run test:int -- ssh -> 'closing the connection closes the tunnel: no SSH session, no member connection left' (checks sshd/mongod connection counts) and 'a failed driver connect closes its tunnel too' passed (15/15); unit test for CR-8 socket destroy on unresponsive peer passes
+  - verified (2026-11-17 03:08+0100 by dell26/agent-2): npm run test:int -- ssh -> 'closing the connection closes the tunnel: no SSH session, no member connection left' (checks sshd/mongod connection counts) and 'a failed driver connect closes its tunnel too' passed (15/15); unit test for CR-8 socket destroy on unresponsive peer passes
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
