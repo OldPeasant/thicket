@@ -4,7 +4,7 @@ import {
   createServer,
   type AddressInfo,
   type Server as NetServer,
-  type Socket,
+  Socket,
 } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -756,6 +756,74 @@ describe('openSshTunnel: forwarding and lifetime', () => {
     await vi.waitFor(async () => expect(await portIsClosed(tunnel.proxy.proxyPort)).toBe(true), {
       timeout: 3_000,
     });
+  });
+
+  it('close() with a peer that stopped answering destroys the SSH socket after 1 s (CR-8)', async () => {
+    const ssh = await startSshServer();
+    // A relay in front of the SSH server that can go silent: it then neither forwards nor answers
+    // the client's FIN (allowHalfOpen), like a peer behind a dead network path.
+    const relayed: Socket[] = [];
+    const upstreams: Socket[] = [];
+    const relay = createServer({ allowHalfOpen: true }, (socket) => {
+      relayed.push(socket);
+      socket.on('error', () => undefined);
+      const upstream = connect(ssh.port, '127.0.0.1');
+      upstreams.push(upstream);
+      upstream.on('error', () => undefined);
+      socket.pipe(upstream).pipe(socket);
+    });
+    const relayPort = await listen(relay);
+    cleanups.push(
+      () =>
+        new Promise<void>((resolve) => {
+          for (const socket of [...relayed, ...upstreams]) socket.destroy();
+          relay.close(() => resolve());
+        }),
+    );
+    // The client's TCP socket to the relay (ssh2 creates it internally with `new Socket()`).
+    const clientSockets: Socket[] = [];
+    const realConnect = Socket.prototype.connect;
+    const spy = vi.spyOn(Socket.prototype, 'connect').mockImplementation(function (
+      this: Socket,
+      ...args: unknown[]
+    ) {
+      clientSockets.push(this);
+      return (realConnect as (...a: unknown[]) => Socket).apply(this, args);
+    });
+    cleanups.push(() => spy.mockRestore());
+
+    const { env, log } = environment(freshKnownHosts());
+    const onClosed = vi.fn();
+    const tunnel = await openSshTunnel(settings(relayPort), { sshPassword: PASSWORD }, env, {
+      onClosed,
+    });
+    spy.mockRestore();
+    const sshSocket = clientSockets.find((socket) => socket.remotePort === relayPort);
+    expect(sshSocket).toBeDefined();
+
+    // The peer goes silent: nothing is forwarded any more and the relay never ends its side.
+    for (const socket of relayed) {
+      socket.unpipe();
+      socket.on('data', () => undefined);
+    }
+    for (const upstream of upstreams) {
+      upstream.unpipe();
+      upstream.destroy();
+    }
+
+    const started = Date.now();
+    await tunnel.close();
+    const took = Date.now() - started;
+
+    // `close` never came from ssh2, so close() waited for its 1 s fallback ...
+    expect(took).toBeGreaterThanOrEqual(900);
+    expect(took).toBeLessThan(3_000);
+    // ... and then destroyed the half-closed socket instead of leaving it open.
+    expect(sshSocket?.destroyed).toBe(true);
+    expect(log).toHaveBeenCalledWith(expect.stringMatching(/: closed$/));
+    // The owner's own close() is not a lost session.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(onClosed).not.toHaveBeenCalled();
   });
 });
 
