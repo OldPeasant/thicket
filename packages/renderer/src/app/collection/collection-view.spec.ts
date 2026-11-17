@@ -1616,6 +1616,183 @@ describe('CollectionView', () => {
     });
   });
 
+  describe('Schema (schema-analysis)', () => {
+    const analyses = () =>
+      fake.requestsFor('schema.analyze').map((r: Request) => r.params as Record<string, unknown>);
+    const filterValue = () => get<HTMLInputElement>('query-filter').value;
+    const pick = (path: string, testid: 'schema-example' | 'schema-type', index = 0) => {
+      const row = el().querySelector(`[data-testid="schema-row"][data-path="${path}"]`);
+      const buttons = row?.querySelectorAll<HTMLButtonElement>(`[data-testid="${testid}"]`);
+      const button = buttons?.[index];
+      if (!button) throw new Error(`no ${testid} ${index} in ${path}`);
+      button.click();
+    };
+
+    beforeEach(() => {
+      fake.respond('schema.analyze', {
+        sampled: 3,
+        fields: [
+          {
+            path: 'status',
+            probability: 1,
+            count: 3,
+            types: [
+              { bsonType: 'string', probability: 2 / 3, count: 2, examples: '["open"]' },
+              { bsonType: 'int', probability: 1 / 3, count: 1, examples: '[{"$numberInt":"7"}]' },
+            ],
+          },
+          {
+            path: 'items',
+            probability: 1,
+            count: 3,
+            types: [{ bsonType: 'array', probability: 1, count: 3, examples: '[]' }],
+          },
+          {
+            path: 'items.[]',
+            probability: 1,
+            count: 3,
+            types: [{ bsonType: 'object', probability: 1, count: 3, examples: '[]' }],
+          },
+          {
+            path: 'items.[].sku',
+            probability: 1,
+            count: 3,
+            types: [{ bsonType: 'string', probability: 1, count: 3, examples: '["SKU-9"]' }],
+          },
+        ],
+      });
+    });
+
+    it('Schema analyzes the parsed filter of the tab collection without running the query', async () => {
+      type('query-filter', '{ n: { $gt: 100 } }');
+      type('query-limit', '7');
+      expect(q('schema-panel')).toBeNull();
+      expect(q('query-schema')?.getAttribute('aria-pressed')).toBe('false');
+      click('query-schema');
+      await settle();
+      expect(analyses()).toEqual([
+        {
+          profileId: 'p1',
+          db: 'shop',
+          coll: 'orders',
+          filter: '{"n":{"$gt":{"$numberInt":"100"}}}',
+        },
+      ]);
+      expect(finds()).toHaveLength(1);
+      expect(q('schema-panel')).not.toBeNull();
+      expect(q('query-schema')?.getAttribute('aria-pressed')).toBe('true');
+      expect(el().querySelectorAll('[data-testid="schema-row"]')).toHaveLength(4);
+    });
+
+    it('an empty filter is not sent', async () => {
+      click('query-schema');
+      await settle();
+      expect(analyses()).toHaveLength(1);
+      expect(analyses()[0]).not.toHaveProperty('filter');
+    });
+
+    it('an invalid filter shows the error, sends nothing and closes an earlier analysis', async () => {
+      click('query-schema');
+      await settle();
+      expect(q('schema-panel')).not.toBeNull();
+      type('query-filter', '{ status: ');
+      click('query-schema');
+      await settle();
+      expect(q('schema-panel')).toBeNull();
+      expect(q('query-error-filter')?.textContent).toContain('Filter:');
+      expect(analyses()).toHaveLength(1);
+
+      type('query-filter', '{ status: "open" }');
+      click('query-schema');
+      await settle();
+      expect(q('query-error-filter')).toBeNull();
+      expect(analyses().at(-1)?.['filter']).toBe('{"status":"open"}');
+    });
+
+    it('a picked value goes into the filter (not run) and the filter field gets the focus', async () => {
+      type('query-filter', '{ city: "Springfield" }');
+      click('query-schema');
+      await settle();
+      pick('status', 'schema-example');
+      await settle();
+      expect(filterValue()).toMatch(/city/);
+      expect(filterValue()).toMatch(/status:\s*['"]open['"]/);
+      expect(document.activeElement).toBe(get('query-filter'));
+      // Not run until the user runs it.
+      expect(finds()).toHaveLength(1);
+
+      click('query-run');
+      await settle();
+      expect(lastFind()['filter']).toBe('{"city":"Springfield","status":"open"}');
+    });
+
+    it('a second pick on the same field replaces the first; types become $type conditions', async () => {
+      click('query-schema');
+      await settle();
+      pick('status', 'schema-example');
+      await settle();
+      pick('status', 'schema-type', 1);
+      await settle();
+      click('query-run');
+      await settle();
+      expect(lastFind()['filter']).toBe('{"status":{"$type":"int"}}');
+    });
+
+    it('values in arrays filter on the path without the [] segment', async () => {
+      click('query-schema');
+      await settle();
+      pick('items.[].sku', 'schema-example');
+      await settle();
+      click('query-run');
+      await settle();
+      expect(lastFind()['filter']).toBe('{"items.sku":"SKU-9"}');
+    });
+
+    it('a pick replaces a filter that no longer parses and clears its error', async () => {
+      click('query-schema');
+      await settle();
+      type('query-filter', '{ broken: ');
+      click('query-run');
+      await settle();
+      expect(q('query-error-filter')).not.toBeNull();
+      // The panel of the earlier (valid) filter is still open.
+      pick('status', 'schema-example', 1);
+      await settle();
+      expect(q('query-error-filter')).toBeNull();
+      expect(get('query-filter').getAttribute('aria-invalid')).toBeNull();
+      click('query-run');
+      await settle();
+      expect(lastFind()['filter']).toBe('{"status":{"$numberInt":"7"}}');
+    });
+
+    it('Close closes the panel', async () => {
+      click('query-schema');
+      await settle();
+      click('schema-close');
+      await settle();
+      expect(q('schema-panel')).toBeNull();
+      expect(q('query-schema')?.getAttribute('aria-pressed')).toBe('false');
+    });
+
+    it('pointing the tab at another collection closes the panel and cancels a running analysis', async () => {
+      fake.handle('schema.analyze', () => new Promise(() => undefined));
+      click('query-schema');
+      await settle();
+      expect(q('schema-loading')).not.toBeNull();
+      fixture.componentRef.setInput('tab', {
+        ...TAB,
+        id: 'p1/shop.invoices',
+        data: { profileId: 'p1', db: 'shop', coll: 'invoices', type: 'collection' },
+      });
+      await settle();
+      expect(q('schema-panel')).toBeNull();
+      expect(fake.cancels).toContain(fake.requestsFor('schema.analyze')[0]?.id);
+      click('query-schema');
+      await settle();
+      expect(analyses().at(-1)).toMatchObject({ coll: 'invoices' });
+    });
+  });
+
   describe('validator marks', () => {
     const int = (n: number) => `{"$numberInt":"${n}"}`;
     const ids = (from: number, n: number) =>

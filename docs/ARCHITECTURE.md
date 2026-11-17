@@ -634,6 +634,22 @@ Contract layout (`packages/contract/src/`):
   list); Rename inline; Delete after a second click. e2e:
   `test/e2e/aggregation.e2e.ts` (demo step 8).
 
+## Schema analysis (`packages/backend/src/schema`, `packages/renderer/src/app/schema-analysis`)
+- Backend `schema.analyze` (`schemaHandlers`, `analyzeCollection`): one `aggregate` with
+  `$match` (the filter, when not empty) then `$sample` (`DEFAULT_SCHEMA_SAMPLE` = 1 000) through
+  `Operation` (cancellable), raw batches decoded without promotion, analyzed with
+  `mongodb-schema` (`storeValues`, no semantic types) and flattened depth first (`flattenSchema`):
+  paths dotted, array items `a.[]`, documents in arrays `a.[].b`; type names as `$type` aliases
+  (`typeAlias`); shares relative to the parent (see the contract's `schemaField`); `Undefined`
+  (missing) is not a type; up to `MAX_SCHEMA_EXAMPLES` distinct canonical-EJSON examples per type.
+  Int tests `test/integration/schema.int.spec.ts`.
+- Renderer: **Schema** (`query-schema`) on the collection query bar opens `SchemaPanel`
+  (`app-schema-panel`) under the bar for the bar's parsed filter. One row per path: present /
+  missing share, a bar of the type shares (`--bson-*` tokens, missing part hatched), type and
+  example chips. A click emits `{ key, condition }` (the value, or `{ $type }`; `filterKeyOf`
+  drops `[]`); the tab merges it into the filter text (`withFilterField`, shell syntax) and
+  focuses the filter, without running. e2e: `test/e2e/schema-analysis.e2e.ts`.
+
 ## Indexes tab (`packages/renderer/src/app/indexes`)
 - `IndexesView` is the `indexes` tab view (id `indexesTabId(profileId, db, coll)`, `data` like a
   collection tab), opened with "Indexes…" (`open-indexes`) on the collection tab; dropping or
