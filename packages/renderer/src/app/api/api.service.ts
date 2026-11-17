@@ -4,6 +4,7 @@ import {
   type ConnStatus,
   type Event,
   type MethodName,
+  type OidcPrompt,
   type ParamsOf,
   type ResultOf,
   type SettingsChanged,
@@ -43,6 +44,7 @@ export interface BroadcastPayloads {
   [BROADCAST_STREAMS.theme]: ThemeInfo;
   [BROADCAST_STREAMS.settingsChanged]: SettingsChanged;
   [BROADCAST_STREAMS.sshHostKey]: SshHostKeyPrompt;
+  [BROADCAST_STREAMS.oidcPrompt]: OidcPrompt;
 }
 
 export type BroadcastStream = keyof BroadcastPayloads;

@@ -12,8 +12,10 @@ import {
 import { NgTemplateOutlet } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
 import {
+  OIDC_FLOWS,
   READ_PREFERENCES,
   type FilePurpose,
+  type OidcFlow,
   type Profile,
   type ProfileDraft,
   type ResultOf,
@@ -42,7 +44,10 @@ import {
   formatTagSet,
   parseTagSet,
   parseW,
+  awsKeys,
+  passwordInUse,
   usedSecretKinds,
+  usesExternalSource,
   usesPassword,
   type EditorState,
   type ExtraSecretKind,
@@ -83,6 +88,13 @@ const SECRET_LABELS: Readonly<Record<ExtraSecretKind, string>> = {
   sshKeyPassphrase: 'SSH key passphrase',
   tlsKeyPassphrase: 'client key passphrase',
   proxyPassword: 'proxy password',
+  awsSessionToken: 'AWS session token',
+};
+
+const OIDC_FLOW_LABELS: Readonly<Record<OidcFlow, string>> = {
+  auto: 'Browser, or a device code when no browser can be opened',
+  authCode: 'Browser on this computer',
+  deviceCode: 'Device code (sign in on another device)',
 };
 
 const SSH_METHOD_LABELS: Readonly<Record<SshMethod, string>> = {
@@ -131,6 +143,8 @@ export class ConnectionEditor {
   protected readonly sshDefaultPort = SSH_DEFAULT_PORT;
   protected readonly proxyDefaultPort = PROXY_DEFAULT_PORT;
   protected readonly formatTagSet = formatTagSet;
+  protected readonly oidcFlows = OIDC_FLOWS;
+  protected readonly oidcFlowLabels = OIDC_FLOW_LABELS;
 
   protected readonly load = signal<LoadState>({ status: 'loading' });
   protected readonly state = signal<EditorState>(newEditorState('ask'));
@@ -161,7 +175,48 @@ export class ConnectionEditor {
   protected readonly uri = computed(() => connectionStringText(this.state()));
   protected readonly problems = computed(() => editorProblems(this.state()));
   protected readonly folders = computed(() => folderNames(this.tree.profileList()));
-  protected readonly needsPassword = computed(() => usesPassword(this.state().mechanism));
+  /** The password field is shown (for AWS IAM it is the secret access key of a given key ID). */
+  protected readonly needsPassword = computed(() => passwordInUse(this.state()));
+  /** The user name field must be filled in (SCRAM and LDAP). */
+  protected readonly needsUsername = computed(() => {
+    const mechanism = this.state().mechanism;
+    return usesPassword(mechanism) && mechanism !== 'MONGODB-AWS';
+  });
+  protected readonly awsKeys = computed(() => awsKeys(this.state()));
+  /** No authentication database field: the mechanism's users live in `$external`. */
+  protected readonly externalSource = computed(() => usesExternalSource(this.state().mechanism));
+  /** What the password field is called. */
+  protected readonly passwordLabel = computed(() =>
+    this.state().mechanism === 'MONGODB-AWS'
+      ? 'Secret access key'
+      : this.state().mechanism === 'PLAIN'
+        ? 'LDAP password'
+        : 'Password',
+  );
+  protected readonly usernameLabel = computed(() => {
+    switch (this.state().mechanism) {
+      case 'MONGODB-AWS':
+        return 'Access key ID';
+      case 'PLAIN':
+        return 'LDAP user name';
+      case 'MONGODB-OIDC':
+        return 'User name (optional)';
+      default:
+        return 'User name';
+    }
+  });
+  protected readonly usernamePlaceholder = computed(() => {
+    switch (this.state().mechanism) {
+      case 'MONGODB-X509':
+        return 'from the certificate';
+      case 'MONGODB-AWS':
+        return 'default AWS credential chain';
+      case 'MONGODB-OIDC':
+        return 'from the identity provider';
+      default:
+        return '';
+    }
+  });
   protected readonly mechanisms = computed(() => {
     const current = this.state().mechanism;
     return FORM_MECHANISMS.includes(current) ? FORM_MECHANISMS : [...FORM_MECHANISMS, current];
@@ -178,7 +233,11 @@ export class ConnectionEditor {
   /** Whether a dropped connection-string secret has a field of its own in this editor. */
   protected readonly droppedHasField = computed(() =>
     (this.state().droppedSecrets ?? []).some(
-      (name) => name === 'proxyPassword' || name === 'tlsCertificateKeyFilePassword',
+      (name) =>
+        name === 'proxyPassword' ||
+        name === 'tlsCertificateKeyFilePassword' ||
+        (this.state().mechanism === 'MONGODB-AWS' &&
+          name.toLowerCase() === 'authmechanismproperties aws_session_token'),
     ),
   );
   /** Extra secrets the current settings use (their fields are shown, and stored on save). */
@@ -361,14 +420,17 @@ export class ConnectionEditor {
     const fallback: SecretMode = this.storage()?.defaultSecretMode ?? 'ask';
     this.update((s) => {
       const model = structuredClone(s.model);
+      // An AWS access key ID and secret are no database user name and password (nor the reverse).
+      const awsSwitch = (mechanism === 'MONGODB-AWS') !== (s.mechanism === 'MONGODB-AWS');
+      if (awsSwitch) delete model.username;
       if (mechanism === 'NONE') {
         delete model.username;
         delete model.auth.mechanism;
         delete model.auth.source;
       } else {
         model.auth.mechanism = mechanism;
-        // The authentication database field is hidden for X.509 ($external is implied).
-        if (mechanism === 'MONGODB-X509') delete model.auth.source;
+        // The authentication database field is hidden for $external mechanisms (X.509, ...).
+        if (usesExternalSource(mechanism)) delete model.auth.source;
       }
       let secretMode = s.secretMode;
       if (!usesPassword(mechanism)) secretMode = 'none';
@@ -378,7 +440,7 @@ export class ConnectionEditor {
         model,
         mechanism,
         secretMode,
-        password: usesPassword(mechanism) ? s.password : '',
+        password: usesPassword(mechanism) && !awsSwitch ? s.password : '',
       };
     });
   }
@@ -403,6 +465,14 @@ export class ConnectionEditor {
 
   protected setSecretMode(secretMode: SecretMode): void {
     this.update((s) => ({ ...s, secretMode }));
+  }
+
+  protected setOidcFlow(flow: OidcFlow): void {
+    this.update((s) => ({ ...s, oidc: { ...s.oidc, flow } }));
+  }
+
+  protected setOidcTrustedEndpoint(on: boolean): void {
+    this.update((s) => ({ ...s, oidc: { ...s.oidc, trustedEndpoint: on } }));
   }
 
   protected setTls(on: boolean): void {
@@ -667,8 +737,7 @@ export class ConnectionEditor {
     const abort = new AbortController();
     this.testAbort = abort;
     this.test.set({ status: 'running' });
-    const password =
-      state.password !== '' && usesPassword(state.mechanism) ? state.password : undefined;
+    const password = state.password !== '' && passwordInUse(state) ? state.password : undefined;
     let params: { profileId: string } | { profile: ProfileDraft };
     if (
       state.id !== undefined &&
@@ -755,7 +824,7 @@ export class ConnectionEditor {
       }
 
       const password = state.password;
-      if (usesPassword(state.mechanism) && state.secretMode === 'saved' && password !== '') {
+      if (passwordInUse(state) && state.secretMode === 'saved' && password !== '') {
         try {
           await this.api.request('profiles.setSecret', {
             profileId: profile.id,

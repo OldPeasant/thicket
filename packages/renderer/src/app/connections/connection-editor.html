@@ -495,22 +495,20 @@
               @if (state().mechanism !== 'NONE') {
                 <div class="row">
                   <label class="field grow">
-                    <span class="label">User name</span>
+                    <span class="label">{{ usernameLabel() }}</span>
                     <input
                       data-testid="field-username"
                       autocomplete="off"
                       spellcheck="false"
                       [value]="state().model.username ?? ''"
-                      [placeholder]="
-                        state().mechanism === 'MONGODB-X509' ? 'from the certificate' : ''
-                      "
+                      [placeholder]="usernamePlaceholder()"
                       [attr.aria-invalid]="
-                        attempted() && needsPassword() && !state().model.username
+                        attempted() && needsUsername() && !state().model.username
                       "
                       (input)="setUsername(value($event))"
                     />
                   </label>
-                  @if (state().mechanism !== 'MONGODB-X509') {
+                  @if (!externalSource()) {
                     <label class="field">
                       <span class="label">Authentication database</span>
                       <input
@@ -530,11 +528,72 @@
                     Enter a user name only to check it against the certificate's subject.
                   </p>
                 }
+                @switch (state().mechanism) {
+                  @case ('PLAIN') {
+                    <p class="hint" data-testid="ldap-hint">
+                      The server checks the user name and password against its LDAP directory
+                      (MongoDB Enterprise or Atlas; the users live in <code>$external</code>).
+                    </p>
+                    @if (!tlsOn()) {
+                      <p class="warning" role="note" data-testid="ldap-tls-warning">
+                        LDAP (PLAIN) sends the password to the server as it is. Turn on TLS unless
+                        this is a test setup.
+                      </p>
+                    }
+                  }
+                  @case ('MONGODB-AWS') {
+                    @if (awsKeys()) {
+                      <p class="hint" data-testid="aws-hint">
+                        Signs in with this access key: an IAM user's, or temporary credentials with
+                        their session token. Leave the access key ID empty to use the default AWS
+                        credential chain instead.
+                      </p>
+                    } @else {
+                      <p class="hint" data-testid="aws-hint">
+                        Without an access key ID, Thicket uses the default AWS credential chain:
+                        environment variables, <code>AWS_PROFILE</code> with the shared config and
+                        credentials files, SSO, or the instance or container role.
+                      </p>
+                    }
+                  }
+                  @case ('MONGODB-OIDC') {
+                    <fieldset class="choice stacked" data-testid="oidc-flow">
+                      <legend>Sign in with</legend>
+                      @for (flow of oidcFlows; track flow) {
+                        <label>
+                          <input
+                            type="radio"
+                            name="oidcFlow"
+                            [attr.data-testid]="'oidc-flow-' + flow"
+                            [checked]="state().oidc.flow === flow"
+                            (change)="setOidcFlow(flow)"
+                          />
+                          {{ oidcFlowLabels[flow] }}
+                        </label>
+                      }
+                    </fieldset>
+                    <label class="check">
+                      <input
+                        type="checkbox"
+                        data-testid="oidc-trusted-endpoint"
+                        [checked]="state().oidc.trustedEndpoint"
+                        (change)="setOidcTrustedEndpoint(checked($event))"
+                      />
+                      Send my identity provider's tokens to this server (trusted endpoint)
+                    </label>
+                    <p class="hint" data-testid="oidc-hint">
+                      On connect, Thicket opens the identity provider's sign-in page and keeps the
+                      tokens in the system keychain, so later connects need no sign-in. Without the
+                      trusted endpoint option, tokens go only to Atlas and to servers on this
+                      computer.
+                    </p>
+                  }
+                }
               }
               @if (needsPassword()) {
                 <div class="password-row">
                   <label class="field grow">
-                    <span class="label">Password</span>
+                    <span class="label">{{ passwordLabel() }}</span>
                     <input
                       data-testid="field-password"
                       autocomplete="new-password"
@@ -555,9 +614,22 @@
                     {{ showPassword() ? 'Hide' : 'Show' }}
                   </button>
                 </div>
+                @if (state().mechanism === 'MONGODB-AWS') {
+                  <ng-container
+                    [ngTemplateOutlet]="secretField"
+                    [ngTemplateOutletContext]="{
+                      kind: 'awsSessionToken',
+                      label: 'Session token (temporary credentials only)',
+                    }"
+                  />
+                  <p class="hint" data-testid="aws-token-hint">
+                    The session token is stored in the system keychain on save; Test connection uses
+                    the saved one, so save before testing temporary credentials.
+                  </p>
+                }
 
                 <fieldset class="choice stacked">
-                  <legend>Password storage</legend>
+                  <legend>{{ passwordLabel() }} storage</legend>
                   <label>
                     <input
                       type="radio"

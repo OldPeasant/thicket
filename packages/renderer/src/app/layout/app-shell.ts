@@ -20,6 +20,7 @@ import { filter } from 'rxjs';
 
 import { HostKeyDialog } from '../connections/host-key-dialog';
 import { HostKeyService } from '../connections/host-key.service';
+import { OidcSignIn } from '../connections/oidc-sign-in';
 import { ConfirmDialog } from '../safety/confirm-dialog';
 import { SidebarTree } from '../sidebar/sidebar-tree';
 import { SidebarTreeService } from '../sidebar/sidebar-tree.service';
@@ -51,6 +52,7 @@ export const SIDEBAR_KEY_STEP = 16;
   imports: [
     ConfirmDialog,
     HostKeyDialog,
+    OidcSignIn,
     NgComponentOutlet,
     RouterOutlet,
     SidebarTree,
@@ -120,6 +122,7 @@ export const SIDEBAR_KEY_STEP = 16;
     <app-status-bar class="status" [attr.inert]="modal() ? '' : null" />
     <app-confirm-dialog />
     <app-host-key-dialog />
+    <app-oidc-sign-in [attr.inert]="modal() ? '' : null" />
   `,
   styleUrl: './app-shell.css',
 })

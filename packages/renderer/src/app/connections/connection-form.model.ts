@@ -1,4 +1,4 @@
-import type { Profile, ProfileDraft } from '@thicket/contract';
+import type { OidcFlow, Profile, ProfileDraft } from '@thicket/contract';
 import {
   ConnectionStringError,
   MASK,
@@ -28,7 +28,24 @@ export const FORM_MECHANISMS: readonly ProfileMechanism[] = [
   'SCRAM-SHA-256',
   'SCRAM-SHA-1',
   'MONGODB-X509',
+  'PLAIN',
+  'MONGODB-OIDC',
+  'MONGODB-AWS',
 ];
+
+/**
+ * Mechanisms whose users live in `$external`: the backend always authenticates against it, so the
+ * form has no authentication database for them and the connection string carries no `authSource`.
+ */
+export function usesExternalSource(mechanism: ProfileMechanism): boolean {
+  return (
+    mechanism === 'MONGODB-X509' ||
+    mechanism === 'PLAIN' ||
+    mechanism === 'MONGODB-OIDC' ||
+    mechanism === 'MONGODB-AWS' ||
+    mechanism === 'GSSAPI'
+  );
+}
 
 export type SshMethod = NonNullable<Profile['ssh']>['method'];
 
@@ -44,7 +61,7 @@ export interface SshForm {
 
 /** Secrets besides the database password that this editor stores with `profiles.setSecret`. */
 export type ExtraSecretKind =
-  'sshPassword' | 'sshKeyPassphrase' | 'tlsKeyPassphrase' | 'proxyPassword';
+  'sshPassword' | 'sshKeyPassphrase' | 'tlsKeyPassphrase' | 'proxyPassword' | 'awsSessionToken';
 
 /** Default SSH port. */
 export const SSH_DEFAULT_PORT = 22;
@@ -71,15 +88,47 @@ export function usedSecretKinds(state: EditorState): ExtraSecretKind[] {
   if (nonEmpty(state.model.proxy.host) !== undefined && nonEmpty(state.model.proxy.username)) {
     kinds.push('proxyPassword');
   }
+  if (awsKeys(state)) kinds.push('awsSessionToken');
   return kinds;
 }
 
 /** Mechanism a user name without `authMechanism` gets (MongoDB's default since 4.0). */
 export const DEFAULT_PASSWORD_MECHANISM: ProfileMechanism = 'SCRAM-SHA-256';
 
-/** Mechanisms that authenticate with a user name and the profile's `password` secret. */
+/**
+ * Mechanisms that can authenticate with the profile's `password` secret (and so have a secret
+ * mode): SCRAM and LDAP always, AWS IAM when an access key ID is given (the secret access key is
+ * its `password`; without a key ID the default AWS credential chain needs no secret).
+ */
 export function usesPassword(mechanism: ProfileMechanism): boolean {
-  return mechanism === 'SCRAM-SHA-1' || mechanism === 'SCRAM-SHA-256' || mechanism === 'PLAIN';
+  return (
+    mechanism === 'SCRAM-SHA-1' ||
+    mechanism === 'SCRAM-SHA-256' ||
+    mechanism === 'PLAIN' ||
+    mechanism === 'MONGODB-AWS'
+  );
+}
+
+/** AWS IAM with explicit keys: an access key ID (the user name) is given. */
+export function awsKeys(state: Pick<EditorState, 'mechanism' | 'model'>): boolean {
+  return state.mechanism === 'MONGODB-AWS' && nonEmpty(state.model.username) !== undefined;
+}
+
+/**
+ * Whether the current settings authenticate with the password field: SCRAM and LDAP, AWS IAM
+ * with an access key ID (the password field is then its secret access key).
+ */
+export function passwordInUse(state: Pick<EditorState, 'mechanism' | 'model'>): boolean {
+  return state.mechanism === 'MONGODB-AWS' ? awsKeys(state) : usesPassword(state.mechanism);
+}
+
+/** Default OIDC sign-in flow (the browser, the device flow when none can be opened). */
+export const DEFAULT_OIDC_FLOW: OidcFlow = 'auto';
+
+/** MONGODB-OIDC settings of the profile (`profile.auth.oidcFlow`, `oidcTrustedEndpoint`). */
+export interface OidcForm {
+  flow: OidcFlow;
+  trustedEndpoint: boolean;
 }
 
 export interface EditorState {
@@ -98,6 +147,8 @@ export interface EditorState {
   production: boolean;
   /** SSH tunnel (not part of the connection string). */
   ssh: SshForm;
+  /** MONGODB-OIDC sign-in settings (kept while another mechanism is chosen, saved only for OIDC). */
+  oidc: OidcForm;
   /** Separate private key file of `tls.certificateKeyFile` (`profile.tls.keyFile`). */
   tlsKeyFile?: string;
   /** Extra secrets typed in this editor ('' or absent = none typed; saved ones are not known). */
@@ -122,6 +173,7 @@ export function newEditorState(defaultSecretMode: 'saved' | 'ask'): EditorState 
     readOnly: false,
     production: false,
     ssh: emptySshForm(),
+    oidc: { flow: DEFAULT_OIDC_FLOW, trustedEndpoint: false },
     secrets: {},
   };
 }
@@ -233,6 +285,7 @@ export function editorStateFromProfile(
   } else {
     model.auth.mechanism = mechanism;
   }
+  if (usesExternalSource(mechanism)) delete model.auth.source;
   const tls = profile.tls;
   if (tls) {
     model.tls.enabled = tls.enabled;
@@ -272,15 +325,33 @@ export function editorStateFromProfile(
     model,
     mechanism,
     password: '',
-    secretMode: auth?.secretMode ?? (usesPassword(mechanism) ? fallbackSecretMode : 'none'),
+    secretMode: loadedSecretMode(auth?.secretMode, mechanism, fallbackSecretMode),
     readOnly: profile.readOnly,
     production: profile.production,
     ssh: profile.ssh ? { enabled: true, ...profile.ssh } : emptySshForm(),
+    oidc: {
+      flow: auth?.oidcFlow ?? DEFAULT_OIDC_FLOW,
+      trustedEndpoint: auth?.oidcTrustedEndpoint === true,
+    },
     ...(tls?.keyFile !== undefined ? { tlsKeyFile: tls.keyFile } : {}),
     secrets: {},
     ...(droppedSecrets.length > 0 ? { droppedSecrets } : {}),
     base: profile,
   };
+}
+
+/**
+ * Secret mode of a loaded profile. An AWS IAM profile on the default credential chain is saved
+ * with `none`; the editor keeps a real mode for it, used once an access key ID is entered.
+ */
+function loadedSecretMode(
+  saved: SecretMode | undefined,
+  mechanism: ProfileMechanism,
+  fallback: SecretMode,
+): SecretMode {
+  if (!usesPassword(mechanism)) return saved ?? 'none';
+  if (saved === undefined || (saved === 'none' && mechanism === 'MONGODB-AWS')) return fallback;
+  return saved;
 }
 
 /**
@@ -297,10 +368,14 @@ function uriModel(state: EditorState, password: string | undefined): ConnectionU
     delete model.auth.source;
   } else {
     model.auth.mechanism = state.mechanism;
-    // X.509 always authenticates against $external (the backend sets it); another authSource
-    // only makes the driver refuse the string.
-    if (state.mechanism === 'MONGODB-X509') delete model.auth.source;
-    if (nonEmpty(model.username) === undefined) delete model.username;
+    // X.509, LDAP, OIDC and AWS always authenticate against $external (the backend sets it);
+    // another authSource only makes the driver refuse the string.
+    if (usesExternalSource(state.mechanism)) delete model.auth.source;
+    // The driver refuses a user name (and password) in the string for MONGODB-AWS: the access key
+    // ID and secret are profile fields, given to the driver as a credential provider.
+    if (nonEmpty(model.username) === undefined || state.mechanism === 'MONGODB-AWS') {
+      delete model.username;
+    }
     if (password !== undefined && model.username !== undefined) model.password = password;
   }
   return model;
@@ -314,7 +389,7 @@ export function connectionStringText(
   state: EditorState,
 ): { text: string; error?: undefined } | { text?: undefined; error: string } {
   try {
-    const shown = state.password !== '' && usesPassword(state.mechanism) ? MASK : undefined;
+    const shown = state.password !== '' && passwordInUse(state) ? MASK : undefined;
     return { text: mask(toConnectionString(uriModel(state, shown))) };
   } catch (error) {
     return { error: readable(error) };
@@ -347,9 +422,21 @@ export function applyConnectionString(
   const droppedSecrets = stripUriSecrets(model);
   const mechanism = mechanismOf(model);
   if (mechanism !== 'NONE') model.auth.mechanism = mechanism;
+  if (usesExternalSource(mechanism)) delete model.auth.source;
   let password = '';
   if (typed === MASK) password = state.password;
   else if (typed !== undefined) password = typed;
+  if (
+    mechanism === 'MONGODB-AWS' &&
+    state.mechanism === 'MONGODB-AWS' &&
+    model.username === undefined &&
+    typed === undefined
+  ) {
+    // The access key ID and secret access key are not part of an AWS connection string (the tab
+    // never shows them): editing the string keeps them. One pasted with a user name replaces them.
+    if (state.model.username !== undefined) model.username = state.model.username;
+    password = state.password;
+  }
   let secretMode = state.secretMode;
   if (!usesPassword(mechanism)) secretMode = 'none';
   else if (secretMode === 'none') secretMode = 'ask';
@@ -380,7 +467,11 @@ export function editorProblems(state: EditorState): string[] {
   ) {
     problems.push('An SRV connection has exactly one host name and no port.');
   }
-  if (usesPassword(state.mechanism) && nonEmpty(state.model.username) === undefined) {
+  if (
+    usesPassword(state.mechanism) &&
+    state.mechanism !== 'MONGODB-AWS' &&
+    nonEmpty(state.model.username) === undefined
+  ) {
     problems.push('Enter the user name, or choose "No authentication".');
   }
   const model = state.model;
@@ -489,13 +580,21 @@ export function profileDraftFromState(state: EditorState): ProfileDraft {
   if (state.mechanism === 'NONE') {
     draft.auth = { mechanism: 'NONE', secretMode: 'none' };
   } else {
-    draft.auth = {
-      mechanism: state.mechanism,
-      secretMode: usesPassword(state.mechanism) ? state.secretMode : 'none',
-    };
-    if (model.username !== undefined) draft.auth.username = model.username;
+    const secretMode =
+      passwordInUse(state) && state.secretMode !== 'none' ? state.secretMode : 'none';
+    draft.auth = { mechanism: state.mechanism, secretMode };
+    // The URI model has no user name for AWS (the driver refuses one there): take the form's.
+    const username =
+      state.mechanism === 'MONGODB-AWS' ? nonEmpty(state.model.username)?.trim() : model.username;
+    if (username !== undefined) draft.auth.username = username;
     const source = nonEmpty(model.auth.source);
-    if (source !== undefined && state.mechanism !== 'MONGODB-X509') draft.auth.authSource = source;
+    if (source !== undefined && !usesExternalSource(state.mechanism)) {
+      draft.auth.authSource = source;
+    }
+    if (state.mechanism === 'MONGODB-OIDC') {
+      if (state.oidc.flow !== DEFAULT_OIDC_FLOW) draft.auth.oidcFlow = state.oidc.flow;
+      if (state.oidc.trustedEndpoint) draft.auth.oidcTrustedEndpoint = true;
+    }
   }
 
   const tls = model.tls;
