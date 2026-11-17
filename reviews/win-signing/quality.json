@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "task": "win-signing",
+  "reviewed_revision": "2758fbf22444a2381f1065d5800d7045c8dc79df",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/win-signing/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/win-signing/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/win-signing/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "build job permissions contents: read + actions: read for the SignPath action (2758fbf2); spec asserts the exact set; re-review confirmed"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "deferred", "note": "SignPath action stays on @v1: looking up a commit SHA needs web access (denied here); docs/CODE_SIGNING.md tells the maintainer to pin it during signpath-setup"},
+    {"id": "CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "prepackaged step calls npx electron-builder in apps/desktop instead of npm run dist (no rebuild); same options, spec checks they match the dist script"},
+    {"id": "CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "docs/user/install.md paragraph rewrapped"}
+  ],
+  "validation": [
+    {"command": "podman run --rm -v <repo>:/repo:ro,Z --workdir /repo docker.io/rhysd/actionlint:latest -no-color", "result": "pass"},
+    {"command": "cd apps/desktop && npx vitest run src/release-signing.spec.ts src/release-workflow.spec.ts", "result": "pass"},
+    {"command": "cd apps/desktop && npx electron-builder --win --x64 --dir, then --prepackaged on a copy with a modified Thicket.exe (Linux, no wine)", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}

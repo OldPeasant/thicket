@@ -4,30 +4,59 @@ Date: 2026-11-17
 
 Task: win-signing - Release: sign Windows builds with SignPath
 
-Scope: task commits e54a194c and f98e6a53 on top of base fbb8c3a5 (`git diff fbb8c3a5..HEAD`, `tasks/` changes ignored)
+Scope: second review round on the final code, whole task diff `git diff fbb8c3a5..HEAD` (commits
+e54a194c, f98e6a53, 1e19e7c2, 2758fbf2; `tasks/` and `reviews/` only read for context). Focus:
+the fixes for CR-1, CR-3 and CR-4 from round one, and anything they introduced.
 
 Requirements:
 - tasks/win-signing.md (goal, acceptance criteria, recorded assumptions)
 - SPEC.md section 3 "Release" (Should: Windows signing via the SignPath Foundation)
 - docs/ARCHITECTURE.md (release/packaging notes)
-- AGENTS.md, parent agent instructions (focus areas: unsigned path, artifact names and checksums, secret handling, Git Bash correctness, `--prepackaged` with fuses and asar integrity, docs completeness)
+- AGENTS.md, parent agent instructions (CR-2 intentionally kept: tag pin, note in docs)
+- Round-one review.md and fixes.md in reviews/win-signing/
 
 Git range:
 - Branch: main
-- HEAD: f98e6a53
+- HEAD: 2758fbf2
 - Base/start: fbb8c3a55cec8c348d1614dd740a7183b8c6c19c
-- Commits reviewed: 2
+- Commits reviewed: 4
 
-Summary: 0 P0, 0 P1, 1 P2, 3 P3
+Summary: 0 P0, 0 P1, 0 P2, 1 P3
 
-Verified without findings:
-- Unsigned path: on Linux/macOS the `signing` step is skipped, so `steps.signing.outputs.enabled` is empty; on Windows without secret/variable it is `false`. `SIGN` is then not `true`, `dir=()` expands to nothing (`"${dir[@]}"` is safe because Actions bash runs without `-u`), and all signing steps are skipped. The only differences to the base are the extra notice step and the Windows job timeout (150 instead of 45 min).
-- Secrets: the token is only passed via `env` to the gate script (which never prints values) and as an action input; no secret appears in an `if:` condition, which only reads the step output.
-- Artifact names: the `--dir` build creates only `release/win-unpacked`; the `--prepackaged` build writes `thicket-<version>-win-x64.exe` / `.zip` into `release/` with the same `artifactName`. The `win-signed` and `installer-signed` directories are not matched by `Collect installers` (`release/*.{...}`), and the `unsigned-*` artifacts do not match the release job's `installers-*` pattern, so `SHA256SUMS.txt` is computed only over the final (signed) files.
-- `Use signed installer`: nullglob, exact-one check and same-name check are correct for Git Bash on Windows.
-- Fuses and asar integrity: fuses and the asar hash resource are written during the `--dir` pack (before signing); `--prepackaged` skips packing, so the Authenticode signature is not invalidated (parent's hash-preservation test supports this).
-- Gate script and its spec (5 cases, including empty/whitespace values GitHub passes for unset secrets) match the criterion.
-- docs/CODE_SIGNING.md contains the policy (what is signed, roles, approvals, privacy statement), 8 setup steps with slugs matching the workflow (`thicket`, `release-signing`, `win-app`, `win-installer`), secret/variable names, and the uninstaller limitation; README has the attribution line and updated SmartScreen note.
+Verified fixes:
+- CR-1 (`actions: read`): `.github/workflows/release.yml:49-51` gives the `build` job
+  `contents: read` and `actions: read`. Job-level permissions replace the workflow-level block, so
+  listing `contents: read` again is correct (checkout still works); the `release` job keeps its own
+  `contents: write`. No write scope was added. The spec asserts the exact map
+  (`release-workflow.spec.ts:228`), and docs/CODE_SIGNING.md explains the permission.
+- CR-3 (no rebuild): the `--prepackaged` step (`release.yml:135-146`) now runs
+  `npx electron-builder --config electron-builder.yml --publish never $ARGS --prepackaged
+  release/win-signed "-c.extraMetadata.version=$version"` with `working-directory: apps/desktop`.
+  - Same config and options as the `dist` script (`apps/desktop/package.json:28`), same project
+    directory (`npm run dist -w apps/desktop` also ran in apps/desktop), so `directories.output:
+    release`, `artifactName` and the extraMetadata version are unchanged. Output names stay
+    `thicket-<version>-win-x64.exe` / `.zip`.
+  - `release/win-signed` resolves relative to apps/desktop, which matches the SignPath
+    `output-artifact-directory: apps/desktop/release/win-signed` (checked by the spec at line 204).
+  - Resolution of `npx electron-builder`: electron-builder is a devDependency of the workspace
+    and hoisted to the root (`node_modules/.bin/electron-builder` exists, no
+    `apps/desktop/node_modules/.bin`). npm 7+ auto-detects the workspace root as local prefix
+    when run inside a workspace folder and puts every ancestor `node_modules/.bin` on PATH, so the
+    locally installed version is used; on Windows Git Bash the runner's `npx` shell shim is found
+    the same way as the `npm` used by the other steps. Arguments after the command name are passed
+    through to electron-builder unchanged (npx stops parsing its own options at the first
+    positional). `CSC_IDENTITY_AUTO_DISCOVERY=false` is still set. The renderer and bundles are
+    inside `win-signed/resources` already, and `--prepackaged` skips packing, fuses and
+    `npmRebuild`, so dropping the build steps loses nothing.
+  - Test: the fake `npx` records the exact argv and the test checks the dist script still uses the
+    same options (lines 388-416), so drift between both paths is caught.
+- CR-4: docs/user/install.md paragraph rewrapped to at most 100 columns, wording unchanged.
+- Unsigned path (unchanged by the fixes): the signing gate, the `dir=()` expansion and all
+  `steps.signing.outputs.enabled == 'true'` conditions are as in round one; without the secret
+  and variable the Windows build runs `npm run dist` with the same arguments as before the task.
+- Checksums: still computed in the release job from the `installers-*` artifacts, after the signed
+  installer replaced the unsigned one; the `unsigned-*` artifacts do not match that pattern.
+- No secrets, tokens or credentials in the diff; tests use fictitious values only.
 
 ## P0 Critical
 
@@ -39,36 +68,24 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | GITHUB_TOKEN may lack `actions: read` for the SignPath action**
-    - File: `.github/workflows/release.yml:16` (workflow `permissions: contents: read`), used by the steps at lines 115 and 155
-    - Category: Integration
-    - Problem: The workflow grants the job token only `contents: read`. To my knowledge `signpath/github-action-submit-signing-request@v1` has a `github-token` input defaulting to `github.token`, which is forwarded so SignPath can read the job/run details for origin verification and download the uploaded artifact through the Actions API. Those endpoints belong to the `actions` permission scope; with `actions: none` the token gets 403 "Resource not accessible by integration". This could not be confirmed here (no web access), so it is a plausibility finding, but if correct the first real signing run fails.
-    - Why it matters: Signing would fail only at the first real release after the human setup (`signpath-setup`), costing a release cycle and a manual debugging round.
-    - Suggested fix: Add job-level permissions to `build` (`contents: read` and `actions: read`; job-level permissions replace the workflow-level block, so list both), or confirm against the action's README during `signpath-setup` and mention it in docs/CODE_SIGNING.md step 8 as something to check if the request fails.
+None.
 
 ## P3 Low
 
-- [ ] **CR-2 | Third-party action that receives the signing token is pinned to a mutable tag**
-    - File: `.github/workflows/release.yml:115`, `.github/workflows/release.yml:155`
+- [ ] **CR-2 | Third-party action that receives the signing token is pinned to a mutable tag (deferred)**
+    - File: `.github/workflows/release.yml:119`, `.github/workflows/release.yml:160`
     - Category: Security
-    - Problem: `signpath/github-action-submit-signing-request@v1` receives `SIGNPATH_API_TOKEN`, but `v1` is a movable tag. The repo uses tags for `actions/*`, but this is the only third-party action and it handles the highest-value credential in the workflow.
-    - Why it matters: A moved or compromised tag could exfiltrate the token able to submit signing requests (manual approval limits, but does not remove, the impact).
-    - Suggested fix: Pin to a full commit SHA with a `# v1.x` comment (can be done during `signpath-setup` once the SHA can be looked up).
-
-- [ ] **CR-3 | Second `npm run dist` rebuilds the renderer and bundles for nothing**
-    - File: `.github/workflows/release.yml:135`
-    - Category: Quality
-    - Problem: `npm run dist` runs `npm run build -w @thicket/renderer && node scripts/build.mjs` before electron-builder; with `--prepackaged` those outputs are unused.
-    - Why it matters: Adds several minutes to an already long Windows job and makes the step look like it repackages the app.
-    - Suggested fix: Call `npx electron-builder --config electron-builder.yml --publish never ...` in that step (within `apps/desktop`), or add a small script for packaging only.
-
-- [ ] **CR-4 | Unwrapped long line in install guide**
-    - File: `docs/user/install.md:11`
-    - Category: Quality
-    - Problem: The edited paragraph leaves one line of about 150 characters, while the rest of the file wraps at about 100.
-    - Why it matters: Inconsistent with the file's formatting; minor.
-    - Suggested fix: Re-wrap the paragraph.
+    - Problem: `signpath/github-action-submit-signing-request@v1` receives `SIGNPATH_API_TOKEN`
+      but is referenced by the movable `v1` tag. Still present; the parent deliberately kept it
+      because the commit SHA cannot be looked up here, and docs/CODE_SIGNING.md now tells a
+      maintainer to pin it.
+    - Why it matters: A moved or compromised tag could exfiltrate the token (manual approval in
+      SignPath limits the impact).
+    - Suggested fix: Pin to a full commit SHA with a `# v1.x` comment during `signpath-setup`.
+      Accepting it as deferred is reasonable; listed only so the disposition stays traceable.
 
 ## Review conclusion
 
-No material issues found. CR-1 cannot be confirmed without the SignPath action's documentation, but it is cheap to fix and should be addressed or explicitly checked during `signpath-setup`. Note for the parent: SPEC.md still says "Unsigned for now" (Release) and lists signed builds as out of scope; the task explicitly requires signing (SPEC's own "Should" item), so this is a SPEC wording issue for humans, not a defect of this change.
+No material issues found. The fixes for CR-1, CR-3 and CR-4 are correct and introduce no new
+issues; CR-2 remains open by the parent's documented decision. Note from round one still applies:
+SPEC.md "Release" wording ("Unsigned for now") is a SPEC text issue for humans, not a defect here.
