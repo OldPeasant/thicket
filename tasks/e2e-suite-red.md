@@ -3,7 +3,7 @@ title: Test: fix failing e2e tests (layout Compass heading, sidebar drag, LDAP f
 status: todo
 owner:
 deps: [e2e-screenshot-repaint]
-touches: [test/e2e/layout.e2e.ts,test/e2e/ldap.e2e.ts,test/integration]
+touches: [test/e2e/layout.e2e.ts,test/e2e/ldap.e2e.ts,test/integration/fixtures/ldap.ts]
 prio: 2
 ---
 ## Goal
