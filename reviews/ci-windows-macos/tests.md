@@ -197,3 +197,94 @@ Round 3 changes only a test timeout. It changes no production file and no test s
 ## Summary (round 3)
 
 Tests and task-scoped coverage are sufficient; no production defects found. The timeout-only change is correct and test-only, the shell-console spec (81 tests) and `npm run check` pass on Linux at HEAD 944771b4, and coverage is unchanged by a timeout-only change. AC1 still needs the Windows/macOS CI run.
+
+---
+
+# Round 4
+
+Date: 2026-11-17
+
+Task: ci-windows-macos - CI: unit tests pass on Windows and macOS again (round 4, no-eval spec path separators)
+
+Scope: commit 9511c440fb4aa91c0c2115aef98a7a3d719b7344 only (given by the parent), measured at HEAD 9511c440. `git show --stat 9511c440` confirms it changes only `packages/renderer/src/app/raw-editor/no-eval.spec.ts` (3 insertions, 2 deletions). At the time of the runs, the working tree differed from HEAD only in `reviews/ci-windows-macos/` reports (`tests.md`, `review.md`), with no source or test changes.
+
+Changed file: `packages/renderer/src/app/raw-editor/no-eval.spec.ts` (test only). No production file is changed.
+
+Requirements:
+- `tasks/ci-windows-macos.md` (AC1: `check` green on all three OSes; AC2: each fix says whether the product or the test was wrong; AC3: `npm run check` passes locally)
+- AGENTS.md project notes (OS-neutral tests: build paths with `path`, never hard-coded `/`)
+- Parent instructions (Windows CI run 44133463790 failed at the `toContain('packages/...')` assertion because `relative()` returned backslash paths)
+
+## Check of the change
+
+I checked the change by reading the code, then ran it on Linux (results below).
+
+- Line 105: `relative(ROOT, path).split(sep).join('/')`. On Linux/macOS `sep` is `/`, so this changes nothing and the names stay as before. On Windows `sep` is `\`, so `packages\core\src\...` becomes `packages/core/src/...`, which matches the `/`-written expectations on lines 110-117. Because `split(sep)` uses the platform's separator, it never touches `/` on POSIX. This matches the failure in run 44133463790.
+- Line 124, `join(ROOT, name)`: on Windows, `path.join` (win32) treats both `/` and `\` as separators and normalizes the result to `\`. So `join('D:\\a\\repo', 'node_modules/bson/lib/bson.mjs')` still opens the same file. On POSIX nothing changes. The paths stay correct.
+- Line 134, `name.includes('node_modules/ajv/')`: names now always use `/`, so the check now works on Windows too. Before the fix, it compared a `/` pattern with `\` names on Windows, so it was always false and the assertion passed without checking anything. The change makes this check effective on Windows. On POSIX nothing changes.
+- Line 132 (`EVAL.test` over the Ajv graph) uses absolute real paths and does not use `names`, so it is unaffected.
+- Line 92 (`unresolved` messages) still uses raw `relative()` output. These strings only appear in a failure message for `toEqual([])`, so `\` there is cosmetic and not a defect.
+- Edge case, not a defect: if a graph file were on a different drive from `ROOT`, `relative()` would return an absolute `X:\...`, and line 124 would build a wrong path. That can't happen with this repo layout. Every file is under the repo's `node_modules` or `packages`, and workspace junctions resolve inside the repo. Line 105 does not change this.
+- The new comment on line 104 says it is a test-only fix and that the product was right (AC2).
+- I found no defect and edited no test in round 4.
+
+## Test files changed
+
+- None by the test-writer in round 4. The parent's change in 9511c440 was reviewed above.
+
+## Tests added or updated
+
+Count: 0 in round 4
+
+## Requirement coverage
+
+| Requirement | Tests | Command | Result |
+|---|---|---|---|
+| The raw editor's import graph has no eval / new Function, and the spec is OS-neutral | `raw editor bundle path` suite: `resolves every import of the editor`, `%s has no eval or new Function` (one per module), `would catch a package that compiles code (Ajv, ...)`, `the pattern flags the usual ways of running text as code` | `npx --prefix /home/eric/work/mongo-db-client-agents/agent-2/packages/renderer ng test --include src/app/raw-editor/no-eval.spec.ts` (working dir `packages/renderer`) | Pass on Linux: 1 file, 279 tests |
+| AC1: `check` run green on ubuntu, macOS and Windows | - | - | Not run: no Windows/macOS here. The parent must use the CI `check` run of `wip/ci-windows-macos` that contains 9511c440 (the previous failing run was 44133463790). |
+| AC2: the fix says the test was wrong | comment on line 104 | reading the file at HEAD | Pass (by reading) |
+| AC3: `npm run check` passes locally | full suite | `npm --prefix /home/eric/work/mongo-db-client-agents/agent-2 run check` | Pass |
+
+## Focused test execution
+
+Command:
+
+`npx --prefix /home/eric/work/mongo-db-client-agents/agent-2/packages/renderer ng test --include src/app/raw-editor/no-eval.spec.ts` (working directory `packages/renderer`)
+
+Result:
+
+Pass: 1 file, 279 tests (the 4 named tests plus one `has no eval or new Function` case per module in the editor's import graph), Vitest 5.1.0, started 18:18:34, duration 489 ms, exit 0.
+
+## Full test execution
+
+Command:
+
+`npm --prefix /home/eric/work/mongo-db-client-agents/agent-2 run check`
+
+Result:
+
+Pass: eslint and prettier clean, typecheck clean for all workspaces, Vitest 99 files / 5219 tests (started 18:19:04), renderer 125 files / 4137 tests (started 18:19:22), exit 0.
+
+## .taskcheck
+
+Result:
+
+Not run separately: `.taskcheck` runs `npm run check`, which passed above at HEAD 9511c440.
+
+## Bugs found
+
+None in round 4.
+
+## Coverage
+
+Status: not applicable for round 4. The round-2 coverage above remains valid.
+
+Round 4 only changes how a test spec formats file names for comparison. It changes no production file, so it cannot change which task-changed production lines run. The task-changed production files (`packages/backend/src/ssh/socks.ts`, `tunnel.ts`) are not in the renderer spec's graph, and the round-2 coverage run did not use this spec. I did not re-measure coverage. `git show --stat 9511c440` confirms the commit changes only the spec file, so the production files are unchanged since round 3. Changed-line coverage for round 4: N/A (no production lines changed).
+
+## Unable to test
+
+- Windows/macOS behavior (whether the `/` names make the Windows run green) can only be shown by the CI `check` run of `wip/ci-windows-macos` that contains 9511c440.
+
+## Summary (round 4)
+
+Tests and task-scoped coverage are sufficient; no production defects found. The change is correct for Linux, macOS and Windows by reading. Line 105 normalizes only the platform separator, line 124 `join(ROOT, name)` accepts `/` names on Windows, and line 134 `includes('node_modules/ajv/')` now works on Windows, where it was always false before. On Linux at HEAD 9511c440, the no-eval spec (279 tests) and `npm run check` pass. AC1 still needs the Windows/macOS CI run.

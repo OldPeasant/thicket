@@ -118,3 +118,63 @@ None.
 ## Review conclusion
 
 No material issues found.
+
+---
+
+# Round 4
+
+Date: 2026-11-17
+
+Task: ci-windows-macos - CI: unit tests pass on Windows and macOS again
+
+Scope: commit 9511c440 only, as named by the parent. It changes `packages/renderer/src/app/raw-editor/no-eval.spec.ts`: the module names built with `relative(ROOT, path)` are now converted to `/` separators (`.split(sep).join('/')`), and a comment is added. Reason given by the parent: Windows CI run 44133463790 failed at the `toContain` check of the expected module list (line 118-119) because the names had `\` separators. Rounds 1-3 (above) are not re-reviewed.
+
+Requirements:
+- tasks/ci-windows-macos.md (criterion 1: green `check` on all three OSes; criterion 2: each fix says whether the product or only the test was wrong)
+- AGENTS.md project notes (OS-neutral tests: build paths with `path.join`/`path.resolve` and compare them with `path` too, never hard-coded `/`)
+- SPEC.md §6 / docs/ARCHITECTURE.md "Conventions" (shell syntax and EJSON are parsed, never evaluated; this spec guards that)
+
+Git range:
+- Branch: main
+- HEAD: 9511c440fb4aa91c0c2115aef98a7a3d719b7344
+- Base/start: 9f442a55 (parent of 9511c440)
+- Commits reviewed: 1 (9511c440)
+
+Limitation: in this round, Bash was denied, so I could not run `git show`, `git status` or the tests. I reviewed the current file in full, using the parent's description of the change. The added line 104-105 and the `sep` import (line 2) match that description. I could not confirm from git that the commit touches only this file or that there are no uncommitted changes. The parent should confirm this with `git show --stat 9511c440`.
+
+Summary: 0 P0, 0 P1, 0 P2, 0 P3
+
+## P0 Critical
+
+None.
+
+## P1 High
+
+None.
+
+## P2 Medium
+
+None.
+
+## P3 Low
+
+None.
+
+## Verification notes
+
+- The fix (`no-eval.spec.ts:104-105`): `relative(ROOT, path).split(sep).join('/')` gives `packages/...` and `node_modules/...` names with `/` on every OS. On Linux and macOS `sep` is `/`, so nothing changes there. On Windows it turns `node_modules\@codemirror\view\dist\index.js` into the form listed at lines 110-117, so the `toContain` checks at line 119 can match.
+- How the rest of the spec uses `names` on Windows:
+  - Line 123-125 (`it.each` per file): `readFileSync(join(ROOT, name))`. On win32 `path.join` normalizes `/` to `\`, so the file is still found. The test titles now show `/` names on every OS, which keeps them the same on all three OSes.
+  - Line 134 (`names.some((name) => name.includes('node_modules/ajv/'))`): before this fix the check could never match on Windows, because the names used `\`. It would have passed even if Ajv had been in the editor graph. With `/` names, the check now works on Windows too. So the fix also makes this guard real on Windows.
+  - Line 132 (Ajv hits) uses the raw absolute paths from `ajvGraph.files` with `readFileSync`, not `names`, so the change does not affect it.
+  - Line 92 (`unresolved` messages) still uses native separators. These strings are only diagnostics in the `toEqual([])` failure output, so this has no effect on the result.
+- Path comparisons: `relative` on win32 compares case-insensitively, so a drive-letter case difference between `process.cwd()` and `realpathSync` output does not produce `..` names. The CI failure showed only a separator mismatch, which matches this.
+- AGENTS.md says to "compare them with `path` too (never hard-coded `/`)". Here the names are made OS-neutral to compare them with fixed expected strings, and file access still goes through `path.join`. This is consistent with the purpose of the rule (OS-neutral comparison), and it is the same pattern the earlier bson fix took in the opposite direction. It is not a finding.
+- Product: the spec only reads source files and follows imports. The raw editor code and its bundle are not changed, and the failure came from how the test built its names. So "test-only, product correct" is right.
+- Criterion 2: met for this fix. The commit subject says "test-only, product correct", and the comment at line 104 says "Test-only fix (the product was right): `relative` gives `\` on Windows, so compare with `/`."
+- Scope: as in round 3, `packages/renderer` is outside the task's `touches` list, but the change serves criterion 1 (green `check` on all three OSes). This is noted for the parent and is not a code finding.
+- Not run in this round (Bash denied): local `ng test` for this spec, and the CI run. Criterion 1 is still open. The parent must record a `check` run of `wip/ci-windows-macos` (or main after done) that is green on ubuntu, macOS and Windows, or mark the criterion skipped with a reason. The parent should also run `npx ng test --include src/app/raw-editor/no-eval.spec.ts` in `packages/renderer` on Linux to confirm the spec still passes there.
+
+## Review conclusion
+
+No material issues found.
