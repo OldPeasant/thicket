@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "task": "bulk-ops-ui",
+  "reviewed_revision": "19dad779985f303221f9e5073661b3561692dd7f",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/bulk-ops-ui/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/bulk-ops-ui/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/bulk-ops-ui/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P2",
+      "disposition": "fixed",
+      "note": "closing the panel during a sent write aborted it; write now sent without signal after WriteGuard.approve, Close and toolbar toggles disabled while writing (d68aea9)"
+    },
+    {
+      "id": "CR-2",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "accepted",
+      "note": "panel header uses the query bar's db.<coll> shorthand on purpose; the confirm dialog shows the exact runnable getCollection(...) call"
+    },
+    {
+      "id": "CR-3",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "accepted",
+      "note": "profile switched to read-only mid-write removes the panel without page reload; rare edge case, the write still completes, toolbar lock is reset (tested)"
+    },
+    {
+      "id": "TW-1",
+      "source": "test-writer",
+      "severity": "Medium",
+      "disposition": "fixed",
+      "note": "prettier formatting of bulk-panel.ts/html (d68aea9)"
+    },
+    {
+      "id": "TW-2",
+      "source": "test-writer",
+      "severity": "Low",
+      "disposition": "fixed",
+      "note": "stale status said '1 documents'; singular now (d68aea9)"
+    }
+  ],
+  "validation": [
+    { "command": "npm run test:e2e -- test/e2e/bulk.e2e.ts", "result": "pass" },
+    {
+      "command": "cd packages/renderer && npx ng test --include='src/app/collection/**/*.spec.ts' --watch=false",
+      "result": "pass"
+    },
+    { "command": "npm run check", "result": "pass" }
+  ]
+}
