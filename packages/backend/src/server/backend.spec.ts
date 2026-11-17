@@ -330,6 +330,9 @@ describe('startBackend: connections', () => {
         'coll.drop',
         'coll.rename',
         'coll.stats',
+        'coll.validator.get',
+        'coll.validator.set',
+        'coll.validator.check',
       ]),
     );
   });

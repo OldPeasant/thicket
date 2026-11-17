@@ -113,6 +113,10 @@ const SAMPLES: { [M in MethodName]: { valid: ParamsOf<M>; invalid: unknown } } =
     },
     invalid: { ...NS, validator: null, validationLevel: 'always', validationAction: 'error' },
   },
+  'coll.validator.check': {
+    valid: { ...NS, ids: '[{"$numberInt":"1"}]', validator: '{"$jsonSchema":{}}' },
+    invalid: { ...NS, ids: '{"_id":1}' },
+  },
 
   'docs.find': {
     valid: {

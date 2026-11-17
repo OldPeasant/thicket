@@ -4,7 +4,7 @@ import { BROADCAST_STREAMS, methods, type Event, type Profile } from '@thicket/c
 
 import { aggHandlers } from '../agg';
 import { OidcAuthenticator } from '../auth/oidc';
-import { browseHandlers } from '../browse';
+import { browseHandlers, validatorHandlers } from '../browse';
 import { ConnectionManager, connHandlers } from '../connections';
 import { docsQueryHandlers } from '../docs/query';
 import { docsWriteHandlers } from '../docs/write';
@@ -131,6 +131,7 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
       ...conn,
       ...sshHandlers(prompts),
       ...browseHandlers(connections),
+      ...validatorHandlers(connections),
       ...docsQueryHandlers(connections),
       ...docsWriteHandlers(connections),
       ...aggHandlers(connections),
