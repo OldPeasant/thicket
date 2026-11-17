@@ -124,6 +124,27 @@ describe('JsonScanner: one array of documents', () => {
     expect(scanError(json, ['[{"a":1},\n}']).message).toBe('Line 2: unexpected }');
   });
 
+  it('returns the array documents before text after the closing ], then throws it at the end', () => {
+    const scanner = new JsonScanner();
+    expect(scanner.feed('[{"a":1},\n{"b":2}]\nx')).toEqual([
+      { text: '{"a":1}', line: 1 },
+      { text: '{"b":2}', line: 2 },
+    ]);
+    const error = (() => {
+      try {
+        scanner.end();
+      } catch (e) {
+        return e;
+      }
+      return undefined;
+    })();
+    expect(error).toBeInstanceOf(ScanError);
+    expect(error).toMatchObject({
+      line: 3,
+      message: 'Line 3: unexpected text after the closing ]',
+    });
+  });
+
   it('refuses a missing value before a comma', () => {
     expect(scanError(json, ['[,{"a":1}]']).message).toMatch(/missing value before ,/);
     const error = scanError(json, ['[{"a":1},\n,{"b":2}]']);
@@ -216,6 +237,21 @@ describe('JsonScanner: documents one after another (mongoexport)', () => {
     expect(scanError(json, ['{"a":1}]']).message).toMatch(/unexpected \]/);
     expect(scanError(json, ['{"a":1}}']).message).toMatch(/unexpected \}/);
     expect(scanError(json, ['1}']).message).toMatch(/unexpected \}/);
+  });
+
+  it('returns the documents completed before a stray bracket, then throws on the next call', () => {
+    const scanner = new JsonScanner();
+    expect(scanner.feed('{"a":1}\n{"b":2}\n}\n{"c":3}')).toEqual([
+      { text: '{"a":1}', line: 1 },
+      { text: '{"b":2}', line: 2 },
+    ]);
+    expect(() => scanner.end()).toThrow(/^Line 3: unexpected \}/);
+  });
+
+  it('a broken point with no value completed in its chunk throws at once', () => {
+    const scanner = new JsonScanner();
+    expect(scanner.feed('{"a":1}\n')).toEqual([{ text: '{"a":1}', line: 1 }]);
+    expect(() => scanner.feed('}')).toThrow(/^Line 2: unexpected \}/);
   });
 
   it('refuses a file that ends inside a document', () => {

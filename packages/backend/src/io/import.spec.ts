@@ -177,6 +177,14 @@ describe('previewFile', () => {
     expect((error as Error).message).toMatch(/after the closing \]/);
   });
 
+  it('a broken structure after the sample is complete still gives the sample', async () => {
+    const file = await fileWith('late.json', '[{"a":1},\n{"b":2},\n{"c":3},\n}');
+    expect((await previewFile(file, 'json', 2)).sample).toEqual([
+      '{"a":{"$numberInt":"1"}}',
+      '{"b":{"$numberInt":"2"}}',
+    ]);
+  });
+
   it('answers INTERNAL for other read errors (a folder)', async () => {
     await expect(previewFile(dir, 'jsonl')).rejects.toMatchObject({ code: 'INTERNAL' });
   });
@@ -506,6 +514,90 @@ describe('importFile', () => {
         ],
       },
     ]);
+  });
+
+  it.each([
+    [
+      'documents one after another with a stray }',
+      'seq.json',
+      '{"_id":1}\n{"_id":2}\n}\n{"_id":4}\n',
+      'Line 3: unexpected }',
+    ],
+    [
+      'text after the closing ]',
+      'trail.json',
+      '[{"_id":1},\n{"_id":2}]\nmore',
+      'Line 3: unexpected text after the closing ]',
+    ],
+  ])(
+    'a broken structure (%s) inserts the documents before it, then rejects',
+    async (_what, name, text, message) => {
+      const file = await fileWith(name, text);
+      const server = fakeServer();
+      const { result, progress } = await runImport(server.client, file, 'json', {
+        stopOnError: false,
+      });
+      expect(result).toBeInstanceOf(RpcError);
+      expect(result).toMatchObject({ code: 'INVALID_PARAMS', message });
+      expect(server.inserts.map((i) => texts(i.documents))).toEqual([
+        ['{"_id":{"$numberInt":"1"}}', '{"_id":{"$numberInt":"2"}}'],
+      ]);
+      expect(progress).toEqual([{ processed: 2, failed: 0, errors: [] }]);
+    },
+  );
+
+  it('a broken structure in a later read chunk inserts every document before it', async () => {
+    // Far more than one 256 KiB read chunk: the broken point comes with a later chunk.
+    const count = 30_000;
+    const lines = Array.from({ length: count }, (_, k) => `{"_id":${String(k)}}`);
+    const file = await fileWith('broken-big.json', `[\n${lines.join(',\n')},\n,\n]`);
+    const server = fakeServer();
+    const { result, progress } = await runImport(server.client, file, 'json');
+    expect(result).toMatchObject({ code: 'INVALID_PARAMS' });
+    expect((result as Error).message).toBe(`Line ${String(count + 2)}: missing value before ,`);
+    const inserted = texts(server.inserts.flatMap((i) => i.documents));
+    expect(inserted).toHaveLength(count);
+    expect(inserted.at(-1)).toBe(`{"_id":{"$numberInt":"${String(count - 1)}"}}`);
+    expect(progress.at(-1)).toEqual({ processed: count, failed: 0, errors: [] });
+  });
+
+  it('continue mode: a refused insert in the last batch before a broken structure is reported', async () => {
+    const file = await fileWith('dup-broken-cont.json', '[{"_id":1},\n{"_id":1},\n{"_id":2},\n}');
+    const server = fakeServer((documents, ordered, call) =>
+      call === 1 ? duplicateAt(documents, 1, ordered) : { n: documents.length, ok: 1 },
+    );
+    const { result, progress } = await runImport(server.client, file, 'json', {
+      stopOnError: false,
+    });
+    expect(result).toMatchObject({ code: 'INVALID_PARAMS', message: 'Line 4: unexpected }' });
+    // Ordered: the rest after the refused document is sent again.
+    expect(server.inserts.map((i) => i.documents.length)).toEqual([3, 1]);
+    expect(progress).toEqual([
+      {
+        processed: 3,
+        failed: 1,
+        errors: [
+          {
+            index: 2,
+            error: { code: 'SERVER_ERROR', message: 'Line 2: E11000 duplicate key error' },
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('a failing final insert after a broken structure rejects with the server error', async () => {
+    const file = await fileWith('wc-broken.json', '[{"_id":1},\n}');
+    const server = fakeServer((documents) => ({
+      n: documents.length,
+      writeConcernError: { code: 64, errmsg: 'waiting for replication timed out' },
+      ok: 1,
+    }));
+    const { result, progress } = await runImport(server.client, file, 'json');
+    expect(result).toMatchObject({ code: 'SERVER_ERROR' });
+    expect((result as Error).message).toMatch(/not acknowledged/);
+    expect(server.inserts).toHaveLength(1);
+    expect(progress).toEqual([]);
   });
 
   it('a stop before the broken structure wins (its line comes first)', async () => {

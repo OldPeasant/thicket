@@ -364,4 +364,54 @@ describe('exportToFile', () => {
       expect(await readdir(dir)).toEqual([]);
     },
   );
+
+  it.skipIf(!existsSync('/dev/full'))(
+    'rejects INTERNAL when a write fails while waiting for the buffer to drain (disk full)',
+    { timeout: 3000 },
+    async () => {
+      // One batch larger than the stream's buffer: write() returns false and the export waits for
+      // `drain`, which never comes; the write error must end the wait.
+      const pad = 'p'.repeat(200);
+      const batch = Array.from({ length: EXPORT_BATCH_SIZE }, (_, k) => ({
+        _id: new Int32(k),
+        pad,
+      }));
+      const server = fakeServer([batch]);
+      const file = path.join(dir, 'full-big.jsonl');
+      await symlink('/dev/full', file);
+      const progress: IoProgress[] = [];
+      const outcome = await Promise.race([
+        exportToFile(server.client, params(), file, { progress: (p) => progress.push(p) }).then(
+          () => 'resolved',
+          (e: unknown) => e,
+        ),
+        new Promise((resolve) => setTimeout(() => resolve('still running after 2 s'), 2000)),
+      ]);
+      expect(outcome).toMatchObject({ code: 'INTERNAL' });
+      expect((outcome as Error).message).toContain(file);
+      expect((outcome as Error).message).toMatch(/ENOSPC/);
+      // No final progress event for a failed export.
+      expect(progress).toEqual([]);
+      expect(await readdir(dir)).toEqual([]);
+    },
+  );
+
+  it.skipIf(!existsSync('/dev/full'))(
+    'rejects INTERNAL for an empty JSON export when the bracket cannot be written (disk full)',
+    { timeout: 3000 },
+    async () => {
+      const file = path.join(dir, 'full-empty.json');
+      await symlink('/dev/full', file);
+      const outcome = await Promise.race([
+        exportToFile(fakeServer([[]]).client, params({ format: 'json' }), file).then(
+          () => 'resolved',
+          (e: unknown) => e,
+        ),
+        new Promise((resolve) => setTimeout(() => resolve('still running after 2 s'), 2000)),
+      ]);
+      expect(outcome).toMatchObject({ code: 'INTERNAL' });
+      expect((outcome as Error).message).toContain(file);
+      expect(await readdir(dir)).toEqual([]);
+    },
+  );
 });
