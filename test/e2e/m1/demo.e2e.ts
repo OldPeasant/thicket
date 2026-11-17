@@ -33,7 +33,7 @@ import {
  *        -> `shop` and `orders` in the tree, "Stats" shows "40,000 docs, …"; click opens the tab.
  * [x] 4. Table, one row per document, 50 per page; page 3 of ~40 000 one click away; filter
  *        `{status: "open", total: {$gt: 100}}` and a sort; results update.
- *        -> 50 table rows, "~40,000", "of ~800"; Next twice -> page 3 (rows 101–150); filter + sort
+ *        -> 50 table rows, "~40,000", "of ~800"; page field 3 -> rows 101–150; filter + sort
  *           `{total: -1}` -> the first document is the largest open order.
  * [x] 5. Open a document: nested `items` (2 000 subdocuments) pages inside the document; `_id`
  *        ObjectId, `createdAt` Date, `total` Decimal128.
@@ -43,12 +43,12 @@ import {
  *        `$set`; save succeeds.
  *        -> edit mode, total = 1234.56, new field `reviewed` = "yes"; "2 changes"; Save -> confirm
  *           dialog (production) shows updateOne with $set total NumberDecimal and reviewed; OK ->
- *           "Saved 1."; the driver reads the new values.
+ *           "Saved ObjectId(…)."; the driver reads the new values.
  * [x] 7. Change the same document elsewhere, edit it again in Thicket, Save: conflict, both
  *        versions side by side.
- *        -> the driver (the "second window") sets status "shipped"; edit total again; Save (+
- *           production confirm) -> conflict view with local and server columns, the server's
- *           status differs; the server document is unchanged by the failed save.
+ *        -> the driver (the "second window") sets total 1500.00 and status "shipped"; edit total
+ *           again (777.00); Save (+ production confirm) -> conflict view with local and server
+ *           columns, total and status rows differ; the failed save wrote nothing.
  *
  * Screenshots of each step (Business style, light mode) go to $THICKET_M1_SHOTS (default
  * test-results/m1); the committed set is in reviews/m1-e2e/.
@@ -119,7 +119,7 @@ async function seed(mongo: E2EMongo): Promise<void> {
       batch.push({
         _id: new ObjectId(),
         status: statuses[i % 4] as string,
-        total: Decimal128.fromString(((i * 37) % 40_000 / 100).toFixed(2)),
+        total: Decimal128.fromString((((i * 37) % 40_000) / 100).toFixed(2)),
         createdAt: new Date(base + i * 60_000),
         customer: `customer ${i % 997}`,
         items: [
@@ -261,7 +261,7 @@ test('M1 demo, steps 2–7, against a TLS replica set', async ({ window, userDat
     await expect(orders).toBeVisible();
     await orders.click({ button: 'right' });
     await window.getByTestId('menu-stats').click();
-    await expect(orders.getByTestId('node-stats')).toHaveText(/^40,000 docs, \S+/);
+    await expect(orders.getByTestId('node-stats')).toHaveText(/^40\D?000 docs, \d/);
     await orders.click();
     await expect(window.locator('[data-testid="tab"][data-tab-id$="shop.orders"]')).toBeVisible();
     // Production: red accent on the shell and the tab.
@@ -276,20 +276,21 @@ test('M1 demo, steps 2–7, against a TLS replica set', async ({ window, userDat
     await expect(window.getByTestId('pager-pages')).toHaveText('of ~800');
     await window.getByTestId('view-table').click();
     await expect(
-      window.locator('app-json-explorer .json-output > app-json-table > .tw tbody > tr'),
+      window.locator('app-json-explorer .json-output > app-json-table > .tw > table > tbody > tr'),
     ).toHaveCount(50);
     await shot(window, 'step-4-table.png');
 
-    await window.getByTestId('pager-next').click();
-    await window.getByTestId('pager-next').click();
-    await expect(rows).toHaveText('101–150');
+    // Page 3 by its number in the page field (Next twice gets there too).
+    await window.getByTestId('pager-page').fill('3');
+    await window.getByTestId('pager-page').press('Enter');
+    await expect(rows).toContainText(/^101–150 of ~40,000/);
     await expect(window.getByTestId('pager-page')).toHaveValue('3');
 
     await window.getByTestId('query-filter').fill('{status: "open", total: {$gt: 100}}');
     await window.getByTestId('query-sort').fill('{total: -1}');
     await window.getByTestId('query-run').click();
     await expect(window.getByTestId('query-errors')).toHaveCount(0);
-    await expect(rows).toContainText('1–50');
+    await expect(rows).toHaveText('1–50');
     await expect(window.getByTestId('pager-page')).toHaveValue('1');
     await window.getByTestId('view-raw').click();
     const raw = window.getByTestId('raw-text');
@@ -304,9 +305,15 @@ test('M1 demo, steps 2–7, against a TLS replica set', async ({ window, userDat
   await test.step('5. open the document: items page inside it, BSON types shown', async () => {
     await window.getByTestId('view-list').click();
     await expect(doc).toBeVisible();
-    await expect(doc.locator('.field[data-node$="._id"] [data-bson-type="objectId"]').first()).toBeVisible();
-    await expect(doc.locator('.field[data-node$=".createdAt"] [data-bson-type="date"]').first()).toBeVisible();
-    await expect(doc.locator('.field[data-node$=".total"] [data-bson-type="decimal"]').first()).toBeVisible();
+    await expect(
+      doc.locator('.field[data-node$="._id"] [data-bson-type="objectId"]').first(),
+    ).toBeVisible();
+    await expect(
+      doc.locator('.field[data-node$=".createdAt"] [data-bson-type="date"]').first(),
+    ).toBeVisible();
+    await expect(
+      doc.locator('.field[data-node$=".total"] [data-bson-type="decimal"]').first(),
+    ).toBeVisible();
     const range = doc.getByTestId('nested-pager-range');
     await expect(range).toHaveText('1–100 of 2,000 items');
     await expect(doc.getByText('ITEM-0000', { exact: true })).toBeVisible();
@@ -337,7 +344,9 @@ test('M1 demo, steps 2–7, against a TLS replica set', async ({ window, userDat
       await expect(operation).toContainText('reviewed: "yes"');
       await shot(window, 'step-6-production-confirm.png');
     });
-    await expect(window.getByTestId('edit-message')).toHaveText('Saved 1.');
+    await expect(window.getByTestId('edit-message')).toHaveText(
+      `Saved ObjectId("${DEMO_ID.toHexString()}").`,
+    );
     const saved = await withOrders(mongo, (c) => c.findOne({ _id: DEMO_ID }));
     expect(saved?.total.toString()).toBe('1234.56');
     expect(saved?.reviewed).toBe('yes');
@@ -345,28 +354,32 @@ test('M1 demo, steps 2–7, against a TLS replica set', async ({ window, userDat
   });
 
   await test.step('7. a concurrent change makes the next save a conflict, side by side', async () => {
-    // The "second window": another client changes the same document.
-    await withOrders(mongo, (c) => c.updateOne({ _id: DEMO_ID }, { $set: { status: 'shipped' } }));
+    // The "second window": another client changes the same document, including `total`. The
+    // conflict check covers the fields the save changes (SPEC: `_id` plus their original values).
+    await withOrders(mongo, (c) =>
+      c.updateOne(
+        { _id: DEMO_ID },
+        { $set: { total: Decimal128.fromString('1500.00'), status: 'shipped' } },
+      ),
+    );
     await typeValue(doc, 'total', '777.00');
     await expect(window.getByTestId('edit-count')).toHaveText('1 change');
     await saveConfirmed(window);
     const view = window.getByTestId('conflict-view');
     await expect(view).toBeVisible();
     await expect(window.getByTestId('edit-message')).toContainText('changed on the server');
+    // Side by side: the user's version left, the server's right, the differing lines marked.
     const changed = view.locator('[data-testid="conflict-row"][data-kind="changed"]');
-    await expect(changed.getByTestId('conflict-local').filter({ hasText: 'status' })).toContainText(
-      'status: "open"',
-    );
-    await expect(
-      changed.getByTestId('conflict-server').filter({ hasText: 'status' }),
-    ).toContainText('status: "shipped"');
-    await expect(
-      changed.getByTestId('conflict-local').filter({ hasText: 'total' }),
-    ).toContainText('777.00');
+    const totalRow = changed.filter({ hasText: 'total' });
+    await expect(totalRow.getByTestId('conflict-local')).toContainText('777.00');
+    await expect(totalRow.getByTestId('conflict-server')).toContainText('1500.00');
+    const statusRow = changed.filter({ hasText: 'status' });
+    await expect(statusRow.getByTestId('conflict-local')).toContainText('status: "open"');
+    await expect(statusRow.getByTestId('conflict-server')).toContainText('status: "shipped"');
     await shot(window, 'step-7-conflict.png');
     // The failed save wrote nothing.
     const stored = await withOrders(mongo, (c) => c.findOne({ _id: DEMO_ID }));
     expect(stored?.status).toBe('shipped');
-    expect(stored?.total.toString()).toBe('1234.56');
+    expect(stored?.total.toString()).toBe('1500.00');
   });
 });
