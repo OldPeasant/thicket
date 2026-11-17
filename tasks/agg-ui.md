@@ -17,3 +17,4 @@ Stage list (add/remove/reorder/disable), each stage in shell syntax with live pr
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 02:55+0100 by felix/agent-1): The builder is its own tab kind 'aggregation' (one per collection, id aggregation:<profile>:<db>.<coll>), opened with 'Aggregate…' on the collection tab; drop/rename close it like the collection tab
+- ASSUMPTION (2026-11-17 02:55+0100 by felix/agent-1): Saving pipelines (pipelines.json) needs a main-process store and new contract methods; left to the new task saved-pipelines instead of growing agg-ui (not in its acceptance criteria)
