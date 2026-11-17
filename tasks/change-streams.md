@@ -17,3 +17,4 @@ Watch a collection or database (replica set only) with a live event list; open t
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 07:36+0100 by felix/agent-1): admin.watch uses raw $changeStream aggregate + getMore loop on the primary (lossless EJSON like docs.find) instead of the driver's ChangeStream; no automatic resume after a network error/failover: the stream ends with the error and the user presses Start
+- ASSUMPTION (2026-11-17 07:36+0100 by felix/agent-1): Standalone is refused at request time via hello (UNSUPPORTED, detail reason needsReplicaSet) rather than as a stream error; the renderer shows a dedicated notice for that detail
