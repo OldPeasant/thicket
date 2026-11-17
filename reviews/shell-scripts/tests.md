@@ -194,3 +194,80 @@ Evidence:
 ## Summary (round 2)
 
 Tests added. The focused console suite passes (143 tests), and no production defects were found. The fixes for CR-1, CR-2 and TW-2 are covered by tests. Changed-line coverage is 55/55 lines and 33/34 branches. `.taskcheck` was not run by the test-writer in this round, so the parent must run it.
+
+# Round 3
+
+Date: 2026-11-17
+
+Task: shell-scripts — M4 (Should): Run a script file in the shell
+
+Scope: base `c1d702aa77c62dfdf6e705dbfba7f6bfdda09a92` .. HEAD `8af8d202370a7227ed427cf68ed2073d2ea3a9db`. The only code change since round 2 is `8af8d202` (fix CR-3; see `reviews/shell-scripts/fixes.md` Round 2). It replaces the literal byte order mark character with the escape `'﻿'` in `script-file.ts:58` and in two places in `script-file.spec.ts` (lines 88 and 125). `shell-console.ts` is unchanged since round 2: its sha256 is the same. No uncommitted source or test changes were in the measured snapshot. The working tree was clean apart from this report.
+
+Requirements: same as rounds 1 and 2, plus CR-3. CR-3 needs no behaviour change, so the BOM must still be stripped.
+
+## Do the BOM tests still exercise real BOM stripping?
+
+Yes.
+- `grep -c -P '\x{FEFF}'` finds 0 literal BOM characters in `script-file.ts` and `script-file.spec.ts`, so the escape is now the only BOM in both files.
+- In a TS/JS string literal, `'﻿'` is the single code unit U+FEFF. The production check `code.startsWith('﻿')` and the spec input `'﻿print(1)'` therefore use the same character a UTF-8 BOM decodes to. The spec helper's `size` (via `TextEncoder`) counts it as 3 bytes (EF BB BF).
+- Runtime evidence from the fresh lcov: `BRDA:58,3,0,3` shows the strip branch at `script-file.ts:58` was taken 3 times. Those are `drops a UTF-8 byte order mark` plus the two BOM inputs of `refuses an empty, blank or BOM-only file`.
+- `drops a UTF-8 byte order mark` would fail without the strip, because the code would stay `'﻿print(1)'` and the test expects `'print(1)'`. That test is the regression guard. The BOM-only cases of `refuses an empty, blank or BOM-only file` would pass even without the strip, because ECMAScript `String.prototype.trim()` already removes U+FEFF. They are still correct tests, but they do not by themselves prove the strip runs. This was already true before CR-3, so nothing needs to change.
+
+## Test files changed (round 3)
+
+None. No tests were added or changed in this round. The CR-3 spec edit was made by the fixer in `8af8d202`, and I reviewed it above.
+
+Count: 0
+
+## Focused test execution
+
+Command: `cd packages/renderer && npx ng test --include='src/app/console/**/*.spec.ts'`
+
+Result: Pass. 3 files, 143 tests (06:58:17 +01:00).
+
+## Full test execution / .taskcheck
+
+Command: `sh .taskcheck` (`npm run check` = `npm run lint && npm run typecheck && npm run test`)
+
+Result: Pass. The renderer `ng test` runs last in the `&&` chain and reported 103 files, 3426 tests passed (06:59:40 +01:00), so lint, typecheck and the root vitest run before it also passed. The root vitest file and test counts were cut off by my output tail and are not recorded here.
+
+## Bugs found
+
+None.
+
+## Coverage (round 3)
+
+Status: verified
+
+Metric: whole-file coverage of task-changed production files.
+Changed-line coverage: `script-file.ts` is all new in `c1d702aa..8af8d202` and has 20/20 lines and 10/10 branches. CR-3 changed only line 58, which has `DA:58,32` and both branches taken (`BRDA:58,3,0,3` and `BRDA:58,3,1,29`). `shell-console.ts` is byte-identical to round 2 (sha256 1735c95e…955f23), and its round-2 changed-line result still holds: 35/35 lines and 23/24 branches on changed lines. The only uncovered branch is `:291` branch 1, the defensive `String(error)`. Total: 55/55 changed lines and 33/34 changed branches.
+
+Evidence:
+- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: `shell-scripts`; base `c1d702aa77c62dfdf6e705dbfba7f6bfdda09a92` (from the parent); HEAD `8af8d202370a7227ed427cf68ed2073d2ea3a9db`. The task commits are `e6f99bee`, `45897b54`, `dc96c1f1`, `b32e49cc` and `8af8d202`. I confirmed the CR-3 file list with `git show --stat HEAD`.
+- Source/test snapshot identifier (sha256, the same before and after the coverage run, all equal to HEAD): `script-file.ts` 8d6a657e…9d01e377, `shell-console.ts` 1735c95e…29955f23, `script-file.spec.ts` 3ad1eae7…a303a289, `shell-console.spec.ts` 13ee2613…2c2039.
+- Exact included files and exclusions: included `packages/renderer/src/app/console/scripts/script-file.ts` and `packages/renderer/src/app/console/shell-console.ts`. The exclusions are the same as before: the `shell-console.html` template, which v8 does not instrument separately and which the DOM tests cover; `shell-console.css`, which holds only styles; and the e2e test and its fixture. No files were renamed or deleted.
+- Provider/version, command, working directory, and test selection: `@vitest/coverage-v8` via `@angular/build:unit-test`, vitest 5.1.0. Command: `npx ng test --include='src/app/console/**/*.spec.ts' --coverage --coverage-include='src/app/console/scripts/script-file.ts' --coverage-include='src/app/console/shell-console.ts'` in `packages/renderer`. Test selection: the console specs (3 files, 143 tests).
+- Run start/completion time and exit status: started 2026-11-17 06:58:37 +01:00, report written 06:58:42 +01:00. 143 passed, and the coverage summary was printed.
+- Generated report paths and hashes: `packages/renderer/coverage/renderer/coverage-summary.json` (sha256 c89a510f…dcc4064) and `packages/renderer/coverage/renderer/lcov.info` (sha256 c1eb2a5b…1b03562d).
+- Evidence outputs are fresh and inputs stayed unchanged: yes. The report files have mtime 06:58:42, which is this run. Their content hashes are identical to round 2. That is expected: CR-3 kept line 58's position and runtime meaning, and the reports contain no timestamps. The input hashes did not change during the run.
+- Final run after latest test additions and production fixes: yes. It ran on `8af8d202`, after CR-3.
+
+| Changed file | Statements | Branches | Functions | Lines |
+|---|---:|---:|---:|---:|
+| `packages/renderer/src/app/console/scripts/script-file.ts` | 24/24 (100%) | 10/10 (100%) | 4/4 (100%) | 20/20 (100%) |
+| `packages/renderer/src/app/console/shell-console.ts` | 293/301 (97.34%) | 194/205 (94.63%) | 58/62 (93.54%) | 248/250 (99.20%) |
+| Aggregate (summed counters, both files; html/css excluded as above) | 317/325 (97.53%) | 204/215 (94.88%) | 62/66 (93.93%) | 268/270 (99.25%) |
+
+| File and uncovered lines/branch locations | Required behavior or risk | Action/test added or reason left uncovered |
+|---|---|---|
+| `script-file.ts` | — | Fully covered. |
+| `shell-console.ts:291` branch 1 (`String(error)` for a throw that is not an `Error`) | none | Defensive code. `readScriptFile` only throws `Error`, and `throws Error instances` asserts that. This is a justified gap. |
+| `shell-console.ts:158`, `:160`, `:216`, `:235`, `:348`, `:361`, `:366`, `:463`, `:504`, `:552` and the 4 uncovered functions | Code that existed before this task | Outside the task's changed lines. No tests were added. |
+
+## Unable to test (round 3)
+
+- AC1 (the e2e against real mongosh/MongoDB) was not run by the test-writer. The parent owns that evidence.
+
+## Summary (round 3)
+
+Tests and task-scoped coverage are sufficient, and no production defects were found. After CR-3, the BOM tests still exercise real U+FEFF stripping (the strip branch was taken 3 times). The focused console suite (143 tests) and `.taskcheck` (renderer 3426 tests) pass. Changed-line coverage is 55/55 lines and 33/34 branches.

@@ -119,3 +119,59 @@ None.
 ## Review conclusion
 
 No material issues found. CR-1, CR-2 and TW-2 are fixed. CR-3 is a low-priority readability improvement and does not block completing the task.
+
+---
+
+# Round 3
+
+Date: 2026-11-17
+
+Task: shell-scripts - M4 (Should): Run a script file in the shell
+
+Scope: the changes since round 2 on the final code: commit `b32e49cc` (one new unit test in `packages/renderer/src/app/console/shell-console.spec.ts`, plus round-2 reports) and commit `8af8d202` (the CR-3 fix in `packages/renderer/src/app/console/scripts/script-file.ts` and `script-file.spec.ts`, plus `reviews/shell-scripts/fixes.md` "Round 2"). I also checked the task diff `git diff c1d702aa..HEAD -- packages/renderer/src/app/console test/e2e/shell.e2e.ts test/e2e/fixtures` again for context. Changes to `import-export-page.*` and `test/e2e/layout.e2e.ts` belong to task `e2e-layout-import-heading` and were not reviewed, as in round 2. The working tree had no uncommitted changes before this report was written.
+
+Requirements:
+- tasks/shell-scripts.md (acceptance criterion #1, assumptions #1 and #2)
+- SPEC.md section 3 M4 and section 6; docs/ARCHITECTURE.md; AGENTS.md; docs/QUALITY.md
+- reviews/shell-scripts/review.md (rounds 1 and 2), reviews/shell-scripts/fixes.md (rounds 1 and 2)
+
+Git range:
+- Branch: main
+- HEAD: 8af8d202370a7227ed427cf68ed2073d2ea3a9db
+- Base/start: c1d702aa77c62dfdf6e705dbfba7f6bfdda09a92
+- Commits reviewed: 2 new since round 2 (b32e49cc, 8af8d202); 5 task commits in total (e6f99bee, 45897b54, dc96c1f1, b32e49cc, 8af8d202)
+
+Summary: 0 P0, 0 P1, 0 P2, 0 P3
+
+## Round 2 findings, checked against the final code
+
+- **CR-3: resolved.** `script-file.ts:58` now reads `if (code.startsWith('﻿')) code = code.slice(1);`. It uses the escape sequence instead of a raw character. The spec uses the same escape in the BOM-drop test and in the two BOM-only empty-file cases. A byte scan finds no U+FEFF and no other non-ASCII character in either file. The behavior is unchanged: the BOM-drop test still expects `print(1)` with 1 line, and the empty-file test still rejects `'﻿'` and `'﻿  \n'`.
+
+## Changes since round 2
+
+- New unit test "runs the same file once the busy run ends, and the busy message goes away" (`shell-console.spec.ts`, commit `b32e49cc`). It starts a script read and sends a typed input during the read. Then it checks that the busy message appears. Next it ends the typed run and chooses the file again. It checks that the message is cleared, that both inputs were sent in order, and that the last run has the script name and line count. The test checks visible behavior and what the fake bridge received, not internal state. It covers recovery after the CR-1 message. No problems found.
+
+## P0 Critical
+
+None.
+
+## P1 High
+
+None.
+
+## P2 Medium
+
+None.
+
+## P3 Low
+
+None.
+
+## Notes (not findings)
+
+- Validation run by the reviewer: `cd packages/renderer && npx ng test --include='src/app/console/**/*.spec.ts'` -> 3 files, 143 tests passed. I did not run the e2e suite or `.taskcheck` again. The CR-3 fix only changes how the same character is written in the source, so it does not affect the e2e path.
+- Report note: in the round-2 CR-3 text above, both the "Problem" and the "Suggested fix" code spans contain the raw U+FEFF character, so the suggested fix looks the same as the problem. The intended fix was the `﻿` escape sequence, and commit `8af8d202` applied it. This affects only the report text, not the code.
+
+## Review conclusion
+
+No material issues found. CR-3 is fixed, the new unit test is sound, and the final code has no new findings.

@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "task": "shell-scripts",
+  "reviewed_revision": "8af8d202370a7227ed427cf68ed2073d2ea3a9db",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/shell-scripts/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/shell-scripts/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/shell-scripts/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "script silently not run when a run starts or the session ends while the file is read; now says why"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "script runs no longer keep the script text in the transcript"},
+    {"id": "CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "literal U+FEFF in source replaced by the escape"},
+    {"id": "TW-1", "source": "test-writer", "severity": "Low", "disposition": "fixed",
+     "note": "same as CR-1 (script dropped without message while busy)"},
+    {"id": "TW-2", "source": "test-writer", "severity": "Low", "disposition": "fixed",
+     "note": "'(5.0 MB; at most 5.0 MB)' message now says 'larger than 5 MB'"}
+  ],
+  "validation": [
+    {"command": "cd packages/renderer && npx ng test --include='src/app/console/**/*.spec.ts'", "result": "pass"},
+    {"command": "npm run test:e2e -- test/e2e/shell.e2e.ts", "result": "pass"},
+    {"command": "sh .taskcheck", "result": "pass"}
+  ]
+}
