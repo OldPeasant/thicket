@@ -165,7 +165,7 @@ export class BulkPanel {
         key,
         mode,
         matched: result.matched,
-        sample: result.sample.map((doc) => shell(doc)),
+        sample: result.sample.map((doc) => shell(doc, 0)),
       });
     } catch (error) {
       if (!controller.signal.aborted) this.fail(error);

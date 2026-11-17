@@ -649,6 +649,14 @@ Contract layout (`packages/contract/src/`):
   Production accent: `.tab.production`, `AppShell` host class `production`
   (red sidebar edge; active tab's `production`, else the status bar's connection) and the status
   bar's `production` class. Dev page `#/dev/safety`; screenshots in `test/e2e/safety.e2e.ts`.
+- Bulk update/delete (`packages/renderer/src/app/collection/bulk`, `BulkPanel`, "Update/Delete
+  many…" in the collection tab, hidden on read-only profiles): works on the tab's applied filter
+  and collation (sort/limit don't apply). The update is shell syntax (operators only, or a
+  pipeline; `parseUpdate`). Preview = `docs.previewMany` (count + 5-document sample); the write is
+  only possible for a current preview (changing mode, update or applied query makes it stale) and
+  goes through `WriteGuard.run` with `expectedCount` = the previewed count; over
+  `TYPE_TO_CONFIRM_ABOVE` the collection name must be typed, for updates as for deletes. A
+  `CONFLICT` (more matches now) asks for a new preview. e2e: `test/e2e/bulk.e2e.ts`.
 
 ## Install (development)
 All OSes: Node 24 LTS, 24.15.0 or newer (Angular 22 and jsdom require it), with npm, git, Python 3
