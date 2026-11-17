@@ -87,7 +87,7 @@ export function idpRequest(
         });
         res.on('end', () => {
           const text = Buffer.concat(chunks).toString('utf8');
-          let parsed: unknown = undefined;
+          let parsed: unknown;
           try {
             parsed = text.length > 0 ? JSON.parse(text) : undefined;
           } catch {

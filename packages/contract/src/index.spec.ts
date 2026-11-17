@@ -672,6 +672,7 @@ describe('envelope', () => {
       'app.settings.changed',
       'backend.restarted',
       'ssh.hostKey',
+      'oidc.prompt',
     ]);
   });
 

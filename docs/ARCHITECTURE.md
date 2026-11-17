@@ -202,7 +202,33 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   the driver uses the default chain (`fromNodeProviderChain()` of `@aws-sdk/credential-providers`,
   a backend dependency the driver needs for MONGODB-AWS at all: environment, SSO, shared
   config/`AWS_PROFILE`, web identity, ECS/EC2 role); a chain without credentials is a `MongoAWSError`
-  → `AUTH_FAILED`. Real Atlas verification is the human task `aws-verify`. `proxy` → `proxyHost`/`proxyPort`
+  → `AUTH_FAILED`. Real Atlas verification is the human task `aws-verify`.
+  MONGODB-OIDC (task oidc-auth, `packages/backend/src/auth/oidc/`, `authSource: '$external'`, the
+  user name only a principal hint): the driver's `OIDC_HUMAN_CALLBACK` is
+  `OidcAuthenticator.callbackFor()`. It discovers the issuer the server announces
+  (`/.well-known/openid-configuration`, https only except loopback; the document must name that
+  issuer), then: a refresh token from the driver → refresh; else the profile's `oidcTokens` cache
+  (memory of this process first, else the stored secret) for the same issuer + client id →
+  refresh with its refresh token (a refused refresh → interactive), or reuse an access token
+  valid for > 60 s when there is no refresh token; else interactive. Interactive per
+  `auth.oidcFlow`: `authCode` = authorization code + PKCE S256, the sign-in page opened by main
+  (privileged `oidc.openBrowser` → `shell.openExternal`, http/https only), redirect to a one-shot
+  loopback server on `http://localhost:27097/redirect` (mongosh/Compass's URI, so IdP apps
+  registered for them work; 127.0.0.1 + ::1); `deviceCode` = RFC 8628 (with PKCE, Keycloak
+  enforces it per client), polling at the IdP's interval; `auto` (default) = browser, device
+  flow when the browser or the loopback port is unavailable. Scopes: `openid`, the server's
+  `requestScopes`, `offline_access` when offered. The backend broadcasts `oidc.prompt`
+  (`OidcPrompt`: `browser` with the URL, `device` with user code and verification URI,
+  `finished`); no tokens in it. New tokens go to main's privileged `oidc.saveTokens`, kept as the
+  `oidcTokens` secret only with `secure` storage (else memory only, `saved: false`) and only for an
+  existing profile; an unsaved draft (`conn.test`) caches nothing. `conn.close`/cancel aborts a
+  waiting sign-in (`CANCELLED`); the driver's own limit is 5 min. Integration fixture
+  `test/integration/fixtures/oidc.ts`: Keycloak 26 (HTTPS, per-run CA, realm import with a public
+  PKCE client that allows the device grant and an audience mapper) and MongoDB Enterprise 8.0
+  sharing Keycloak's network namespace, so `https://localhost:<P>/realms/thicket` is the same
+  issuer for the test and mongod (mongod trusts the CA through its system bundle); headless
+  Chromium (`npx playwright install chromium-headless-shell`) signs in on Keycloak's pages.
+  `proxy` → `proxyHost`/`proxyPort`
   (+ `proxyUsername` and the `proxyPassword` secret; a user without a stored password is
   `AUTH_FAILED`) through the `socks` package (a backend dependency the driver loads lazily).
   `readPreferenceTags` (contract: tag sets as `{ name, value }` pairs, no free-form records) and

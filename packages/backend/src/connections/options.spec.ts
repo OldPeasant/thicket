@@ -239,18 +239,48 @@ describe('clientConfig', () => {
     expect(error?.code).toBe('AUTH_FAILED');
   });
 
-  it.each(['GSSAPI', 'MONGODB-OIDC'] as const)(
-    'answers UNSUPPORTED for mechanism %s',
-    (mechanism) => {
-      const error = errorOf(() =>
-        clientConfig(draft({ auth: { mechanism, username: 'alice', secretMode: 'saved' } }), {
-          password: PASSWORD,
-        }),
-      );
-      expect(error?.code).toBe('UNSUPPORTED');
-      expect(error?.message).toContain(mechanism);
-    },
-  );
+  it('answers UNSUPPORTED for mechanism GSSAPI', () => {
+    const error = errorOf(() =>
+      clientConfig(
+        draft({ auth: { mechanism: 'GSSAPI', username: 'alice', secretMode: 'saved' } }),
+        { password: PASSWORD },
+      ),
+    );
+    expect(error?.code).toBe('UNSUPPORTED');
+    expect(error?.message).toContain('GSSAPI');
+  });
+
+  it('answers UNSUPPORTED for MONGODB-OIDC without a sign-in callback', () => {
+    const error = errorOf(() =>
+      clientConfig(draft({ auth: { mechanism: 'MONGODB-OIDC', secretMode: 'none' } }), {}),
+    );
+    expect(error?.code).toBe('UNSUPPORTED');
+    expect(error?.message).toContain('OIDC');
+  });
+
+  it('maps MONGODB-OIDC to the human callback in $external, with an optional principal name', () => {
+    const callback = () => Promise.resolve({ accessToken: 'x' });
+    const { uri, options } = clientConfig(
+      draft({ auth: { mechanism: 'MONGODB-OIDC', username: 'alice', secretMode: 'none' } }),
+      {},
+      undefined,
+      callback,
+    );
+    expect(uri).toBe(draft().connectionString);
+    expect(options).toMatchObject({
+      authMechanism: 'MONGODB-OIDC',
+      authSource: '$external',
+      auth: { username: 'alice' },
+    });
+    expect(options.authMechanismProperties?.OIDC_HUMAN_CALLBACK).toBe(callback);
+    const anonymous = clientConfig(
+      draft({ auth: { mechanism: 'MONGODB-OIDC', secretMode: 'none' } }),
+      {},
+      undefined,
+      callback,
+    );
+    expect(anonymous.options.auth).toBeUndefined();
+  });
 
   it('maps MONGODB-AWS explicit keys to a credential provider, never to auth or the URI', async () => {
     const profile = draft({
