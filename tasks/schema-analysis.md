@@ -22,3 +22,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 05:42+0100 by felix/agent-2): Schema button sits next to Explain in the query bar and analyzes the bar's current filter; sample uses $match then $sample (default 1000), up to 5 distinct examples per type, strings cut at 200 chars.
 - ASSUMPTION (2026-11-17 06:02+0100 by felix/agent-2): Correction to the earlier sample assumption: examples are full values only; the library limit is 1000 chars/bytes and any example that may have been cut is dropped, so no example builds a filter that cannot match (review CR-1/CR-6).
 - ASSUMPTION (2026-11-17 06:02+0100 by felix/agent-2): Uses @mongodb-js/mongodb-schema (maintained successor of the deprecated mongodb-schema named in ARCHITECTURE.md; same API).
+- ASSUMPTION (2026-11-17 06:02+0100 by felix/agent-2): Schema analysis ignores the query bar's collation: schema.analyze has no collation param in the contract (review CR-3, accepted).
