@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "task": "raw-cmd-read-pref",
+  "reviewed_revision": "e19cc6a2284d5295270c3dfeb648d8dcc22e05fc",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/raw-cmd-read-pref/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/raw-cmd-read-pref/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/raw-cmd-read-pref/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "TW-1", "source": "test-writer", "severity": "Low", "disposition": "fixed",
+     "note": "integration test file failed tsc; fixed in the test file (first test-writer run)"},
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "unit tests for Operation driver-cursor/write/cancel paths, close() waits for in-flight batch; int test cancelling during a getMore on rs-b"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "$out/$merge in agg (outside this task's touches) keep the server default write concern; recorded as a task assumption for a human to decide"},
+    {"id": "CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "read preference typed ReadPreference, primary reads use ReadPreference.primary"},
+    {"id": "CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "rawOptions and isOpenCursor shared from browse.ts"},
+    {"id": "CR-5 (second review)", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "w:2 int test does not assert the insert's writeConcern field; the w:3 int test proves the profile write concern reaches the server and unit tests assert the field"}
+  ],
+  "validation": [
+    {"command": "npm run check", "result": "pass"},
+    {"command": "npm run test:int -- raw-cmd-read-pref", "result": "pass"},
+    {"command": "cd packages/backend && npx vitest run src/browse/read-preference.spec.ts src/docs/query/read-preference.spec.ts src/docs/write/read-preference.spec.ts src/io/import.spec.ts", "result": "pass"}
+  ]
+}
