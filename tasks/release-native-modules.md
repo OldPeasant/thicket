@@ -1,11 +1,11 @@
 ---
 title: Release: bundle works when native modules (ssh2, os-dns-native) are compiled
-status: in_progress
+status: done
 owner: dell26/agent-3
 deps: [release-ci]
 touches: [apps/desktop/scripts,apps/desktop/electron-builder.yml,.github/workflows/check.yml]
 prio: 1
-lease_until: 2026-11-17T17:22:23Z
+lease_until: 
 ---
 ## Goal
 The release for tag `v0.1.0-rc.1` (GitHub Actions run 44118230764, 2026-11-17) failed on all four builds in `npm run dist`: esbuild in `apps/desktop/scripts/build.mjs` reports `No loader is configured for ".node" files` for `ssh2/lib/protocol/crypto/build/Release/sshcrypto.node` and `os-dns-native/build/Release/os_dns_native.node`. These optional native addons are only compiled where a C/C++ toolchain exists (GitHub runners have one, the agents' machines don't), so local builds pass. Make the bundle work either way: keep the native addons out of the esbuild bundle (external, packaged into the app with electron-builder and loaded at runtime, or deliberately left out where the module has a JS fallback, e.g. ssh2 without sshcrypto) and make sure the packaged app still starts and loads them correctly. Check for other addons in the dependency tree that would hit the same error (`hasInstallScript` packages in package-lock.json). Then make CI catch this on every push: the Linux job of `check.yml` (or a separate job) builds the app bundle with native addons compiled.
@@ -31,3 +31,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 17:46+0100 by dell26/agent-3): The plugin lives in apps/desktop/src/build/native-addons.ts (imported by scripts/build.mjs via Node 24 type stripping) so it is linted, type-checked and unit-tested like other src code; slightly outside the task's touches list.
 - ASSUMPTION (2026-11-17 17:47+0100 by dell26/agent-3): check run 44127846813 on wip/release-native-modules: macOS/Windows red only for the pre-existing failures listed in task ci-windows-macos (socks/known-hosts/tunnel/oidc/bson specs); nothing from this task.
 - ASSUMPTION (2026-11-17 18:02+0100 by dell26/agent-3): check run 44127846813 on wip/release-native-modules failed only on macOS/Windows in ssh/socks.spec.ts and auth/oidc/flows.spec.ts, pre-existing on main and owned by task ci-windows-macos; the new native-addons bundle job and ubuntu passed. Latest run 44131603619 was still queued at done time.
+- done by dell26/agent-3: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 57s on 29b0d6bee; criteria verified 4/4
