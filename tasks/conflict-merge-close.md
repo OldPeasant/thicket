@@ -1,0 +1,19 @@
+---
+title: Close the conflict merge editor when its conflict disappears or changes state (CR-7 of conflict-ui)
+status: todo
+owner:
+deps: [conflict-ui]
+touches: [packages/renderer/src/app/document/conflict]
+prio: 2
+---
+## Goal
+The conflict view's merge editor (`conflict-view.ts`) stays open after its conflict is gone or no longer
+"changed" (see `reviews/conflict-ui/review.md` round 2, CR-7): after a revert or edit-bar save it reopens
+with stale text on the next conflict and hides Keep server / Overwrite; after Save merged hits a deleted
+document, the editor stays and its Save does nothing silently.
+
+## Acceptance criteria
+- [ ] The merge editor closes when its conflict is removed or its server version is no longer a document (deleted/unknown); component tests cover revert, edit-bar save and the deleted case
+- [ ] A later conflict on the same document opens with Keep server / Overwrite / Merge offered and fresh merge text (test)
+
+## Notes
