@@ -1,0 +1,113 @@
+<button
+  #toggleButton
+  type="button"
+  class="btn quiet toggle"
+  data-testid="history-toggle"
+  title="Recent and favorite queries of this collection"
+  aria-haspopup="true"
+  [attr.aria-expanded]="open()"
+  [attr.aria-controls]="uid"
+  (click)="toggle()"
+>
+  History <span class="caret" aria-hidden="true">▾</span>
+</button>
+@if (open()) {
+  <div
+    class="panel"
+    [id]="uid"
+    role="region"
+    aria-label="Query history"
+    data-testid="history-panel"
+  >
+    <!-- Not a <form>: the panel is inside the query bar's form. -->
+    <div class="save" role="group" aria-label="Save as favorite">
+      <input
+        class="name"
+        data-testid="history-favorite-name"
+        aria-label="Favorite name"
+        placeholder="Name of the favorite"
+        autocomplete="off"
+        spellcheck="false"
+        [attr.maxlength]="maxName"
+        [value]="name()"
+        (input)="typeName($event)"
+        (keydown.enter)="save($event)"
+      />
+      <button
+        type="button"
+        class="btn"
+        data-testid="history-favorite-save"
+        [disabled]="!canSave()"
+        (click)="save($event)"
+      >
+        {{ replaces() ? 'Replace favorite' : 'Save as favorite' }}
+      </button>
+    </div>
+    @if (history.error(); as error) {
+      <p class="error" role="alert" data-testid="history-error">{{ error }}</p>
+    }
+
+    <h3 class="heading">Favorites</h3>
+    @if (history.favorites().length === 0) {
+      <p class="empty" data-testid="history-favorites-empty">
+        No favorites yet: name the query in the bar above and save it.
+      </p>
+    } @else {
+      <ul class="list" data-testid="history-favorites">
+        @for (f of history.favorites(); track f.id) {
+          <li class="item">
+            <button
+              type="button"
+              class="pick"
+              data-testid="history-favorite"
+              [title]="describe(f.query)"
+              (click)="pick(f.query)"
+            >
+              <span class="label">{{ f.name }}</span>
+              <span class="query">{{ describe(f.query) }}</span>
+            </button>
+            <button
+              type="button"
+              class="remove"
+              data-testid="history-favorite-delete"
+              [attr.aria-label]="'Delete favorite ' + f.name"
+              title="Delete favorite"
+              (click)="remove(f.id)"
+            >
+              ×
+            </button>
+          </li>
+        }
+      </ul>
+    }
+
+    <div class="heading-row">
+      <h3 class="heading">Recent</h3>
+      @if (history.entries().length) {
+        <button type="button" class="link" data-testid="history-clear" (click)="clear()">
+          Clear
+        </button>
+      }
+    </div>
+    @if (history.entries().length === 0) {
+      <p class="empty" data-testid="history-empty">Queries you run appear here.</p>
+    } @else {
+      <ul class="list" data-testid="history-entries">
+        @for (e of history.entries(); track $index) {
+          <li class="item">
+            <button
+              type="button"
+              class="pick"
+              data-testid="history-entry"
+              [title]="describe(e.query)"
+              (click)="pick(e.query)"
+            >
+              <span class="query">{{ describe(e.query) }}</span>
+              <span class="time">{{ time(e.at) }}</span>
+            </button>
+          </li>
+        }
+      </ul>
+    }
+  </div>
+}

@@ -36,6 +36,7 @@ import { fromExplorerValue, toExplorerValue } from '../explorer/bson-value.util'
 import { ExplainPanel, type ExplainParams } from '../explain';
 import { ExportPanel } from '../io/export-panel';
 import { BulkPanel } from './bulk/bulk-panel';
+import { QueryHistory, QueryHistoryMenu } from './history';
 import { ImportPanel } from '../io/import-panel';
 import { JsonExplorerComponent } from '../explorer/json-explorer.component';
 import { JsonFormComponent } from '../explorer/json-form/json-form.component';
@@ -112,9 +113,11 @@ const numberFormat = new Intl.NumberFormat();
     ImportPanel,
     ExplainPanel,
     BulkPanel,
+    QueryHistoryMenu,
   ],
   providers: [
     CollectionResults,
+    QueryHistory,
     DocumentEdits,
     DocumentActions,
     BsonDisplayService,
@@ -150,6 +153,8 @@ export class CollectionView {
   protected readonly display = inject(BsonDisplayService);
   private readonly api = inject(ApiService);
   private readonly slices = inject(ArraySliceService);
+  /** Recent and favorite queries of this collection (kept by main). */
+  private readonly history = inject(QueryHistory);
   /** Which shown documents fail the collection's validator (checked by the server). */
   protected readonly validator = inject(ValidatorMarks);
   private readonly validatorChanges = inject(ValidatorChanges);
@@ -357,7 +362,8 @@ export class CollectionView {
           slicedOf: (key) => this.slicedOf(key),
           documentChanged: (key, doc, sliced) => this.documentChanged(key, doc, sliced),
         });
-        this.run();
+        void this.history.load(target);
+        this.execute(false);
       });
     });
     // Read-only profiles show the documents without editing controls.
@@ -409,16 +415,30 @@ export class CollectionView {
     }
   }
 
-  /** Parses the query bar; runs it only when every field is valid. */
+  /** Parses the query bar; runs it only when every field is valid (and records it in the history). */
   protected run(event?: Event): void {
     event?.preventDefault();
-    const parsed = parseQuery(this.text());
+    this.execute(true);
+  }
+
+  /** Fills the query bar with a query picked from the history or the favorites and runs it. */
+  protected applyQuery(query: QueryText): void {
+    this.text.set({ ...query });
+    this.errors.set({});
+    this.execute(true);
+  }
+
+  private execute(record: boolean): void {
+    const text = this.text();
+    const parsed = parseQuery(text);
     if (!parsed.ok) {
       this.errors.set(parsed.errors);
       return;
     }
     this.errors.set({});
     this.results.run(parsed.query);
+    // Opening the tab runs the empty query: that is not something the user ran.
+    if (record) void this.history.record(text);
   }
 
   /** Explains the query bar's query (with execution stats) in the explain panel. */
@@ -440,7 +460,7 @@ export class CollectionView {
 
   protected reset(): void {
     this.text.set({ ...EMPTY_QUERY });
-    this.run();
+    this.execute(false);
   }
 
   /** Jumps to the page typed (Enter or leaving the field). */

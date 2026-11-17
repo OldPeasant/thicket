@@ -128,6 +128,17 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   something, broadcasts `app.settings.changed` (payload `SettingsChanged`) to every window through
   `Broadcaster` (`src/main/broadcast.ts`) on the window's main port. `THICKET_USER_DATA` overrides
   Electron's `userData` folder (tests).
+- Query history (`src/history/`, `HistoryStore`, contract `history.*`, routed to main):
+  `userData/history/<sha-256 of [profileId, db, coll]>.json` per collection (`{ version: 1,
+  profileId, db, coll, entries: [{ query, at }] }`, newest first, at most `HISTORY_LIMIT` = 50;
+  a query equal in every trimmed field moves to the top; an all-empty query is not recorded) and
+  `userData/favorites.json` (`{ version: 1, favorites: [{ id, profileId, db, coll, name, query,
+  at }] }`, names unique per collection ignoring case: saving a taken name replaces it). Queries
+  are the query bar's text as typed (shell syntax), not EJSON. Files are read lazily, written
+  atomically (`.tmp` + rename), operations serialized; an invalid file is renamed
+  `<file>.corrupt-<time>`. The renderer's `QueryHistory` (per collection view) and
+  `QueryHistoryMenu` (`packages/renderer/src/app/collection/history/`) record every query the
+  user runs (not the tab's opening query or Reset) and re-run a picked entry by filling the bar.
 - Secrets (`src/secrets/`): `SecretsStore` keeps `secrets.bin` in `userData` — one JSON document
   `{ version: 1, profiles: { <profileId>: { <SecretKind>: value } } }` encrypted as a whole with
   `safeStorage`'s async API, rewritten atomically (temp file + rename, mode 0600), operations
