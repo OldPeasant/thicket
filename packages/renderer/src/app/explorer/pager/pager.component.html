@@ -7,7 +7,7 @@
   <button
     type="button"
     class="pg-btn"
-    data-testid="pager-first"
+    data-testid="nested-pager-first"
     title="First page"
     aria-label="First page"
     [disabled]="window.page === 0"
@@ -18,7 +18,7 @@
   <button
     type="button"
     class="pg-btn"
-    data-testid="pager-prev"
+    data-testid="nested-pager-prev"
     title="Previous page"
     aria-label="Previous page"
     [disabled]="window.page === 0"
@@ -31,7 +31,7 @@
     <input
       #pageInput
       class="pg-input"
-      data-testid="pager-page"
+      data-testid="nested-pager-page"
       inputmode="numeric"
       [attr.aria-label]="'Page of ' + noun + ' (1 to ' + window.pages + ')'"
       [value]="window.page + 1"
@@ -43,7 +43,7 @@
   <button
     type="button"
     class="pg-btn"
-    data-testid="pager-next"
+    data-testid="nested-pager-next"
     title="Next page"
     aria-label="Next page"
     [disabled]="window.page >= window.pages - 1"
@@ -54,7 +54,7 @@
   <button
     type="button"
     class="pg-btn"
-    data-testid="pager-last"
+    data-testid="nested-pager-last"
     title="Last page"
     aria-label="Last page"
     [disabled]="window.page >= window.pages - 1"
@@ -62,5 +62,5 @@
   >
     »
   </button>
-  <span class="pg-range" data-testid="pager-range">{{ rangeText }} {{ noun }}</span>
+  <span class="pg-range" data-testid="nested-pager-range">{{ rangeText }} {{ noun }}</span>
 </nav>

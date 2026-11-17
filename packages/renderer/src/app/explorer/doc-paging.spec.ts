@@ -38,13 +38,14 @@ describe('Paging inside a document', () => {
     if (!found) throw new Error('no pager');
     return found;
   };
-  const range = () => pager().querySelector('[data-testid="pager-range"]')?.textContent?.trim();
+  const range = () =>
+    pager().querySelector('[data-testid="nested-pager-range"]')?.textContent?.trim();
   const click = async (testId: string) => {
     pager().querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`)?.click();
     await settle();
   };
   const jumpTo = async (page: string) => {
-    const input = pager().querySelector<HTMLInputElement>('[data-testid="pager-page"]');
+    const input = pager().querySelector<HTMLInputElement>('[data-testid="nested-pager-page"]');
     if (!input) throw new Error('no page field');
     input.value = page;
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
@@ -76,22 +77,22 @@ describe('Paging inside a document', () => {
   });
 
   it('goes to the next, last, previous and first page', async () => {
-    await click('pager-next');
+    await click('nested-pager-next');
     expect(range()).toBe('101–200 of 2,000 items');
     expect(names()[0]).toBe('item 100');
-    await click('pager-last');
+    await click('nested-pager-last');
     expect(range()).toBe('1,901–2,000 of 2,000 items');
     expect(names().at(-1)).toBe('item 1999');
-    expect(pager().querySelector<HTMLButtonElement>('[data-testid="pager-next"]')?.disabled).toBe(
-      true,
-    );
-    await click('pager-prev');
+    expect(
+      pager().querySelector<HTMLButtonElement>('[data-testid="nested-pager-next"]')?.disabled,
+    ).toBe(true);
+    await click('nested-pager-prev');
     expect(range()).toBe('1,801–1,900 of 2,000 items');
-    await click('pager-first');
+    await click('nested-pager-first');
     expect(range()).toBe('1–100 of 2,000 items');
-    expect(pager().querySelector<HTMLButtonElement>('[data-testid="pager-prev"]')?.disabled).toBe(
-      true,
-    );
+    expect(
+      pager().querySelector<HTMLButtonElement>('[data-testid="nested-pager-prev"]')?.disabled,
+    ).toBe(true);
   });
 
   it('jumps to a typed page; an invalid page number keeps the page shown', async () => {
@@ -102,7 +103,9 @@ describe('Paging inside a document', () => {
 
     await jumpTo('abc');
     expect(range()).toBe('601–700 of 2,000 items');
-    expect(pager().querySelector<HTMLInputElement>('[data-testid="pager-page"]')?.value).toBe('7');
+    expect(
+      pager().querySelector<HTMLInputElement>('[data-testid="nested-pager-page"]')?.value,
+    ).toBe('7');
 
     // Beyond the last page: the last page.
     await jumpTo('99');
@@ -120,9 +123,9 @@ describe('Paging inside a document', () => {
     await settle();
     expect(docItems()[650]?.name).toBe('edited 650');
 
-    await click('pager-first');
+    await click('nested-pager-first');
     expect(names()).not.toContain('edited 650');
-    await click('pager-next');
+    await click('nested-pager-next');
     await jumpTo('20');
 
     await jumpTo('7');
@@ -153,7 +156,7 @@ describe('Paging inside a document', () => {
     fixture.componentInstance.doc.set({ _id: 1, big });
     await settle();
     expect(range()).toBe('1–100 of 250 fields');
-    await click('pager-last');
+    await click('nested-pager-last');
     expect(range()).toBe('201–250 of 250 fields');
     expect(names()[0]).toBe('v200');
   });
@@ -215,23 +218,24 @@ describe('Paging a partly loaded array (large document)', () => {
 
   it('shows the loaded first page without reading anything', () => {
     expect(
-      el().querySelector('[data-testid="nested-pager"] [data-testid="pager-range"]')?.textContent,
+      el().querySelector('[data-testid="nested-pager"] [data-testid="nested-pager-range"]')
+        ?.textContent,
     ).toContain('1–100 of 50,000');
     expect(names()[0]).toBe('item 0');
     expect(calls).toEqual([]);
   });
 
   it('reads other pages from the source and does not read them twice', async () => {
-    pagerButton('pager-next')?.click();
+    pagerButton('nested-pager-next')?.click();
     await settle();
     expect(calls).toEqual([{ skip: 100, limit: 100 }]);
     expect(names()[0]).toBe('item 100');
-    pagerButton('pager-last')?.click();
+    pagerButton('nested-pager-last')?.click();
     await settle();
     expect(names().at(-1)).toBe('item 49999');
-    pagerButton('pager-first')?.click();
+    pagerButton('nested-pager-first')?.click();
     await settle();
-    pagerButton('pager-next')?.click();
+    pagerButton('nested-pager-next')?.click();
     await settle();
     expect(calls).toEqual([
       { skip: 100, limit: 100 },
@@ -253,7 +257,7 @@ describe('Paging a partly loaded array (large document)', () => {
 
   it('shows a failed read with a retry', async () => {
     fail = true;
-    pagerButton('pager-next')?.click();
+    pagerButton('nested-pager-next')?.click();
     await settle();
     expect(el().querySelector('[data-testid="slice-error"]')?.textContent).toContain('server gone');
     fail = false;

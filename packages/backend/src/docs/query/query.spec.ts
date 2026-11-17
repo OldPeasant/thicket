@@ -17,8 +17,43 @@ import {
   operationToken,
   parseDocument,
   parseEjson,
+  sliceLargeArrays,
   streamFind,
 } from './query';
+
+describe('sliceLargeArrays (docs.find slice)', () => {
+  const big = (n: number) => Array.from({ length: n }, (_, i) => ({ i, pad: 'x'.repeat(20) }));
+
+  it('leaves documents at or below the size threshold alone', () => {
+    const doc = { _id: 1, items: big(500) };
+    const size = BSON.calculateObjectSize(doc);
+    expect(sliceLargeArrays(doc, 100, size)).toEqual({ doc, arrays: [] });
+  });
+
+  it('cuts long top-level arrays of a large document, keeping field order and short arrays', () => {
+    const doc = { _id: 1, items: big(500), tags: ['a', 'b'], more: big(101), name: 'n' };
+    const cut = sliceLargeArrays(doc, 100, 1000);
+    expect(Object.keys(cut.doc)).toEqual(['_id', 'items', 'tags', 'more', 'name']);
+    expect(cut.doc['items']).toEqual(big(100));
+    expect(cut.doc['more']).toEqual(big(100));
+    expect(cut.doc['tags']).toEqual(['a', 'b']);
+    expect(cut.arrays).toEqual([
+      { path: 'items', total: 500, loaded: 100 },
+      { path: 'more', total: 101, loaded: 100 },
+    ]);
+    // The original stays whole.
+    expect(doc.items).toHaveLength(500);
+  });
+
+  it('keeps arrays docs.getSlice can not address or the projection returns only partly', () => {
+    const doc = { _id: 1, '1': big(200), a: big(200), b: big(200), c: big(200) };
+    const cut = sliceLargeArrays(doc, 100, 1000, { 'a.i': 1, b: { $slice: 150 }, c: 1 });
+    expect(cut.arrays.map((s) => s.path)).toEqual(['c']);
+    expect(cut.doc['1']).toHaveLength(200);
+    expect(cut.doc['a']).toHaveLength(200);
+    expect(cut.doc['b']).toHaveLength(200);
+  });
+});
 
 /** One command the fake client received: database, command document and options. */
 interface Sent {

@@ -99,20 +99,20 @@ describe('JsonLinesComponent', () => {
     await render(text);
     expect(lineNumbers()).toHaveLength(50);
     const pager = () => el().querySelector('[data-testid="nested-pager"]');
-    expect(pager()?.querySelector('[data-testid="pager-range"]')?.textContent?.trim()).toBe(
+    expect(pager()?.querySelector('[data-testid="nested-pager-range"]')?.textContent?.trim()).toBe(
       '1–50 of 200 lines',
     );
 
-    pager()?.querySelector<HTMLButtonElement>('[data-testid="pager-next"]')?.click();
+    pager()?.querySelector<HTMLButtonElement>('[data-testid="nested-pager-next"]')?.click();
     await fixture.whenStable();
     expect(lineNumbers()).toHaveLength(50);
-    expect(pager()?.querySelector('[data-testid="pager-range"]')?.textContent?.trim()).toBe(
+    expect(pager()?.querySelector('[data-testid="nested-pager-range"]')?.textContent?.trim()).toBe(
       '51–100 of 200 lines',
     );
 
-    pager()?.querySelector<HTMLButtonElement>('[data-testid="pager-last"]')?.click();
+    pager()?.querySelector<HTMLButtonElement>('[data-testid="nested-pager-last"]')?.click();
     await fixture.whenStable();
-    expect(pager()?.querySelector('[data-testid="pager-range"]')?.textContent?.trim()).toBe(
+    expect(pager()?.querySelector('[data-testid="nested-pager-range"]')?.textContent?.trim()).toBe(
       '151–200 of 200 lines',
     );
   });
