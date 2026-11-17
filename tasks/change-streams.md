@@ -5,7 +5,7 @@ owner: felix/agent-1
 deps: [docs-query-backend,collection-view]
 touches: [packages/backend/src/admin/watch,packages/renderer/src/app/watch]
 prio: 4
-lease_until: 2026-11-17T07:32:04Z
+lease_until: 2026-11-17T07:37:07Z
 ---
 ## Goal
 Watch a collection or database (replica set only) with a live event list; open the changed document.
