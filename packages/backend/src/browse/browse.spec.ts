@@ -19,6 +19,7 @@ import {
   databaseStats,
   dropCollection,
   dropDatabase,
+  isUnauthorizedBrowseError,
   listCollections,
   listDatabases,
   parseCreateOptions,
@@ -67,6 +68,29 @@ async function rejection(promise: Promise<unknown>): Promise<RpcError> {
 }
 
 const firstKey = (doc: Document) => Object.keys(doc)[0];
+
+describe('isUnauthorizedBrowseError', () => {
+  it('recognizes Unauthorized by code or code name after toBrowseError', () => {
+    expect(isUnauthorizedBrowseError(toBrowseError(serverError(13, 'Unauthorized', 'no')))).toBe(
+      true,
+    );
+    expect(isUnauthorizedBrowseError(toBrowseError({ code: 13, message: 'no' }))).toBe(true);
+    expect(isUnauthorizedBrowseError(toBrowseError({ codeName: 'Unauthorized' }))).toBe(true);
+  });
+
+  it('is false for other server errors, other RpcErrors and raw values', () => {
+    expect(
+      isUnauthorizedBrowseError(toBrowseError(serverError(26, 'NamespaceNotFound', 'x'))),
+    ).toBe(false);
+    expect(isUnauthorizedBrowseError(toBrowseError(serverError(48, 'NamespaceExists', 'x')))).toBe(
+      false,
+    );
+    expect(isUnauthorizedBrowseError(new RpcError('INTERNAL', 'boom'))).toBe(false);
+    expect(isUnauthorizedBrowseError(serverError(13, 'Unauthorized', 'raw'))).toBe(false);
+    expect(isUnauthorizedBrowseError(undefined)).toBe(false);
+    expect(isUnauthorizedBrowseError(null)).toBe(false);
+  });
+});
 
 describe('toBrowseError', () => {
   it('maps NamespaceNotFound (code 26) to NOT_FOUND with the server message', () => {

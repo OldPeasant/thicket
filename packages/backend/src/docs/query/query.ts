@@ -18,6 +18,7 @@ import {
   ReadCursor,
   canonical,
   isOpenCursor,
+  isUnauthorizedBrowseError,
   rawOptions,
   toBrowseError,
   toNumber,
@@ -42,8 +43,6 @@ const CANCEL_SETTLE_MS = 4000;
 
 /** Interval of the `currentOp` probes while a cancelled command is not visible there yet. */
 const KILL_RETRY_MS = 100;
-
-const UNAUTHORIZED = 13;
 
 function cancelled(): RpcError {
   return new RpcError('CANCELLED', 'The operation was cancelled');
@@ -106,11 +105,6 @@ async function command(
   }
 }
 
-function isUnauthorized(error: unknown): boolean {
-  const detail = (error as { detail?: { serverCode?: number; codeName?: string } }).detail;
-  return detail?.serverCode === UNAUTHORIZED || detail?.codeName === 'Unauthorized';
-}
-
 /**
  * Kills the server operations carrying `comment`. Users without the `inprog` privilege see (and
  * may kill) their own operations with `$ownOps`. `currentOp` and `killOp` run with the read
@@ -133,7 +127,7 @@ export async function killOperations(
         readPreference,
       );
     } catch (error) {
-      if (!isUnauthorized(error)) throw error;
+      if (!isUnauthorizedBrowseError(error)) throw error;
       reply = await command(
         client,
         'admin',

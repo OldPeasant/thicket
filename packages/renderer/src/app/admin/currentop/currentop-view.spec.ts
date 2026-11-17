@@ -453,4 +453,32 @@ describe('CurrentOpView', () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(pending).toHaveLength(1);
   });
+
+  it('reads nothing more when the tab closes while a confirmed kill waits for the server', async () => {
+    vi.useFakeTimers();
+    let answerKill: (value: Record<string, never>) => void = () => undefined;
+    fake.handle(
+      'admin.killOp',
+      () =>
+        new Promise((resolve) => {
+          answerKill = resolve;
+        }),
+    );
+    fixture = TestBed.createComponent(CurrentOpView);
+    view = fixture.componentInstance;
+    fixture.componentRef.setInput('tab', TAB);
+    fixture.detectChanges();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(sent('admin.currentOp')).toHaveLength(1);
+    const killed = view.kill(loadedOp('42'));
+    await vi.advanceTimersByTimeAsync(10);
+    confirm.answer(true);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(sent('admin.killOp')).toHaveLength(1);
+    fixture.destroy();
+    answerKill({});
+    await killed;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sent('admin.currentOp')).toHaveLength(1);
+  });
 });

@@ -187,7 +187,7 @@ describe('currentOpHandlers', () => {
     expect(sent).toEqual([{ db: 'admin', command: { killOp: 1, op: new BSON.Int32(42) } }]);
   });
 
-  it('drops an aggregate $currentOp probe too and sorts operations without a running time last', async () => {
+  it('keeps $currentOp aggregations of other clients and sorts operations without a running time last', async () => {
     const { call } = await setup((db, command) => {
       if ('currentOp' in command) {
         return {
@@ -216,7 +216,7 @@ describe('currentOpHandlers', () => {
       return defaultAnswer(db, command);
     });
     const { ops } = (await call('admin.currentOp', { profileId: 'p1' })) as { ops: string[] };
-    expect(ops.map(parse).map((op) => Number(op['opid']))).toEqual([4, 3, 5, 1]);
+    expect(ops.map(parse).map((op) => Number(op['opid']))).toEqual([4, 3, 2, 5, 1]);
   });
 
   it('answers an empty list when the reply has no inprog array', async () => {

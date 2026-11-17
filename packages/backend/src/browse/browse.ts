@@ -106,6 +106,16 @@ export function toBrowseError(error: unknown): RpcError {
   return mapped;
 }
 
+/**
+ * Whether a `toBrowseError` answer is the server's `Unauthorized` (code 13), e.g. `currentOp`
+ * without the `inprog` privilege, which callers retry with `$ownOps`.
+ */
+export function isUnauthorizedBrowseError(error: unknown): boolean {
+  if (!(error instanceof RpcError)) return false;
+  const detail = error.detail as { serverCode?: unknown; codeName?: unknown } | undefined;
+  return detail?.serverCode === UNAUTHORIZED || detail?.codeName === 'Unauthorized';
+}
+
 function isUnauthorized(error: unknown): boolean {
   const e = error as { code?: unknown; codeName?: unknown };
   return toNumber(e.code) === UNAUTHORIZED || e.codeName === 'Unauthorized';

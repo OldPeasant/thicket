@@ -105,6 +105,8 @@ export class CurrentOpView {
 
   private request: AbortController | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  /** Set when the tab closes: a kill answering later must not read or schedule again. */
+  private destroyed = false;
 
   constructor() {
     // Reload when the connection or the filters change.
@@ -116,6 +118,7 @@ export class CurrentOpView {
       });
     });
     inject(DestroyRef).onDestroy(() => {
+      this.destroyed = true;
       this.request?.abort();
       this.clearTimer();
     });
@@ -152,6 +155,7 @@ export class CurrentOpView {
 
   /** Reads the operations again (and schedules the next automatic read). */
   async refresh(): Promise<void> {
+    if (this.destroyed) return;
     this.request?.abort();
     this.clearTimer();
     const request = new AbortController();
@@ -215,7 +219,7 @@ export class CurrentOpView {
   private schedule(): void {
     this.clearTimer();
     const secs = this.refreshSecs();
-    if (secs <= 0 || this.request !== null) return;
+    if (this.destroyed || secs <= 0 || this.request !== null) return;
     this.timer = setTimeout(() => void this.refresh(), secs * 1000);
   }
 

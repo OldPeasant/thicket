@@ -2,7 +2,7 @@ import type { ParsedParamsOf, ResultOf } from '@thicket/contract';
 
 import { BSON, type Document } from 'mongodb';
 
-import { canonical, runCommand } from '../../browse/browse';
+import { canonical, isUnauthorizedBrowseError, runCommand } from '../../browse/browse';
 import type { ClientLike } from '../../connections/manager';
 import { RpcError } from '../../server/rpc';
 
@@ -11,8 +11,6 @@ import { RpcError } from '../../server/rpc';
  * the primary (the connection's default server), so the `opid` a list shows is killed on the
  * server that reported it. Server errors become `toBrowseError`s.
  */
-
-const UNAUTHORIZED = 13;
 
 /** Escapes `text` for use inside a regular expression. */
 export function escapeRegExp(text: string): string {
@@ -42,22 +40,19 @@ export function currentOpCommand(
   return command;
 }
 
-function isUnauthorized(error: unknown): boolean {
-  if (!(error instanceof RpcError)) return false;
-  const detail = error.detail as { serverCode?: number; codeName?: string } | undefined;
-  return detail?.serverCode === UNAUTHORIZED || detail?.codeName === 'Unauthorized';
-}
-
-/** Whether `op` is the `currentOp` command that produced the list (not worth showing). */
+/**
+ * Whether `op` is a `currentOp` command, such as the one that produced the list (not worth
+ * showing). The command can't carry a tagging `comment` (its extra fields are filters), so every
+ * short `currentOp` command is left out; `$currentOp` aggregations of other clients stay visible
+ * (and killable).
+ */
 function isOwnProbe(op: Document): boolean {
   const command = op['command'] as Document | undefined;
   return (
     command !== undefined &&
     command !== null &&
     typeof command === 'object' &&
-    ('currentOp' in command ||
-      (Array.isArray(command['pipeline']) &&
-        (command['pipeline'] as Document[]).some((stage) => '$currentOp' in stage)))
+    'currentOp' in command
   );
 }
 
@@ -82,7 +77,7 @@ export async function currentOps(
   try {
     reply = await runCommand(client, 'admin', currentOpCommand(params));
   } catch (error) {
-    if (!isUnauthorized(error)) throw error;
+    if (!isUnauthorizedBrowseError(error)) throw error;
     reply = await runCommand(client, 'admin', currentOpCommand(params, true));
   }
   const inprog = Array.isArray(reply['inprog']) ? (reply['inprog'] as Document[]) : [];

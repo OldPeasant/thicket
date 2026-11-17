@@ -629,9 +629,10 @@ Contract layout (`packages/contract/src/`):
   connection's default server, so `killOp` reaches the server that listed the opid); `ns` is a
   prefix on name boundaries (`^<ns>(\.|$)`), `minSecsRunning` → `secs_running: { $gte }`,
   `opType` → `op`, `all` → `$all`. `Unauthorized` (no `inprog` privilege) retries with
-  `$ownOps`. Its own `currentOp` is left out; longest running first. `admin.killOp` (behind the
-  write guard) parses the canonical EJSON `opId` (integer or `"shard:opid"`, else
-  `INVALID_PARAMS`) and sends `killOp`. Int tests `test/integration/currentop.int.spec.ts`.
+  `$ownOps`. `currentOp` commands are left out (its own probe can't be tagged with a comment,
+  extra fields are filters); `$currentOp` aggregations stay listed; longest running first.
+  `admin.killOp` (behind the write guard) parses the canonical EJSON `opId` (integer or
+  `"shard:opid"`, else `INVALID_PARAMS`) and sends `killOp`. Int tests `test/integration/currentop.int.spec.ts`.
 - Renderer: filters (namespace, minimum seconds, type, idle/system) reload at once; the head
   shows the matching `db.currentOp(…)` call; auto-refresh every 2/5/10 s (default 5) or never,
   the next read scheduled after the previous answer. Running time as text and a log-scaled bar
