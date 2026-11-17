@@ -11,7 +11,8 @@ lease_until: 2026-11-17T02:58:53Z
 PLAIN auth against MongoDB Enterprise configured for LDAP, with an OpenLDAP container fixture.
 
 ## Acceptance criteria
-- [ ] Integration test: LDAP user authenticates; wrong password → AUTH_FAILED (Enterprise + OpenLDAP fixtures)
+- [x] Integration test: LDAP user authenticates; wrong password → AUTH_FAILED (Enterprise + OpenLDAP fixtures)
+  - verified (2026-11-17 03:39+0100 by felix/agent-2): npm run test:int -- ldap (Podman; mongodb-enterprise-server:8.0 + osixia/openldap:1.5.0 containers, test/integration/fixtures/ldap.ts) -> 8 passed: LDAP user alice authenticates as alice@$external (saved, typed, URI user, authSource override); wrong password (saved and typed) and unknown user -> AUTH_FAILED, password not logged
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
