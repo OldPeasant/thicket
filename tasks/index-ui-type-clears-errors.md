@@ -5,7 +5,7 @@ owner: dell26/agent-2
 deps: [index-ui]
 touches: [packages/renderer/src/app/indexes]
 prio: 2
-lease_until: 2026-11-17T04:37:19Z
+lease_until: 2026-11-17T04:40:48Z
 ---
 ## Goal
 In `IndexCreateForm.setType` (packages/renderer/src/app/indexes/index-create-form.ts), also clear the
