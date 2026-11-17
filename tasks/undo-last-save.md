@@ -5,7 +5,7 @@ owner: felix/agent-2
 deps: [doc-edit-save]
 touches: [packages/renderer/src/app/document/history]
 prio: 3
-lease_until: 2026-11-17T07:56:40Z
+lease_until: 2026-11-17T08:01:43Z
 extended: felix/agent-2
 ---
 ## Goal
