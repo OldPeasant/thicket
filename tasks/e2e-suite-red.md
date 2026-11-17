@@ -22,7 +22,8 @@ Find each cause (test out of date vs. app bug vs. fixture/environment) and fix i
 ## Acceptance criteria
 - [x] the three tests pass in `npm run test:e2e` (under a display and headless, DISPLAY/WAYLAND_DISPLAY unset)
   - verified (2026-11-17 07:14+0100 by felix/agent-2): npm run test:e2e at 8d46a2d2 (fresh build, real display DISPLAY=:0/Wayland) -> 61 passed, 1 skipped (demo AppImage, needs npm run dist); headless: node spawn of npx playwright test with DISPLAY and WAYLAND_DISPLAY deleted from env, same build -> 61 passed, 1 skipped; incl. layout.e2e.ts:36, layout.e2e.ts:61 and ldap.e2e.ts (LDAP passes here, kernel 7.1.3, Podman). On Linux kernels 6.19.0-7.0.13 (dell26's failure, SERVER-121912, not reproducible here) ldap.e2e now skips with the reason instead of failing
-- [ ] if the cause was an app bug, a test covers it
+- [x] if the cause was an app bug, a test covers it
+  - verified (2026-11-17 07:14+0100 by felix/agent-2): App bug (splitter drag relied on pointer capture; moves/release off the narrow splitter were lost, 283 = 2nd of 5 steps): cd packages/renderer && npx ng test --include=src/app/layout/app-shell.spec.ts -> 75 passed; the 2 original new tests (moves/release on another element, release position sets width) fail without the fix (2 failed), plus document-listener lifecycle tests; LDAP fixture: npx vitest run --config test/integration/vitest.config.ts ldap-fixture -> 19 passed
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md ("End-to-end tests").
