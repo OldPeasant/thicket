@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "task": "ui-polish-m1",
+  "reviewed_revision": "384c62015958167b76ecd1a4ac5954fcea2fac93",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/ui-polish-m1/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/ui-polish-m1/review.md" },
+    "fixer": {
+      "status": "not_required",
+      "reason": "code-reviewer reported no findings and test-writer found no production bugs"
+    }
+  },
+  "fixes_required": false,
+  "findings": [],
+  "validation": [
+    {
+      "command": "cd packages/renderer && npx ng test --include connection-editor, status-bar, app-shell specs",
+      "result": "pass"
+    },
+    { "command": "npm run test:e2e -- m1", "result": "pass" },
+    { "command": "npm run check", "result": "pass" }
+  ]
+}
