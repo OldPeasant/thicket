@@ -91,6 +91,79 @@ describe('omitNativeAddons', () => {
     writeFileSync(join(dir, 'pkg.cjs'), "module.exports = require('node:path').sep;");
     expect(run(await bundle('pkg.cjs'))).toBe(sep);
   });
+
+  it('stubs an addon that was never compiled (no toolchain: the file does not exist)', async () => {
+    writeFileSync(
+      join(dir, 'missing.cjs'),
+      [
+        'try {',
+        "  module.exports = require('./build/Release/never_built.node');",
+        '} catch (error) {',
+        '  module.exports = { code: error.code };',
+        '}',
+      ].join('\n'),
+    );
+    expect(run(await bundle('missing.cjs'))).toEqual({ code: 'MODULE_NOT_FOUND' });
+  });
+
+  it('stubs every addon in one bundle, each failing with its own path', async () => {
+    mkdirSync(join(dir, 'dns', 'build', 'Release'), { recursive: true });
+    writeFileSync(join(dir, 'dns', 'build', 'Release', 'os_dns_native.node'), 'fake addon');
+    writeFileSync(
+      join(dir, 'several.cjs'),
+      [
+        'const tryLoad = (load) => { try { load(); return null; } catch (e) { return [e.code, e.message]; } };',
+        'module.exports = [',
+        "  tryLoad(() => require('./crypto/build/Release/sshcrypto.node')),",
+        "  tryLoad(() => require('./dns/build/Release/os_dns_native.node')),",
+        '];',
+      ].join('\n'),
+    );
+    const code = await bundle('several.cjs');
+    expect(code).not.toContain('fake addon');
+    expect(run(code)).toEqual([
+      [
+        'MODULE_NOT_FOUND',
+        "Cannot find module './crypto/build/Release/sshcrypto.node' (native addon not bundled into Thicket)",
+      ],
+      [
+        'MODULE_NOT_FOUND',
+        "Cannot find module './dns/build/Release/os_dns_native.node' (native addon not bundled into Thicket)",
+      ],
+    ]);
+  });
+
+  it('also stubs an addon imported from an ES module', async () => {
+    writeFileSync(
+      join(dir, 'esm.mjs'),
+      "import binding from './crypto/build/Release/sshcrypto.node';\nexport default binding;",
+    );
+    const code = await bundle('esm.mjs');
+    expect(() => run(code)).toThrow(/native addon not bundled into Thicket/);
+  });
+
+  it('bundles files whose names only start with or contain ".node" normally', async () => {
+    writeFileSync(join(dir, 'helper.node.cjs'), "module.exports = 'js helper';");
+    writeFileSync(join(dir, 'other.nodejs'), "module.exports = 'not an addon';");
+    writeFileSync(
+      join(dir, 'lookalikes.cjs'),
+      "module.exports = [require('./helper.node.cjs'), require('./other.nodejs')];",
+    );
+    // `.nodejs` has no esbuild loader either: give it one so only the plugin's filter is tested.
+    const result = await build({
+      entryPoints: [join(dir, 'lookalikes.cjs')],
+      bundle: true,
+      platform: 'node',
+      format: 'cjs',
+      write: false,
+      logLevel: 'silent',
+      loader: { '.nodejs': 'js' },
+      plugins: [omitNativeAddons],
+    });
+    const [output] = result.outputFiles;
+    if (!output) throw new Error('esbuild wrote no output');
+    expect(run(output.text)).toEqual(['js helper', 'not an addon']);
+  });
 });
 
 describe('omittedAddonSource', () => {
@@ -99,6 +172,22 @@ describe('omittedAddonSource', () => {
     const module = { exports: {} };
     expect(() => new Function('module', source)(module)).toThrow(
       "Cannot find module './it's/a.node'",
+    );
+  });
+
+  it('keeps Windows separators, double quotes and newlines in the path literal', () => {
+    const path = 'C:\\addons\\"x"\n\\b.node';
+    const error = (() => {
+      try {
+        new Function(omittedAddonSource(path))();
+      } catch (e) {
+        return e as NodeJS.ErrnoException;
+      }
+      return undefined;
+    })();
+    expect(error?.code).toBe('MODULE_NOT_FOUND');
+    expect(error?.message).toBe(
+      `Cannot find module '${path}' (native addon not bundled into Thicket)`,
     );
   });
 });
