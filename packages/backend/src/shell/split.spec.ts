@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import { EXIT_TEXT, isExitCommand, splitShellInput } from './split';
 
+/** U+2028 LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR (line terminators in JavaScript). */
+const LS = String.fromCharCode(0x2028);
+const PS = String.fromCharCode(0x2029);
+
 describe('splitShellInput', () => {
   it.each([
     [
@@ -202,9 +206,9 @@ describe('splitShellInput', () => {
     ['many glued slashes', `use ${'a/'.repeat(20000)} x =`],
     ['many arguments then a bracket', `use ${'ab '.repeat(20000)}(`],
     ['only slashes', `show ${'/'.repeat(40000)}`],
-    // TW-2: a run of block comments followed by code. The lazy `.*?` of the block-comment branch
-    // can also span several comments, so a failing match tries every grouping (2^n). Kept at 28
-    // comments so the test ends (a few seconds) while it fails; a linear match takes < 1 ms.
+    // TW-2: a run of block comments followed by code. Before 8712197 the lazy `.*?` of the
+    // block-comment branch could also span several comments, so a failing match tried every
+    // grouping (2^n, 3 to 6 s at 28). Kept at 28 comments so a regression ends in seconds.
     ['28 block comments then code', `use a${' /**/'.repeat(28)} x`],
     ['28 glued block comments then code', `use a${'/**/'.repeat(28)} x`],
   ])(
@@ -216,6 +220,70 @@ describe('splitShellInput', () => {
       expect(performance.now() - started).toBeLessThan(1000);
     },
   );
+
+  // TW-2 fix (8712197): a block comment ends at its first `*/`, as in JavaScript and in
+  // `skipBlockComment`; a line comment runs as far as `.` matches.
+  it.each([
+    // The comment is `/* x */`; `b */` after it is code, so the line is not a command form and
+    // goes to mongosh whole (before the fix `/* x */ b */` was taken as one comment).
+    ['use a /* x */ b */', ['use a /* x */ b */']],
+    ['use a /* x */ /* y */ */', ['use a /* x */ /* y */ */']],
+    ['use a /* x */ */\nq', ['use a /* x */ */\nq']],
+    // Stars inside or before the end of a block comment.
+    ['show dbs /***/;x', ['show dbs', 'x']],
+    ['use a /* **/\nq', ['use a', '\nq']],
+    ['use a /* * / */\nq', ['use a', '\nq']],
+    ['use a /* x */ /** y **/ // z\r\nq', ['use a', '\nq']],
+    // A line comment ends at a CR: a CR at the end of the input or before a line break is
+    // trailing whitespace, a CR followed by code is not a command form.
+    ['use a // c\r', ['use a']],
+    ['use a // c\r// d\nq', ['use a', '\nq']],
+    ['use a // c\rx', ['use a // c\rx']],
+    // U+2028 / U+2029 end a line comment like a CR: at the end of the input they are trailing
+    // whitespace; followed by code the line is not a command form (unchanged by the fix).
+    [`use a // c${LS}`, ['use a']],
+    [`use a // c${LS}x`, [`use a // c${LS}x`]],
+    [`use a // c${PS}x`, [`use a // c${PS}x`]],
+  ])(
+    'a block comment ends at its first */, a line comment at the line end: %j',
+    (input, pieces) => {
+      expect(splitShellInput(input)).toEqual(pieces);
+    },
+  );
+
+  it.each([
+    // TW-2, line-comment part: before 8712197 `\/\/.*` could stop at any `//` or space and let
+    // the next comment start there, so a line ended by a CR or U+2028 and then code tried every
+    // grouping (18 ` //`: about 5 s) or every comment length (40000 spaces: about 3 s,
+    // quadratic). These sizes keep a regression bounded to seconds; the fixed match takes < 2 ms.
+    ['18 line comments then U+2028 and code', `use a${' //'.repeat(18)}${LS}x`],
+    ['18 line comments then CR and code', `use a${' //'.repeat(18)}\rx`],
+    ['a line comment of 40000 spaces then U+2028 and code', `use a //${' '.repeat(40000)}${LS}x`],
+    ['a line comment of 40000 spaces then CR and code', `use a //${' '.repeat(40000)}\rx`],
+    // Block-comment part with many comments, stars and unterminated openers.
+    ['5000 block comments then code', `use a${' /**/'.repeat(5000)} x`],
+    ['3000 starred block comments then code', `use a${' /***/ /* * */'.repeat(3000)} x`],
+    ['5000 block comments with an inner /* then code', `use a${' /* /* */'.repeat(5000)} x`],
+    ['10000 unterminated block comment openers', `use a${' /* /*'.repeat(10000)}`],
+    ['an unterminated block comment of 40000 stars', `use a /*${'*'.repeat(40000)}`],
+    ['20000 stray */ after a comment', `use a /**/${' */'.repeat(20000)}`],
+    [
+      '5000 block comments, a long line comment, U+2028 and code',
+      `use a${' /**/'.repeat(5000)} //${' '.repeat(5000)}${LS}x`,
+    ],
+  ])('TW-2 fix: a failing command match stays linear: %s', (_, input) => {
+    const started = performance.now();
+    expect(splitShellInput(input)).toEqual([input]);
+    // Generous bound: the fixed pattern takes about 1 ms for each of these inputs.
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+
+  it('a command line with many trailing comments still splits (linear success path)', () => {
+    const input = `use a${' /**/'.repeat(5000)}${' //'.repeat(1000)}\nq`;
+    const started = performance.now();
+    expect(splitShellInput(input)).toEqual(['use a', '\nq']);
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
 
   it('a command with a trailing comment between JavaScript lines splits into three pieces', () => {
     expect(splitShellInput('var a = 1\nuse test // switch\na + 1')).toEqual([
