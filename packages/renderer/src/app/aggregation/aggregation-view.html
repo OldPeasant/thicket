@@ -1,0 +1,362 @@
+<section class="agg" [attr.aria-label]="'Aggregation on ' + target().coll">
+  <header class="head">
+    <span class="code ns" [title]="target().db + '.' + target().coll"
+      >db.<span class="coll">{{ target().coll }}</span
+      >.aggregate([</span
+    >
+    <div class="modes" role="group" aria-label="Edit mode">
+      <button
+        type="button"
+        data-testid="agg-mode-stages"
+        [attr.aria-pressed]="mode() === 'stages'"
+        (click)="setMode('stages')"
+      >
+        Stages
+      </button>
+      <button
+        type="button"
+        data-testid="agg-mode-text"
+        [attr.aria-pressed]="mode() === 'text'"
+        (click)="setMode('text')"
+      >
+        Text
+      </button>
+    </div>
+    <div class="actions">
+      @if (running()) {
+        <button type="button" class="btn stop" data-testid="agg-cancel" (click)="cancelRun()">
+          Cancel
+        </button>
+      } @else {
+        <button type="button" class="btn run" data-testid="agg-run" (click)="run()">Run</button>
+      }
+      <button
+        type="button"
+        class="btn quiet"
+        data-testid="agg-export"
+        [attr.aria-pressed]="exportOpen()"
+        (click)="toggleExport()"
+      >
+        Export code
+      </button>
+      <button
+        type="button"
+        class="btn quiet"
+        data-testid="agg-create-view"
+        [appWriteControl]="target().profileId"
+        [attr.aria-pressed]="viewOpen()"
+        (click)="toggleView()"
+      >
+        Create view…
+      </button>
+    </div>
+  </header>
+
+  <div class="body">
+    @if (mode() === 'stages') {
+      <ol class="stages" data-testid="agg-stages">
+        @for (stage of stages(); track stage.id; let i = $index, last = $last, first = $first) {
+          @let p = parsed().get(stage.id);
+          @let preview = previews().get(stage.id);
+          <li
+            class="stage"
+            data-testid="agg-stage"
+            [class.disabled]="!stage.enabled"
+            [class.invalid]="p && !p.ok"
+            [attr.aria-label]="'Stage ' + (i + 1) + ' ' + stage.operator"
+          >
+            <div class="rail" aria-hidden="true">
+              <span class="node">{{ i + 1 }}</span>
+            </div>
+            <div class="editor">
+              <div class="stage-head">
+                <select
+                  class="operator"
+                  data-testid="agg-stage-operator"
+                  [attr.aria-label]="'Operator of stage ' + (i + 1)"
+                  (change)="setOperator(stage, $event)"
+                >
+                  @for (t of templates; track t.operator) {
+                    <option [value]="t.operator" [selected]="t.operator === stage.operator">
+                      {{ t.operator }}
+                    </option>
+                  }
+                  @if (!templates.some((t) => t.operator === stage.operator)) {
+                    <option [value]="stage.operator" selected>{{ stage.operator }}</option>
+                  }
+                </select>
+                <span class="tools">
+                  <label class="enable">
+                    <input
+                      type="checkbox"
+                      data-testid="agg-stage-enabled"
+                      [checked]="stage.enabled"
+                      (change)="toggleStage(stage.id)"
+                    />
+                    Enabled
+                  </label>
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    data-testid="agg-stage-up"
+                    [attr.aria-label]="'Move stage ' + (i + 1) + ' up'"
+                    title="Move up"
+                    [disabled]="first"
+                    (click)="moveStage(stage.id, -1)"
+                  >
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 10 8 5l5 5" /></svg>
+                  </button>
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    data-testid="agg-stage-down"
+                    [attr.aria-label]="'Move stage ' + (i + 1) + ' down'"
+                    title="Move down"
+                    [disabled]="last"
+                    (click)="moveStage(stage.id, 1)"
+                  >
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 6 5 5 5-5" /></svg>
+                  </button>
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    data-testid="agg-stage-remove"
+                    [attr.aria-label]="'Remove stage ' + (i + 1)"
+                    title="Remove"
+                    (click)="removeStage(stage.id)"
+                  >
+                    <svg viewBox="0 0 16 16" aria-hidden="true">
+                      <path d="m4 4 8 8M12 4l-8 8" />
+                    </svg>
+                  </button>
+                </span>
+              </div>
+              <textarea
+                class="stage-body"
+                data-testid="agg-stage-body"
+                spellcheck="false"
+                autocomplete="off"
+                [attr.aria-label]="'Argument of stage ' + (i + 1) + ' (' + stage.operator + ')'"
+                [rows]="bodyRows(stage)"
+                [value]="stage.body"
+                (input)="setBody(stage, $event)"
+                [attr.aria-invalid]="p && !p.ok ? true : null"
+                [attr.aria-describedby]="p && !p.ok ? uid + '-err-' + stage.id : null"
+              ></textarea>
+              @if (p && !p.ok) {
+                <p class="error" data-testid="agg-stage-error" [id]="uid + '-err-' + stage.id">
+                  {{ p.error.message }}
+                </p>
+              }
+            </div>
+            <div class="preview" data-testid="agg-stage-preview">
+              <p class="sr-only" data-testid="agg-preview-live" aria-live="polite">
+                {{ previewStatus(stage.id) }}
+              </p>
+              @if (!stage.enabled) {
+                <p class="note">Disabled: the pipeline skips this stage.</p>
+              } @else if (p && !p.ok) {
+                <p class="note" data-testid="agg-preview-blocked">
+                  No preview until the error is fixed.
+                </p>
+              } @else if (p && p.ok && stage.operator === '$out') {
+                <p class="note">Writes the result to a collection. Run asks first.</p>
+              } @else if (p && p.ok && stage.operator === '$merge') {
+                <p class="note">Merges the result into a collection. Run asks first.</p>
+              } @else {
+                @if (skippedText(stage.id); as skipped) {
+                  <p class="note warn">{{ skipped }}</p>
+                }
+                @switch (preview?.state) {
+                  @case ('ok') {
+                    @if (preview?.state === 'ok' && preview.docs; as docs) {
+                      <p class="count" data-testid="agg-preview-count">
+                        {{ countText(docs) }}
+                        <span class="faint">from a sample</span>
+                      </p>
+                      @for (doc of docs; track $index) {
+                        <pre class="doc" data-testid="agg-preview-doc">{{ doc }}</pre>
+                      }
+                    }
+                  }
+                  @case ('error') {
+                    @if (preview?.state === 'error' && preview.message; as message) {
+                      <p class="error" data-testid="agg-preview-error">
+                        {{ message }}
+                        <button
+                          type="button"
+                          class="btn quiet retry"
+                          data-testid="agg-preview-retry"
+                          [attr.aria-label]="'Retry the preview of stage ' + (i + 1)"
+                          (click)="retryPreview(stage.id)"
+                        >
+                          Retry
+                        </button>
+                      </p>
+                    }
+                  }
+                  @default {
+                    <p class="note">Loading preview…</p>
+                  }
+                }
+              }
+            </div>
+            <div class="insert">
+              <button
+                type="button"
+                class="add"
+                data-testid="agg-stage-insert"
+                [attr.aria-label]="'Add a stage after stage ' + (i + 1)"
+                (click)="addStage('$match', stage.id)"
+              >
+                + stage
+              </button>
+            </div>
+          </li>
+        } @empty {
+          <li class="empty">No stages: the pipeline returns every document.</li>
+        }
+      </ol>
+      <button
+        type="button"
+        class="btn quiet add-end"
+        data-testid="agg-add-stage"
+        (click)="addStage()"
+      >
+        Add stage
+      </button>
+    } @else {
+      <div class="full-text">
+        <textarea
+          class="text"
+          data-testid="agg-text"
+          spellcheck="false"
+          autocomplete="off"
+          aria-label="Pipeline"
+          [value]="text()"
+          (input)="editText($event)"
+          [attr.aria-invalid]="textError() ? true : null"
+          [attr.aria-describedby]="textError() ? uid + '-text-err' : null"
+        ></textarea>
+        <p class="hint">Lines starting with <code>//-</code> are disabled stages.</p>
+        @if (textError(); as error) {
+          <p class="error" role="alert" data-testid="agg-text-error" [id]="uid + '-text-err'">
+            {{ error.message }}
+          </p>
+        }
+      </div>
+    }
+    <span class="code close">])</span>
+
+    @if (exportOpen()) {
+      <section class="panel" data-testid="agg-export-panel" aria-label="Export code">
+        <div class="panel-head">
+          <div class="modes" role="group" aria-label="Language">
+            @for (lang of languages; track lang) {
+              <button
+                type="button"
+                [attr.data-testid]="'agg-lang-' + lang"
+                [attr.aria-pressed]="language() === lang"
+                (click)="language.set(lang)"
+              >
+                {{ languageLabels[lang] }}
+              </button>
+            }
+          </div>
+          <button
+            type="button"
+            class="btn quiet"
+            data-testid="agg-copy"
+            [disabled]="!code().ok"
+            (click)="copyCode()"
+          >
+            {{ copied() ? 'Copied' : 'Copy' }}
+          </button>
+        </div>
+        @let c = code();
+        @if (c.ok) {
+          <pre class="code-out" data-testid="agg-code">{{ c.text }}</pre>
+        } @else {
+          <p class="error" data-testid="agg-code-error">{{ c.message }}</p>
+        }
+      </section>
+    }
+
+    @if (viewOpen()) {
+      <form class="panel view-form" data-testid="agg-view-panel" (submit)="createView($event)">
+        <label>
+          View name
+          <input
+            data-testid="agg-view-name"
+            spellcheck="false"
+            autocomplete="off"
+            [value]="viewName()"
+            (input)="viewName.set(inputValue($event))"
+          />
+        </label>
+        <button
+          type="submit"
+          class="btn run"
+          data-testid="agg-view-submit"
+          [appWriteControl]="target().profileId"
+        >
+          Create view
+        </button>
+        @if (viewMessage(); as m) {
+          <p
+            [class.error]="m.error"
+            [class.ok]="!m.error"
+            role="status"
+            data-testid="agg-view-message"
+          >
+            {{ m.text }}
+          </p>
+        }
+      </form>
+    }
+
+    @if (runError(); as error) {
+      <p class="error run-error" role="alert" data-testid="agg-run-error">{{ error }}</p>
+    }
+    @if (result(); as r) {
+      <section class="results" data-testid="agg-results" aria-label="Result">
+        <div class="bar">
+          @if (r.wrote) {
+            <p class="rows" data-testid="agg-result-rows">Done: the output was written.</p>
+          } @else {
+            <nav class="pager" aria-label="Result pages">
+              <button
+                type="button"
+                class="icon-btn"
+                data-testid="agg-prev"
+                aria-label="Previous page"
+                title="Previous page"
+                [disabled]="r.page === 0 || running()"
+                (click)="turnPage(-1)"
+              >
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" /></svg>
+              </button>
+              <button
+                type="button"
+                class="icon-btn"
+                data-testid="agg-next"
+                aria-label="Next page"
+                title="Next page"
+                [disabled]="!r.hasNext || running()"
+                (click)="turnPage(1)"
+              >
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg>
+              </button>
+            </nav>
+            <p class="rows" data-testid="agg-result-rows" aria-live="polite">
+              {{ resultRange() }}
+            </p>
+          }
+        </div>
+        @for (doc of r.docs; track $index) {
+          <pre class="doc" data-testid="agg-result-doc">{{ doc }}</pre>
+        }
+      </section>
+    }
+  </div>
+</section>

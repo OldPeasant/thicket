@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./bson": "./src/bson/index.ts",
+    "./codegen": "./src/codegen/index.ts",
     "./diff": "./src/diff/index.ts",
     "./paging": "./src/paging/index.ts",
     "./shellsyntax": "./src/shellsyntax/index.ts",

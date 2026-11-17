@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
 import { DocumentEdits } from '../document';
-import type { WorkspaceTab } from '../layout/workspace.service';
+import { WorkspaceService, type WorkspaceTab } from '../layout/workspace.service';
 import { ProfileSafetyService } from '../safety/profile-safety.service';
 import { CollectionView } from './collection-view';
 
@@ -723,6 +723,43 @@ describe('CollectionView', () => {
     expect(get<HTMLInputElement>('pager-page').value).toBe('24');
     expect(q('pager-rows')?.textContent).toContain('1,151–1,200');
     expect(q('pager-rows')?.textContent).toMatch(/of 1,234 documents/);
+  });
+
+  it('Aggregate… opens the aggregation tab of this collection, once', async () => {
+    const workspace = TestBed.inject(WorkspaceService);
+    fixture.componentRef.setInput('tab', {
+      ...TAB,
+      detail: 'Live / shop',
+      production: true,
+    });
+    await settle();
+    click('open-aggregation');
+    await settle();
+    expect(workspace.active()).toEqual({
+      id: 'aggregation:p1:shop.orders',
+      kind: 'aggregation',
+      title: 'orders aggregation',
+      detail: 'Live / shop',
+      production: true,
+      data: { profileId: 'p1', db: 'shop', coll: 'orders', type: 'collection' },
+    });
+    // Its data is a copy: the builder cannot change the collection tab's data.
+    expect(workspace.active()?.data).not.toBe(TAB.data);
+
+    click('open-aggregation');
+    await settle();
+    expect(workspace.tabs().filter((t) => t.kind === 'aggregation')).toHaveLength(1);
+  });
+
+  it('Aggregate… is offered on a read-only profile (it reads)', async () => {
+    TestBed.inject(ProfileSafetyService).set({
+      id: 'p1',
+      name: 'Reporting',
+      readOnly: true,
+      production: false,
+    });
+    await settle();
+    expect(get<HTMLButtonElement>('open-aggregation').disabled).toBe(false);
   });
 
   it('lets the explorer edit documents on a writable profile', () => {

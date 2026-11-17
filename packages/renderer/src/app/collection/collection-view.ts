@@ -52,7 +52,8 @@ import { ArraySliceService, type SliceSource } from '../explorer/services/array-
 import { PageService } from '../explorer/services/page.service';
 import { SchemaService } from '../explorer/services/schema.service';
 import { TableOrientationService } from '../explorer/services/table-orientation.service';
-import type { WorkspaceTab } from '../layout/workspace.service';
+import { WorkspaceService, type WorkspaceTab } from '../layout/workspace.service';
+import { aggregationTabId } from '../aggregation/aggregation-view';
 import { RawEditor } from '../raw-editor/raw-editor';
 import { ProfileSafetyService } from '../safety/profile-safety.service';
 import type { CollectionTabData } from '../sidebar/sidebar-tree.service';
@@ -136,6 +137,7 @@ export class CollectionView {
   private readonly editMode = inject(EditModeService);
   private readonly numbers = inject(NumberDefaultService);
   private readonly safety = inject(ProfileSafetyService);
+  private readonly workspace = inject(WorkspaceService);
   protected readonly display = inject(BsonDisplayService);
   private readonly api = inject(ApiService);
   private readonly slices = inject(ArraySliceService);
@@ -501,6 +503,20 @@ export class CollectionView {
     const index = this.docs().findIndex((d) => d !== null && documentKey(d) === key);
     const arrays = index === -1 ? undefined : this.results.page()?.sliced?.[index];
     return arrays === undefined ? undefined : { above: this.results.sliceAbove(), arrays };
+  }
+
+  /** Opens the aggregation builder of this collection in its own tab. */
+  protected openAggregation(): void {
+    const tab = this.tab();
+    const { profileId, db, coll } = this.target();
+    this.workspace.open({
+      id: aggregationTabId(profileId, db, coll),
+      kind: 'aggregation',
+      title: `${coll} aggregation`,
+      detail: tab.detail,
+      production: tab.production,
+      data: { ...tab.data },
+    });
   }
 
   protected toggleIo(panel: 'export' | 'import'): void {

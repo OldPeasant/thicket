@@ -987,6 +987,76 @@ describe('SidebarTreeService', () => {
       expect(tree.collStats('p1', 'shop', 'orders')).toBeUndefined();
     });
 
+    describe('aggregation tabs', () => {
+      /** The aggregation tab of a collection, as the collection tab's Aggregate… opens it. */
+      const openAggregation = (profileId: string, db: string, name: string): void => {
+        ws.open({
+          id: `aggregation:${profileId}:${db}.${name}`,
+          kind: 'aggregation',
+          title: `${name} aggregation`,
+          data: { profileId, db, coll: name, type: 'collection' },
+        });
+      };
+      const withAggregations = (): void => {
+        openTabs();
+        openAggregation('p1', 'shop', 'orders');
+        openAggregation('p1', 'shop', 'items');
+        openAggregation('p1', 'other', 'orders');
+        openAggregation('p2', 'shop', 'orders');
+      };
+
+      it('dropping a collection closes its aggregation tab too, and only that one', async () => {
+        withAggregations();
+        const done = tree.dropCollection('p1', 'shop', 'orders');
+        await answer(true);
+        await done;
+        expect(ws.tabs().map((t) => t.id)).toEqual([
+          'collection:p1:shop.items',
+          'collection:p1:other.orders',
+          'collection:p2:shop.orders',
+          'shell:p1',
+          'aggregation:p1:shop.items',
+          'aggregation:p1:other.orders',
+          'aggregation:p2:shop.orders',
+        ]);
+      });
+
+      it('dropping a database closes the aggregation tabs of all its collections', async () => {
+        withAggregations();
+        const done = tree.dropDatabase('p1', 'shop');
+        await answer(true);
+        await done;
+        expect(ws.tabs().map((t) => t.id)).toEqual([
+          'collection:p1:other.orders',
+          'collection:p2:shop.orders',
+          'shell:p1',
+          'aggregation:p1:other.orders',
+          'aggregation:p2:shop.orders',
+        ]);
+      });
+
+      it('renaming a collection closes its aggregation tab', async () => {
+        withAggregations();
+        await tree.renameCollection('p1', 'shop', 'orders', 'orders2');
+        const ids = ws.tabs().map((t) => t.id);
+        expect(ids).not.toContain('aggregation:p1:shop.orders');
+        expect(ids).toContain('aggregation:p1:shop.items');
+        expect(ids).toContain('aggregation:p2:shop.orders');
+      });
+
+      it('a cancelled or failed drop keeps the aggregation tab', async () => {
+        withAggregations();
+        const cancelled = tree.dropCollection('p1', 'shop', 'orders');
+        await answer(false);
+        await expect(cancelled).rejects.toMatchObject({ code: 'CANCELLED' });
+        fake.fail('coll.drop', { code: 'SERVER_ERROR', message: 'not authorized' });
+        const failed = tree.dropCollection('p1', 'shop', 'orders');
+        await answer(true);
+        await expect(failed).rejects.toMatchObject({ code: 'SERVER_ERROR' });
+        expect(ws.tabs().map((t) => t.id)).toContain('aggregation:p1:shop.orders');
+      });
+    });
+
     it('create and rename on a non-production profile are sent without a dialog', async () => {
       await tree.createCollection('p1', 'shop', 'fresh');
       await tree.createDatabase('p1', 'newdb', 'first');
