@@ -2,21 +2,25 @@
 
 Date: 2026-11-17
 
-Task: e2e-screenshot-repaint - Test: screenshots after view switches don't hang on headless Linux
+Task: e2e-screenshot-repaint - Test: screenshots after view switches don't hang on headless Linux (round 2, final code after the fixer)
 
-Scope: `git diff c74ea8166f401f147ac6917a4a7a5ec65cbc789d..HEAD`, task commits 5a7801c and 0370640.
-While testing, main was rebased under the task: the same commits are now 2416ed36 and 0758062a (HEAD
-0758062addc8afc0c9114ec96fa97b4e688f641b, parent 240c9b11). `git patch-id --stable` of
-`git diff c74ea81 0370640` and `git diff 240c9b11 0758062a` are identical
-(de30338ecadc77180bf13417722a90a4f149ff22), so the tested code change is the same.
-Uncommitted input: this report's test additions in `test/e2e/screenshot.e2e.ts`
-(sha256 3a8847a9bcde717d98125fad5ba8c8d1debb821d12e7cc6b44c06d0199b5c2a3).
+Scope: `git diff c74ea8166f401f147ac6917a4a7a5ec65cbc789d..HEAD -- . ':!tasks' ':!reviews'`, final code
+revision 99a03cbc7d2d85feec57a5bc2b56b191912ee126. The task owns these commits: 2416ed36 (helper, headless screen
+size, suites switched), 0758062a (docs), 5bc11db9 (round-1 tests), and 99a03cbc (fixes CR-1..CR-4). The
+parent supplied this list, and I checked it with `git show --stat`. The range also includes commits from
+other tasks that were rebased under this one (raw-cmd-read-pref backend/integration files). They are not
+part of this task and are excluded. Measured at HEAD 95a4d480aefe865c70bc4345bb93feee6b31eb01. The only
+commits after 99a03cbc are `tasks/` commits (763a0972, 6524195b, 95a4d480), and
+`git diff --stat 99a03cbc..HEAD -- . ':!tasks' ':!reviews'` is empty. Uncommitted input: this round's test
+addition in `test/e2e/screenshot.e2e.ts` (sha256 f5a2fa1ce0e993706e51a04640d48e3ed4cb3103f08e96a17d52c5306f0582e8).
 
 Requirements:
 - tasks/e2e-screenshot-repaint.md acceptance criteria 1-3
-- docs/ARCHITECTURE.md (e2e section, Coverage section)
-- parent agent instructions (gaps to consider: timeout fallback end to end, locator + rect fallback,
-  non-timeout errors rethrown, output folder creation)
+- docs/ARCHITECTURE.md "End-to-end tests" (screenshot helper rule) and "Coverage"
+- reviews/e2e-screenshot-repaint/fixes.md (final behaviour: the element fallback runs only for visible
+  elements that have a box, and a hidden element or no match rethrows the TimeoutError;
+  `screenshotWindows` uses the helper; smoke-packaged screen-size switch; the headless test checks spawnargs)
+- parent agent instructions for round 2
 
 ## Test files changed
 
@@ -24,62 +28,74 @@ Requirements:
 
 ## Tests added or updated
 
-Count: 3 added (in the `screenshot() on headless Linux` describe, which unsets DISPLAY,
-WAYLAND_DISPLAY and THICKET_TEST_HEADLESS for the app it starts):
+Count: 1 added (this round)
 
-- `when Playwright times out, screenshot() falls back to a repaint capture of the element` - a laid-out
-  `visibility:hidden` 240x60 box: Playwright's element screenshot times out (TimeoutError after 5 s),
-  the helper falls back to `capturePageWithRepaint()` with the element's bounding box; asserts the PNG
-  is the element's size (not the whole window), the file is written, the nested output folder is
-  created, and the file holds the returned PNG. Exercises the timeout branch, the locator + rect path
-  and the rect rounding in `capturePageWithRepaint()` end to end.
-- `a page screenshot creates the output folder and writes the returned PNG` - nested non-existent
-  folder for a page capture; file content equals the returned buffer; the marker colour is shown.
-- `errors other than a timeout are rethrown, not hidden by the fallback` - an ambiguous locator
-  (`button`, several matches): the strict-mode error is rethrown within 4 s (no 5 s timeout, no repaint
-  rounds) and no file is written.
+- `a visible element whose capture times out falls back to a repaint capture of just that element`:
+  CR-1 removed the round-1 fallback test, which used a hidden box. After that, nothing tested the branch
+  the fix keeps: a visible locator with a box whose Playwright capture times out, followed by
+  `capturePageWithRepaint()` with the element rect. The new test uses a visible 240x60 box that moves
+  3 px on every animation frame. Playwright's element screenshot never sees it stable and times out.
+  The test asserts that:
+  - the call takes at least 5 s, which proves the timeout and fallback path ran, and less than 9 s;
+  - the file holds the returned PNG;
+  - the PNG is the element's size (240x60 +/- 1 px), not the whole window;
+  - the PNG shows the element's colour.
+
+  If the helper rethrew for visible elements, or captured the whole window, this test would fail.
+
+Existing tests that cover the rest of the final behaviour (no changes needed):
+- `an element that is not visible fails with the TimeoutError, not a fallback capture` (CR-1)
+- `a locator that matches nothing fails fast with the TimeoutError` (TW-1)
+- `the app is started headless with a real screen size`, which checks `electronApp.process().spawnargs` (CR-4)
+- `screenshotWindows saves a PNG of the window under test-results/ and attaches it` in
+  `harness-helpers.e2e.ts`, which now goes through the helper (CR-2). The parent reports that it passed
+  in the full `npm run test:e2e` run with the default output folder.
 
 ## Requirement coverage
 
 | Requirement | Tests | Command | Result |
 |---|---|---|---|
-| AC1: after several view switches each screenshot shows the new view, none times out, headless with DISPLAY/WAYLAND_DISPLAY unset | `each screenshot after a view switch shows the new view`, `the app is started headless with a real screen size`, `an element screenshot shows the element in its current state`, `the repaint fallback captures the current view` (existing) | `npx playwright test screenshot.e2e --output=/tmp/tw-e2e-screenshot-results` | Pass (7/7) |
-| Helper fallback on Playwright timeout (element rect), output folder, returned PNG = file | the 2 new fallback/folder tests | same | Pass |
-| Non-timeout errors are not swallowed by the fallback | `errors other than a timeout are rethrown, not hidden by the fallback` | same | Pass |
-| headlessArgs adds `--ozone-override-screen-size=1920,1080` with the headless switch | `headlessArgs` describe in `harness-helpers.e2e.ts` (existing, updated by the task) | `npx playwright test screenshot.e2e harness-helpers --output=/tmp/tw-e2e-screenshot-results` | Pass |
-| AC2: existing suites use the helper; `npm run test:e2e` passes headless | not run by the test-writer (parent's full run was in progress in this clone; instructed not to run the full suite) | - | Not run: parent runs the full `npm run test:e2e` |
-| AC3: docs/ARCHITECTURE.md e2e section explains the helper | documentation, no executable behavior | - | Not testable |
+| AC1: after several view switches each screenshot shows the new view and none times out, headless with DISPLAY/WAYLAND_DISPLAY unset | `each screenshot after a view switch shows the new view`, `the app is started headless with a real screen size`, `an element screenshot shows the element in its current state`, `the repaint fallback captures the current view`, `a page screenshot creates the output folder and writes the returned PNG` | `npx playwright test screenshot.e2e --output=/tmp/tw2-e2e-screenshot-final --reporter=line` | Pass (9/9); also `--repeat-each=3` -> 27/27 |
+| Helper: a visible element whose capture times out falls back to a repaint capture of the element rect | `a visible element whose capture times out falls back to a repaint capture of just that element` (new) | same | Pass (7.0 s: 5 s timeout + repaint rounds) |
+| Helper: a hidden element or a locator with no match rethrows the TimeoutError and writes no file (CR-1, TW-1) | `an element that is not visible fails with the TimeoutError, not a fallback capture`, `a locator that matches nothing fails fast with the TimeoutError` | same | Pass (5.8 s, 6.1 s) |
+| Helper: errors other than a timeout are rethrown | `errors other than a timeout are rethrown, not hidden by the fallback` | same | Pass |
+| Harness failure screenshots use the helper (CR-2) | `screenshotWindows saves a PNG ...` (harness-helpers.e2e.ts) | parent's `npm run test:e2e` (default output folder) | Pass, as reported by the parent. I did not rerun it: with `--output` its `test-results/` path assertion fails by design |
+| AC2: existing suites use the helper; `npm run test:e2e` passes headless | `grep -rn "\.screenshot(" test/e2e` finds no direct call outside `harness/screenshot.ts` | parent's `npm run test:e2e` | Fail as reported by the parent: 57 passed, 3 failed (`layout.e2e.ts:36`, `:61`, `ldap.e2e.ts`; not screenshot-related, follow-up `tasks/e2e-suite-red.md`). I did not rerun it (parent instruction) |
+| Packaged smoke uses the headless screen size (CR-3) | none | - | Not run: needs a packaged build, and the parent said not to rebuild |
+| AC3: docs/ARCHITECTURE.md explains the helper | documentation | - | Not testable |
 
 ## Focused test execution
 
 Command:
 
-`npx playwright test screenshot.e2e harness-helpers --output=/tmp/tw-e2e-screenshot-results`
+`npx playwright test screenshot.e2e --output=/tmp/tw2-e2e-screenshot --reporter=list`
 
 Result:
 
-Fail as a run (17 passed, 2 failed), but the 2 failures are caused only by the `--output` override:
-`screenshotWindows saves a PNG of the window under test-results/ and attaches it` and
-`a failing test leaves a window screenshot and the app output under test-results/` assert the output
-path starts with `test-results/`. `--output` was used so this run would not wipe the `test-results/`
-of the parent's concurrent full e2e run (Playwright clears its output folder at start). These two tests
-are outside the task diff; they should be confirmed by the parent's full run with the default output
-folder. All `headlessArgs` and `screenshot.e2e` tests passed.
+Pass: 9 passed (32.2 s), 2026-11-17 06:25:14 to 06:25:47 +01:00
 
 Command:
 
-`npx playwright test screenshot.e2e --output=/tmp/tw-e2e-screenshot-results --reporter=list`
+`npx playwright test screenshot.e2e --repeat-each=3 --output=/tmp/tw2-e2e-screenshot-rep --reporter=line`
 
 Result:
 
-Pass - 7 passed (12.6 s); the timeout-fallback test takes 6.8 s (5 s Playwright timeout + 3 x 400 ms
-repaint rounds), the others are under 2 s.
+Pass: 27 passed (1.2 min). This checks that the new timing-dependent test is stable.
 
-Static checks:
+Command (final run, after Prettier reformatted the spec; same test logic):
 
-- `npx tsc -p tsconfig.json` - Pass
-- `npx eslint test/e2e` - Pass
-- `npx prettier --check test/e2e` - Pass
+`npx playwright test screenshot.e2e --output=/tmp/tw2-e2e-screenshot-final --reporter=line`
+
+Result:
+
+Pass: 9 passed (23.1 s), started 2026-11-17 06:27:17 +01:00
+
+Static checks (on the final file):
+
+- `npx tsc -p tsconfig.json`: Pass
+- `npx eslint test/e2e`: Pass
+- `npx prettier --check test/e2e`: Pass. The first check flagged my new test's line wrapping, and
+  `npx prettier --write test/e2e/screenshot.e2e.ts` fixed it before the final run.
 
 ## Full test execution
 
@@ -89,75 +105,88 @@ Command:
 
 Result:
 
-Not run by the test-writer: the parent's full headless run was in progress in this clone and the
-instructions forbid a rebuild or a second full run.
+Not run by me (parent instruction: no full e2e suite). The parent's run on this revision: 57 passed, 3
+failed (`layout.e2e.ts:36`, `layout.e2e.ts:61`, `ldap.e2e.ts`). The failures are outside the screenshot
+helper and are tracked in `tasks/e2e-suite-red.md`. `harness-helpers.e2e.ts` passed in that run.
 
 ## .taskcheck
 
 Result:
 
-Not run (`npm run check` covers lint, type check and Vitest unit tests; the task changes only e2e
-harness files, whose type check, lint and formatting were run directly above). The parent runs
-`.taskcheck` before `done`.
+Not run. It runs `npm run check` (lint, type check, Vitest unit tests). This round changed only an e2e
+spec, and I ran its type check, lint and formatting directly above. The parent runs `.taskcheck` before
+`done`.
 
 ## Bugs found
 
-No production defects found.
+No production defects found in the task's harness code.
 
-Observation (not a defect against the criteria, no test added): for a locator that matches no element,
-`locator.screenshot()` times out after 5 s and the fallback then calls `locator.boundingBox()`, which
-waits with Playwright's default action timeout (none in this config) - so `screenshot()` of a missing
-element would hang until the test timeout instead of failing quickly. A caller error, not a case the
-task requires; the parent may decide whether to pass a timeout to `boundingBox()`.
+Observation (outside this task's diff, no finding): `apps/desktop/scripts/smoke-packaged.mjs:59` and
+`apps/desktop/test/theme.electron.spec.ts:119` still call `page.screenshot()` directly. Neither file is
+in `test/e2e`, which is what AC2 names ("existing e2e suites"). The smoke script now gets the headless
+screen size (CR-3), and that switch alone lets the window paint. The parent decides whether these need
+follow-up.
 
 ## Coverage
 
-Status: unavailable - the changed production files are Playwright e2e harness code
-(`test/e2e/harness/screenshot.ts`, `test/e2e/harness/app.ts`, `apps/desktop/test/helpers.ts`). The
-project's only coverage tooling is Vitest with `@vitest/coverage-v8` (docs/ARCHITECTURE.md
-"Coverage"), which instruments workspace unit tests, not code run by the Playwright runner; and the
-helper's core runs inside the Electron main process via `evaluate()`. No coverage provider is
-configured for Playwright, and adding one is outside the test-writer's authority.
+Status: unavailable. The task-changed production files are Playwright e2e harness code and launch
+scripts. The project's only coverage tooling is Vitest with `@vitest/coverage-v8` (docs/ARCHITECTURE.md
+"Coverage"), and it instruments only code that the workspace Vitest projects run. These files run under
+the Playwright test runner, and the core of the helper (`invalidate()` / `capturePage()` loop, window
+size check) runs inside the Electron main process through `JSHandle.evaluate()`, which no configured
+provider instruments. No Playwright or Electron coverage provider is configured, and adding one is a
+configuration change outside the test-writer's authority.
 
-Metric: whole-file coverage of task-changed production files - not measured.
-Changed-line coverage: not measured.
+Metric: whole-file coverage of task-changed production files: not measured.
+Changed-line coverage: not measured (no provider for these files).
 
 Evidence:
-- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: e2e-screenshot-repaint; base c74ea8166f401f147ac6917a4a7a5ec65cbc789d; HEAD 0758062addc8afc0c9114ec96fa97b4e688f641b; task commits from the parent (5a7801c, 0370640, rebased to 2416ed36, 0758062a with the same patch-id)
-- Source/test snapshot identifier (including uncommitted inputs): HEAD 0758062a plus `test/e2e/screenshot.e2e.ts` sha256 3a8847a9bcde717d98125fad5ba8c8d1debb821d12e7cc6b44c06d0199b5c2a3; `test/e2e/harness/screenshot.ts` sha256 43f1e301ce9240d2b57ebe235ccaa28ea8dbf43501647dce63da9fd0a6aa8e21
-- Exact included files; renamed/deleted/excluded files and reasons: in scope `test/e2e/harness/screenshot.ts`, `test/e2e/harness/app.ts`, `test/e2e/harness/index.ts`, `apps/desktop/test/helpers.ts`; excluded: the e2e suites (tests), `docs/ARCHITECTURE.md` (docs); no renames or deletions
-- Provider/version, command, working directory, and test selection: none (no Playwright coverage provider); behavior verified with Playwright 1.65.1, commands above, repo root
+- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: e2e-screenshot-repaint; base c74ea8166f401f147ac6917a4a7a5ec65cbc789d; measured HEAD 95a4d480aefe865c70bc4345bb93feee6b31eb01 (code identical to 99a03cbc); task commits 2416ed36, 0758062a, 5bc11db9, 99a03cbc (from the parent, checked with `git show --stat`)
+- Source/test snapshot identifier (including uncommitted inputs): HEAD 95a4d480 plus `test/e2e/screenshot.e2e.ts` sha256 f5a2fa1ce0e993706e51a04640d48e3ed4cb3103f08e96a17d52c5306f0582e8; `test/e2e/harness/screenshot.ts` sha256 9bf407cda2086cdae33944f367736226f1606e6e394982863ae02540646b61ca (unchanged before and after the final run); `test/e2e/harness/fixtures.ts` sha256 09fef9d8b449374ef1a5a2d5c645800a8cbb824cbebfb93af4e7781ee6f34965
+- Exact included files; renamed/deleted/excluded files and reasons: in scope `test/e2e/harness/screenshot.ts`, `test/e2e/harness/app.ts`, `test/e2e/harness/fixtures.ts`, `test/e2e/harness/index.ts`, `apps/desktop/test/helpers.ts`, `apps/desktop/scripts/smoke-packaged.mjs`. Excluded: the e2e suites (tests), `docs/ARCHITECTURE.md` (docs), and the backend/integration files of other tasks in the range (raw-cmd-read-pref and import.ts; not task-owned). No renames or deletions
+- Provider/version, command, working directory, and test selection: none (no provider for Playwright/Electron code). Behaviour was verified with Playwright 1.65.1 (`npx playwright test screenshot.e2e`), working directory is the repo root
 - Run start/completion time and exit status: no coverage run
 - Generated report paths and report hashes/run identifier: none
-- Evidence outputs are fresh and inputs stayed unchanged: test runs were on the snapshot above
-- Final run after latest test additions and production fixes: yes (tests); no coverage run
+- Evidence outputs are fresh and inputs stayed unchanged: the test runs above are on the snapshot listed, and the hashes were the same before and after the final run
+- Final run after latest test additions and production fixes: yes for tests (final run after the fixer's 99a03cbc and this round's addition); no coverage run
 
 | Changed file | Statements | Branches | Functions | Lines |
 |---|---:|---:|---:|---:|
 | `test/e2e/harness/screenshot.ts` | N/A (not measured) | N/A | N/A | N/A |
 | `test/e2e/harness/app.ts` | N/A (not measured) | N/A | N/A | N/A |
+| `test/e2e/harness/fixtures.ts` | N/A (not measured) | N/A | N/A | N/A |
 | `test/e2e/harness/index.ts` | N/A (not measured) | N/A | N/A | N/A |
 | `apps/desktop/test/helpers.ts` | N/A (not measured) | N/A | N/A | N/A |
+| `apps/desktop/scripts/smoke-packaged.mjs` | N/A (not measured) | N/A | N/A | N/A |
 
-Behavioral coverage of the branches by inspection (not instrumented):
+No aggregate is reported because no file was measured.
+
+These branches were checked by inspection and by the tests that exercise them, not by instrumentation:
 
 | File and uncovered lines/branch locations | Required behavior or risk | Action/test added or reason left uncovered |
 |---|---|---|
-| `test/e2e/harness/screenshot.ts` `screenshot()` timeout catch + fallback with locator rect | fallback must show the current state when Playwright hangs | new test `when Playwright times out, screenshot() falls back ...` |
-| `test/e2e/harness/screenshot.ts` non-TimeoutError rethrow | failures must not be hidden | new test `errors other than a timeout are rethrown ...` |
-| `test/e2e/harness/screenshot.ts` `mkdir` of the output folder | screenshots into new folders (final-demo) | both new tests use nested new folders |
-| `test/e2e/harness/screenshot.ts` `setContentSize(1280, 800)` when the window is under 100 px | defensive; with `--ozone-override-screen-size` the window is never collapsed | not reachable without breaking the harness's launch args; left untested |
-| `test/e2e/harness/screenshot.ts` fallback when `boundingBox()` is null (element gone) | caller error | not tested; see observation under Bugs found |
-| `apps/desktop/test/helpers.ts` `headlessArgs()` | same switch as the harness copy | no test of its own in the diff; identical logic to the tested `test/e2e/harness/app.ts` copy; used by the desktop app's own tests |
+| `test/e2e/harness/screenshot.ts:49-50` Playwright capture succeeds | AC1, current view without a hang | `each screenshot after a view switch ...`, `an element screenshot ...`, `a page screenshot ...` |
+| `test/e2e/harness/screenshot.ts:52` non-TimeoutError rethrow | failures must not be hidden | `errors other than a timeout are rethrown ...` |
+| `test/e2e/harness/screenshot.ts:55-58` locator: visible + box -> fallback with rect | fallback shows the current element | new test `a visible element whose capture times out falls back ...` |
+| `test/e2e/harness/screenshot.ts:57`, `105-111` hidden or no match -> rethrow (incl. `visibleBox` catch / null) | CR-1, TW-1 | `an element that is not visible fails ...`, `a locator that matches nothing fails fast ...` |
+| `test/e2e/harness/screenshot.ts:60-62` Page target timeout -> whole-window fallback | fallback for a window that never sends a frame | Not reached through `screenshot()`: a page capture times out only when the window paints no frame, and the headless screen size prevents that in this harness. `capturePageWithRepaint()` itself is tested directly (`the repaint fallback captures the current view`). Gap left on purpose |
+| `test/e2e/harness/screenshot.ts:44` `setContentSize(1280, 800)` for a window under 100 px | defensive | Not reachable without removing the harness's launch switch; left untested |
+| `test/e2e/harness/fixtures.ts:49` `screenshotWindows` -> helper (CR-2) | failure screenshots | `screenshotWindows saves a PNG ...` (parent's full run) |
+| `apps/desktop/scripts/smoke-packaged.mjs:34` screen-size switch (CR-3) | packaged smoke paints headless | Not run: needs a packaged build |
 
 ## Unable to test
 
-- AC2 full `npm run test:e2e` headless: not run here (concurrent parent run); the parent must record its result.
-- The two `test-results/`-path tests in `harness-helpers.e2e.ts` could not pass with `--output` redirected; they need the parent's default-output run.
-- Coverage: no coverage tooling for Playwright e2e code (see Coverage).
+- Packaged smoke script (CR-3): it needs a packaged build, and I was told not to rebuild. Follow-up:
+  confirm it in the next packaged smoke run.
+- AC2 full `npm run test:e2e`: I did not run it (instruction). The parent's run has 3 failures that are
+  not screenshot-related, tracked in `tasks/e2e-suite-red.md`. The parent decides how AC2 is recorded.
+- `harness-helpers.e2e.ts` `test-results/` path tests: these fail under `--output` by design, so they
+  need the default-output run (the parent's full run, where they passed).
+- Coverage: no provider for Playwright/Electron harness code (see Coverage).
 
 ## Summary
 
-Tests added and all focused validation passed (apart from two path assertions that fail only because
-of the redirected `--output`); no production defects found. The full `npm run test:e2e` run (AC2) and
-`.taskcheck` remain for the parent.
+Tests added and focused validation passed (9/9, plus 27/27 with `--repeat-each=3`); no production
+defects found. The new test closes the one real gap left by the CR-1 fix: the fallback path for a
+visible element with a box. AC2's full suite is still red for 3 tests that are not screenshot-related,
+so the parent has to record that result. Coverage is unavailable for Playwright harness code.

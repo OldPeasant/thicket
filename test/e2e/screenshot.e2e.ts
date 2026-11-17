@@ -191,6 +191,52 @@ test.describe('screenshot() on headless Linux', () => {
     expect(shown.rgb).toEqual([255, 128, 0]);
   });
 
+  test('a visible element whose capture times out falls back to a repaint capture of just that element', async ({
+    electronApp,
+    window,
+  }, testInfo) => {
+    await expect(window.getByTestId('welcome-new')).toBeVisible();
+    // A visible, laid-out box that moves by a few pixels on every frame: Playwright's element
+    // screenshot waits for it to be stable and times out, but it is visible and has a box, so the
+    // helper must use the repaint fallback limited to the element's rectangle.
+    await window.evaluate(() => {
+      const page = globalThis as unknown as Dom & {
+        requestAnimationFrame(callback: () => void): number;
+      };
+      const box = page.document.createElement('div');
+      box.id = 'e2e-moving-box';
+      box.style.cssText =
+        'position:fixed;left:20px;top:100px;width:240px;height:60px;z-index:2147483646;' +
+        'background:rgb(20, 160, 90)';
+      page.document.body.appendChild(box);
+      let shifted = false;
+      const move = () => {
+        shifted = !shifted;
+        box.style.cssText = box.style.cssText.replace(
+          /left:\s*\d+px/,
+          `left:${shifted ? 23 : 20}px`,
+        );
+        page.requestAnimationFrame(move);
+      };
+      page.requestAnimationFrame(move);
+    });
+    const moving = window.locator('#e2e-moving-box');
+    await expect(moving).toBeVisible();
+    const path = testInfo.outputPath('fallback', 'moving-box.png');
+    const started = Date.now();
+    const png = await screenshot(electronApp, moving, path);
+    const elapsed = Date.now() - started;
+    // Playwright's 5 s timeout was hit (the fallback path ran), then 3 repaint rounds, no hang.
+    expect(elapsed).toBeGreaterThanOrEqual(5_000);
+    expect(elapsed).toBeLessThan(9_000);
+    expect((await readFile(path)).equals(png)).toBe(true);
+    // Only the element's rectangle (240x60 CSS px, give or take rounding), not the whole window.
+    const shown = await pixel(window, png, 120, 30);
+    expect(Math.abs(shown.width - 240)).toBeLessThanOrEqual(1);
+    expect(Math.abs(shown.height - 60)).toBeLessThanOrEqual(1);
+    expect(shown.rgb).toEqual([20, 160, 90]);
+  });
+
   test('an element that is not visible fails with the TimeoutError, not a fallback capture', async ({
     electronApp,
     window,
