@@ -69,17 +69,81 @@ function treeNode(window: Page, kind: 'conn' | 'db' | 'coll', name: string): Loc
 // The root tsconfig has no DOM lib: just what the measurement below uses.
 interface Rect {
   top: number;
+  right: number;
+}
+interface TextNode {
+  textContent: string | null;
 }
 interface El {
   textContent: string | null;
   dataset: Record<string, string | undefined>;
   parentElement: El | null;
   querySelector(s: string): El | null;
+  closest(s: string): El | null;
   getBoundingClientRect(): Rect;
+}
+interface Range {
+  selectNodeContents(n: El): void;
+  setStart(n: TextNode, offset: number): void;
+  setEnd(n: TextNode, offset: number): void;
+  getClientRects(): Iterable<Rect>;
 }
 interface Doc {
   querySelectorAll(s: string): Iterable<El>;
-  createRange(): { selectNodeContents(n: El): void; getClientRects(): Iterable<Rect> };
+  createRange(): Range;
+  createTreeWalker(root: El, whatToShow: number): { nextNode(): TextNode | null };
+}
+
+/** Scalar values whose box ends past the right edge of their own table cell. */
+async function overflowingScalars(window: Page): Promise<string[]> {
+  return window.evaluate(() => {
+    const doc = (globalThis as unknown as { document: Doc }).document;
+    const out: string[] = [];
+    for (const val of doc.querySelectorAll('app-json-explorer .json-output .val.bson.scalar')) {
+      const cell = val.closest('td');
+      if (!cell) continue;
+      if (val.getBoundingClientRect().right > cell.getBoundingClientRect().right + 1) {
+        out.push(`${val.dataset['bsonType']}: ${val.textContent}`);
+      }
+    }
+    return out;
+  });
+}
+
+/**
+ * For every string value containing `needle`: how many lines it takes, and the words that were
+ * split across lines (wrapping character by character would split them).
+ */
+async function stringWrap(
+  window: Page,
+  needle: string,
+): Promise<{ count: number; maxLines: number; splitWords: string[] }> {
+  return window.evaluate((needle) => {
+    const doc = (globalThis as unknown as { document: Doc }).document;
+    const vals = [...doc.querySelectorAll('app-json-explorer .json-output .val.str')].filter((v) =>
+      (v.textContent ?? '').includes(needle),
+    );
+    const splitWords: string[] = [];
+    let maxLines = 0;
+    for (const val of vals) {
+      const all = doc.createRange();
+      all.selectNodeContents(val);
+      const lines = new Set([...all.getClientRects()].map((r) => Math.round(r.top))).size;
+      maxLines = Math.max(maxLines, lines);
+      const walker = doc.createTreeWalker(val, 4 /* NodeFilter.SHOW_TEXT */);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const text = node.textContent ?? '';
+        for (const m of text.matchAll(/\S+/g)) {
+          const r = doc.createRange();
+          r.setStart(node, m.index);
+          r.setEnd(node, m.index + m[0].length);
+          const tops = new Set([...r.getClientRects()].map((x) => Math.round(x.top)));
+          if (tops.size > 1) splitWords.push(m[0]);
+        }
+      }
+    }
+    return { count: vals.length, maxLines, splitWords };
+  }, needle);
 }
 
 /**
@@ -144,6 +208,13 @@ for (const [style, mode] of [
     const { count, wrapped } = await wrappedScalars(window);
     expect(count).toBeGreaterThanOrEqual(12 * 7);
     expect(wrapped).toEqual([]);
+    // CR-1: a one-line scalar widens its column instead of spilling into the next cell.
+    expect(await overflowingScalars(window)).toEqual([]);
+    // AC2: the long `note` string still wraps, but only between words.
+    const note12 = await stringWrap(window, 'leave the parcel');
+    expect(note12.count).toBe(12);
+    expect(note12.maxLines).toBeGreaterThan(1); // it does wrap here, so the next check means something
+    expect(note12.splitWords).toEqual([]);
 
     await window.evaluate(async () => {
       await (globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }).document
