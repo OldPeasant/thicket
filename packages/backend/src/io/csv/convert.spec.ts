@@ -124,19 +124,47 @@ describe('collectPaths', () => {
       );
     });
 
+    it('does not flatten the document value of a top-level dotted key', () => {
+      const doc: Document = { 'a.b': { c: 1 } };
+      const paths = new Set<string>();
+      collectPaths(doc, paths);
+      expect([...paths]).toEqual(['a.b']);
+      expect(cellText(valueAt(doc, 'a.b'), false)).toBe(canonical({ c: new Int32(1) }));
+    });
+
+    it('keeps the document value of a top-level dotted key next to a colliding document', () => {
+      const doc: Document = { 'a.b': { c: 1 }, a: { b: { c: 9 } } };
+      const paths = new Set<string>();
+      collectPaths(doc, paths);
+      expect([...paths]).toEqual(['a.b', 'a']);
+      expect(valueAt(doc, 'a.b')).toEqual({ c: 1 });
+      expect(valueAt(doc, 'a')).toEqual({ b: { c: 9 } });
+    });
+
     it('loses no value of any document on export', () => {
       const docs: Document[] = [
         { 'a.b': 'literal', a: { b: 'nested' } },
         { a: { b: 'only nested' } },
         { 'a.b.c': 'deep literal' },
         { x: { 'p.q': 'inner' } },
+        { 'm.n': { o: 'literal document' } },
+        { 'm.n': { o: 'colliding literal' }, m: { n: { o: 'colliding nested' } } },
       ];
       const paths = new Set<string>();
       for (const d of docs) collectPaths(d, paths);
       const text = docs
         .map((d) => [...paths].map((p) => cellText(valueAt(d, p), true)).join('|'))
         .join('\n');
-      for (const value of ['literal', 'nested', 'only nested', 'deep literal', 'inner']) {
+      for (const value of [
+        'literal',
+        'nested',
+        'only nested',
+        'deep literal',
+        'inner',
+        'literal document',
+        'colliding literal',
+        'colliding nested',
+      ]) {
         expect(text).toContain(value);
       }
     });
@@ -512,10 +540,15 @@ describe('convertCell', () => {
       expect(convertCell('-271821-04-20T00:00:00.000Z', 'date')).toEqual(new Date(-8.64e15));
       expect(convertCell('+275760-09-13T00:00:00.000Z', 'date')).toEqual(new Date(8.64e15));
       expect(convertCell('+275760-09-12T23:00-01:00', 'date')).toEqual(new Date(8.64e15));
+      // The wall-clock time lies outside the Date range, the instant is the first or last one.
+      expect(convertCell('-271821-04-19T23:00:00-01:00', 'date')).toEqual(new Date(-8.64e15));
+      expect(convertCell('+275760-09-13T01:00+01:00', 'date')).toEqual(new Date(8.64e15));
       for (const text of [
         '-271821-04-19T23:59:59.999Z',
         '+275760-09-13T00:00:00.001Z',
         '-271821-04-20T00:00:00+00:01',
+        '-271821-04-19T22:59:59.999-01:00',
+        '+275760-09-13T01:00:00.001+01:00',
         '-271822-01-01',
         '+999999-12-31',
       ]) {

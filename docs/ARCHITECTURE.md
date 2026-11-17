@@ -379,7 +379,8 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
     `""`, never a blank line). Cells: strings as is, numbers in decimal (Long/Decimal128 exact),
     dates `toISOString()` (`±YYYYYY` outside the years 0–9999), ObjectIds as hex, null/missing
     blank, the rest Extended JSON. Field names with a dot: a top-level one (`"a.b"`) is its own
-    column (`valueAt` reads the literal key first), and a document that would collide with it
+    column (`valueAt` reads the literal key first), never flattened (a document value is one
+    Extended JSON column), and a document that would collide with it
     (`a` next to `"a.b"`) or holds such a key itself is one Extended JSON column, not flattened.
   - CSV import (`CsvScanner`: RFC 4180, quoted line breaks, blank lines skipped, a record ≤
     `MAX_VALUE_CHARS` counting separators): the first record is the header. `csvMapping` entries

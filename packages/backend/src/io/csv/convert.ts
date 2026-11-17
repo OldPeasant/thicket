@@ -27,7 +27,8 @@ export function isPlainDocument(value: unknown): value is Document {
  *
  * Field names that contain a dot (legal since MongoDB 5.0) never lose their value:
  * - a top-level one (`"a.b"`) is its own column, named by the key ({@link valueAt} reads the
- *   literal key first);
+ *   literal key first), and is never flattened: a document value is one column (as Extended
+ *   JSON), not `a.b.c`;
  * - a top-level document that such a key would collide with in the same document (`a` next to
  *   `"a.b"`) is not flattened: it is one column (`a`, as Extended JSON);
  * - a nested document with such a key (`{x: {"a.b": 1}}`) is not flattened: it is one column
@@ -43,6 +44,7 @@ export function collectPaths(doc: Document, paths: Set<string>, prefix = ''): vo
     if (
       isPlainDocument(value) &&
       Object.keys(value).length > 0 &&
+      !key.includes('.') &&
       !shadowed.has(key) &&
       !Object.keys(value).some((k) => k.includes('.'))
     ) {
@@ -154,25 +156,40 @@ function date(text: string): Date {
   const n = (i: number) => Number(m[i] ?? '0');
   const [year, month, day, hours, minutes, seconds] = [n(1), n(2), n(3), n(4), n(5), n(6)];
   const millis = Number((m[7] ?? '').padEnd(3, '0').slice(0, 3));
-  const utc = new Date(0);
-  utc.setUTCFullYear(year, month - 1, day);
-  utc.setUTCHours(hours, minutes, seconds, millis);
-  // Out-of-range parts (month 13, February 30, hour 24, second 60) roll over: refuse them.
+  // Refuse out-of-range parts (month 13, February 30, hour 24, second 60, offset +24:00).
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const monthDays = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
   const valid =
-    utc.getUTCFullYear() === year &&
-    utc.getUTCMonth() === month - 1 &&
-    utc.getUTCDate() === day &&
-    utc.getUTCHours() === hours &&
-    utc.getUTCMinutes() === minutes &&
-    utc.getUTCSeconds() === seconds &&
+    month >= 1 &&
+    month <= 12 &&
+    day >= 1 &&
+    day <= (monthDays[month - 1] ?? 0) &&
+    hours <= 23 &&
+    minutes <= 59 &&
+    seconds <= 59 &&
     n(9) <= 23 &&
     n(10) <= 59;
   if (!valid) throw new CellError('is not a date');
+  // Computed on numbers, not a Date: the wall-clock time may lie outside the Date range when the
+  // offset moves the instant back in (`+275760-09-13T01:00+01:00`). Exact: |ms| < 2^53.
   const offsetMinutes = (m[8] === '-' ? -1 : 1) * (n(9) * 60 + n(10));
-  const result = new Date(utc.getTime() - offsetMinutes * 60_000);
-  // The offset can move the first or last representable day out of range.
-  if (Number.isNaN(result.getTime())) throw new CellError('is not a date');
-  return result;
+  const ms =
+    daysFromCivil(year, month, day) * 86_400_000 +
+    ((hours * 60 + minutes - offsetMinutes) * 60 + seconds) * 1000 +
+    millis;
+  if (Math.abs(ms) > 8.64e15) throw new CellError('is not a date');
+  return new Date(ms);
+}
+
+/** Days since 1970-01-01 of a proleptic Gregorian date (month 1-12; H. Hinnant's algorithm). */
+function daysFromCivil(year: number, month: number, day: number): number {
+  const y = month <= 2 ? year - 1 : year;
+  const era = Math.floor(y / 400);
+  const yearOfEra = y - era * 400;
+  const dayOfYear = Math.floor((153 * (month + (month > 2 ? -3 : 9)) + 2) / 5) + day - 1;
+  const dayOfEra =
+    yearOfEra * 365 + Math.floor(yearOfEra / 4) - Math.floor(yearOfEra / 100) + dayOfYear;
+  return era * 146_097 + dayOfEra - 719_468;
 }
 
 /**
