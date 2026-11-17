@@ -16,3 +16,4 @@ serverStatus, dbStats and replica set status with a few charts (ops/s, connectio
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-17 07:53+0100 by dell26/agent-2): Replica set status needs a contract method the SPEC table lacks: added admin.replSetStatus ({profileId} -> {status: EJSON | null}, null on standalone/mongos) instead of overloading admin.serverStatus; dbStats reuses db.stats.
