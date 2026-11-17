@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "task": "connection-ui",
+  "reviewed_revision": "0414a53acd8a081a99f73c9826d319e9a3daec60",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/connection-ui/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/connection-ui/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/connection-ui/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "TW-1", "source": "test-writer", "severity": "Medium", "disposition": "fixed",
+     "note": "secret URI options (proxyPassword, tlsCertificateKeyFilePassword) no longer reach the saved draft; fixes.md round 1"},
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P1", "disposition": "fixed",
+     "note": "first review pass: same defect as TW-1, plus AWS_SESSION_TOKEN and masking in the preview (stripUriSecrets + mask)"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "saved profile adopted before setSecret; retry updates the same id"},
+    {"id": "CR-3", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "save() guarded by loadGeneration"},
+    {"id": "CR-4", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "model and manager page specs committed by the test-writer"},
+    {"id": "CR-5", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "e2e saved-mode control shows secrets.bin changes before the ask-mode unchanged check"},
+    {"id": "CR-6", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "ready-state heading is an h1"},
+    {"id": "CR2-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed",
+     "note": "second review pass (labelled CR-1 there): leaving /connections/new during Save navigated back; destroy now marks the editor stale (fixes.md round 2)"},
+    {"id": "CR3-1", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "edits typed during the in-flight profiles.save are overwritten; save is a fast local write, low impact, left as is"},
+    {"id": "CR3-2", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
+     "note": "spec name overstates coverage (no password store in that case); its URL/navigation-state assertions are correct, naming only"}
+  ],
+  "validation": [
+    {"command": "cd packages/renderer && npx ng test --watch=false --include='src/app/connections/**/*.spec.ts'", "result": "pass"},
+    {"command": "npm run check", "result": "pass"},
+    {"command": "npm run test:e2e -- test/e2e/connections.e2e.ts", "result": "pass"}
+  ]
+}

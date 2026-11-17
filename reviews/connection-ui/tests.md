@@ -2,48 +2,53 @@
 
 Date: 2026-11-17
 
-Task: connection-ui (M1: Connection editor and manager), second pass on the fixed code
+Task: connection-ui (M1: Connection editor and manager), third pass on the final code after fixer round 2
 
-Scope: task base 9d2524478e7bf26f37e1ec73ebb4f721753be056 (supplied by the parent); after the parent's rebase the current merge base with `origin/main` is fda71f94e3a52a1b5d760a23a58fcacd7a959f64 and the task commits on `main` are c0c0d72, 3ce5528, 14881ea, 2ffe107, 5aa43a1 (the rebased b36d7dd, 123af50, a4388a3, 8ca68f6, dd51ff0) plus 26608b8 (fixes.md only). The supplied final code revision dd51ff076c1ef0f5450b108b46fe15f11edfc3bc and HEAD 26608b8991f29302729acd18f17332416c236467 have identical `packages/`, `test/` and `docs/` trees (`git diff dd51ff0 HEAD -- packages test docs` is empty; 5aa43a1 differs from dd51ff0 only in `tasks/`). Production paths in scope: `packages/renderer/src/app/connections/` (connection-form.model.ts, connection-editor.ts/html/css, connections-page.ts/html/css, index.ts), `src/shared-array-buffer-stub.ts`, `src/main.ts`, `sidebar/sidebar-tree.ts/html`, `layout/navigation.ts`, `app.routes.ts`, `app.config.ts`, `packages/core/package.json`, `packages/renderer/angular.json`. This pass focuses on the fixer's changes in dd51ff0 (TW-1/CR-1, CR-2, CR-3, CR-5, CR-6). Working tree at measurement: only the two spec files below modified by the test-writer, plus `reviews/connection-ui/review.md` being written by the concurrent code-reviewer (not touched, not measured).
+Scope: task base `git merge-base HEAD origin/main` = fda71f94e3a52a1b5d760a23a58fcacd7a959f64 (originally 9d2524478e7bf26f37e1ec73ebb4f721753be056 before the parent's rebase). Task commits on `main`: c0c0d72, 3ce5528, 14881ea, 2ffe107, 5aa43a1, 26608b8 (fixes.md), 1562057 (tests/review), 55339c5 (round-2 fix), 27f6b76 (fixes.md only). Measured HEAD 27f6b76 (`main`); its `packages/`, `test/` and `docs/` trees equal 55339c51d415303829347f5b55909c85e4e1471f, the latest code commit (27f6b76 changes only `reviews/connection-ui/fixes.md`). This pass focuses on 55339c5 (`connection-editor.ts`: the destroy hook increments `loadGeneration`; "Saved." is set only when the form still equals the state Save set). Production paths in scope are unchanged from the previous pass: `packages/renderer/src/app/connections/` (connection-form.model.ts, connection-editor.ts/html/css, connections-page.ts/html/css, index.ts), `src/shared-array-buffer-stub.ts`, `src/main.ts`, `sidebar/sidebar-tree.ts/html`, `layout/navigation.ts`, `app.routes.ts`, `app.config.ts`, `packages/core/package.json`, `packages/renderer/angular.json`. Working tree at measurement: only `connection-editor.spec.ts` modified by the test-writer, plus `reviews/connection-ui/review.md` being written by the concurrent code-reviewer (not touched, not measured).
 
 Requirements:
-- `tasks/connection-ui.md` acceptance criteria and recorded assumptions (incl. the 01:11 assumption that secret URI options are dropped with a visible note)
+- `tasks/connection-ui.md` acceptance criteria and recorded assumptions
 - `SPEC.md` (profiles in `connections.json` without secrets; secrets only in `secrets.bin`)
 - `docs/ARCHITECTURE.md` "Coverage"
-- `reviews/connection-ui/fixes.md` (behavior the fixes claim)
+- `reviews/connection-ui/fixes.md` "Round 2" (behavior the fix claims)
 - Parent instructions
 
 ## Test files changed
 
-- `packages/renderer/src/app/connections/connection-editor.spec.ts` (6 tests added in `review fixes`; existing tests unchanged)
-- `packages/renderer/src/app/connections/connection-form.model.spec.ts` (6 tests added in `secret URI options (review fix CR-1)`; existing tests unchanged)
+- `packages/renderer/src/app/connections/connection-editor.spec.ts` (2 tests added in `review fixes`; existing tests unchanged)
 
 ## Tests added or updated
 
-Count: 12 (6 editor, 6 model). Focused suite went from 112 to 124 tests.
+Count: 2. Focused suite went from 125 to 127 tests.
+
+- `leaving a new profile while its password is stored keeps the store but stays on the new page`: the fixer's spec covers leaving while `profiles.save` runs; this one leaves after `profiles.save` answered while `profiles.setSecret` is still pending (the other `await` in `save()`). It asserts the URL stays on the page the user moved to and that the typed password is still stored once for `new-id` (leaving must not lose the password of a profile that now exists). Without the destroy-hook change this path would reach `router.navigate(['/connections', 'new-id'])` and fail the URL assertion.
+- `a new profile saved without edits during the store navigates to its page with the Saved notice state`: guards the other side of the round-2 `unchanged` check, i.e. the normal create flow still navigates to `/connections/new-id` with the `thicketProfileSaved` navigation state that makes the next editor show "Saved." (that notice on the next instance was previously only checked by e2e).
+
+The rest of round 2 is already covered: the fixer's `leaving a new profile while Save runs does not navigate back to it` (fails with the fix disabled, per fixes.md), the extended `edits made while the password is being stored are kept when Save finishes` (no `saved-notice`), and `a failed setSecret on an existing profile stays on its page; a retry stores the password` (notice shown when nothing was edited during the store).
 
 ## Requirement coverage
 
 | Requirement | Tests | Command | Result |
 |---|---|---|---|
-| AC1: form edits update the URI and vice versa; masked password | existing editor `form ⇄ connection string` and `secret mode` suites, model `applyConnectionString` / `connectionStringText` suites | `cd packages/renderer && npx ng test --watch=false --include='src/app/connections/**/*.spec.ts'` | Pass (124/124) |
-| TW-1 / CR-1: secret URI options never in a saved or tested draft, never shown, user told they were not stored | previously failing `profileDraftFromState > never contains secret URI options (proxyPassword, tlsCertificateKeyFilePassword)`; fixer's per-option cases; added model `stripUriSecrets removes a lower-case AWS_SESSION_TOKEN and an emptied property map`, `stripUriSecrets keeps the other mechanism properties`, `stripUriSecrets cleans unparsed options in extra, keeping what is not secret`, `stripUriSecrets removes an unparsed authMechanismProperties that holds only the token`, `stripUriSecrets leaves an unparsed authMechanismProperties without secrets alone`, `the connection-string tab never shows a secret option a model still holds in extra`; added editor `a saved profile holding a secret option loads without it and says it is not stored` | same | Pass |
-| CR-2: a failed setSecret keeps the saved profile; a retry updates it, no duplicate | fixer's `a failed setSecret keeps the new profile…`; added `a failed setSecret on an existing profile stays on its page; a retry stores the password` | same | Pass |
-| CR-3: Save results are tied to the current load | fixer's `switching to another profile while Save runs…` (save succeeds late); added `a Save that fails after switching to another profile shows no error on the new one`, `a password store that succeeds after switching profiles leaves the new profile alone`, `a password store that fails after switching profiles leaves the new profile alone`, `edits made while the password is being stored are kept when Save finishes` | same | Pass |
-| CR-6: level-1 heading in the ready editor | fixer's `the ready editor has a level-1 page heading` | same | Pass |
-| AC2 e2e: profile for the int-harness fixture, Test connection succeeds; wrong password shows AUTH_FAILED | `create a profile for the fixture: Test connection succeeds, a wrong password is AUTH_FAILED` | `npm run test:e2e -- test/e2e/connections.e2e.ts` (renderer + desktop build, Playwright Electron, int-harness MongoDB fixture) | Pass |
-| AC3 e2e: ask-each-time prompts on connect, `secrets.bin` unchanged (with CR-5 control that a saved password does change it) | `ask each time: connecting prompts for the password and stores nothing` | same | Pass |
+| AC1: form edits update the URI and vice versa; masked password | editor `form ⇄ connection string` and `password` suites, model `applyConnectionString` / `connectionStringText` suites | `npm run test -w packages/renderer -- --watch=false --include='src/app/connections/**/*.spec.ts'` (runs `ng test` in `packages/renderer`) | Pass (127/127) |
+| Secret URI options never saved or shown (TW-1 / round-1 CR-1) | model `profileDraftFromState > never contains secret URI options`, `stripUriSecrets …` cases; editor `secret URI options are masked…`, `a saved profile holding a secret option loads without it…` | same | Pass |
+| Save robustness (round-1 CR-2, CR-3) | `a failed setSecret keeps the new profile…`, `a failed setSecret on an existing profile…`, `switching to another profile while Save runs…`, `a Save that fails after switching…`, `a password store that succeeds/fails after switching profiles…` | same | Pass |
+| Round-2 CR-1: leaving the page while Save runs does not navigate back | fixer's `leaving a new profile while Save runs does not navigate back to it`; added `leaving a new profile while its password is stored keeps the store but stays on the new page` | same | Pass |
+| Round-2: "Saved." only when the form equals what was saved | `edits made while the password is being stored are kept when Save finishes` (no notice), `a failed setSecret on an existing profile…` (notice after an unedited retry); added `a new profile saved without edits during the store navigates to its page with the Saved notice state` | same | Pass |
+| Level-1 heading (round-1 CR-6) | `the ready editor has a level-1 page heading` | same | Pass |
+| AC2 e2e: profile for the int-harness fixture, Test connection succeeds; wrong password is AUTH_FAILED | `create a profile for the fixture: Test connection succeeds, a wrong password is AUTH_FAILED` | `npm run test:e2e -- test/e2e/connections.e2e.ts` (renderer + desktop build, Playwright Electron, int-harness MongoDB fixture) | Pass |
+| AC3 e2e: ask-each-time prompts on connect, `secrets.bin` unchanged (with the saved-password control) | `ask each time: connecting prompts for the password and stores nothing` | same | Pass |
 | No regressions in the rest of the repository | whole suite | `npm run check` | Pass |
 
 ## Focused test execution
 
 Command:
 
-`cd packages/renderer && npx ng test --watch=false --include='src/app/connections/**/*.spec.ts'`
+`npm --prefix /home/felix/work/thicket-agents/agent-2 run test -w packages/renderer -- --watch=false --include='src/app/connections/**/*.spec.ts'`
 
 Result:
 
-Pass: 3 files, 124 tests.
+Pass: 3 files, 127 tests.
 
 ## Full test execution
 
@@ -53,9 +58,9 @@ Command:
 
 Result:
 
-Pass: lint and formatting clean, type checks pass, root Vitest 48 files / 2989 tests, renderer 64 files / 1593 tests.
+Pass: lint and formatting clean, type checks pass, root Vitest 48 files / 2989 tests, renderer 64 files / 1596 tests.
 
-`npm run test:e2e -- test/e2e/connections.e2e.ts`: Pass, 2 passed (5.7 s). The renderer build prints the existing initial-bundle budget warning (1.35 MB vs 1.00 MB), not a failure.
+`npm run test:e2e -- test/e2e/connections.e2e.ts`: Pass, 2 passed (6.1 s), on the final code with the added specs. The renderer build prints the existing initial-bundle budget warning (1.35 MB vs 1.00 MB), not a failure.
 
 ## .taskcheck
 
@@ -65,90 +70,57 @@ Pass (`.taskcheck` runs `npm run check`; result above).
 
 ## Bugs found
 
-None in this pass. TW-1 from the first pass is resolved:
-
-### Secret URI options (proxyPassword, tlsCertificateKeyFilePassword) saved in the profile's connectionString
-
-Finding ID:
-
-`TW-1`
-
-Test:
-
-`connection-form.model > profileDraftFromState > never contains secret URI options (proxyPassword, tlsCertificateKeyFilePassword)`
-
-Production source:
-
-`packages/renderer/src/app/connections/connection-form.model.ts` (`stripUriSecrets`, called from `editorStateFromProfile`, `applyConnectionString` and `uriModel`)
-
-Requirement:
-
-SPEC.md: profiles without secrets; secrets only in `secrets.bin`.
-
-Expected behavior:
-
-Secret URI options never reach the `ProfileDraft` sent to `profiles.save` or `conn.test`, and are not shown.
-
-Actual behavior:
-
-Fixed in dd51ff0: the test passes unchanged, plus the per-option and added edge-case tests above. Status: resolved.
-
-Severity:
-
-Medium (at the time it was found)
-
-Fix required:
-
-`No — fixed in dd51ff0 (fixer report reviews/connection-ui/fixes.md); verified by the passing test.`
+None in this pass. TW-1 from the first pass stays resolved (`connection-form.model > profileDraftFromState > never contains secret URI options (proxyPassword, tlsCertificateKeyFilePassword)` passes; fixed in dd51ff0).
 
 ## Coverage
 
-Status: verified. The full task-scoped command ran without the earlier TW-1 `--filter`, all 1593 renderer tests passed and a fresh report was written.
+Status: verified. Whole renderer suite with task-scoped `--coverage-include`, exit 0, fresh report.
 
 Metric: whole-file coverage of task-changed production files.
-Changed-line coverage: not measured (the configured tooling has no changed-line mode; not reconstructed by hand).
+Changed-line coverage: not measured (the configured tooling has no changed-line mode; not reconstructed by hand). The round-2 lines in `connection-editor.ts` (`save()` lines 562-565 and the destroy hook 152-156) have no uncovered statement or branch in the report.
 
 Evidence:
-- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: connection-ui; base 9d2524478e7bf26f37e1ec73ebb4f721753be056 as supplied (current merge base fda71f9 after the rebase); measured HEAD 26608b8991f29302729acd18f17332416c236467, whose code equals the supplied final revision dd51ff0; commits and file list from the parent, checked with `git log` / `git diff --stat` against the base.
-- Source/test snapshot identifier (including uncommitted inputs): production = HEAD (`git diff --quiet HEAD` on the connection sources; no uncommitted production change). Uncommitted specs (sha256): `connection-editor.spec.ts` 0f7f0f7c…dda9, `connection-form.model.spec.ts` a1ce0d7a…dec7. Other in-scope specs unchanged from HEAD (`connections-page.spec.ts` 5004f5f1…88f7, `sidebar-tree.spec.ts` 27acf949…146c). Same hashes before and after the run.
-- Exact included files; renamed/deleted/excluded files and reasons: included and measured `src/app/connections/connection-form.model.ts`, `connection-editor.ts`, `connections-page.ts`, `src/shared-array-buffer-stub.ts`, `src/app/sidebar/sidebar-tree.ts`, `src/app/layout/navigation.ts`, `src/app/app.routes.ts`, `src/app/app.config.ts` (all present in the report). Excluded: `*.html` / `*.css` (templates and styles are not instrumented by v8; exercised through the component specs and e2e), `connections/index.ts` (re-exports only), `src/main.ts` (bootstrap, not loaded by unit tests; exercised by the e2e), `packages/core/package.json`, `angular.json` (configuration), `test/e2e/*.e2e.ts` (tests), `docs/ARCHITECTURE.md` (documentation). No renamed or deleted files.
-- Provider/version, command, working directory, and test selection: Vitest 5.1.0 with @vitest/coverage-v8 5.1.0 via `ng test`; working directory `packages/renderer`; `npx ng test --watch=false --coverage --coverage-reporters=text-summary --coverage-reporters=json-summary --coverage-reporters=json --coverage-include='src/app/connections/connection-form.model.ts' --coverage-include='src/app/connections/connection-editor.ts' --coverage-include='src/app/connections/connections-page.ts' --coverage-include='src/shared-array-buffer-stub.ts' --coverage-include='src/app/sidebar/sidebar-tree.ts' --coverage-include='src/app/layout/navigation.ts' --coverage-include='src/app/app.routes.ts' --coverage-include='src/app/app.config.ts'`; whole renderer suite (64 files, 1593 tests), no filter.
-- Run start/completion time and exit status: 2026-11-17T01:17:32+01:00 to 01:17:46+01:00, exit 0 (1593 passed).
-- Generated report paths and report hashes/run identifier: `packages/renderer/coverage/renderer/coverage-summary.json` sha256 67f61b36…2540, `coverage-final.json` sha256 217438f7…93de03 (Git-ignored), both written 01:17:46.9; the directory was recreated by the run.
-- Evidence outputs are fresh and inputs stayed unchanged: yes (spec hashes and `git status` identical before and after; the report hashes differ from the earlier run of this pass at 01:15:39, which preceded the last 2 tests).
-- Final run after latest test additions and production fixes: yes (after dd51ff0 and after the last test was added).
+- Task id, immutable base, measured HEAD, and task-owned commits/file-scope source: connection-ui; base fda71f94e3a52a1b5d760a23a58fcacd7a959f64 (merge base with `origin/main`; original base 9d25244 before rebase); measured HEAD 27f6b76, code identical to 55339c51d415303829347f5b55909c85e4e1471f; commits and file list from the parent and the previous passes, checked with `git log` and `git diff --stat 26608b8 55339c5 -- packages test docs` (only connection-editor.ts/spec and connection-form.model.spec.ts changed since the previous measurement).
+- Source/test snapshot identifier (including uncommitted inputs): production = HEAD (no uncommitted production change; `git status --short` shows only the editor spec and the reviewer's review.md). Uncommitted spec sha256 `connection-editor.spec.ts` 57c4cf51…0fdf; committed specs `connection-form.model.spec.ts` a1ce0d7a…3f0, `connections-page.spec.ts` 5004f5f1…88f7, `sidebar-tree.spec.ts` 27acf949…146c. The editor spec hash was the same before and after the run.
+- Exact included files; renamed/deleted/excluded files and reasons: measured `src/app/connections/connection-form.model.ts`, `connection-editor.ts`, `connections-page.ts`, `src/shared-array-buffer-stub.ts`, `src/app/sidebar/sidebar-tree.ts`, `src/app/layout/navigation.ts`, `src/app/app.routes.ts`, `src/app/app.config.ts` (all in the report). Excluded: `*.html` / `*.css` (not instrumented by v8; exercised by component specs and e2e), `connections/index.ts` (re-exports only), `src/main.ts` (bootstrap, not loaded by unit tests; exercised by the e2e), `packages/core/package.json`, `angular.json` (configuration), `test/e2e/*.e2e.ts` (tests), `docs/ARCHITECTURE.md` (documentation). No renamed or deleted files.
+- Provider/version, command, working directory, and test selection: Vitest 5.1.0 with @vitest/coverage-v8 5.1.0 via `ng test`; working directory `packages/renderer` (npm workspace script); `npm --prefix /home/felix/work/thicket-agents/agent-2 run test -w packages/renderer -- --watch=false --coverage --coverage-reporters=text-summary --coverage-reporters=json-summary --coverage-reporters=json --coverage-include='src/app/connections/connection-form.model.ts' --coverage-include='src/app/connections/connection-editor.ts' --coverage-include='src/app/connections/connections-page.ts' --coverage-include='src/shared-array-buffer-stub.ts' --coverage-include='src/app/sidebar/sidebar-tree.ts' --coverage-include='src/app/layout/navigation.ts' --coverage-include='src/app/app.routes.ts' --coverage-include='src/app/app.config.ts'`; whole renderer suite (64 files, 1596 tests), no filter.
+- Run start/completion time and exit status: 2026-11-17T01:26:21+01:00 to 01:26:58+01:00, exit 0 (1596 passed).
+- Generated report paths and report hashes/run identifier: `packages/renderer/coverage/renderer/coverage-summary.json` sha256 e2a16121…a5ba221, `coverage-final.json` sha256 3b43203d…66c8ec (Git-ignored), both written 01:26:58.68; the `coverage` directory was recreated by the run (01:26:33).
+- Evidence outputs are fresh and inputs stayed unchanged: yes (report hashes differ from the previous pass, file times are inside this run, spec hash and `git status` unchanged).
+- Final run after latest test additions and production fixes: yes (after 55339c5 and after both added tests).
 
 Values below use covered/total (percentage); zero-denominator or unsupported metrics are N/A.
 
 | Changed file | Statements | Branches | Functions | Lines |
 |---|---:|---:|---:|---:|
 | `src/app/connections/connection-form.model.ts` | 243/245 (99.18%) | 207/212 (97.64%) | 32/32 (100%) | 196/197 (99.49%) |
-| `src/app/connections/connection-editor.ts` | 305/310 (98.38%) | 147/164 (89.63%) | 82/82 (100%) | 253/255 (99.21%) |
+| `src/app/connections/connection-editor.ts` | 307/312 (98.39%) | 147/164 (89.63%) | 81/81 (100%) | 256/258 (99.22%) |
 | `src/app/connections/connections-page.ts` | 50/51 (98.03%) | 23/24 (95.83%) | 15/15 (100%) | 43/43 (100%) |
 | `src/shared-array-buffer-stub.ts` | 10/10 (100%) | 3/3 (100%) | 5/5 (100%) | 9/9 (100%) |
 | `src/app/sidebar/sidebar-tree.ts` (whole file, mostly pre-existing) | 398/407 (97.78%) | 238/272 (87.50%) | 90/90 (100%) | 340/341 (99.70%) |
 | `src/app/layout/navigation.ts` | 2/2 (100%) | N/A (0/0) | 1/1 (100%) | 2/2 (100%) |
 | `src/app/app.routes.ts` | 5/11 (45.45%) | N/A (0/0) | 4/10 (40%) | 3/6 (50%) |
 | `src/app/app.config.ts` | 1/1 (100%) | N/A (0/0) | N/A (0/0) | 1/1 (100%) |
-| **Aggregate (summed counters, 8 files above)** | 1014/1037 (97.78%) | 618/675 (91.56%) | 229/235 (97.45%) | 847/854 (99.18%) |
+| **Aggregate (summed counters, 8 files above)** | 1016/1039 (97.78%) | 618/675 (91.55%) | 228/234 (97.43%) | 850/857 (99.18%) |
 
-The aggregate leaves out the excluded files named above; no in-scope file is unmeasured. The first run of this pass (before the two profile-switch store tests) had 616/675 branches; `connection-editor.ts` branches 540#1 and 547#1 (setSecret outcome after a profile switch) are now covered.
+The aggregate leaves out the excluded files named above; no in-scope file is unmeasured. Line numbers in `connection-editor.ts` moved by +4 from the previous pass because of the larger destroy hook.
 
 | File and uncovered lines/branch locations | Required behavior or risk | Action/test added or reason left uncovered |
 |---|---|---|
-| `connection-form.model.ts:270` (non-Error thrown), `:331` (URI error when no other problem), branches 269, 270, 331, 402 | Defensive fallbacks; `toConnectionString` throws only `ConnectionStringError`, and the other problems already catch the invalid models | Justified gap |
-| `connection-editor.ts:151` (saved notice from navigation state) | "Saved." on the new editor instance after creating a profile | Checked by the e2e (`saved-notice` visible after Save in the AC3 test). Low risk |
-| `connection-editor.ts:178`, branch 194 | Stale `profiles.secretStorage` answer after a route switch | Same generation guard as the covered `profiles.get` race. Low risk |
-| `connection-editor.ts:204` (`draftKey` catch), `:271`, `:361` (allowInvalidHostnames off), branches 136, 213, 253-264, 286, 305, 360, 413, 467, 479, 521 (`storage()` missing on save) | Defensive guards and `??` fallbacks not reachable through the UI in normal use; 361 is switching `tlsAllowInvalidHostnames` off again (low risk: same pattern as the other TLS flag) | Justified gap |
+| `connection-form.model.ts:270` (non-Error thrown), `:331`, branches 269#1, 270#0/1, 331#0, 402#1 | Defensive fallbacks; `toConnectionString` throws only `ConnectionStringError` and other problems already catch the invalid models | Justified gap |
+| `connection-editor.ts:151` (branch 151#0, saved notice from navigation state) | "Saved." on the new editor instance after creating a profile | The navigation state is now unit-tested (added `a new profile saved without edits…`); the notice on the next instance is checked by the e2e. `currentNavigation()` is null when a TestBed fixture is created, so the read itself is not unit-reachable. Low risk |
+| `connection-editor.ts:182` (branch 182#0), `198#1` | Stale `profiles.secretStorage` answer / stale load error after a route switch or destroy | Same generation guard as the covered `profiles.get` race. Low risk |
+| `connection-editor.ts:208` (`draftKey` catch), `:275`, `:365` (allowInvalidHostnames off), branches 136#1, 217#1, 257-268, 275#0, 290#1, 309#1, 364#1, 417#1, 471#1, 483#0, 526#1 (`storage()` missing on save) | Defensive guards and `??` fallbacks not reachable through the UI in normal use; 365 is switching `tlsAllowInvalidHostnames` off again (same pattern as the covered TLS flags) | Justified gap |
 | `connections-page.ts:98` (`run()` busy guard) | Double action while busy | Buttons are disabled while busy (tested); the guard is defensive |
 | `app.routes.ts:28,35,55` (lazy `loadComponent`) | Lazy loading of the manager and editor routes | Not unit-tested; exercised by the passing `test/e2e/connections.e2e.ts`. Line 28 is pre-existing |
 | `sidebar-tree.ts` 9 statements / 34 branches | Pre-existing sidebar code; the task's `edit-conn` item is covered | Out of task scope |
 
 ## Unable to test
 
-- Whether the backend itself would strip secret URI options sent by another client was not tested (outside this renderer task; the renderer no longer sends them).
-- After a successful Save whose password store finished while the user was editing, the "Saved." notice is shown although the newer edits are unsaved. Observed while writing `edits made while the password is being stored are kept when Save finishes`; no requirement defines this, so it is not reported as a defect and no test asserts it.
+- Whether the backend would strip secret URI options sent by another client (outside this renderer task; the renderer no longer sends them).
+- For a new profile, edits made while its password is being stored are lost because the editor then navigates to `/connections/:id`, which loads the saved profile (noted and deliberately left as is in fixes.md Round 2). No requirement defines this; no test asserts either outcome.
+- A pending profile load answering after the editor is destroyed has no observable effect in a destroyed fixture, so the new guard on that path is not asserted directly (covered indirectly by the same generation guard tests).
 
 ## Summary
 
-Tests added and all validation passed. TW-1 is resolved; the fixes for CR-2, CR-3 and CR-6 are covered by tests including the added edge cases (failed Save or password store after a profile switch, edits during the password store, setSecret retry on an existing profile, secret options in a saved profile and in unparsed URI options). `npm run check`, the connections e2e and task-scoped coverage (verified, no filter) pass on the final code.
+Tests added and all validation passed. The round-2 fix (destroyed editor ignores a finishing Save, including one finishing in the password store; "Saved." only when nothing was edited during the store) is covered by the fixer's specs and two added specs. `npm run check`, the connections e2e and task-scoped coverage (verified, fresh, final code) pass. No production defects found.
