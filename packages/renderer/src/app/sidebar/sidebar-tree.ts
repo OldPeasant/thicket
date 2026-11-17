@@ -410,6 +410,12 @@ export class SidebarTree {
           },
         },
         {
+          id: 'open-shell',
+          label: 'Open shell',
+          disabled: !connected,
+          run: () => this.tree.openShell(id),
+        },
+        {
           id: 'create-db',
           label: 'Create database…',
           write: true,
@@ -435,6 +441,11 @@ export class SidebarTree {
           id: 'stats',
           label: 'Show counts and sizes',
           run: () => void this.tree.loadDbStats(profileId, db),
+        },
+        {
+          id: 'open-shell',
+          label: 'Open shell',
+          run: () => this.tree.openShell(profileId, db),
         },
         {
           id: 'create-coll',

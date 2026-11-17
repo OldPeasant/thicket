@@ -10,6 +10,7 @@ import {
 
 import { ApiError, describeError } from '../api/api-error';
 import { ApiService } from '../api/api.service';
+import { type ShellTabData, shellTabId } from '../console/shell-console';
 import { WorkspaceService } from '../layout/workspace.service';
 import { ProfileSafetyService } from '../safety/profile-safety.service';
 import { WriteGuard } from '../safety/write-guard.service';
@@ -397,6 +398,25 @@ export class SidebarTreeService {
       kind: 'collection',
       title: info.name,
       detail: `${profile?.name ?? profileId} / ${db}`,
+      production: profile?.production === true,
+      data: { ...data },
+    });
+  }
+
+  /** Opens (or selects) the connection's mongosh console, starting in `db` when it is new. */
+  openShell(profileId: string, db?: string): void {
+    const profile = this.profile(profileId);
+    const tabId = shellTabId(profileId);
+    if (this.workspace.tabs().some((t) => t.id === tabId)) {
+      this.workspace.activate(tabId);
+      return;
+    }
+    const data: ShellTabData = { profileId, ...(db ? { db } : {}) };
+    this.workspace.open({
+      id: tabId,
+      kind: 'shell',
+      title: 'Shell',
+      detail: profile?.name ?? profileId,
       production: profile?.production === true,
       data: { ...data },
     });

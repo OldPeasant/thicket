@@ -8,6 +8,7 @@ import { provideRouter, withComponentInputBinding, withHashLocation } from '@ang
 import { AggregationView } from './aggregation';
 import { routes } from './app.routes';
 import { CollectionView } from './collection';
+import { ShellConsole } from './console';
 import { IndexesView } from './indexes';
 import { provideTabView } from './layout';
 import { provideTheme } from './theme';
@@ -22,5 +23,6 @@ export const appConfig: ApplicationConfig = {
     provideTabView('collection', CollectionView),
     provideTabView('aggregation', AggregationView),
     provideTabView('indexes', IndexesView),
+    provideTabView('shell', ShellConsole),
   ],
 };
