@@ -125,10 +125,22 @@ test.beforeAll(async () => {
   // Rootless Podman can't run Ryuk; afterAll stops the containers.
   if (process.env['DOCKER_HOST']?.includes('podman'))
     process.env['TESTCONTAINERS_RYUK_DISABLED'] ??= 'true';
-  [server, bastion] = await Promise.all([
+  const [started, startedSsh] = await Promise.allSettled([
     startMongoSpec({ version: '8', replicaSet: true, tls: true }),
     startSshX509Fixture(),
   ]);
+  if (started.status === 'rejected' || startedSsh.status === 'rejected') {
+    // Stop whichever fixture did start, then report the first failure.
+    await Promise.allSettled([
+      started.status === 'fulfilled' ? started.value.stop() : undefined,
+      startedSsh.status === 'fulfilled' ? startedSsh.value.stop() : undefined,
+    ]);
+    throw started.status === 'rejected'
+      ? started.reason
+      : (startedSsh as PromiseRejectedResult).reason;
+  }
+  server = started.value;
+  bastion = startedSsh.value;
   await seed(server);
 });
 
@@ -218,10 +230,14 @@ async function setTheme(window: Page, style: string, mode: string): Promise<void
   await expect(window.locator('html')).toHaveAttribute('data-theme', mode);
 }
 
-/** Screenshots the window in every theme of `THEMES`, then returns to Business light. */
-async function shot(window: Page, name: string): Promise<void> {
+/**
+ * Screenshots the window in every theme of `THEMES`, then returns to Business light. `scrollTo`
+ * is scrolled into view after each theme switch: another theme's fonts can move it below the fold.
+ */
+async function shot(window: Page, name: string, scrollTo?: Locator): Promise<void> {
   for (const theme of THEMES) {
     await setTheme(window, theme.style, theme.mode);
+    if (scrollTo) await scrollTo.scrollIntoViewIfNeeded();
     const dir = join(SHOTS, theme.dir);
     await mkdir(dir, { recursive: true });
     // Let fonts and transitions settle so the screenshots are stable.
@@ -277,6 +293,11 @@ test('release demo, steps 2–11, against the AppImage', async ({
   );
   test.skip(unavailable !== undefined, unavailable);
   test.setTimeout(600_000);
+  // Name the AppImage under test and its build time, so a stale build shows in the report.
+  const appImage = APPIMAGE as string;
+  const built = new Date(statSync(appImage).mtimeMs).toISOString();
+  test.info().annotations.push({ type: 'appimage', description: `${appImage} (mtime ${built})` });
+  console.log(`demo: AppImage ${appImage}, mtime ${built}`);
   const mongo = server as E2EMongo;
   const ssh = bastion as SshX509Fixture;
   const user = await createUser(mongo);
@@ -321,8 +342,7 @@ test('release demo, steps 2–11, against the AppImage', async ({
     await window.getByTestId('secret-saved').check();
     await window.getByTestId('test-connection').click();
     await expect(window.getByTestId('test-ok')).toContainText('Connected in', { timeout: 30_000 });
-    await production.scrollIntoViewIfNeeded();
-    await shot(window, 'step-02-production.png');
+    await shot(window, 'step-02-production.png', production);
 
     await window.getByTestId('save').click();
     await expect(window.getByTestId('saved-notice')).toBeVisible();
@@ -623,8 +643,7 @@ test('release demo, steps 2–11, against the AppImage', async ({
     await window.getByTestId('ssh-method-privateKey').check();
     await setField(window.getByTestId('field-ssh-key-file'), ssh.sshKeyFile);
     await expect(window.getByTestId('route')).toContainText(`${ssh.sshUser}@${ssh.sshHost}`);
-    await window.getByTestId('field-ssh').scrollIntoViewIfNeeded();
-    await shot(window, 'step-10-ssh-x509-form.png');
+    await shot(window, 'step-10-ssh-x509-form.png', window.getByTestId('field-ssh'));
 
     await window.getByTestId('save').click();
     await expect(window.getByTestId('saved-notice')).toBeVisible();
