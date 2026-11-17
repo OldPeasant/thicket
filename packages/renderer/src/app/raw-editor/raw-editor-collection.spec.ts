@@ -150,6 +150,35 @@ describe('Raw editor in a collection tab', () => {
     expect((editor.componentInstance as RawEditor).partial()).toBe(true);
   });
 
+  it('passes a large document with cut arrays to the editor as partial, its neighbour not', async () => {
+    let streams = 100;
+    fake.handle('docs.find', () => {
+      const id = `s${++streams}`;
+      setTimeout(() => {
+        fake.data('docs.find', id, {
+          docs: rows,
+          // Row 1 came with a cut array (docs.find `slice`); row 0 is whole.
+          sliced: [{ index: 1, arrays: [{ path: 'items', total: 5000, loaded: 100 }] }],
+        });
+        fake.end(id, { delivered: rows.length });
+      });
+      return { streamId: id };
+    });
+    await start();
+    const partialOf = () =>
+      (
+        must(fixture.debugElement.query(By.directive(RawEditor)), 'raw editor')
+          .componentInstance as RawEditor
+      ).partial();
+
+    await click('doc-raw-toggle', docItem(1));
+    expect(partialOf()).toBe(true);
+    await click('doc-raw-toggle', docItem(1));
+
+    await click('doc-raw-toggle', docItem(0));
+    expect(partialOf()).toBe(false);
+  });
+
   // conflict-ui TW-2 fix: the raw editor passes whether the projection may hide parts of fields.
   describe('with a projection that may hide parts of fields', () => {
     const runProjection = async (text: string) => {

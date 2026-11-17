@@ -1,30 +1,27 @@
 import { Injectable, inject } from '@angular/core';
 import { pathKey, type Path, type Problem } from '../../schema';
-import {
-  estimateAvgItemBytes,
-  formRevealKey,
-  initialFormRevealCount,
-  initialRevealCount,
-} from '../reveal.util';
+import { formPageKey } from '../page.util';
 import { formFields } from '../form-fields.util';
 import { groupRootPath, lineUid } from '../json-lines.util';
 import { revealSteps, type RevealStep } from '../jump-steps.util';
 import { CollapseService } from './collapse.service';
 import { FilterService } from './filter.service';
 import { FocusService } from './focus.service';
-import { JsonLinesService, LINES_INITIAL_COUNT, LINES_REVEAL_KEY } from './json-lines.service';
+import { JsonLinesService, LINES_PAGE_KEY, LINES_PAGE_SIZE } from './json-lines.service';
 import { LayoutService } from './layout.service';
+import { NestedPageSizeService } from './nested-page-size.service';
 import { NodeVisibilityService } from './node-visibility.service';
-import { RevealService } from './reveal.service';
+import { PageService } from './page.service';
 import { SchemaService } from './schema.service';
 
 // Takes the user to the node a schema problem is shown on: undoes whatever
 // hides it — an active search, a collapsed ancestor, a hidden column, rows
-// beyond the revealed page — then scrolls to it and flashes it.
+// on another page — then scrolls to it and flashes it.
 @Injectable({ providedIn: 'root' })
 export class JumpService {
   private collapse = inject(CollapseService);
-  private reveal = inject(RevealService);
+  private pages = inject(PageService);
+  private pageSize = inject(NestedPageSizeService);
   private visibility = inject(NodeVisibilityService);
   private filter = inject(FilterService);
   private schema = inject(SchemaService);
@@ -58,8 +55,7 @@ export class JumpService {
             fields.findIndex((f) => f.key === step.key),
           )
         : step.position;
-      const { initial } = this.sizeOf(step, fields?.length);
-      this.reveal.ensure(byForm ? formRevealKey(step.path) : step.path, position, initial);
+      this.pages.ensure(byForm ? formPageKey(step.uid) : step.uid, position, this.pageSize.size());
       if (step.kind !== 'object') inTable = true;
     }
     this.focus.set(pathKey(anchor));
@@ -73,34 +69,16 @@ export class JumpService {
     if (!doc) return revealSteps(data, anchor);
     const index = anchor[0] as number;
     const line = doc.lines[index];
-    this.reveal.ensure(
-      LINES_REVEAL_KEY,
+    this.pages.ensure(
+      LINES_PAGE_KEY,
       Math.max(0, this.lines.shown().indexOf(index)),
-      LINES_INITIAL_COUNT,
+      LINES_PAGE_SIZE,
     );
     if (line?.kind !== 'json') return [];
     return revealSteps(line.value, anchor.slice(1), {
       uid: lineUid(index),
       path: groupRootPath(line.group),
     });
-  }
-
-  // The same numbers the table itself uses to decide its first page.
-  private sizeOf(step: RevealStep, fieldCount?: number): { length: number; initial: number } {
-    const items =
-      step.kind === 'object'
-        ? Object.values(step.container as object)
-        : (step.container as unknown[]);
-    const length = fieldCount ?? items.length;
-    const avg = estimateAvgItemBytes(step.container as object, items);
-    // Must be what the table or the form itself would start with.
-    return {
-      length,
-      initial:
-        fieldCount === undefined
-          ? initialRevealCount(length, avg)
-          : initialFormRevealCount(length, avg),
-    };
   }
 
   private formFieldsOf(step: RevealStep) {

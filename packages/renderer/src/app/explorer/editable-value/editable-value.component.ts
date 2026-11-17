@@ -34,6 +34,8 @@ export class EditableValueComponent {
   @Input({ required: true }) value: unknown;
   // Instance key of the node this value belongs to; how the schema is asked about it.
   @Input() uid = '';
+  // Shown as plain text even in edit mode (e.g. inside a partly loaded array).
+  @Input() readOnly = false;
   @Output() valueChange = new EventEmitter<unknown>();
 
   protected editMode = inject(EditModeService);
@@ -65,9 +67,9 @@ export class EditableValueComponent {
     return this.display.text(this.value);
   }
 
-  // Read-only per the schema: shown as plain text even in edit mode.
+  // Read-only per the schema (or the `readOnly` input): shown as plain text even in edit mode.
   get locked(): boolean {
-    return this.editMode.enabled() && this.schema.readOnlyFor(this.uid);
+    return this.editMode.enabled() && (this.readOnly || this.schema.readOnlyFor(this.uid));
   }
 
   get type(): JsonType {

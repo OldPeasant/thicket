@@ -465,6 +465,22 @@ Contract layout (`packages/contract/src/`):
 - Views: table (explorer, `tables` layout), document list (one `app-json-form` per document), raw
   (shell syntax via `printShellSyntax`, or the canonical EJSON as received). e2e:
   `test/e2e/collection.e2e.ts` (10 000 documents).
+- Paging inside documents (task doc-paging): arrays and objects with more entries than the
+  `nestedPageSize` setting (`NestedPageSizeService`, default 100) show one page at a time with
+  `app-pager` (first/previous/page field/next/last, `nested-pager-*` test ids) instead of
+  Canopy's "show more"; the page per node instance (`uid`; the form's `form:<uid>`) lives in
+  `PageService` (pure math in `explorer/page.util.ts`), edits stay in the document. Large
+  documents: `docs.find` takes `slice: { above, docBytes }` (`LARGE_DOC_BYTES` = 1 MiB): in a
+  document above `docBytes` the backend (`sliceLargeArrays`) cuts top-level arrays longer than
+  `above` to their first `above` items and lists them in the batch's `sliced` (documents without
+  `_id` stay whole: `docs.getSlice` can't address them). The collection view
+  registers each cut array with `ArraySliceService` (source: `docs.getSlice`); `app-json-table`
+  shows it as a sparse array of its full length, reads other pages on demand (cached per loaded
+  document), and keeps it and everything below read-only (`locked`); the document counts as
+  partial for Save. A saved large document is read back with `docs.get` `sliceAbove` (cut again;
+  a failed read-back keeps its `sliced` entry). Inner pages reset when a new result page arrives
+  (`CollectionResults.pageLoads`). e2e: `test/e2e/doc-paging.e2e.ts` (50 000 items, server
+  profiler as the log).
 - Raw editor (`packages/renderer/src/app/raw-editor`, `RawEditor`, `app-raw-editor`): each
   document of the document list has a **Raw** toggle that swaps its form for a CodeMirror 6
   editor of the whole document (`@codemirror/*`, JavaScript highlighting for shell syntax, JSON for
