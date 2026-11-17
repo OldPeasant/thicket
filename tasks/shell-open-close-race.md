@@ -5,7 +5,7 @@ owner: dell26/agent-3
 deps: [shell-backend]
 touches: [packages/backend/src/shell]
 prio: 2
-lease_until: 2026-11-17T05:07:38Z
+lease_until: 2026-11-17T05:12:23Z
 ---
 ## Goal
 `shell.open` reads the connection's config, waits for the worker to connect, and only then registers
