@@ -16,3 +16,4 @@ Two UI bugs seen in the M1 demo screenshots (reviews/m1-e2e/, task m1-e2e).
 
 ## Notes
 Found during m1-e2e review (finding CR-3).
+- ASSUMPTION (2026-11-17 06:21+0100 by felix/agent-2): Latency below 0.5 ms shows 'Connected in < 1 ms' instead of '0 ms'; status bar shows the active tab's connection only for tabs whose data.profileId names a known profile, otherwise it keeps StatusService.connection() (start page, dev tabs).
