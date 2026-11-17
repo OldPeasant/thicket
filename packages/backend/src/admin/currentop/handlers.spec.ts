@@ -219,6 +219,41 @@ describe('currentOpHandlers', () => {
     expect(ops.map(parse).map((op) => Number(op['opid']))).toEqual([4, 3, 2, 5, 1]);
   });
 
+  it('hides currentOp commands of other clients but lists and kills their $currentOp aggregation', async () => {
+    const { call, sent } = await setup((db, command) => {
+      if ('currentOp' in command) {
+        return {
+          ok: 1,
+          inprog: [
+            {
+              opid: 11,
+              op: 'command',
+              active: true,
+              command: { currentOp: 1, $all: true, comment: 'monitoring agent' },
+              microsecs_running: 50_000_000,
+            },
+            {
+              opid: 12,
+              op: 'command',
+              active: true,
+              command: { aggregate: 1, pipeline: [{ $currentOp: { allUsers: true } }] },
+              microsecs_running: 40_000_000,
+            },
+          ],
+        };
+      }
+      return defaultAnswer(db, command);
+    });
+    const { ops } = (await call('admin.currentOp', { profileId: 'p1', all: true })) as {
+      ops: string[];
+    };
+    expect(ops.map(parse).map((op) => Number(op['opid']))).toEqual([12]);
+    const opId = JSON.stringify((JSON.parse(ops[0] as string) as Document)['opid']);
+    sent.length = 0;
+    await call('admin.killOp', { profileId: 'p1', opId });
+    expect(sent).toEqual([{ db: 'admin', command: { killOp: 1, op: new BSON.Int32(12) } }]);
+  });
+
   it('answers an empty list when the reply has no inprog array', async () => {
     const { call } = await setup((db, command) =>
       'currentOp' in command ? { ok: 1 } : defaultAnswer(db, command),

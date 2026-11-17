@@ -481,4 +481,19 @@ describe('CurrentOpView', () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(sent('admin.currentOp')).toHaveLength(1);
   });
+
+  it('neither reads nor schedules after the tab closed, also on Refresh or a new interval', async () => {
+    vi.useFakeTimers();
+    fixture = TestBed.createComponent(CurrentOpView);
+    view = fixture.componentInstance;
+    fixture.componentRef.setInput('tab', TAB);
+    fixture.detectChanges();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(sent('admin.currentOp')).toHaveLength(1);
+    fixture.destroy();
+    await view.refresh();
+    view.setRefresh('2');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sent('admin.currentOp')).toHaveLength(1);
+  });
 });
