@@ -13,7 +13,8 @@ releases: 1
 ssh2-based tunnels with password, private key (+passphrase) or SSH agent; known_hosts in userData with a 'trust this host key' event to the renderer; replica sets get one forwarded port per member; SRV resolved before tunnelling.
 
 ## Acceptance criteria
-- [ ] Integration tests with an sshd container in front of the replica set fixture: password, key, key with passphrase; unknown host key → event, accept → connects
+- [x] Integration tests with an sshd container in front of the replica set fixture: password, key, key with passphrase; unknown host key → event, accept → connects
+  - verified (2026-11-17 03:07+0100 by dell26/agent-2): npm run test:int -- ssh (Docker: linuxserver/openssh-server sshd in front of the replica set fixture) -> 15/15 passed, incl. password (unknown host key -> question, trust -> connects to RS), private key, key with passphrase, agent, and backend ssh.hostKey event + conn.trustHostKey -> connects
 - [ ] Changed host key → refused with a clear error (int test)
 - [ ] Tunnels closed when the connection closes (no leaked sockets: test checks server connection count)
 
