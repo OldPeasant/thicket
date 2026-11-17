@@ -12,7 +12,8 @@ Release run 44136477833 (tag v0.1.0-rc.2, 2026-11-17) failed in the "Smoke test 
 
 ## Acceptance criteria
 - [ ] Reproduce locally: run the smoke suite against a locally built AppImage (`npm run dist -w apps/desktop -- --linux AppImage`, then the smoke command the release workflow uses, headless) several times (e.g. 10 runs): record failures before and none after the fix
-- [ ] A release-like run on GitHub passes the Linux smoke step: the `bundle` job in check.yml or the smoke step on this task's `wip/` branch, if one runs it; otherwise skip with reason and a human checks the next tag
+- [~] A release-like run on GitHub passes the Linux smoke step: the `bundle` job in check.yml or the smoke step on this task's `wip/` branch, if one runs it; otherwise skip with reason and a human checks the next tag
+  - skipped (2026-11-17 18:57+0100 by dell26/agent-1): check.yml's bundle job runs scripts/smoke-packaged.mjs on linux-unpacked, not test/e2e/smoke/installer.smoke.ts on the AppImage; release.yml runs only on v* tags, which agents don't push. A human checks the Linux 'Smoke test installer' step on the next tag.
 - [ ] `npm run check` passes
 
 ## Notes
