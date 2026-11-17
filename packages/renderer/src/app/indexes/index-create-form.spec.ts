@@ -305,4 +305,52 @@ describe('IndexCreateForm', () => {
     await click('idx-create-cancel');
     expect(cancelled).toBe(1);
   });
+
+  it('disables Cancel while a create is running and enables it again afterwards', async () => {
+    let finish!: () => void;
+    fake.handle(
+      'idx.create',
+      () => new Promise((resolve) => (finish = () => resolve({ name: 'a_1' }))),
+    );
+    expect(get<HTMLButtonElement>('idx-create-cancel').disabled).toBe(false);
+    await type('idx-key-field', 'a');
+    await submit();
+    expect(get<HTMLButtonElement>('idx-create-cancel').disabled).toBe(true);
+    await click('idx-create-cancel');
+    expect(cancelled).toBe(0);
+    finish();
+    await settle();
+    expect(created).toEqual(['a_1']);
+    expect(get<HTMLButtonElement>('idx-create-cancel').disabled).toBe(false);
+  });
+
+  it('creates a wildcard text index with weights and language, without a wildcard projection', async () => {
+    await type('idx-key-field', '$**');
+    await select('idx-key-type', 'text');
+    await click('idx-more');
+    const projection = get('idx-wildcard-projection');
+    const label = el().querySelector(`label[for="${projection.id}"]`);
+    expect(label?.classList.contains('off')).toBe(true);
+    await type('idx-weights', '{ title: 10 }');
+    await type('idx-language', 'spanish');
+    await submit();
+    expect(sent()[0]).toMatchObject({
+      key: '{"$**":"text"}',
+      options: '{"weights":{"title":{"$numberInt":"10"}},"default_language":"spanish"}',
+    });
+  });
+
+  it('refuses a wildcard projection and a collation on a wildcard text index', async () => {
+    await type('idx-key-field', '$**');
+    await select('idx-key-type', 'text');
+    await click('idx-more');
+    await type('idx-wildcard-projection', '{ secret: 0 }');
+    await type('idx-collation', '{ locale: "en" }');
+    await submit();
+    expect(errors()).toEqual([
+      'A text index does not support a collation.',
+      'A wildcard text index has no wildcard projection.',
+    ]);
+    expect(sent()).toEqual([]);
+  });
 });

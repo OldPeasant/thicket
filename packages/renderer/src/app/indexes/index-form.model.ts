@@ -24,7 +24,10 @@ export const KEY_TYPES: readonly { value: KeyType; label: string }[] = [
 ];
 
 export interface KeyFieldDraft {
-  /** Field path; `$**` or `path.$**` makes a wildcard index. */
+  /**
+   * Field path; `$**` or `path.$**` makes a wildcard index, except `{ "$**": "text" }`, which is
+   * a text index on every string field.
+   */
   field: string;
   type: KeyType;
 }
@@ -43,7 +46,7 @@ export interface IndexDraft {
   /** Text indexes only. */
   weights: string;
   defaultLanguage: string;
-  /** Wildcard index on `$**` only. */
+  /** Wildcard (non-text) index on `$**` only. */
   wildcardProjection: string;
 }
 
@@ -99,8 +102,9 @@ export function isWildcard(field: string): boolean {
 function fieldProblem(field: string): string | null {
   if (field === '') return 'Enter a field name.';
   if (isWildcard(field)) {
-    const base = field === '$**' ? '' : field.slice(0, -4);
-    if (base === '') return null;
+    if (field === '$**') return null;
+    const base = field.slice(0, -4);
+    if (base === '') return 'A field path has no empty parts.';
     return fieldProblem(base);
   }
   if (field.split('.').some((part) => part === '')) return 'A field path has no empty parts.';
@@ -137,7 +141,13 @@ export function buildIndex(draft: IndexDraft): DraftResult {
     if (problem !== null) errors[`field.${i}`] = problem;
     else if (seen.has(field)) errors[`field.${i}`] = `${field} is already in the key.`;
     else if (isWildcard(field) && type !== '1' && type !== '-1') {
-      errors[`field.${i}`] = 'A wildcard field is ascending or descending.';
+      // `{ "$**": "text" }` is a text index on all string fields; `path.$**` has no text form.
+      if (!(field === '$**' && type === 'text')) {
+        errors[`field.${i}`] =
+          type === 'text'
+            ? 'Only the field $** can be a text field among wildcards.'
+            : 'A wildcard field is ascending or descending.';
+      }
     }
     seen.add(field);
     keyFields.push({ key: field, value: keyValue(type) });
@@ -146,7 +156,9 @@ export function buildIndex(draft: IndexDraft): DraftResult {
   const types = fields.map((f) => f.type);
   const count = (t: KeyType) => types.filter((x) => x === t).length;
   const hasText = count('text') > 0;
-  const hasWildcard = fields.some((f) => isWildcard(f.field));
+  /** A wildcard index: a `$**`/`path.$**` field that is not the text field `$**`. */
+  const wildcards = fields.filter((f) => isWildcard(f.field) && f.type !== 'text');
+  const hasWildcard = wildcards.length > 0;
   const special = (['2dsphere', '2d', 'hashed'] as const).filter((t) => count(t) > 0);
   if (errors.fields === undefined) {
     if (count('hashed') > 1) errors.fields = 'An index has at most one hashed field.';
@@ -155,8 +167,10 @@ export function buildIndex(draft: IndexDraft): DraftResult {
       errors.fields = `A text index cannot also have a ${special[0]} field.`;
     } else if (hasWildcard && (hasText || special.length > 0)) {
       errors.fields = 'A wildcard index has only ascending or descending fields.';
-    } else if (fields.filter((f) => isWildcard(f.field)).length > 1) {
+    } else if (wildcards.length > 1) {
       errors.fields = 'An index has at most one wildcard field.';
+    } else if (count('2d') === 1 && types[0] !== '2d') {
+      errors.fields = 'A 2d field must be the first field of the key.';
     }
   }
 
@@ -214,7 +228,9 @@ export function buildIndex(draft: IndexDraft): DraftResult {
     const collation = parseDoc(draft.collation);
     if (collation !== null) {
       const locale = collation.fields.find((f) => f.key === 'locale')?.value;
-      if (locale?.type !== 'string' || locale.value === '') {
+      if (hasText) errors.collation = 'A text index does not support a collation.';
+      else if (count('2d') > 0) errors.collation = 'A 2d index does not support a collation.';
+      else if (locale?.type !== 'string' || locale.value === '') {
         errors.collation = 'A collation needs a locale, e.g. { locale: "en" }.';
       } else options.push({ key: 'collation', value: collation });
     }
@@ -241,7 +257,9 @@ export function buildIndex(draft: IndexDraft): DraftResult {
   try {
     const projection = parseDoc(draft.wildcardProjection);
     if (projection !== null) {
-      if (!(fields.length >= 1 && fields.some((f) => f.field === '$**'))) {
+      if (fields.some((f) => f.field === '$**' && f.type === 'text')) {
+        errors.wildcardProjection = 'A wildcard text index has no wildcard projection.';
+      } else if (!wildcards.some((f) => f.field === '$**')) {
         errors.wildcardProjection = 'A wildcard projection needs the field $**.';
       } else options.push({ key: 'wildcardProjection', value: projection });
     }

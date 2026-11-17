@@ -33,7 +33,7 @@ export interface KeyPart {
 
 export interface IndexTag {
   label: string;
-  /** Detail on hover (the partial filter, the collation). */
+  /** Detail on hover (the option name, the collation, the wildcard projection). */
   title?: string;
 }
 
@@ -94,7 +94,29 @@ export function formatBytes(bytes: number): string {
   return `${text} ${units[unit]}`;
 }
 
-function tagsOf(index: IndexInfo): IndexTag[] {
+/** The `listIndexes` entry; `null` when it can't be read (it is only extra detail). */
+function rawOf(index: IndexInfo): BsonDocument | null {
+  try {
+    return parseEJsonDocument(index.raw);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The key as the user created it. The server stores a text index as `_fts: "text", _ftsx: 1`
+ * in place of its text fields; those come back from `weights` (`$**` for a wildcard text index).
+ */
+function rowKeys(index: IndexInfo, raw: BsonDocument | null): KeyPart[] {
+  const parts = keyParts(index.key);
+  if (!parts.some((p) => p.field === '_fts' && p.kind === 'text')) return parts;
+  const weights = raw?.fields.find((f) => f.key === 'weights')?.value;
+  if (weights?.type !== 'object') return parts;
+  const textParts = weights.fields.map(({ key }) => ({ field: key, kind: 'text' }));
+  return parts.flatMap((p) => (p.field === '_fts' ? textParts : p.field === '_ftsx' ? [] : [p]));
+}
+
+function tagsOf(index: IndexInfo, raw: BsonDocument | null): IndexTag[] {
   const tags: IndexTag[] = [];
   if (index.unique) tags.push({ label: 'unique' });
   if (index.sparse) tags.push({ label: 'sparse' });
@@ -104,16 +126,20 @@ function tagsOf(index: IndexInfo): IndexTag[] {
   if (index.partialFilterExpression !== undefined) {
     tags.push({ label: 'partial', title: 'partialFilterExpression' });
   }
-  try {
-    const raw = parseEJsonDocument(index.raw);
-    const collation = raw.fields.find((f) => f.key === 'collation')?.value;
-    if (collation?.type === 'object') {
-      const locale = collation.fields.find((f) => f.key === 'locale')?.value;
-      const label = locale?.type === 'string' ? `collation ${locale.value}` : 'collation';
-      tags.push({ label, title: shell(collation) });
-    }
-  } catch {
-    // The raw spec is only extra detail.
+  const option = (key: string) => raw?.fields.find((f) => f.key === key)?.value;
+  const collation = option('collation');
+  if (collation?.type === 'object') {
+    const locale = collation.fields.find((f) => f.key === 'locale')?.value;
+    const label = locale?.type === 'string' ? `collation ${locale.value}` : 'collation';
+    tags.push({ label, title: shell(collation) });
+  }
+  const language = option('default_language');
+  if (language?.type === 'string' && language.value !== 'english') {
+    tags.push({ label: `language ${language.value}`, title: 'default_language' });
+  }
+  const projection = option('wildcardProjection');
+  if (projection?.type === 'object') {
+    tags.push({ label: 'wildcard projection', title: shell(projection) });
   }
   return tags;
 }
@@ -128,10 +154,11 @@ export function toRows(
   return indexes.map((index) => {
     const s = byName.get(index.name);
     const accesses = s?.accesses ?? null;
+    const raw = rawOf(index);
     return {
       name: index.name,
-      keys: keyParts(index.key),
-      tags: tagsOf(index),
+      keys: rowKeys(index, raw),
+      tags: tagsOf(index, raw),
       hidden: index.hidden,
       partialFilter:
         index.partialFilterExpression === undefined ? null : shell(index.partialFilterExpression),
@@ -190,7 +217,6 @@ export class IndexesView {
   readonly creating = signal(false);
   /** Name of the index a drop or hide is running for. */
   readonly busy = signal<string | null>(null);
-  protected readonly hasUsage = computed(() => (this.rows() ?? []).some((r) => r.usage !== null));
 
   private generation = 0;
 

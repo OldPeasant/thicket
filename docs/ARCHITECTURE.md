@@ -561,15 +561,19 @@ Contract layout (`packages/contract/src/`):
   collection tab), opened with "Indexes…" (`open-indexes`) on the collection tab; dropping or
   renaming the collection closes it too. It reads `idx.list` and `idx.stats` together (a failed
   `idx.stats`, e.g. no `indexStats` privilege, only leaves size/usage empty) and shows one row per
-  index: key pattern (↑/↓ or the index type), option tags, size, uses with a meter relative to
-  the most used index. Drop (`alwaysConfirm`) and hide/unhide go through `WriteGuard`; `_id_`
-  has neither.
+  index: key pattern (↑/↓ or the index type; a text index shows its fields from `weights`
+  instead of the stored `_fts`/`_ftsx`), option tags (incl. a non-English `default_language` and
+  `wildcardProjection`), size, uses with a meter relative to the most used index. Drop
+  (`alwaysConfirm`) and hide/unhide go through `WriteGuard`; `_id_` has neither.
 - `IndexCreateForm`: key fields (direction or `text`/`2dsphere`/`2d`/`hashed`; `$**` /
-  `path.$**` is a wildcard) and options (name, unique, sparse, hidden, TTL, partial filter;
-  collation, text weights/language, wildcard projection under a disclosure). `buildIndex()`
+  `path.$**` is a wildcard, except `{ "$**": "text" }`, a text index on all string fields, which
+  takes weights/language but no wildcard projection) and options (name, unique, sparse, hidden,
+  TTL, partial filter; collation, text weights/language, wildcard projection under a
+  disclosure). `buildIndex()`
   (`index-form.model.ts`, pure) parses the shell-syntax options and refuses what the server
-  would (sparse + partial, TTL on a compound/special/`_id` key, unique hashed/wildcard, …) next to
-  the field; a live preview shows the `createIndex(…)` call. e2e: `test/e2e/indexes.e2e.ts`.
+  would (sparse + partial, TTL on a compound/special/`_id` key, unique hashed/wildcard, a 2d field
+  not first, collation with a text or 2d key, …) next to the field; Cancel is disabled while a
+  create runs; a live preview shows the `createIndex(…)` call. e2e: `test/e2e/indexes.e2e.ts`.
 
 ## Write safety in the renderer (`packages/renderer/src/app/safety`)
 - Every write UI sends writes through `WriteGuard.run(method, params, options)` (or `approve()`,

@@ -81,8 +81,9 @@ export class IndexCreateForm {
     return printCreateIndex(this.target().coll, keyDoc, optionsDoc);
   });
   protected readonly hasText = computed(() => this.draft().fields.some((f) => f.type === 'text'));
+  /** A wildcard (non-text) index: `{ "$**": "text" }` is a text index and takes no projection. */
   protected readonly hasWildcard = computed(() =>
-    this.draft().fields.some((f) => isWildcard(f.field.trim())),
+    this.draft().fields.some((f) => isWildcard(f.field.trim()) && f.type !== 'text'),
   );
 
   protected id(key: string): string {

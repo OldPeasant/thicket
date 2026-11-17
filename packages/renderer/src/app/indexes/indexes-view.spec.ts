@@ -623,6 +623,64 @@ describe('toRows', () => {
     expect(r?.tags.map((t) => t.label)).toEqual(['collation']);
   });
 
+  it('shows the text fields of a text index from its weights, in place of _fts/_ftsx', () => {
+    const key =
+      '{"shop":{"$numberInt":"1"},"_fts":"text","_ftsx":{"$numberInt":"1"},"day":{"$numberInt":"-1"}}';
+    const [r] = toRows(
+      [
+        info('shop_text', key, {
+          raw: `{"key":${key},"name":"shop_text","weights":{"body":{"$numberInt":"1"},"title":{"$numberInt":"10"}},"default_language":"english","language_override":"language","textIndexVersion":{"$numberInt":"3"}}`,
+        }),
+      ],
+      null,
+    );
+    expect(r?.keys).toEqual([
+      { field: 'shop', kind: 'asc' },
+      { field: 'body', kind: 'text' },
+      { field: 'title', kind: 'text' },
+      { field: 'day', kind: 'desc' },
+    ]);
+    // English is the default language: no tag.
+    expect(r?.tags).toEqual([]);
+  });
+
+  it('shows a wildcard text index as $** text and tags a non-default language', () => {
+    const key = '{"_fts":"text","_ftsx":{"$numberInt":"1"}}';
+    const [r] = toRows(
+      [
+        info('$**_text', key, {
+          raw: `{"key":${key},"name":"$**_text","weights":{"$**":{"$numberInt":"1"}},"default_language":"spanish"}`,
+        }),
+      ],
+      null,
+    );
+    expect(r?.keys).toEqual([{ field: '$**', kind: 'text' }]);
+    expect(r?.tags).toEqual([{ label: 'language spanish', title: 'default_language' }]);
+  });
+
+  it('keeps the raw _fts/_ftsx key parts when the weights cannot be read', () => {
+    const key = '{"_fts":"text","_ftsx":{"$numberInt":"1"}}';
+    const [r] = toRows([info('t', key, { raw: 'nope' })], null);
+    expect(r?.keys).toEqual([
+      { field: '_fts', kind: 'text' },
+      { field: '_ftsx', kind: 'asc' },
+    ]);
+  });
+
+  it('tags a wildcard projection with the projection in shell syntax', () => {
+    const key = '{"$**":{"$numberInt":"1"}}';
+    const [r] = toRows(
+      [
+        info('$**_1', key, {
+          raw: `{"key":${key},"name":"$**_1","wildcardProjection":{"secret":{"$numberInt":"0"}}}`,
+        }),
+      ],
+      null,
+    );
+    expect(r?.keys).toEqual([{ field: '$**', kind: 'asc' }]);
+    expect(r?.tags).toEqual([{ label: 'wildcard projection', title: '{ secret: 0 }' }]);
+  });
+
   it('ignores an unparseable raw spec and keeps an unparseable filter as text', () => {
     const [r] = toRows(
       [info('bad', '{"a":1}', { raw: 'nope', partialFilterExpression: 'not ejson' })],

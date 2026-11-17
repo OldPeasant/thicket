@@ -276,7 +276,13 @@
   }
 
   <div class="actions">
-    <button type="button" class="btn quiet" data-testid="idx-create-cancel" (click)="cancel()">
+    <button
+      type="button"
+      class="btn quiet"
+      data-testid="idx-create-cancel"
+      [disabled]="saving()"
+      (click)="cancel()"
+    >
       Cancel
     </button>
     <button

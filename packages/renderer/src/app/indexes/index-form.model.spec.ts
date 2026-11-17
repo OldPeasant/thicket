@@ -146,17 +146,63 @@ describe('buildIndex: key fields', () => {
     });
   });
 
-  it.each(['text', '2dsphere', '2d', 'hashed'] as const)(
-    'refuses a wildcard field of type %s',
-    (type) => {
-      const errors = errorsOf(draft({ fields: one('$**', type) }));
+  it.each(['2dsphere', '2d', 'hashed'] as const)('refuses a wildcard field of type %s', (type) => {
+    for (const field of ['$**', 'attrs.$**']) {
+      const errors = errorsOf(draft({ fields: one(field, type) }));
       expect(errors['field.0']).toBe('A wildcard field is ascending or descending.');
+    }
+  });
+
+  it('allows the wildcard text index { "$**": "text" }', () => {
+    expect(specOf(draft({ fields: one('$**', 'text') }))).toEqual({
+      key: { '$**': 'text' },
+      options: undefined,
+    });
+  });
+
+  it('allows the wildcard text field with plain and other text fields', () => {
+    expect(
+      specOf(draft({ fields: key(['shop', '1'], ['$**', 'text'], ['title', 'text']) })).key,
+    ).toEqual({ shop: { $numberInt: '1' }, '$**': 'text', title: 'text' });
+  });
+
+  it('refuses text on a path wildcard', () => {
+    expect(errorsOf(draft({ fields: one('attrs.$**', 'text') }))).toEqual({
+      'field.0': 'Only the field $** can be a text field among wildcards.',
+    });
+  });
+
+  it('refuses the wildcard text field together with a wildcard (non-text) field', () => {
+    expect(errorsOf(draft({ fields: key(['$**', 'text'], ['attrs.$**', '1']) }))).toEqual({
+      fields: 'A wildcard index has only ascending or descending fields.',
+    });
+  });
+
+  it.each(['2dsphere', '2d', 'hashed'] as const)(
+    'refuses the wildcard text field together with %s',
+    (type) => {
+      expect(errorsOf(draft({ fields: key(['$**', 'text'], ['x', type]) }))).toEqual({
+        fields: `A text index cannot also have a ${type} field.`,
+      });
     },
   );
 
   it('refuses two hashed fields', () => {
     expect(errorsOf(draft({ fields: key(['a', 'hashed'], ['b', 'hashed']) }))).toEqual({
       fields: 'An index has at most one hashed field.',
+    });
+  });
+
+  it('refuses a 2d field that is not the first field of the key', () => {
+    expect(errorsOf(draft({ fields: key(['cat', '1'], ['pos', '2d']) }))).toEqual({
+      fields: 'A 2d field must be the first field of the key.',
+    });
+  });
+
+  it('allows a 2d field first with further fields', () => {
+    expect(specOf(draft({ fields: key(['pos', '2d'], ['cat', '1']) })).key).toEqual({
+      pos: '2d',
+      cat: { $numberInt: '1' },
     });
   });
 
@@ -231,7 +277,6 @@ describe('buildIndex: options', () => {
           unique: true,
           hidden: true,
           partialFilter: '{ status: "open" }',
-          collation: '{ locale: "fr", strength: 2 }',
           weights: '{ title: 10 }',
           defaultLanguage: ' french ',
         }),
@@ -241,9 +286,25 @@ describe('buildIndex: options', () => {
       unique: true,
       hidden: true,
       partialFilterExpression: { status: 'open' },
-      collation: { locale: 'fr', strength: { $numberInt: '2' } },
       weights: { title: { $numberInt: '10' } },
       default_language: 'french',
+    });
+    // A text index takes no collation: the collation's place is checked on a plain index.
+    expect(
+      specOf(
+        draft({
+          fields: key(['title', '1']),
+          name: 'by_title',
+          sparse: true,
+          ttl: '60',
+          collation: '{ locale: "fr", strength: 2 }',
+        }),
+      ).options,
+    ).toEqual({
+      name: 'by_title',
+      sparse: true,
+      expireAfterSeconds: { $numberInt: '60' },
+      collation: { locale: 'fr', strength: { $numberInt: '2' } },
     });
   });
 
@@ -422,6 +483,29 @@ describe('buildIndex: options', () => {
       },
     );
 
+    it.each([
+      ['text', 'A text index does not support a collation.'],
+      ['2d', 'A 2d index does not support a collation.'],
+    ] as const)('refuses a collation on a %s index', (type, message) => {
+      expect(
+        errorsOf(
+          draft({ fields: key(['pos', type], ['cat', '1']), collation: '{ locale: "en" }' }),
+        ),
+      ).toEqual({ collation: message });
+    });
+
+    it('refuses a collation on the wildcard text index', () => {
+      expect(
+        errorsOf(draft({ fields: one('$**', 'text'), collation: '{ locale: "en" }' })),
+      ).toEqual({ collation: 'A text index does not support a collation.' });
+    });
+
+    it('allows a collation on a 2dsphere index', () => {
+      expect(
+        specOf(draft({ fields: one('loc', '2dsphere'), collation: '{ locale: "en" }' })).options,
+      ).toEqual({ collation: { locale: 'en' } });
+    });
+
     it('shows the parser message for a malformed collation', () => {
       expect(errorsOf(draft({ fields: one(), collation: 'locale' })).collation).toMatch(
         /line 1, column \d+/,
@@ -448,6 +532,18 @@ describe('buildIndex: options', () => {
       });
     });
 
+    it('sends weights and a language for the wildcard text index', () => {
+      expect(
+        specOf(
+          draft({
+            fields: one('$**', 'text'),
+            weights: '{ title: 10 }',
+            defaultLanguage: 'spanish',
+          }),
+        ).options,
+      ).toEqual({ weights: { title: { $numberInt: '10' } }, default_language: 'spanish' });
+    });
+
     it('treats a whitespace-only language as not set', () => {
       expect(specOf(draft({ fields: one(), defaultLanguage: '  ' })).options).toBeUndefined();
     });
@@ -464,6 +560,12 @@ describe('buildIndex: options', () => {
       expect(errorsOf(draft({ fields: one('attrs.$**'), wildcardProjection: '{ a: 1 }' }))).toEqual(
         { wildcardProjection: 'A wildcard projection needs the field $**.' },
       );
+    });
+
+    it('is refused for the wildcard text index', () => {
+      expect(
+        errorsOf(draft({ fields: one('$**', 'text'), wildcardProjection: '{ a: 1 }' })),
+      ).toEqual({ wildcardProjection: 'A wildcard text index has no wildcard projection.' });
     });
 
     it('is refused for a plain index', () => {
