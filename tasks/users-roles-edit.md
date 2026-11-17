@@ -13,7 +13,8 @@ Create/edit/drop users and roles, grant/revoke, through the guard.
 ## Acceptance criteria
 - [x] Integration tests for each operation
   - verified (2026-11-17 08:18+0100 by dell26/agent-1): npx vitest run --config test/integration/vitest.config.ts test/integration/users-edit.int.spec.ts (mongo8 container fixture; create/update/drop user+role, grant/revoke to user and role, SCRAM sign-in of new password, guard read-only/production) at f9a32cf8 -> 16 passed
-- [ ] e2e: create user, grant role, connect as that user
+- [x] e2e: create user, grant role, connect as that user
+  - verified (2026-11-17 08:18+0100 by dell26/agent-1): npm run build -w packages/renderer && npm run build -w apps/desktop && npx playwright test test/e2e/users-edit.e2e.ts (Electron app against MongoDB 8 --auth container, generated root password) at f9a32cf8 -> 1 passed (create user, grant read, connect as that user)
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
