@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 import {
   ConnectionManager,
   RpcClient,
+  type ClientLike,
   RpcError,
   connHandlers,
   docsQueryHandlers,
@@ -64,12 +65,21 @@ interface StreamOutcome {
 }
 
 function backendFor() {
+  /** `killOp` commands sent by this backend's own driver clients (command monitoring). */
+  const killOps: Document[] = [];
   const manager = new ConnectionManager({
     loadProfile: (id) =>
       id === PROFILE.id
         ? Promise.resolve(PROFILE)
         : Promise.reject(new RpcError('NOT_FOUND', `No profile ${id}`)),
     loadSecrets: () => Promise.resolve(null),
+    createClient: (uri, options) => {
+      const client = new MongoClient(uri, { ...options, monitorCommands: true });
+      client.on('commandStarted', (event) => {
+        if (event.commandName === 'killOp') killOps.push(event.command);
+      });
+      return client as ClientLike;
+    },
   });
   const [serverPort, clientPort] = portPair();
   const stop = serve(serverPort, {
@@ -123,7 +133,7 @@ function backendFor() {
     stop();
     await manager.closeAll();
   };
-  return { manager, call, find, finished, serverPort, clientPort, close };
+  return { manager, killOps, call, find, finished, serverPort, clientPort, close };
 }
 
 let backend: ReturnType<typeof backendFor>;
@@ -347,13 +357,6 @@ async function serverOps(coll: string): Promise<Document[]> {
     .toArray();
 }
 
-/** How many `killOp` commands the server has run so far. */
-async function killOpCount(): Promise<number> {
-  const status = await direct.db('admin').command({ serverStatus: 1 });
-  const metrics = status['metrics'] as Document;
-  return Number((metrics['commands'] as Document)['killOp']?.['total'] ?? 0);
-}
-
 async function waitFor<T>(probe: () => Promise<T>, done: (value: T) => boolean): Promise<T> {
   const deadline = Date.now() + 10_000;
   for (;;) {
@@ -472,16 +475,17 @@ describe('cancel', () => {
       () => serverOps(CLOSING),
       (ops) => ops.length > 0,
     );
-    const kills = await killOpCount();
+    const kills = backend.killOps.length;
     try {
       await backend.call('conn.close', { profileId: PROFILE.id });
       const outcome = await backend.finished(streamId);
       expect(outcome.error).toEqual({ code: 'CANCELLED', message: 'The connection was closed' });
       // conn.close cancelled the stream before closing the client: its operation is gone.
       expect(await serverOps(CLOSING)).toEqual([]);
-      // ...killed by the stream's cleanup (killOp), not left to the server noticing the closed
-      // sockets (mongod 8 interrupts it then, but not every deployment or path does).
-      expect(await killOpCount()).toBeGreaterThan(kills);
+      // ...killed by the stream's cleanup (a killOp sent by this backend's own client), not left to
+      // the server noticing the closed sockets (mongod 8 interrupts it then, but not every
+      // deployment or path does).
+      expect(backend.killOps.length).toBeGreaterThan(kills);
     } finally {
       await backend.manager.open(PROFILE.id, undefined);
     }
