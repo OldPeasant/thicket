@@ -12,7 +12,8 @@ extended: felix/agent-2
 Keep the pre-save version of the last save per document; 'Undo last save' writes it back with the same conflict check.
 
 ## Acceptance criteria
-- [ ] Component/e2e test: save, undo last save → server doc equals original
+- [x] Component/e2e test: save, undo last save → server doc equals original
+  - verified (2026-11-17 08:23+0100 by felix/agent-2): npm run test:e2e -- test/e2e/undo-last-save.e2e.ts (Playwright+Electron against the MongoDB 8 container fixture; server doc read with the driver as EJSON text) -> 12 passed, incl. 'save, then Undo last save: the server document equals the original', removed-field/typed-values/embedded-subfields/field-order restore cases; plus unit undo-last-save.spec.ts via npx ng test
 - [ ] If the document changed on the server since, undo reports a conflict instead of overwriting (test)
 
 ## Notes
