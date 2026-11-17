@@ -3,6 +3,7 @@ import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
+import { ConfirmService } from '../safety/confirm.service';
 import { ProfileSafetyService } from '../safety/profile-safety.service';
 import { IndexCreateForm } from './index-create-form';
 
@@ -51,8 +52,7 @@ describe('IndexCreateForm', () => {
   };
   const submit = () => click('idx-create-submit');
   const errors = () => all('idx-error').map((e) => e.textContent?.trim() ?? '');
-  const sent = () =>
-    fake.requestsFor('idx.create').map((r) => r.params as Record<string, unknown>);
+  const sent = () => fake.requestsFor('idx.create').map((r) => r.params as Record<string, unknown>);
 
   beforeEach(async () => {
     fake = new FakeThicketBridge();
@@ -226,6 +226,79 @@ describe('IndexCreateForm', () => {
     });
     await settle();
     expect(get<HTMLButtonElement>('idx-create-submit').disabled).toBe(true);
+  });
+
+  it('removing a field drops the positional and TTL errors and the last field cannot be removed', async () => {
+    expect(get<HTMLButtonElement>('idx-key-remove').disabled).toBe(true);
+    await type('idx-key-field', 'createdAt');
+    await click('idx-key-add');
+    await type('idx-key-field', '$bad', 1);
+    await type('idx-ttl', '60');
+    await submit();
+    expect(errors()).toEqual([
+      'Field names do not start with $.',
+      'A TTL index has exactly one field.',
+    ]);
+    await click('idx-key-remove', 1);
+    expect(all('idx-key-row')).toHaveLength(1);
+    expect(errors()).toEqual([]);
+    expect(get<HTMLButtonElement>('idx-key-remove').disabled).toBe(true);
+    await submit();
+    expect(sent()).toHaveLength(1);
+    expect(sent()[0]).toMatchObject({
+      key: '{"createdAt":{"$numberInt":"1"}}',
+      options: '{"expireAfterSeconds":{"$numberInt":"60"}}',
+    });
+  });
+
+  it('shows a whole-key error and clears it when a field changes', async () => {
+    await type('idx-key-field', 'a');
+    await select('idx-key-type', 'hashed');
+    await click('idx-key-add');
+    await type('idx-key-field', 'b', 1);
+    await select('idx-key-type', 'hashed', 1);
+    await submit();
+    expect(get('idx-error-fields').textContent).toContain('at most one hashed field');
+    await select('idx-key-type', '1', 1);
+    expect(all('idx-error-fields')).toHaveLength(0);
+    expect(sent()).toEqual([]);
+  });
+
+  it('on a production profile asks first and a cancel sends nothing and shows no error', async () => {
+    TestBed.inject(ProfileSafetyService).set({
+      id: 'p1',
+      name: 'Live',
+      readOnly: false,
+      production: true,
+    });
+    const confirm = TestBed.inject(ConfirmService);
+    await type('idx-key-field', 'a');
+    await submit();
+    expect(confirm.current()?.title).toBe('Create index');
+    confirm.answer(false);
+    await settle();
+    expect(sent()).toEqual([]);
+    expect(all('idx-create-error')).toHaveLength(0);
+    expect(created).toEqual([]);
+    expect(get<HTMLButtonElement>('idx-create-submit').disabled).toBe(false);
+  });
+
+  it('sends one create while the first is still running', async () => {
+    let finish!: () => void;
+    fake.handle(
+      'idx.create',
+      () => new Promise((resolve) => (finish = () => resolve({ name: 'a_1' }))),
+    );
+    await type('idx-key-field', 'a');
+    await submit();
+    expect(get('idx-create-submit').textContent).toContain('Creating…');
+    await fixture.componentInstance.create();
+    expect(sent()).toHaveLength(1);
+    finish();
+    await settle();
+    expect(created).toEqual(['a_1']);
+    // The form starts over after a create.
+    expect(get<HTMLInputElement>('idx-key-field').value).toBe('');
   });
 
   it('emits cancelled', async () => {
