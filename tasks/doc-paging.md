@@ -5,7 +5,7 @@ owner: felix/agent-2
 deps: [bson-inputs,docs-query-backend]
 touches: [packages/renderer/src/app/explorer]
 prio: 1
-lease_until: 2026-11-17T01:54:22Z
+lease_until: 2026-11-17T01:58:10Z
 ---
 ## Goal
 Replace Canopy's 'show more' with a pager for arrays/objects above N entries (setting, default 100); for documents above a size threshold, load array pages lazily through docs.getSlice.
