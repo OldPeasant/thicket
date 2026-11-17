@@ -418,4 +418,68 @@ describe('IndexCreateForm', () => {
       key: '{"$**":{"$numberInt":"1"}}',
     });
   });
+
+  it('clears the collation error of a text key when the key type changes to ascending', async () => {
+    await type('idx-key-field', 'title');
+    await select('idx-key-type', 'text');
+    await click('idx-more');
+    await type('idx-collation', '{ locale: "fr" }');
+    await submit();
+    expect(errors()).toEqual(['A text index does not support a collation.']);
+    expect(get('idx-collation').getAttribute('aria-invalid')).toBe('true');
+    await select('idx-key-type', '1');
+    expect(errors()).toEqual([]);
+    expect(get('idx-collation').getAttribute('aria-invalid')).toBeNull();
+    await submit();
+    expect(errors()).toEqual([]);
+    expect(sent()).toEqual([
+      {
+        profileId: 'p1',
+        db: 'shop',
+        coll: 'orders',
+        key: '{"title":{"$numberInt":"1"}}',
+        options: '{"collation":{"locale":"fr"}}',
+      },
+    ]);
+  });
+
+  it('clears the collation error of a 2d key when the type of the second field changes', async () => {
+    await type('idx-key-field', 'pos');
+    await select('idx-key-type', '2d');
+    await click('idx-key-add');
+    await type('idx-key-field', 'cat', 1);
+    await click('idx-more');
+    await type('idx-collation', '{ locale: "en" }');
+    await submit();
+    expect(errors()).toEqual(['A 2d index does not support a collation.']);
+    // Any key type change clears it: the next Create checks the collation again.
+    await select('idx-key-type', '-1', 1);
+    expect(errors()).toEqual([]);
+    await submit();
+    expect(errors()).toEqual(['A 2d index does not support a collation.']);
+    await select('idx-key-type', '2dsphere');
+    expect(errors()).toEqual([]);
+    await submit();
+    expect(errors()).toEqual([]);
+    expect(sent()[0]).toMatchObject({
+      key: '{"pos":"2dsphere","cat":{"$numberInt":"-1"}}',
+      options: '{"collation":{"locale":"en"}}',
+    });
+  });
+
+  it('keeps unrelated option errors when a key type changes', async () => {
+    await type('idx-key-field', 'title');
+    await select('idx-key-type', 'text');
+    await click('idx-more');
+    await type('idx-collation', '{ locale: "en" }');
+    await type('idx-name', '*');
+    await submit();
+    expect(errors()).toEqual([
+      'The name * is reserved.',
+      'A text index does not support a collation.',
+    ]);
+    await select('idx-key-type', '1');
+    expect(errors()).toEqual(['The name * is reserved.']);
+    expect(sent()).toEqual([]);
+  });
 });
