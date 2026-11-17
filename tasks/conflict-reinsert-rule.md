@@ -14,7 +14,8 @@ refuses re-insert for any partial document (`partial || cut`). A document delete
 partial only because of a projection still offers the button, and clicking it is always refused.
 
 ## Acceptance criteria
-- [ ] The view and `DocumentActions` use one rule for whether a deleted document can be inserted again (e.g. `canReinsert(key)` or a `resolveBlocker` result for deleted documents); the rule lives in the service only
+- [x] The view and `DocumentActions` use one rule for whether a deleted document can be inserted again (e.g. `canReinsert(key)` or a `resolveBlocker` result for deleted documents); the rule lives in the service only
+  - verified (2026-11-17 06:27+0100 by dell26/agent-2): Code review of git diff 2e1f1933..fe0d5bc4: DocumentActions.reinsertBlocker(key) is the only rule for re-inserting a deleted document; both resolveWith (refusal) and ConflictView.item() (blocked for deleted docs) call it, and the view's own cut check was removed. Unit tests: (cd packages/renderer && npx ng test --include src/app/document/document-actions.service.spec.ts --include src/app/document/conflict/conflict-view.spec.ts) -> 162 passed
 - [ ] A document deleted on the server that was loaded with a projection (active or since cleared) does not offer "Insert your version again" and shows a note saying why (component test)
 
 ## Notes
