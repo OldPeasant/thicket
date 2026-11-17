@@ -11,7 +11,8 @@ lease_until: 2026-11-17T02:14:08Z
 On CONFLICT show local vs server side by side with differences highlighted; actions overwrite (replace with conflict check on the new server version), keep server version, merge manually.
 
 ## Acceptance criteria
-- [ ] e2e reproduces demo step 7: external change between load and save → conflict view appears
+- [x] e2e reproduces demo step 7: external change between load and save → conflict view appears
+  - verified (2026-11-17 02:58+0100 by dell26/agent-2): npm run test:e2e -- test/e2e/conflict.e2e.ts (Electron app + MongoDB container, HEAD fda519b) -> 2 passed: external change between load and save shows the conflict view; Overwrite writes the local version / Keep server + Merge manually
 - [ ] Overwrite writes the local version; keep-server discards local edits; manual merge saves the merged doc (tests)
 
 ## Notes
