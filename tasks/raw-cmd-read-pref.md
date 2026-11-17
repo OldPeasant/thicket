@@ -21,8 +21,9 @@ pinning the server), not whatever the read preference selects next.
       more than one batch on a `secondaryPreferred` profile reads every batch from `rs-b:27017`
       (connection checkout events or `currentOp`), and cancelling it kills the cursor there
   - verified (2026-11-17 06:10+0100 by felix/agent-1): npm run test:int -- raw-cmd-read-pref (SOCKS5 replica set fixture, Podman) at e19cc6a2 -> 7 passed; 'docs.find follows the read preference' asserts find + every getMore address rs-b:27017 via commandStarted on a secondaryPreferred profile, and cancel (idle cursor and during an in-flight getMore) sends killCursors/killOp to rs-b and leaves serverStatus open cursors on rs-b unchanged
-- [ ] Int test: `docs.insert` on a profile with `writeConcern: { w: 3 }` answers `SERVER_ERROR`
+- [x] Int test: `docs.insert` on a profile with `writeConcern: { w: 3 }` answers `SERVER_ERROR`
       (write concern error, 2 members); with `w: 2` a secondary read sees the document
+  - verified (2026-11-17 06:11+0100 by felix/agent-1): npm run test:int -- raw-cmd-read-pref at e19cc6a2 -> 7 passed; docs.insert with writeConcern {w:3} on the 2-member set answers SERVER_ERROR (write concern error, applied but not acknowledged), with {w:2} a secondary read on rs-b sees the document
 - [ ] Browse reads (`listCollections`, counts, stats) honour the read preference (unit test)
 
 ## Notes
