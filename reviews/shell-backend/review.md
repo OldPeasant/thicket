@@ -82,3 +82,76 @@ None.
 No material issues found.
 
 The TW-2 fix removes the exponential (block comments) and quadratic (line comments) backtracking without introducing new ambiguity anywhere in `COMMAND`, the only production change since round 3 is that regex, all earlier findings (CR-1 to CR-5 of earlier rounds, TW-2) remain resolved, and the shell unit specs pass at 8712197. The one P3 note above is documentation/test hygiene only.
+
+---
+
+# Code Review (round 5: merge resolutions)
+
+Date: 2026-11-17
+
+Task: shell-backend - M4: mongosh host in the backend (round 5, after the main merges 369c532 and 515cdb8)
+
+Scope: `git diff origin/main...HEAD` (merge-base 1ec66b38860e9925cd05c63d8ca088ca93ace3d6, which equals origin/main) with focus on the conflict resolutions in `apps/desktop/scripts/build.mjs`, `packages/backend/package.json`, `packages/backend/src/index.ts`, `packages/backend/src/server/backend.ts`, `packages/backend/src/connections/manager.ts`, plus how the shell host integrates with the features that arrived from main through those merges (SSH tunnel, MONGODB-AWS, LDAP). Committed changes only. Reviewed revision: 515cdb8ab181c7697c121441ae903f883f68f2c5.
+
+Requirements:
+- tasks/shell-backend.md acceptance criteria and recorded assumptions
+- SPEC.md (M4 Shell, M5 MONGODB-AWS)
+- docs/mongosh.md, docs/ARCHITECTURE.md
+- AGENTS.md
+- round 4 of this report and fixes.md
+
+Git range:
+- Branch: main
+- HEAD: 515cdb8ab181c7697c121441ae903f883f68f2c5
+- Base/start: 1ec66b38860e9925cd05c63d8ca088ca93ace3d6 (origin/main)
+- Commits reviewed: 9 non-merge task commits (2f0b3d7 .. a6e4257) and 8 merge commits (369c532 .. 515cdb8); working tree clean
+
+Summary: 0 P0, 1 P1, 0 P2, 1 P3
+
+## Merge resolution check
+
+- Nothing from main was dropped: the only `-` lines of `git diff origin/main...HEAD` outside `package-lock.json` and `reviews/` are replaced by supersets (`external` list in build.mjs, the `options` import and the `createClient` assignment in manager.ts, the `rpc` import in backend.spec.ts, `...connHandlers(connections)` replaced by the wrapped `...conn`).
+- `package-lock.json`: comparing the `packages` maps of origin/main and HEAD gives 0 entries removed, 0 versions changed, 271 added (the mongosh packages and their dependencies); `packages/backend` in the lock lists the four `@mongosh/*` pins of package.json. One `mongodb` (7.9.0) is used by both the backend and `@mongosh/service-provider-node-driver`.
+- `backend.ts`: SSH (`KnownHosts`, `HostKeyPrompts`, `sshHandlers`, the `ssh` option), `indexHandlers`, `ioHandlers` and the shell wiring (`ShellHost`, `shellHandlers`, the `conn.close` wrapper that closes the profile's shells after the connection) are all present and inside `guardWrites`.
+- `manager.ts`: `configOf` records the `{uri, options}` of every client made through `createClient`, which covers both `test` and `connect`; with an SSH tunnel the recorded options carry the tunnel's local proxy, so shells go through the tunnel.
+- `index.ts` exports `./shell` next to `./ssh`; `entry.ts` passes `shellWorker` next to `userData`.
+- `build.mjs`: `common.external` keeps `cpu-features` from main and adds `kerberos` and `mongodb-client-encryption`; the worker entry spreads `common.external` and adds its two lazy requires.
+
+## Verification run by this reviewer
+
+- `npx vitest run packages/backend/src/shell packages/backend/src/server/backend.spec.ts packages/backend/src/connections/manager.spec.ts` at 515cdb8 -> 6 files, 371 tests passed (the stray `zz-probe-tmp.spec.ts` of round 4 is gone).
+- In-memory esbuild bundles (`write: false`) of `packages/backend/src/server/entry.ts`, `packages/backend/src/shell/worker.ts` and `apps/desktop/src/main/index.ts` with the externals of build.mjs -> all three built with 0 warnings.
+- `node -e` with a `worker_threads` Worker: `postMessage({ options: { authMechanismProperties: { AWS_CREDENTIAL_PROVIDER: () => ... } } })` -> throws `DataCloneError ... could not be cloned` (basis of CR-2).
+- Integration tests were not re-run by this reviewer; the task file records 17/17 at 369c532.
+
+## P0 Critical
+
+None.
+
+## P1 High
+
+- [ ] **CR-2 | shell.open fails for MONGODB-AWS profiles with explicit keys and leaks a worker thread**
+    - File: `packages/backend/src/shell/host.ts:381` (with `packages/backend/src/auth/aws/aws.ts:63`)
+    - Category: Integration
+    - Problem: the AWS auth merged from main puts a function into the driver options (`authMechanismProperties.AWS_CREDENTIAL_PROVIDER: () => Promise.resolve(credentials)`). `configOf` hands those options to the shell host, which sends them to the worker with `worker.postMessage({ type: 'open', uri, options, db })`. Structured clone cannot copy a function, so `postMessage` throws `DataCloneError` synchronously. The call is before the `try` at line 382, so the `catch` that terminates the worker never runs: the worker created at line 366 stays alive (waiting for an `open` it never gets) and `shell.open` fails with a non-`RpcError` (INTERNAL with a DataCloneError text) instead of opening a shell.
+    - Why it matters: SPEC M4 requires a mongosh console per connection and SPEC M5 makes MONGODB-AWS with access key / secret / session token a Must; after the merge every such connection can connect but cannot open a shell, and each attempt leaks one worker thread for the life of the backend. No unit test covers function-valued options or a throwing `postMessage` on open.
+    - Suggested fix: send only cloneable data to the worker (e.g. strip `AWS_CREDENTIAL_PROVIDER` and pass the static credentials as plain fields that the worker turns back into a provider, or build the options in the worker from the same profile data), mask the AWS secret access key and session token in `secretsOf`, and move the `postMessage` inside the `try` so any failure terminates the worker. Add a host test where `postMessage` throws on `open` and one for an AWS-key configuration.
+
+## P2 Medium
+
+None.
+
+## P3 Low
+
+- [ ] **CR-3 | Shell sessions of an SSH profile keep a dead tunnel after the tunnel is lost**
+    - File: `packages/backend/src/server/backend.ts:96` (with `packages/backend/src/connections/manager.ts:318`)
+    - Category: Correctness
+    - Problem: shell sessions are closed only through the `conn.close` RPC wrapper. When the SSH tunnel drops, `tunnelLost` sets the connection to `error` and closes the main client, but the profile's shell sessions keep their recorded config pointing at the closed tunnel's local proxy. If the user opens the connection again (a new tunnel with a new proxy port and credentials) without a `conn.close` first, the old shell tabs stay broken, and their restart after an interrupt (`restart` reuses `session.config`) fails too.
+    - Why it matters: a recoverable network event leaves shell tabs that only fail until the user closes them; the recorded assumption "conn.close also closes that profile's shell sessions" does not cover connection loss.
+    - Suggested fix: close (or mark dead with a clear message) the profile's shells on the `conn.status` transition to `error`/`disconnected` as well, e.g. from the manager's `onStatus` callback in `startBackend`, and add a test.
+
+## Review conclusion
+
+Material issues found; fix before completing the task.
+
+The merge resolutions themselves are correct: nothing from main or from the task was dropped, the lockfile only adds packages, the shell wiring and the build externals are intact and the bundles build. CR-2 is an integration defect between the shell host and the MONGODB-AWS auth that arrived with the merges and should be fixed before `done`; CR-3 is a low-priority resilience note.

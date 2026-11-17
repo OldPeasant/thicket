@@ -616,6 +616,44 @@ describe('startBackend: connections', () => {
     }
   });
 
+  it('serves shell.* next to the conn, ssh, idx, docs, agg and io handlers (merged wiring)', () => {
+    const parentPort: ParentPortLike = { on: () => undefined };
+    const handlers = startBackend({ parentPort, pid: 1 });
+    expect(Object.keys(handlers)).toEqual(
+      expect.arrayContaining([
+        'backend.ping',
+        'conn.open',
+        'conn.close',
+        'conn.trustHostKey',
+        'db.listDatabases',
+        'docs.find',
+        'agg.run',
+        'idx.list',
+        'idx.create',
+        'io.import',
+        'shell.open',
+        'shell.eval',
+        'shell.complete',
+        'shell.close',
+      ]),
+    );
+    for (const method of ['shell.open', 'shell.eval', 'shell.complete', 'shell.close']) {
+      expect(typeof handlers[method]).toBe('function');
+    }
+  });
+
+  it('conn.close of a profile without shell sessions still answers {} (closeProfile is a no-op)', async () => {
+    const closeProfile = vi.spyOn(ShellHost.prototype, 'closeProfile');
+    try {
+      const m = withMain();
+      m.renderer.send({ id: 'c', method: 'conn.close', params: { profileId: 'p1' } });
+      expect(await m.answer('c')).toMatchObject({ ok: true, result: {} });
+      expect(closeProfile).toHaveBeenCalledWith('p1');
+    } finally {
+      closeProfile.mockRestore();
+    }
+  });
+
   it('logs connection events with a prefix and without the password', async () => {
     const m = withMain(null);
     m.renderer.send({
