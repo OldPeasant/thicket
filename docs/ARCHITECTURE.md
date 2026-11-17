@@ -830,10 +830,12 @@ Windows: run `.taskcheck` and npm scripts from Git for Windows' bash (TFP runs t
   Docker; `THICKET_SMOKE_MONGO=1` forces it elsewhere), connects to the `mongo8` fixture through the
   connection editor (skipped without Docker/Podman; `THICKET_SMOKE_MONGO=1` makes that a failure).
   `release.yml` runs it after every build: Linux under `xvfb-run` with `APPIMAGE_EXTRACT_AND_RUN=1`
-  and MongoDB, macOS on the arm64 dmg, Windows on the NSIS installer. `_electron.launch` drives the
-  packaged app through `--inspect`, so packaged builds must leave the Electron fuse
-  `EnableNodeCliInspectArguments` on: turning it off breaks this smoke test, and only on `v*` tag
-  releases, since `test:smoke` is not part of `.taskcheck`.
+  and MongoDB, macOS on the arm64 dmg, Windows on the NSIS installer. It does not use
+  `_electron.launch` (that needs `--inspect`, which the `EnableNodeCliInspectArguments` fuse turns
+  off): it spawns the app with `--remote-debugging-port=0` and attaches with
+  `chromium.connectOverCDP`, so it works with the hardened fuses. It needs the renderer's
+  `--remote-debugging-port` switch to keep working in packaged builds; breaking that shows only on
+  `v*` tag releases, since `test:smoke` is not part of `.taskcheck`.
 
 ## Coverage
 - Tool: Vitest with `@vitest/coverage-v8`, reporters `text-summary`, `json-summary`, `lcov`.
