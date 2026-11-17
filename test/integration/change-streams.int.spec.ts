@@ -203,9 +203,9 @@ describe('admin.watch on a replica set', () => {
     expect(text).toContain('{\\"$numberLong\\":\\"9007199254740993\\"}');
     // Cluster time order: each event comes after the one before.
     const times = seen.map((c) => c['clusterTime'] as BSON.Timestamp);
-    for (let i = 1; i < times.length; i += 1) {
-      expect(times[i]!.compare(times[i - 1]!)).toBeGreaterThanOrEqual(0);
-    }
+    times.slice(1).forEach((time, i) => {
+      expect(time.compare(times[i] as BSON.Timestamp)).toBeGreaterThanOrEqual(0);
+    });
 
     await cancel(streamId);
   });

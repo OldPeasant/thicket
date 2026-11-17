@@ -91,17 +91,17 @@ describe('WatchView', () => {
     const rows = all('watch-event');
     expect(rows.map((r) => r.dataset['op'])).toEqual(['delete', 'update', 'insert']);
     expect(rows.map((r) => r.dataset['kind'])).toEqual(['delete', 'update', 'insert']);
-    expect(text(rows[1]!)).toContain('set status; unset draft');
-    expect(text(rows[2]!)).toContain('ObjectId("65a000000000000000000001")');
+    expect(text(rows[1] ?? null)).toContain('set status; unset draft');
+    expect(text(rows[2] ?? null)).toContain('ObjectId("65a000000000000000000001")');
     // A collection tab doesn't repeat the namespace.
-    expect(rows[0]!.querySelector('.ns')).toBeNull();
+    expect(rows[0]?.querySelector('.ns')).toBeNull();
     expect(text(get('watch-count'))).toBe('3 events');
   });
 
   it('expands an event to the whole event in shell syntax', async () => {
     await create();
     await push(UPDATE);
-    el().querySelector<HTMLButtonElement>('.toggle')!.click();
+    el().querySelector<HTMLButtonElement>('.toggle')?.click();
     await settle();
     expect(text(get('watch-event-text'))).toContain('operationType: "update"');
     expect(text(get('watch-event-text'))).toContain('status: "paid"');
