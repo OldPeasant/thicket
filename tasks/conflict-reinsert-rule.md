@@ -19,3 +19,4 @@ partial only because of a projection still offers the button, and clicking it is
 
 ## Notes
 See conflict-partial-docs, SPEC.md "Conflict detection".
+- ASSUMPTION (2026-11-17 06:23+0100 by dell26/agent-2): Added DocumentActions.reinsertBlocker(key) ('projection'|'partial'|null) instead of extending resolveBlocker, so resolveBlocker keeps its contract (null for deleted docs); the conflict view shows one generic 'loaded only partly' insert-again note for both blockers, wording 'data' instead of 'items' since it now covers projections too.
