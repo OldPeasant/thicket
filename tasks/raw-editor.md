@@ -11,7 +11,8 @@ lease_until: 2026-11-17T01:17:46Z
 Text editor for a whole document (CodeMirror 6) in shell syntax with a toggle to canonical EJSON; syntax errors with position; applying the text updates the edit session.
 
 ## Acceptance criteria
-- [ ] Component tests: toggle preserves content; syntax error highlighted at line/column; apply updates the model
+- [x] Component tests: toggle preserves content; syntax error highlighted at line/column; apply updates the model
+  - verified (2026-11-17 02:01+0100 by felix/agent-2): cd packages/renderer && npx ng test --include='src/app/raw-editor/**/*.spec.ts' (jsdom, real CodeMirror 6 EditorView) -> 4 files, 331 passed: raw-editor.spec.ts format toggle (shell to EJSON and back keeps the document incl. unapplied changes, all-types fixture round trip, unreadable text not switched); syntax errors (shell error at line 3 column 6 marked with a CodeMirror lint diagnostic and .cm-lintRange-error, aria-invalid, cursor moved; EJSON error at line 3 column 10); apply (DocumentEdits.current equals the parsed text, change count, partial flag, undo/redo, _id refusal, read-only); raw-editor-collection.spec.ts Raw toggle in the collection tab, Apply, then Save sends the set diff
 - [ ] No `eval`/`new Function` in the bundle path used by the editor (lint rule or grep in test)
 
 ## Notes
