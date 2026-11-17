@@ -19,10 +19,32 @@ const ID = '{"$numberInt":"1"}';
 const doc = (text: string): BsonDocument => parseEJsonDocument(text);
 const ORIGINAL = '{"_id":{"$numberInt":"1"},"status":"open","total":{"$numberInt":"10"}}';
 
+const MISSING = Symbol('missing');
+
+/** The whole-document check's condition that field `key` equals `value` (plain JSON of EJSON). */
+const fieldEq = (key: string, value: unknown) => ({
+  $eq: [{ $getField: { field: { $literal: key }, input: '$$ROOT' } }, { $literal: value }],
+});
+/** The condition that field `key` has the type `type` (null, BSON undefined). */
+const fieldType = (key: string, type: string) => ({
+  $eq: [{ $type: { $getField: { field: { $literal: key }, input: '$$ROOT' } } }, type],
+});
+/** The whole-document check: one `$expr` with every field condition, then the field count. */
+const wholeCheck = (conditions: unknown[], count: number) => ({
+  $expr: {
+    $and: [
+      ...conditions,
+      { $eq: [{ $size: { $objectToArray: '$$ROOT' } }, { $numberInt: String(count) }] },
+    ],
+  },
+});
+
 /**
  * A one-document server: `docs.update` applies top-level `$set`/`$unset` only when every
- * `expected` check (`$eq`, `$exists: false`) matches the stored document, as MongoDB's filter
- * would; otherwise it answers CONFLICT with the current version. `docs.get` returns it.
+ * `expected` check (`$eq`, `$exists: false`, `$type`, and the `$expr` of the undo's whole-document
+ * check, see `evaluate`) matches the stored document, as MongoDB's filter would; otherwise it
+ * answers CONFLICT with the current version. `docs.get` returns it. Anything else in a check
+ * throws.
  */
 class OneDocServer {
   stored: BsonDocument | null;
@@ -76,7 +98,7 @@ class OneDocServer {
 
   private matches(current: BsonDocument, expected: BsonDocument): boolean {
     return expected.fields.every(({ key, value }) => {
-      if (key === '$expr') return current.fields.length === this.fieldCount(value);
+      if (key === '$expr') return this.truthy(current, value);
       const field = current.fields.find((f) => f.key === key);
       if (value.type !== 'object') throw new Error(`unsupported check ${key}`);
       const check = value.fields[0];
@@ -89,18 +111,53 @@ class OneDocServer {
     });
   }
 
+  private truthy(current: BsonDocument, expr: BsonValue): boolean {
+    const result = this.evaluate(current, expr);
+    return result !== MISSING && result.type === 'bool' && result.value;
+  }
+
   /**
-   * The count of `{$eq: [{$size: {$objectToArray: '$$ROOT'}}, n]}`, the only `$expr` the undo
-   * sends (the server document must have exactly n fields).
+   * The aggregation expressions of the undo's whole-document check, and nothing else: `$and`,
+   * `$eq` (whole values by `bsonEquals`, so an array that only contains the value does not match;
+   * stricter than MongoDB across numeric types), `$literal`, `$getField` of `$$ROOT` by a
+   * `$literal` name, `$type` (`missing`, `null`, `undefined`, otherwise the value's type) and
+   * `{$size: {$objectToArray: '$$ROOT'}}`. A constant (a string not starting with `$`, a number)
+   * is itself.
    */
-  private fieldCount(expr: BsonValue): number {
-    const text = stringifyEJson(expr);
-    const match =
-      /^\{"\$eq":\[\{"\$size":\{"\$objectToArray":"\$\$ROOT"\}\},\{"\$numberInt":"(\d+)"\}\]\}$/.exec(
-        text,
-      );
-    if (match === null) throw new Error(`unsupported $expr ${text}`);
-    return Number(match[1]);
+  private evaluate(current: BsonDocument, expr: BsonValue): BsonValue | typeof MISSING {
+    if (expr.type === 'string' ? !expr.value.startsWith('$') : expr.type !== 'object') return expr;
+    const only = expr.type === 'object' && expr.fields.length === 1 ? expr.fields[0] : undefined;
+    const arg = only?.value;
+    const bool = (value: boolean): BsonValue => ({ type: 'bool', value });
+    switch (only?.key) {
+      case '$literal':
+        return arg as BsonValue;
+      case '$and':
+        if (arg?.type !== 'array') break;
+        return bool(arg.items.every((e) => this.truthy(current, e)));
+      case '$eq': {
+        if (arg?.type !== 'array' || arg.items.length !== 2) break;
+        const [a, b] = arg.items.map((e) => this.evaluate(current, e));
+        if (a === MISSING || b === MISSING) return bool(a === b);
+        return bool(bsonEquals(a as BsonValue, b as BsonValue));
+      }
+      case '$type': {
+        const v = this.evaluate(current, arg as BsonValue);
+        return { type: 'string', value: v === MISSING ? 'missing' : v.type };
+      }
+      case '$getField': {
+        const match = /^\{"field":\{"\$literal":(".*")\},"input":"\$\$ROOT"\}$/.exec(
+          stringifyEJson(arg as BsonValue),
+        );
+        if (match === null) break;
+        const name = JSON.parse(match[1] as string) as string;
+        return current.fields.find((f) => f.key === name)?.value ?? MISSING;
+      }
+      case '$size':
+        if (stringifyEJson(arg as BsonValue) !== '{"$objectToArray":"$$ROOT"}') break;
+        return { type: 'int', value: current.fields.length };
+    }
+    throw new Error(`unsupported $expr ${stringifyEJson(expr)}`);
   }
 
   private apply(current: BsonDocument, update: BsonDocument): BsonDocument {
@@ -200,13 +257,9 @@ describe('Undo last save', () => {
     expect(undo?.['doc']).toBe(ORIGINAL);
     // A replace writes every field, so its conflict check is the whole saved version: every
     // field's saved value and exactly its number of fields (_id is in the filter anyway).
-    expect(JSON.parse(undo?.['expected'] as string)).toEqual({
-      total: { $eq: { $numberInt: '15' } },
-      note: { $eq: 'rush' },
-      $expr: {
-        $eq: [{ $size: { $objectToArray: '$$ROOT' } }, { $numberInt: '3' }],
-      },
-    });
+    expect(JSON.parse(undo?.['expected'] as string)).toEqual(
+      wholeCheck([fieldEq('total', { $numberInt: '15' }), fieldEq('note', 'rush')], 3),
+    );
     expect(actions.message()).toEqual({ kind: 'info', text: 'Undid the last save of 1.' });
     // The page shows the server's version, read back.
     expect(changed.at(-1)?.[1]).toBe(stringifyEJson(server.stored as BsonDocument));
@@ -507,13 +560,12 @@ describe('Undo last save', () => {
     expect(await actions.undoSave(ID)).toBe(true);
 
     expect(stringifyEJson(server.stored as BsonDocument)).toBe(withNull);
-    expect(JSON.parse(replaces()[0]?.['expected'] as string)).toMatchObject({
-      note: { $type: 'null' },
-      total: { $eq: { $numberInt: '10' } },
-    });
+    expect(JSON.parse(replaces()[0]?.['expected'] as string)).toEqual(
+      wholeCheck([fieldType('note', 'null'), fieldEq('total', { $numberInt: '10' })], 3),
+    );
   });
 
-  it('falls back to the minimal update when a field name cannot be checked by a query path', async () => {
+  it('checks a field name that is not a query path by its literal name on the replace path', async () => {
     const dotted = '{"_id":{"$numberInt":"1"},"status":"open","a.b":{"$numberInt":"1"}}';
     server.stored = doc(dotted);
     edits.edit(doc(dotted), doc('{"_id":{"$numberInt":"1"},"a.b":{"$numberInt":"1"}}'));
@@ -521,14 +573,10 @@ describe('Undo last save', () => {
 
     expect(await actions.undoSave(ID)).toBe(true);
 
-    // No whole-document check is possible for "a.b": no replace, status is appended instead.
-    expect(replaces()).toHaveLength(0);
-    expect(updates()[1]).toMatchObject({
-      update: '{"$set":{"status":"open"}}',
-      expected: '{"status":{"$exists":false}}',
-    });
-    expect(stringifyEJson(server.stored as BsonDocument)).toBe(
-      '{"_id":{"$numberInt":"1"},"a.b":{"$numberInt":"1"},"status":"open"}',
+    // "a.b" is compared with $getField, so the replace restores the original order.
+    expect(stringifyEJson(server.stored as BsonDocument)).toBe(dotted);
+    expect(JSON.parse(replaces()[0]?.['expected'] as string)).toEqual(
+      wholeCheck([fieldEq('a.b', { $numberInt: '1' })], 2),
     );
   });
 
@@ -564,14 +612,18 @@ describe('Undo last save', () => {
 
     expect(stringifyEJson(server.stored as BsonDocument)).toBe(TYPED);
     expect(replaces()).toHaveLength(1);
-    expect(JSON.parse(replaces()[0]?.['expected'] as string)).toEqual({
-      placed: { $eq: { $date: { $numberLong: '1768471200000' } } },
-      ref: { $eq: { $oid: '650000000000000000000001' } },
-      total: { $eq: { $numberDecimal: '10.50' } },
-      addr: { $eq: { city: 'Springfield', zip: '12345' } },
-      tags: { $eq: ['gift', 'rush'] },
-      $expr: { $eq: [{ $size: { $objectToArray: '$$ROOT' } }, { $numberInt: '6' }] },
-    });
+    expect(JSON.parse(replaces()[0]?.['expected'] as string)).toEqual(
+      wholeCheck(
+        [
+          fieldEq('placed', { $date: { $numberLong: '1768471200000' } }),
+          fieldEq('ref', { $oid: '650000000000000000000001' }),
+          fieldEq('total', { $numberDecimal: '10.50' }),
+          fieldEq('addr', { city: 'Springfield', zip: '12345' }),
+          fieldEq('tags', ['gift', 'rush']),
+        ],
+        6,
+      ),
+    );
   });
 
   it.each([
@@ -620,11 +672,9 @@ describe('Undo last save', () => {
     expect(await actions.undoSave(ID)).toBe(true);
 
     expect(stringifyEJson(server.stored as BsonDocument)).toBe(ORIGINAL);
-    expect(JSON.parse(replaces()[1]?.['expected'] as string)).toEqual({
-      total: { $eq: { $numberInt: '10' } },
-      status: { $eq: 'open' },
-      $expr: { $eq: [{ $size: { $objectToArray: '$$ROOT' } }, { $numberInt: '3' }] },
-    });
+    expect(JSON.parse(replaces()[1]?.['expected'] as string)).toEqual(
+      wholeCheck([fieldEq('total', { $numberInt: '10' }), fieldEq('status', 'open')], 3),
+    );
   });
 
   it('reports a conflict instead of undoing a reorder over a newer server change', async () => {
@@ -645,10 +695,97 @@ describe('Undo last save', () => {
     expect(await actions.undoSave(ID)).toBe(true);
 
     expect(stringifyEJson(server.stored as BsonDocument)).toBe(ORIGINAL);
-    expect(JSON.parse(replaces()[0]?.['expected'] as string)).toEqual({
-      total: { $eq: { $numberInt: '10' } },
-      note: { $eq: 'rush' },
-      $expr: { $eq: [{ $size: { $objectToArray: '$$ROOT' } }, { $numberInt: '3' }] },
+    expect(JSON.parse(replaces()[0]?.['expected'] as string)).toEqual(
+      wholeCheck([fieldEq('total', { $numberInt: '10' }), fieldEq('note', 'rush')], 3),
+    );
+  });
+
+  // Added by the fixer (round 2).
+
+  // CR-1: query `$eq` also matches an array that contains the value; the whole-document check
+  // compares whole values inside `$expr`, so such a server change conflicts.
+  it('reports a conflict on the replace path when a field became an array containing its saved value', async () => {
+    await saveAs('{"_id":{"$numberInt":"1"},"total":{"$numberInt":"10"}}');
+    server.set('total', {
+      type: 'array',
+      items: [
+        { type: 'int', value: 10 },
+        { type: 'int', value: 20 },
+      ],
     });
+    const changedOnServer = stringifyEJson(server.stored as BsonDocument);
+
+    expect(await actions.undoSave(ID)).toBe(false);
+
+    expect(stringifyEJson(server.stored as BsonDocument)).toBe(changedOnServer);
+    expect(actions.message()?.text).toMatch(/^Not undone: the document was changed on the server/);
+    // No per-field query operator: everything is in the `$expr`.
+    expect(Object.keys(JSON.parse(replaces()[0]?.['expected'] as string))).toEqual(['$expr']);
+  });
+
+  // TW-2: MongoDB adds an update's fields in field-name order, so the undo's `$set` of the removed
+  // total and qty would store qty first; only a replace restores total, qty.
+  it('restores the last two fields removed in one save in their original order by a replace', async () => {
+    const withQty =
+      '{"_id":{"$numberInt":"1"},"status":"open","total":{"$numberInt":"10"},' +
+      '"qty":{"$numberInt":"2"}}';
+    server.stored = doc(withQty);
+    edits.edit(doc(withQty), doc('{"_id":{"$numberInt":"1"},"status":"open"}'));
+    expect(await actions.save(ID)).toBe(true);
+
+    expect(await actions.undoSave(ID)).toBe(true);
+
+    expect(replaces()).toHaveLength(1);
+    expect(stringifyEJson(server.stored as BsonDocument)).toBe(withQty);
+  });
+
+  // TW-3: the undo checks the document as the server stored it (read back after the save), not as
+  // it was sent: MongoDB stored the two added sub-fields in name order.
+  it('checks the version the server stored (read back after the save), not the one sent', async () => {
+    const nested = '{"_id":{"$numberInt":"1"},"addr":{"city":"Springfield"}}';
+    const stored = '{"_id":{"$numberInt":"1"},"addr":{"city":"Springfield","apt":"","zip":""}}';
+    server.stored = doc(nested);
+    edits.edit(
+      doc(nested),
+      doc('{"_id":{"$numberInt":"1"},"addr":{"city":"Springfield","zip":"","apt":""}}'),
+    );
+    // The fake server applies top-level paths only: the save and the undo are checked by what
+    // was sent.
+    fake.handle('docs.update', (p) => {
+      if (updates().length === 1) {
+        expect(p.update).toBe('{"$set":{"addr.zip":"","addr.apt":""}}');
+        server.stored = doc(stored);
+      } else {
+        expect(p.update).toBe('{"$unset":{"addr.apt":"","addr.zip":""}}');
+        expect(p.expected).toBe('{"addr":{"$eq":{"city":"Springfield","apt":"","zip":""}}}');
+        server.stored = doc(nested);
+      }
+      return { modified: true };
+    });
+    expect(await actions.save(ID)).toBe(true);
+
+    expect(await actions.undoSave(ID)).toBe(true);
+
+    expect(stringifyEJson(server.stored as BsonDocument)).toBe(nested);
+    expect(replaces()).toHaveLength(0);
+  });
+
+  it('does not take a read-back with other values as the saved version, so a newer change conflicts', async () => {
+    // The save removes status; right after it, before the read-back, another client adds a field.
+    fake.handle('docs.update', () => {
+      server.stored = doc('{"_id":{"$numberInt":"1"},"total":{"$numberInt":"10"},"note":"x"}');
+      return { modified: true };
+    });
+    await saveAs('{"_id":{"$numberInt":"1"},"total":{"$numberInt":"10"}}');
+    server.install(fake);
+    const changedOnServer = stringifyEJson(server.stored as BsonDocument);
+
+    expect(await actions.undoSave(ID)).toBe(false);
+
+    // The replace's check expects the version the save wrote (2 fields), so note is not dropped.
+    expect(stringifyEJson(server.stored as BsonDocument)).toBe(changedOnServer);
+    expect(JSON.parse(replaces()[0]?.['expected'] as string)).toEqual(
+      wholeCheck([fieldEq('total', { $numberInt: '10' })], 2),
+    );
   });
 });

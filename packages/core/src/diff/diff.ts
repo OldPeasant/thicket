@@ -224,11 +224,13 @@ function queryFieldCheck(value: BsonValue | undefined): BsonField {
 }
 
 /**
- * `$expr` condition for a field whose name is not a valid path (`.`, `$`, empty). Absent, null
- * and BSON undefined originals compare the field's `$type` ("missing", "null", "undefined"), so a
- * null original never matches a missing field.
+ * `$expr` condition that the top-level field `key` has exactly `value`: works for any name, also
+ * one that is not a valid path (`.`, `$`, empty). Aggregation `$eq` compares an array or embedded
+ * document as a whole (no match on an array element, unlike query `$eq`). Absent, null and BSON
+ * undefined originals compare the field's `$type` ("missing", "null", "undefined"), so a null
+ * original never matches a missing field.
  */
-function exprFieldCheck(key: string, value: BsonValue | undefined): BsonValue {
+export function exprFieldCheck(key: string, value: BsonValue | undefined): BsonValue {
   const literal = (v: BsonValue) => doc([{ key: '$literal', value: v }]);
   const getField = doc([
     {

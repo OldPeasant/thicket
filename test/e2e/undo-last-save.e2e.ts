@@ -303,6 +303,11 @@ const SERVER_CHANGES: readonly (readonly [string, Record<string, unknown>])[] = 
   ['a nested sub-field changed on the server', { $set: { 'addr.city': 'Shelbyville' } }],
   ['an untouched field removed on the server', { $unset: { tags: '' } }],
   ['a Date changed on the server', { $set: { placed: new Date('2026-02-01T00:00:00.000Z') } }],
+  // Added by the fixer (CR-1): query `$eq` would match an array that contains the saved value.
+  [
+    'a field turned into an array containing its saved value',
+    { $set: { qty: [new Int32(1), new Int32(7)] } },
+  ],
 ];
 
 for (const [what, update] of SERVER_CHANGES) {

@@ -12,7 +12,7 @@ import {
   str,
   stringifyEJson,
 } from '@thicket/core/bson';
-import { bsonEquals, type DocumentDiff, isAddressableKey } from '@thicket/core/diff';
+import { bsonEquals, type DocumentDiff, exprFieldCheck } from '@thicket/core/diff';
 import { printShellSyntax } from '@thicket/core/shellsyntax';
 
 import { ApiError, ApiService, describeError } from '../api';
@@ -144,9 +144,9 @@ export class DocumentActions {
       entry.original,
       sent,
       partial,
-      () => {
+      (stored) => {
         this.edits.rebase(key, sent);
-        this.recordSave(key, entry.original, sent, partial, entry.hidesSubFields);
+        this.recordSave(key, entry.original, sent, partial, entry.hidesSubFields, stored);
       },
       entry.hidesSubFields ? entry.original : undefined,
     );
@@ -197,13 +197,25 @@ export class DocumentActions {
     );
   }
 
+  /**
+   * Keeps `before` for "Undo last save", with the version the save left on the server as `after`:
+   * `stored` (the whole document as read back) when it holds what was sent, in the field order
+   * MongoDB stored it in; otherwise `sent` with the order MongoDB gives an update
+   * (`savedVersion`). A read-back with other values (another client changed the document right
+   * after the save) is not used, so the undo's check still conflicts with that change.
+   */
   private recordSave(
     key: string,
     before: BsonDocument,
-    after: BsonDocument,
+    sent: BsonDocument,
     partial: boolean,
     hidesSubFields: boolean,
+    stored: BsonDocument | undefined,
   ): void {
+    const after =
+      stored !== undefined && bsonEquals(unordered(stored), unordered(sent))
+        ? stored
+        : savedVersion(before, sent);
     this.saveHistory.record({ key, before, after, partial, hidesSubFields });
   }
 
@@ -390,9 +402,9 @@ export class DocumentActions {
       base,
       local,
       partial,
-      () => {
+      (stored) => {
         saved();
-        this.recordSave(key, base, local, partial, hidesSubFields);
+        this.recordSave(key, base, local, partial, hidesSubFields, stored);
       },
       hidesSubFields ? entry?.original : undefined,
     );
@@ -401,17 +413,18 @@ export class DocumentActions {
   /**
    * Saves `current` as the minimal diff from `original`, with `original`'s values as the conflict
    * check (`docs.update`, or `docs.replace` when the diff needs it), then reads it back and calls
-   * `saved`. Nothing in the edit session changes before the write succeeded. `loaded`: the
-   * document as the user loaded it under a projection that may hide parts of fields (nothing it
-   * lacks is unset); under a top-level-only projection whole fields were loaded, so sub-fields
-   * only the server has within them are unset like any other difference.
+   * `saved` (with the whole document as read back, see `readBack`). Nothing in the edit session
+   * changes before the write succeeded. `loaded`: the document as the user loaded it under a
+   * projection that may hide parts of fields (nothing it lacks is unset); under a top-level-only
+   * projection whole fields were loaded, so sub-fields only the server has within them are unset
+   * like any other difference.
    */
   private async send(
     key: string,
     original: BsonDocument,
     current: BsonDocument,
     partial: boolean,
-    saved: () => void,
+    saved: (stored: BsonDocument | undefined) => void,
     loaded?: BsonDocument,
     options: SendOptions = SAVE_OPTIONS,
   ): Promise<boolean> {
@@ -459,8 +472,7 @@ export class DocumentActions {
       }
       this.dropConflict(key);
       this.messageState.set({ kind: 'info', text: options.done(id) });
-      await this.readBack(key, base.id, current);
-      saved();
+      saved(await this.readBack(key, base.id, current));
     };
     return this.write(options.failure, key, write, options.onConflict);
   }
@@ -612,13 +624,15 @@ export class DocumentActions {
    * Reads a saved document back, so the page shows the server's version (MongoDB puts new fields
    * last, for example). When it can't be read, the page shows `saved` (or stays as it is without):
    * with the cut flags of the loaded document, unless `savedWhole` says `saved` is complete.
+   * Resolves with the document read back when it is whole (no projection, nothing cut), else
+   * `undefined`.
    */
   private async readBack(
     key: string,
     id: string,
     saved: BsonDocument | undefined,
     savedWhole = false,
-  ): Promise<void> {
+  ): Promise<BsonDocument | undefined> {
     const host = this.requireHost();
     const projection = host.projection();
     // A large document is read back with its long arrays cut again, not sent whole.
@@ -633,11 +647,16 @@ export class DocumentActions {
         ...(cut === undefined ? {} : { sliceAbove: cut.above }),
       });
       host.documentChanged(key, doc, sliced.length > 0 ? sliced : undefined);
+      if (doc === null || projection !== undefined || cut !== undefined || sliced.length > 0) {
+        return undefined;
+      }
+      return parseWhole(doc);
     } catch {
       // Not readable now: show what was saved (its cut arrays are still only partly there).
       if (saved !== undefined) {
         host.documentChanged(key, stringifyEJson(saved), savedWhole ? undefined : cut?.arrays);
       }
+      return undefined;
     }
   }
 
@@ -685,11 +704,12 @@ interface SendOptions {
 }
 
 /**
- * `diff` as a replace of the whole document `current` when applying its update to `original`
- * would not give `current` with its field order; otherwise `diff` as it is. A replace writes
- * every field, so its conflict check covers the whole version the save wrote (every top-level
- * field and the field count): any change on the server since then conflicts. When that check
- * can't be built (`wholeDocumentCheck`), the update stays the minimal one (the order may differ).
+ * `diff` as a replace of the whole document `current` when applying its update to `original` (the
+ * version the save left on the server, see `recordSave`) would not give `current` with its field
+ * order; otherwise `diff` as it is. A replace writes every field, so its conflict check covers the
+ * whole of `original` (every top-level field and the field count): any change on the server
+ * since then conflicts. When that check can't be built (`wholeDocumentCheck`), the update stays
+ * the minimal one (the order may differ).
  */
 function keepingOrder(
   diff: Exclude<DocumentDiff, { readonly kind: 'none' }>,
@@ -697,7 +717,7 @@ function keepingOrder(
   current: BsonDocument,
 ): Exclude<DocumentDiff, { readonly kind: 'none' }> {
   if (diff.kind === 'update' && bsonEquals(applyUpdate(original, diff.ops), current)) return diff;
-  const expected = wholeDocumentCheck(savedVersion(current, original));
+  const expected = wholeDocumentCheck(original);
   if (expected === null) return diff;
   const id = diff.filter.fields.find((f) => f.key === '_id');
   const filter: BsonDocument = {
@@ -715,7 +735,8 @@ function keepingOrder(
 
 /**
  * The document on the server after a save of `after` over `before`: `after`, except that an
- * update put the fields it added last in their parent (as MongoDB does).
+ * update put the fields it added last in their parent, in field-name order (as MongoDB does, see
+ * `applyUpdate`).
  */
 function savedVersion(before: BsonDocument, after: BsonDocument): BsonDocument {
   const save = pendingSave({ original: before, current: after });
@@ -724,28 +745,42 @@ function savedVersion(before: BsonDocument, after: BsonDocument): BsonDocument {
 
 /**
  * A conflict check (a query fragment, as `expected`) that matches only a document equal to
- * `saved`: every top-level field but `_id` (which the filter matches anyway) with its value
- * (null and BSON undefined by `$type`, as the diff checks them), and exactly as many fields.
- * `null` when it can't be built safely: repeated keys, or a field name that is not a query path.
+ * `saved`: one `$expr` comparing every top-level field but `_id` (which the filter matches anyway)
+ * with its value by aggregation `$eq` (`exprFieldCheck`: an array or embedded document as a whole,
+ * so an array that only contains the value does not match; null and BSON undefined by `$type`),
+ * and exactly as many fields. `null` when it can't be built safely: repeated keys.
  */
 function wholeDocumentCheck(saved: BsonDocument): BsonDocument | null {
   const keys = saved.fields.map((f) => f.key);
-  if (new Set(keys).size !== keys.length || !keys.every(isAddressableKey)) return null;
-  const checks: BsonField[] = saved.fields
+  if (new Set(keys).size !== keys.length) return null;
+  const checks = saved.fields
     .filter((f) => f.key !== '_id')
-    .map(({ key, value }) => ({
-      key,
-      value: bsonDoc([
-        value.type === 'null' || value.type === 'undefined'
-          ? { key: '$type', value: str(value.type) }
-          : { key: '$eq', value },
-      ]),
-    }));
+    .map(({ key, value }) => exprFieldCheck(key, value));
   const size = bsonDoc([
     { key: '$size', value: bsonDoc([{ key: '$objectToArray', value: str('$$ROOT') }]) },
   ]);
   const fieldCount = bsonDoc([{ key: '$eq', value: arr([size, int32(keys.length)]) }]);
-  return bsonDoc([...checks, { key: '$expr', value: fieldCount }]);
+  const all = bsonDoc([{ key: '$and', value: arr([...checks, fieldCount]) }]);
+  return bsonDoc([{ key: '$expr', value: all }]);
+}
+
+/** `value` with the fields of every (embedded) document in key order, to compare without order. */
+function unordered(value: BsonValue): BsonValue {
+  if (value.type === 'array') return { type: 'array', items: value.items.map(unordered) };
+  if (value.type !== 'object') return value;
+  const fields = value.fields
+    .map(({ key, value: v }) => ({ key, value: unordered(v) }))
+    .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  return { type: 'object', fields };
+}
+
+/** A document read back (canonical EJSON), or `undefined` when it does not parse. */
+function parseWhole(text: string): BsonDocument | undefined {
+  try {
+    return parseEJsonDocument(text);
+  } catch {
+    return undefined;
+  }
 }
 
 const SAVE_OPTIONS: SendOptions = {

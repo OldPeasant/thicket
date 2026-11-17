@@ -129,6 +129,35 @@ describe('applyUpdate', () => {
     );
   });
 
+  // Added by the fixer (TW-2/TW-3): MongoDB 5.0+ applies an update's fields in field-name order.
+  describe('field-name order of added fields', () => {
+    it('appends several new fields in name order, not in the order of the operations', () => {
+      const result = applyUpdate(doc('{"_id":"a"}'), [
+        { op: 'set', path: 'total', value: value('"1"') },
+        { op: 'set', path: 'qty', value: value('"2"') },
+        { op: 'push', path: 'b', items: [value('"x"')] },
+      ]);
+      expect(result.fields.map((f) => f.key)).toEqual(['_id', 'b', 'qty', 'total']);
+    });
+
+    it('appends numeric names in numeric order', () => {
+      const result = applyUpdate(doc('{"_id":"a"}'), [
+        { op: 'set', path: '10', value: value('"x"') },
+        { op: 'set', path: '9', value: value('"y"') },
+        { op: 'set', path: 'b', value: value('"z"') },
+      ]);
+      expect(result.fields.map((f) => f.key)).toEqual(['_id', '9', '10', 'b']);
+    });
+
+    it('appends new sub-fields of one parent in name order', () => {
+      const result = applyUpdate(doc('{"_id":"a","addr":{"city":"S"}}'), [
+        { op: 'set', path: 'addr.zip', value: value('""') },
+        { op: 'set', path: 'addr.apt', value: value('""') },
+      ]);
+      expect(text(result)).toBe('{"_id":"a","addr":{"city":"S","apt":"","zip":""}}');
+    });
+  });
+
   it('does not change the document it is given', () => {
     const original = doc('{"_id":"a","o":{"k":"v"},"items":["x"]}');
     applyUpdate(original, [
