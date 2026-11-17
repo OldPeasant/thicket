@@ -932,4 +932,164 @@ describe('AggregationView', () => {
       expect(get('agg-copy').textContent).not.toContain('Copied');
     });
   });
+
+  describe('full-text mode with Export and Create view', () => {
+    const typeText = async (text: string) => {
+      const area = get<HTMLTextAreaElement>('agg-text');
+      area.value = text;
+      area.dispatchEvent(new Event('input'));
+      await settle();
+    };
+
+    it('Export follows the text as typed, without disabled stages, and shows its parse error', async () => {
+      await click(get('agg-mode-text'));
+      await click(get('agg-export'));
+      await typeText(
+        '[\n  { $match: { a: 1 } },\n  //- { $limit: 5 },\n  { $sort: { b: -1 } },\n]',
+      );
+      const code = get('agg-code').textContent ?? '';
+      expect(code).toMatch(/\$match[\s\S]*\$sort/);
+      expect(code).not.toContain('$limit');
+      // The text is not applied to the stage list by Export.
+      expect(view.mode()).toBe('text');
+      expect(view.stages().map((s) => s.operator)).toEqual(['$match']);
+
+      await typeText('[{ $match: { a: 1 } }, { $sort: }]');
+      expect(q('agg-code')).toBeNull();
+      expect(get('agg-code-error').textContent).toMatch(/line 1/);
+      expect(get<HTMLButtonElement>('agg-copy').disabled).toBe(true);
+
+      await typeText('{ $match: {} }');
+      expect(get('agg-code-error').textContent).toContain('must be an array');
+    });
+
+    it('Create view applies the text first and refuses text that does not parse', async () => {
+      await click(get('agg-mode-text'));
+      await typeText('[{ $match: { a: 1 } }, { $sort: { b: 1 } }]');
+      await click(get('agg-create-view'));
+      const name = get<HTMLInputElement>('agg-view-name');
+      name.value = 'v1';
+      name.dispatchEvent(new Event('input'));
+      await click(get('agg-view-submit'));
+      const sent = fake.requestsFor('agg.createView')[0]?.params as Record<string, unknown>;
+      expect(operators(sent['pipeline'])).toEqual(['$match', '$sort']);
+      expect(view.stages().map((s) => s.operator)).toEqual(['$match', '$sort']);
+
+      await typeText('[{ $match: { a: 1 } }, { $limit: }]');
+      await click(get('agg-view-submit'));
+      expect(fake.requestsFor('agg.createView')).toHaveLength(1);
+      expect(get('agg-text-error').textContent).toMatch(/line 1/);
+      expect(get('agg-view-message').textContent).toContain('Fix the pipeline text first');
+      expect(get('agg-view-message').classList).toContain('error');
+      // The stage list keeps the last applied text.
+      expect(view.stages().map((s) => s.operator)).toEqual(['$match', '$sort']);
+    });
+  });
+
+  describe('retrying a failed preview', () => {
+    it('the Retry button asks for the preview again', async () => {
+      fake.fail('agg.previewStage', { code: 'NOT_CONNECTED', message: 'gone' });
+      await setBody(0, '{ a: 1 }');
+      expect(inStage(0, 'agg-preview-error').textContent).toContain('gone');
+      const before = previews().length;
+
+      fake.respond('agg.previewStage', { docs: docs(1, 2) });
+      await click(inStage(0, 'agg-preview-retry'));
+      expect(previews()).toHaveLength(before + 1);
+      expect(operators(previews().at(-1)?.['pipeline'])).toEqual(['$match']);
+      expect(stageEl(0).querySelector('[data-testid="agg-preview-error"]')).toBeNull();
+      expect(inStage(0, 'agg-stage-preview').querySelectorAll('pre')).toHaveLength(2);
+    });
+
+    it('the next edit anywhere asks for a failed preview again', async () => {
+      fake.fail('agg.previewStage', { code: 'NOT_CONNECTED', message: 'gone' });
+      await setBody(0, '{ a: 1 }');
+      expect(inStage(0, 'agg-preview-error')).not.toBeNull();
+
+      fake.respond('agg.previewStage', { docs: docs(1, 1) });
+      const before = previews().length;
+      await click(get('agg-add-stage'));
+      // Stage 1's pipeline did not change, but its failed preview is asked again.
+      expect(
+        previews()
+          .slice(before)
+          .map((p) => operators(p['pipeline'])),
+      ).toEqual([['$match'], ['$match', '$match']]);
+      expect(inStage(0, 'agg-stage-preview').querySelectorAll('pre')).toHaveLength(1);
+    });
+
+    it('a successful preview is still not asked again by an unrelated edit', async () => {
+      const before = previews().length;
+      await click(get('agg-add-stage'));
+      expect(
+        previews()
+          .slice(before)
+          .map((p) => operators(p['pipeline'])),
+      ).toEqual([['$match', '$match']]);
+    });
+  });
+
+  describe('paging the shown result', () => {
+    it('Prev/Next page the pipeline that produced the result; Run starts the edited one at page 0', async () => {
+      total = RESULT_PAGE_SIZE * 2 + 5;
+      await click(get('agg-run'));
+      const first = runs().at(-1)?.['pipeline'];
+      expect(first).toBe('[{"$match":{}},{"$limit":{"$numberInt":"21"}}]');
+
+      // Edited after the run: Next still pages the pipeline that is shown.
+      await setBody(0, '{ a: 1 }');
+      await click(get('agg-next'));
+      expect(runs().at(-1)?.['pipeline']).toBe(
+        '[{"$match":{}},{"$skip":{"$numberInt":"20"}},{"$limit":{"$numberInt":"21"}}]',
+      );
+      expect(get('agg-result-rows').textContent).toContain(
+        `${RESULT_PAGE_SIZE + 1}–${RESULT_PAGE_SIZE * 2}`,
+      );
+      await click(get('agg-prev'));
+      expect(runs().at(-1)?.['pipeline']).toBe(first);
+
+      // A new Run runs the edited pipeline from the first page.
+      await click(get('agg-next'));
+      await click(get('agg-run'));
+      expect(runs().at(-1)?.['pipeline']).toBe(
+        '[{"$match":{"a":{"$numberInt":"1"}}},{"$limit":{"$numberInt":"21"}}]',
+      );
+      expect(get('agg-result-rows').textContent).toContain(`1–${RESULT_PAGE_SIZE}`);
+      expect(get<HTMLButtonElement>('agg-prev').disabled).toBe(true);
+    });
+
+    it('a failed run clears the earlier result', async () => {
+      await click(get('agg-run'));
+      expect(all('agg-result-doc')).toHaveLength(3);
+      fake.handle('agg.run', () => {
+        setTimeout(() => fake.failStream('s-bad', { code: 'SERVER_ERROR', message: 'bad' }));
+        return { streamId: 's-bad' };
+      });
+      await click(get('agg-run'));
+      expect(get('agg-run-error').textContent).toContain('bad');
+      expect(q('agg-results')).toBeNull();
+    });
+
+    it('a Run refused for a stage error clears the earlier result', async () => {
+      await click(get('agg-run'));
+      expect(q('agg-results')).not.toBeNull();
+      await setBody(0, '{ a: ');
+      await click(get('agg-run'));
+      expect(get('agg-run-error').textContent).toContain('Fix stage 1 first');
+      expect(q('agg-results')).toBeNull();
+    });
+  });
+
+  it('announces only the preview count, and does not re-announce stage errors while typing', async () => {
+    const preview = inStage(0, 'agg-stage-preview');
+    expect(preview.hasAttribute('aria-live')).toBe(false);
+    expect(inStage(0, 'agg-preview-count').getAttribute('aria-live')).toBe('polite');
+    expect(preview.querySelector('[aria-live]')).toBe(inStage(0, 'agg-preview-count'));
+
+    await setBody(0, '{ a: ');
+    const error = inStage(0, 'agg-stage-error');
+    expect(error.hasAttribute('role')).toBe(false);
+    expect(error.hasAttribute('aria-live')).toBe(false);
+    expect(inStage(0, 'agg-stage-body').getAttribute('aria-describedby')).toBe(error.id);
+  });
 });

@@ -144,17 +144,12 @@
                 [attr.aria-describedby]="p && !p.ok ? uid + '-err-' + stage.id : null"
               ></textarea>
               @if (p && !p.ok) {
-                <p
-                  class="error"
-                  role="alert"
-                  data-testid="agg-stage-error"
-                  [id]="uid + '-err-' + stage.id"
-                >
+                <p class="error" data-testid="agg-stage-error" [id]="uid + '-err-' + stage.id">
                   {{ p.error.message }}
                 </p>
               }
             </div>
-            <div class="preview" data-testid="agg-stage-preview" aria-live="polite">
+            <div class="preview" data-testid="agg-stage-preview">
               @if (!stage.enabled) {
                 <p class="note">Disabled: the pipeline skips this stage.</p>
               } @else if (p && !p.ok) {
@@ -172,7 +167,7 @@
                 @switch (preview?.state) {
                   @case ('ok') {
                     @if (preview?.state === 'ok' && preview.docs; as docs) {
-                      <p class="count" data-testid="agg-preview-count">
+                      <p class="count" data-testid="agg-preview-count" aria-live="polite">
                         {{
                           docs.length === 0
                             ? 'No documents'
@@ -187,7 +182,18 @@
                   }
                   @case ('error') {
                     @if (preview?.state === 'error' && preview.message; as message) {
-                      <p class="error" data-testid="agg-preview-error">{{ message }}</p>
+                      <p class="error" data-testid="agg-preview-error">
+                        {{ message }}
+                        <button
+                          type="button"
+                          class="btn quiet retry"
+                          data-testid="agg-preview-retry"
+                          [attr.aria-label]="'Retry the preview of stage ' + (i + 1)"
+                          (click)="retryPreview(stage.id)"
+                        >
+                          Retry
+                        </button>
+                      </p>
                     }
                   }
                   @default {
@@ -327,7 +333,7 @@
                 aria-label="Previous page"
                 title="Previous page"
                 [disabled]="r.page === 0 || running()"
-                (click)="run(r.page - 1)"
+                (click)="turnPage(-1)"
               >
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" /></svg>
               </button>
@@ -338,7 +344,7 @@
                 aria-label="Next page"
                 title="Next page"
                 [disabled]="!r.hasNext || running()"
-                (click)="run(r.page + 1)"
+                (click)="turnPage(1)"
               >
                 <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" /></svg>
               </button>

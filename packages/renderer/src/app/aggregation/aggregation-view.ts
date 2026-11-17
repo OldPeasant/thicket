@@ -23,7 +23,6 @@ import type { Subscription } from 'rxjs';
 import { ApiError, describeError } from '../api/api-error';
 import { ApiService } from '../api/api.service';
 import type { WorkspaceTab } from '../layout/workspace.service';
-import { ProfileSafetyService } from '../safety/profile-safety.service';
 import { WriteControl } from '../safety/write-control.directive';
 import { WriteGuard } from '../safety/write-guard.service';
 import type { CollectionTabData } from '../sidebar/sidebar-tree.service';
@@ -76,6 +75,11 @@ function shellText(ejson: string): string {
   }
 }
 
+/** What a stage's preview depends on: the collection and the pipeline up to the stage. */
+function previewKey(target: { profileId: string; db: string; coll: string }, plan: string): string {
+  return `${target.profileId}\u0000${target.db}\u0000${target.coll}\u0000${plan}`;
+}
+
 function stageDoc(key: string, value: BsonValue): BsonDocument {
   return { type: 'object', fields: [{ key, value }] };
 }
@@ -100,7 +104,6 @@ export class AggregationView {
 
   private readonly api = inject(ApiService);
   private readonly guard = inject(WriteGuard);
-  private readonly safety = inject(ProfileSafetyService);
 
   protected readonly templates = STAGE_TEMPLATES;
   protected readonly languages = CODEGEN_LANGUAGES;
@@ -120,7 +123,6 @@ export class AggregationView {
       equal: (a, b) => a.profileId === b.profileId && a.db === b.db && a.coll === b.coll,
     },
   );
-  protected readonly readOnly = computed(() => this.safety.readOnly(this.target().profileId)());
 
   private nextId = 1;
   readonly stages = signal<readonly Stage[]>([]);
@@ -190,6 +192,9 @@ export class AggregationView {
     docs: readonly string[];
     hasNext: boolean;
     wrote: boolean;
+    /** The pipeline and collection that produced it: Prev/Next page through these. */
+    pipeline: readonly BsonDocument[];
+    target: { profileId: string; db: string; coll: string };
   } | null>(null);
   protected readonly runError = signal<string | null>(null);
   private runSub: Subscription | undefined;
@@ -198,9 +203,32 @@ export class AggregationView {
   protected readonly exportOpen = signal(false);
   protected readonly language = signal<CodegenLanguage>('shell');
   private readonly uri = signal<string | undefined>(undefined);
+  /**
+   * The pipeline Export prints: the stage list, or in full-text mode the text as typed (it is
+   * applied to the stage list only by Run, Create view or leaving the mode).
+   */
+  private readonly exportPipeline = computed<
+    { ok: true; pipeline: readonly BsonDocument[] } | { ok: false; message: string }
+  >(() => {
+    if (this.mode() === 'stages') {
+      const pipeline = this.pipeline();
+      return pipeline === null ? { ok: false, message: this.fixFirst() } : { ok: true, pipeline };
+    }
+    const parsed = parsePipeline(this.text());
+    if (!parsed.ok) return { ok: false, message: parsed.error.message };
+    const pipeline: BsonDocument[] = [];
+    for (const [index, stage] of parsed.stages.entries()) {
+      if (!stage.enabled) continue;
+      const one = parseStage(stage);
+      if (!one.ok) return { ok: false, message: `Stage ${index + 1}: ${one.error.message}` };
+      pipeline.push(one.stage);
+    }
+    return { ok: true, pipeline };
+  });
   protected readonly code = computed(() => {
-    const pipeline = this.pipeline();
-    if (pipeline === null) return { ok: false as const, message: this.fixFirst() };
+    const source = this.exportPipeline();
+    if (!source.ok) return source;
+    const { pipeline } = source;
     const { db, coll } = this.target();
     try {
       const uri = this.uri();
@@ -339,14 +367,32 @@ export class AggregationView {
     if (target.profileId === '') return;
     this.previewTimer = setTimeout(() => {
       for (const [id, plan] of plans) {
-        const key = `${target.profileId}\u0000${target.db}\u0000${target.coll}\u0000${plan.key}`;
+        const key = previewKey(target, plan.key);
         if (this.previewRuns.get(id)?.key === key) continue;
-        this.previewRuns.get(id)?.abort.abort();
-        const abort = new AbortController();
-        this.previewRuns.set(id, { key, abort });
-        void this.preview(id, plan.pipeline, target, abort.signal);
+        this.startPreview(id, key, plan.pipeline, target);
       }
     }, this.debounceMs);
+  }
+
+  private startPreview(
+    id: number,
+    key: string,
+    pipeline: readonly BsonDocument[],
+    target: { profileId: string; db: string; coll: string },
+  ): void {
+    this.previewRuns.get(id)?.abort.abort();
+    const abort = new AbortController();
+    this.previewRuns.set(id, { key, abort });
+    void this.preview(id, pipeline, target, abort.signal);
+  }
+
+  /** Asks again for the preview of a stage whose preview failed (the Retry button). */
+  protected retryPreview(id: number): void {
+    const plan = this.previewPlans().get(id);
+    const target = this.target();
+    if (plan === undefined || target.profileId === '') return;
+    const key = previewKey(target, plan.key);
+    this.startPreview(id, key, plan.pipeline, target);
   }
 
   private async preview(
@@ -371,6 +417,8 @@ export class AggregationView {
       this.setPreview(id, { state: 'ok', docs: result.docs.map(shellText) });
     } catch (e) {
       if (signal.aborted) return;
+      // Forget the failed run, so the next scheduling pass (any edit) asks again.
+      if (this.previewRuns.get(id)?.abort.signal === signal) this.previewRuns.delete(id);
       this.setPreview(id, { state: 'error', message: describeError(e) });
     }
   }
@@ -394,14 +442,36 @@ export class AggregationView {
     return `Fix stage ${this.firstError() ?? ''} first: it has an error.`.replace('  ', ' ');
   }
 
-  /** Runs the pipeline and shows page `page` (0-based) of its result. */
-  async run(page = 0): Promise<void> {
+  /** Runs the pipeline as it is now and shows the first page of its result. */
+  async run(): Promise<void> {
     if (this.mode() === 'text' && !this.applyText()) return;
     const pipeline = this.pipeline();
     if (pipeline === null) {
-      this.runError.set(this.fixFirst());
+      this.failRun(this.fixFirst());
       return;
     }
+    await this.runPage(pipeline, this.target(), 0);
+  }
+
+  /** Shows another page of the shown result: same pipeline and collection, even after edits. */
+  protected async turnPage(delta: -1 | 1): Promise<void> {
+    const shown = this.result();
+    if (shown === null) return;
+    await this.runPage(shown.pipeline, shown.target, shown.page + delta);
+  }
+
+  /** A failed run shows its error instead of the earlier, unrelated result. */
+  private failRun(message: string): void {
+    this.runError.set(message);
+    this.result.set(null);
+  }
+
+  /** Runs `pipeline` on `target` and shows page `page` (0-based) of its result. */
+  private async runPage(
+    pipeline: readonly BsonDocument[],
+    target: { profileId: string; db: string; coll: string },
+    page: number,
+  ): Promise<void> {
     this.cancelRun();
     this.runError.set(null);
     const wrote = writesOutput(pipeline);
@@ -413,7 +483,7 @@ export class AggregationView {
           stageDoc('$limit', int32(RESULT_PAGE_SIZE + 1)),
         ];
     const base = {
-      ...this.target(),
+      ...target,
       pipeline: stringifyEJson({ type: 'array', items: paged }),
       batchSize: RESULT_PAGE_SIZE + 1,
     };
@@ -428,7 +498,7 @@ export class AggregationView {
           })
         : base;
     } catch (e) {
-      if (!(e instanceof ApiError && e.code === 'CANCELLED')) this.runError.set(describeError(e));
+      if (!(e instanceof ApiError && e.code === 'CANCELLED')) this.failRun(describeError(e));
       return;
     }
     this.running.set(true);
@@ -437,7 +507,7 @@ export class AggregationView {
       next: (batch) => docs.push(...batch.docs),
       error: (e: unknown) => {
         this.running.set(false);
-        this.runError.set(describeError(e));
+        this.failRun(describeError(e));
       },
       complete: () => {
         this.running.set(false);
@@ -446,6 +516,8 @@ export class AggregationView {
           docs: docs.slice(0, RESULT_PAGE_SIZE).map(shellText),
           hasNext: docs.length > RESULT_PAGE_SIZE,
           wrote,
+          pipeline,
+          target,
         });
       },
     });
@@ -506,11 +578,16 @@ export class AggregationView {
   protected async createView(event?: Event): Promise<void> {
     event?.preventDefault();
     const name = this.viewName().trim();
-    const pipeline = this.pipeline();
     if (name === '') {
       this.viewMessage.set({ error: true, text: 'Type a name for the view.' });
       return;
     }
+    // In full-text mode the view gets the text as typed, like Run (the text error shows there).
+    if (this.mode() === 'text' && !this.applyText()) {
+      this.viewMessage.set({ error: true, text: 'Fix the pipeline text first: it has an error.' });
+      return;
+    }
+    const pipeline = this.pipeline();
     if (pipeline === null) {
       this.viewMessage.set({ error: true, text: this.fixFirst() });
       return;
