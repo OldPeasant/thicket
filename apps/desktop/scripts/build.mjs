@@ -23,7 +23,8 @@ const common = {
   external: ['electron', 'kerberos', 'mongodb-client-encryption', 'cpu-features'],
   // Other native addons (ssh2's sshcrypto, os-dns-native, system-ca's certificate exporters) are
   // compiled only where a C/C++ toolchain exists; they are left out the same way, see
-  // src/build/native-addons.ts. CI (check.yml "bundle") builds with them compiled.
+  // src/build/native-addons.ts; any addon not on its allow-list fails the build. CI (check.yml
+  // "bundle") builds with them compiled.
   plugins: [omitNativeAddons],
   logLevel: 'info',
 };

@@ -2,20 +2,36 @@ import { build } from 'esbuild';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join, sep } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { omitNativeAddons, omittedAddonSource } from './native-addons.ts';
+import {
+  addonLocation,
+  isOptionalAddon,
+  omitNativeAddons,
+  omittedAddonSource,
+} from './native-addons.ts';
 
 let dir: string;
 
+/** Writes `<dir>/<relative path parts>`, creating its directories. */
+function put(parts: string[], contents: string): string {
+  const file = join(dir, ...parts);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, contents);
+  return file;
+}
+
+const SSH2_CRYPTO = ['node_modules', 'ssh2', 'lib', 'protocol'];
+const SSHCRYPTO_MESSAGE =
+  "Cannot find module 'ssh2/lib/protocol/crypto/build/Release/sshcrypto.node' (native addon not bundled into Thicket)";
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'thicket-native-addons-'));
-  // A package laid out like ssh2: an optional addon next to its JS, loaded in try/catch.
-  mkdirSync(join(dir, 'crypto', 'build', 'Release'), { recursive: true });
+  // Laid out like ssh2: an optional addon next to its JS, loaded in try/catch.
   // Not a real addon: the build must never read it.
-  writeFileSync(join(dir, 'crypto', 'build', 'Release', 'sshcrypto.node'), 'not an ELF/PE/Mach-O');
-  writeFileSync(
-    join(dir, 'optional.cjs'),
+  put([...SSH2_CRYPTO, 'crypto', 'build', 'Release', 'sshcrypto.node'], 'not an ELF/PE/Mach-O');
+  put(
+    [...SSH2_CRYPTO, 'crypto.js'],
     [
       'let binding;',
       'try {',
@@ -26,10 +42,12 @@ beforeEach(() => {
       'if (binding) module.exports = { fallback: false };',
     ].join('\n'),
   );
-  writeFileSync(
-    join(dir, 'required.cjs'),
+  put(
+    [...SSH2_CRYPTO, 'required.js'],
     "module.exports = require('./crypto/build/Release/sshcrypto.node');",
   );
+  put(['optional.cjs'], "module.exports = require('ssh2/lib/protocol/crypto.js');");
+  put(['required.cjs'], "module.exports = require('ssh2/lib/protocol/required.js');");
 });
 
 afterEach(() => {
@@ -64,6 +82,16 @@ function run(code: string): unknown {
   return module.exports;
 }
 
+/** A module that tries each `require(specifier)` and records the error code and message. */
+function tryLoadAll(specifiers: string[]): string {
+  return [
+    'const tryLoad = (load) => { try { load(); return null; } catch (e) { return [e.code, e.message]; } };',
+    'module.exports = [',
+    ...specifiers.map((s) => `  tryLoad(() => require(${JSON.stringify(s)})),`),
+    '];',
+  ].join('\n');
+}
+
 describe('omitNativeAddons', () => {
   it('without it, esbuild refuses a compiled addon (the v0.1.0-rc.1 release failure)', async () => {
     await expect(bundle('optional.cjs', false)).rejects.toThrow(
@@ -71,82 +99,147 @@ describe('omitNativeAddons', () => {
     );
   });
 
-  it('bundles code that requires an addon; requiring it throws MODULE_NOT_FOUND, so the JS fallback runs', async () => {
+  it('bundles code that requires an allow-listed addon; requiring it throws MODULE_NOT_FOUND, so the JS fallback runs', async () => {
     const code = await bundle('optional.cjs');
     expect(code).not.toContain('not an ELF/PE/Mach-O');
     expect(run(code)).toEqual({
       fallback: true,
       code: 'MODULE_NOT_FOUND',
-      message:
-        "Cannot find module './crypto/build/Release/sshcrypto.node' (native addon not bundled into Thicket)",
+      message: SSHCRYPTO_MESSAGE,
     });
   });
 
-  it('an unguarded require of an addon throws when the module is loaded, not at build time', async () => {
+  it('an unguarded require of an allow-listed addon throws when the module is loaded, not at build time', async () => {
     const code = await bundle('required.cjs');
     expect(() => run(code)).toThrow(/native addon not bundled into Thicket/);
   });
 
   it('leaves package imports whose names merely contain "node" alone', async () => {
-    writeFileSync(join(dir, 'pkg.cjs'), "module.exports = require('node:path').sep;");
+    put(['pkg.cjs'], "module.exports = require('node:path').sep;");
     expect(run(await bundle('pkg.cjs'))).toBe(sep);
   });
 
-  it('stubs an addon that was never compiled (no toolchain: the file does not exist)', async () => {
-    writeFileSync(
-      join(dir, 'missing.cjs'),
-      [
-        'try {',
-        "  module.exports = require('./build/Release/never_built.node');",
-        '} catch (error) {',
-        '  module.exports = { code: error.code };',
-        '}',
-      ].join('\n'),
+  it('stubs an allow-listed addon that was never compiled (no toolchain: the file does not exist)', async () => {
+    put(
+      ['node_modules', 'os-dns-native', 'lib', 'index.js'],
+      tryLoadAll(['../build/Release/os_dns_native.node', '../build/Debug/os_dns_native.node']),
     );
-    expect(run(await bundle('missing.cjs'))).toEqual({ code: 'MODULE_NOT_FOUND' });
-  });
-
-  it('stubs every addon in one bundle, each failing with its own path', async () => {
-    mkdirSync(join(dir, 'dns', 'build', 'Release'), { recursive: true });
-    writeFileSync(join(dir, 'dns', 'build', 'Release', 'os_dns_native.node'), 'fake addon');
-    writeFileSync(
-      join(dir, 'several.cjs'),
-      [
-        'const tryLoad = (load) => { try { load(); return null; } catch (e) { return [e.code, e.message]; } };',
-        'module.exports = [',
-        "  tryLoad(() => require('./crypto/build/Release/sshcrypto.node')),",
-        "  tryLoad(() => require('./dns/build/Release/os_dns_native.node')),",
-        '];',
-      ].join('\n'),
-    );
-    const code = await bundle('several.cjs');
-    expect(code).not.toContain('fake addon');
-    expect(run(code)).toEqual([
+    put(['dns.cjs'], "module.exports = require('os-dns-native/lib/index.js');");
+    expect(run(await bundle('dns.cjs'))).toEqual([
       [
         'MODULE_NOT_FOUND',
-        "Cannot find module './crypto/build/Release/sshcrypto.node' (native addon not bundled into Thicket)",
+        "Cannot find module 'os-dns-native/build/Release/os_dns_native.node' (native addon not bundled into Thicket)",
       ],
       [
         'MODULE_NOT_FOUND',
-        "Cannot find module './dns/build/Release/os_dns_native.node' (native addon not bundled into Thicket)",
+        "Cannot find module 'os-dns-native/build/Debug/os_dns_native.node' (native addon not bundled into Thicket)",
       ],
     ]);
   });
 
-  it('also stubs an addon imported from an ES module', async () => {
-    writeFileSync(
-      join(dir, 'esm.mjs'),
+  it('stubs every allow-listed addon in one bundle, each failing with its own package path', async () => {
+    put(['node_modules', 'os-dns-native', 'build', 'Release', 'os_dns_native.node'], 'fake addon');
+    put(
+      ['node_modules', 'os-dns-native', 'index.js'],
+      "module.exports = require('./build/Release/os_dns_native.node');",
+    );
+    put(['several.cjs'], tryLoadAll(['ssh2/lib/protocol/required.js', 'os-dns-native/index.js']));
+    const code = await bundle('several.cjs');
+    expect(code).not.toContain('fake addon');
+    expect(run(code)).toEqual([
+      ['MODULE_NOT_FOUND', SSHCRYPTO_MESSAGE],
+      [
+        'MODULE_NOT_FOUND',
+        "Cannot find module 'os-dns-native/build/Release/os_dns_native.node' (native addon not bundled into Thicket)",
+      ],
+    ]);
+  });
+
+  it('gives identical relative addon paths in different packages distinct stubs', async () => {
+    for (const pkg of [
+      'win-export-certificate-and-key',
+      '@mongodb-js/macos-export-certificate-and-key',
+    ]) {
+      put(
+        ['node_modules', ...pkg.split('/'), 'index.js'],
+        "module.exports = require('./build/Release/binding.node');",
+      );
+    }
+    put(
+      ['exporters.cjs'],
+      tryLoadAll([
+        'win-export-certificate-and-key/index.js',
+        '@mongodb-js/macos-export-certificate-and-key/index.js',
+      ]),
+    );
+    expect(run(await bundle('exporters.cjs'))).toEqual([
+      [
+        'MODULE_NOT_FOUND',
+        "Cannot find module 'win-export-certificate-and-key/build/Release/binding.node' (native addon not bundled into Thicket)",
+      ],
+      [
+        'MODULE_NOT_FOUND',
+        "Cannot find module '@mongodb-js/macos-export-certificate-and-key/build/Release/binding.node' (native addon not bundled into Thicket)",
+      ],
+    ]);
+  });
+
+  it('also stubs an allow-listed addon imported from an ES module', async () => {
+    put(
+      [...SSH2_CRYPTO, 'esm.mjs'],
       "import binding from './crypto/build/Release/sshcrypto.node';\nexport default binding;",
     );
+    put(['esm.mjs'], "export { default } from 'ssh2/lib/protocol/esm.mjs';");
     const code = await bundle('esm.mjs');
     expect(() => run(code)).toThrow(/native addon not bundled into Thicket/);
   });
 
+  it('stubs an allow-listed addon named by a bare package specifier', async () => {
+    put(['bare.cjs'], tryLoadAll(['ssh2/lib/protocol/crypto/build/Release/sshcrypto.node']));
+    expect(run(await bundle('bare.cjs'))).toEqual([['MODULE_NOT_FOUND', SSHCRYPTO_MESSAGE]]);
+  });
+
+  it('fails the build for an addon of a package that is not allow-listed, naming the importer', async () => {
+    const importer = put(
+      ['node_modules', 'fast-thing', 'index.js'],
+      "module.exports = require('./build/Release/fast.node');",
+    );
+    put(['unlisted.cjs'], "module.exports = require('fast-thing');");
+    const error = await bundle('unlisted.cjs').then(
+      () => undefined,
+      (e: unknown) => e as Error,
+    );
+    expect(error?.message).toContain("Native addon './build/Release/fast.node'");
+    expect(error?.message).toContain(importer);
+    expect(error?.message).toContain('(package fast-thing)');
+    expect(error?.message).toContain('mark the package external');
+    expect(error?.message).toContain('OPTIONAL_ADDONS');
+  });
+
+  it('fails the build for an unlisted addon of an allow-listed package, whether or not it was compiled', async () => {
+    put([...SSH2_CRYPTO, 'build', 'Release', 'other.node'], 'fake addon');
+    put([...SSH2_CRYPTO, 'other.js'], "module.exports = require('./build/Release/other.node');");
+    put([...SSH2_CRYPTO, 'missing.js'], "module.exports = require('./build/Release/gone.node');");
+    for (const file of ['other', 'missing']) {
+      put([`${file}.cjs`], `module.exports = require('ssh2/lib/protocol/${file}.js');`);
+      await expect(bundle(`${file}.cjs`)).rejects.toThrow(
+        /\(package ssh2\) is not in the allow-list/,
+      );
+    }
+  });
+
+  it('fails the build for an addon outside node_modules', async () => {
+    put(['own.cjs'], "module.exports = require('./build/Release/own.node');");
+    await expect(bundle('own.cjs')).rejects.toThrow(
+      /Native addon '\.\/build\/Release\/own\.node' imported by .*own\.cjs is not in the allow-list/,
+    );
+  });
+
   it('bundles files whose names only start with or contain ".node" normally', async () => {
-    writeFileSync(join(dir, 'helper.node.cjs'), "module.exports = 'js helper';");
-    writeFileSync(join(dir, 'other.nodejs'), "module.exports = 'not an addon';");
-    writeFileSync(
-      join(dir, 'lookalikes.cjs'),
+    put(['helper.node.cjs'], "module.exports = 'js helper';");
+    put(['other.nodejs'], "module.exports = 'not an addon';");
+    put(
+      ['lookalikes.cjs'],
       "module.exports = [require('./helper.node.cjs'), require('./other.nodejs')];",
     );
     // `.nodejs` has no esbuild loader either: give it one so only the plugin's filter is tested.
@@ -163,6 +256,59 @@ describe('omitNativeAddons', () => {
     const [output] = result.outputFiles;
     if (!output) throw new Error('esbuild wrote no output');
     expect(run(output.text)).toEqual(['js helper', 'not an addon']);
+  });
+});
+
+describe('addonLocation', () => {
+  it('finds the package with POSIX and Windows separators', () => {
+    const expected = {
+      packageName: 'ssh2',
+      file: 'lib/protocol/crypto/build/Release/sshcrypto.node',
+    };
+    expect(
+      addonLocation('/app/node_modules/ssh2/lib/protocol/crypto/build/Release/sshcrypto.node'),
+    ).toEqual(expected);
+    expect(
+      addonLocation(
+        'C:\\app\\node_modules\\ssh2\\lib\\protocol\\crypto\\build\\Release\\sshcrypto.node',
+      ),
+    ).toEqual(expected);
+  });
+
+  it('uses the innermost node_modules and handles scoped packages', () => {
+    expect(
+      addonLocation(
+        'C:\\a\\node_modules\\system-ca\\node_modules\\@mongodb-js\\macos-export-certificate-and-key\\build\\Release\\x.node',
+      ),
+    ).toEqual({
+      packageName: '@mongodb-js/macos-export-certificate-and-key',
+      file: 'build/Release/x.node',
+    });
+  });
+
+  it('returns undefined outside node_modules or without a file inside the package', () => {
+    expect(addonLocation('/app/build/Release/x.node')).toBeUndefined();
+    expect(addonLocation('/app/node_modules/x.node')).toBeUndefined();
+    expect(addonLocation('/app/node_modules/@scope/x.node')).toBeUndefined();
+  });
+});
+
+describe('isOptionalAddon', () => {
+  it('matches allow-listed packages by addon file name, in any build directory', () => {
+    expect(
+      isOptionalAddon({ packageName: 'os-dns-native', file: 'build/Debug/os_dns_native.node' }),
+    ).toBe(true);
+    expect(
+      isOptionalAddon({ packageName: 'os-dns-native', file: 'build/Release/other.node' }),
+    ).toBe(false);
+    expect(isOptionalAddon({ packageName: 'ssh2', file: 'sshcrypto.node' })).toBe(true);
+    expect(isOptionalAddon({ packageName: 'not-ssh2', file: 'sshcrypto.node' })).toBe(false);
+    expect(
+      isOptionalAddon({
+        packageName: 'win-export-certificate-and-key',
+        file: 'build/Release/any.node',
+      }),
+    ).toBe(true);
   });
 });
 

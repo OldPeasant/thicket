@@ -52,7 +52,9 @@ jobs:
   # The packaged app with native addons compiled. Optional addons (ssh2's sshcrypto,
   # os-dns-native, ...) are built by `npm ci` only where a C/C++ toolchain exists: the runners
   # have one, agents' machines usually don't. Release v0.1.0-rc.1 failed in esbuild because of
-  # them (apps/desktop/src/build/native-addons.ts); this job catches such failures on every push.
+  # them. The vetted optional ones are now left out (apps/desktop/src/build/native-addons.ts) and
+  # any other addon fails the build there; this job builds and smoke-tests with them compiled on
+  # every push.
   bundle:
     name: bundle (ubuntu-latest, native addons)
     runs-on: ubuntu-latest
