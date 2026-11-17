@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "task": "profiles-import-export",
+  "reviewed_revision": "a1e78d240796d94f84bdfd6b77772bfbe9a12d7d",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/profiles-import-export/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/profiles-import-export/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/profiles-import-export/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P2", "disposition": "fixed", "note": "Thicket-format import strips secret URI options before saving to connections.json"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "Thicket import turns secretMode 'saved' into 'ask' when no secret is stored"},
+    {"id": "CR-3", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "failures to save imported secrets are logged"},
+    {"id": "CR-4", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "architecture note updated, unused PlannedPage removed"},
+    {"id": "CR-5", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "handler tests for Thicket file, oversized file, read-only store"},
+    {"id": "CR-6", "source": "code-reviewer", "severity": "P3", "disposition": "fixed", "note": "import notices give per-secret advice (asked when connecting / connection editor / not enterable)"},
+    {"id": "TW-1", "source": "test-writer", "severity": "Low", "disposition": "fixed", "note": "colorOf no longer resolves inherited object keys"}
+  ],
+  "validation": [
+    {"command": "cd apps/desktop && npx vitest run src/profiles src/main", "result": "pass"},
+    {"command": "npm run test:e2e -- profiles-import", "result": "pass"},
+    {"command": "npm run check", "result": "pass"}
+  ]
+}

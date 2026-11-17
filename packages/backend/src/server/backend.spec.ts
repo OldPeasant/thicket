@@ -14,10 +14,12 @@ import {
 import { Server as SshServer, utils as sshUtils } from 'ssh2';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { ConnectionManager } from '../connections/manager';
+import { ShellHost } from '../shell';
 import { startBackend, type ParentPortLike } from './backend';
 import { sleep } from './handlers';
 import type { MainPortLike } from './ports';
-import { RpcError, serve, type Port } from './rpc';
+import { RpcError, serve, type Handler, type Port } from './rpc';
 import { portPair } from './testing';
 
 /** A `MainPortLike` over one end of an in-memory pair. */
@@ -519,6 +521,205 @@ describe('startBackend: connections', () => {
     expect(await m.answer('l')).toMatchObject({ ok: false, error: { code: 'NOT_CONNECTED' } });
     expect(await m.answer('s')).toMatchObject({ ok: false, error: { code: 'NOT_CONNECTED' } });
     expect(m.forConnect).not.toHaveBeenCalled();
+  });
+
+  it('serves shell.*; shell.open needs an open connection, eval of an unknown session NOT_FOUND', async () => {
+    const parentPort: ParentPortLike = { on: () => undefined };
+    expect(Object.keys(startBackend({ parentPort, pid: 1 }))).toEqual(
+      expect.arrayContaining(['shell.open', 'shell.eval', 'shell.complete', 'shell.close']),
+    );
+    const m = withMain();
+    m.renderer.send({ id: 'o', method: 'shell.open', params: { profileId: 'ssh' } });
+    // Not write-guarded on a read-only production profile: the server's permissions guard it.
+    m.renderer.send({
+      id: 'e',
+      method: 'shell.eval',
+      params: { sessionId: 'unknown', code: 'db.c.drop()' },
+    });
+    m.renderer.send({
+      id: 'c',
+      method: 'shell.complete',
+      params: { sessionId: 'unknown', code: 'db.', cursor: 3 },
+    });
+    expect(await m.answer('o')).toMatchObject({ ok: false, error: { code: 'NOT_CONNECTED' } });
+    expect(await m.answer('e')).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } });
+    expect(await m.answer('c')).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } });
+  });
+
+  it('conn.close also closes the shell sessions of that profile, after the connection', async () => {
+    const order: string[] = [];
+    const closeProfile = vi
+      .spyOn(ShellHost.prototype, 'closeProfile')
+      .mockImplementation((profileId: string) => {
+        order.push(`shells ${profileId}`);
+        return Promise.resolve();
+      });
+    const original = ConnectionManager.prototype.close;
+    const connClose = vi.spyOn(ConnectionManager.prototype, 'close').mockImplementation(function (
+      this: ConnectionManager,
+      profileId: string,
+    ) {
+      order.push(`connection ${profileId}`);
+      return original.call(this, profileId);
+    });
+    try {
+      const m = withMain();
+      m.renderer.send({ id: 'c', method: 'conn.close', params: { profileId: 'prod' } });
+      expect(await m.answer('c')).toMatchObject({ ok: true, result: {} });
+      expect(closeProfile).toHaveBeenCalledTimes(1);
+      expect(closeProfile).toHaveBeenCalledWith('prod');
+      expect(order).toEqual(['connection prod', 'shells prod']);
+    } finally {
+      closeProfile.mockRestore();
+      connClose.mockRestore();
+    }
+  });
+
+  it('conn.close answers only once the shell sessions are closed', async () => {
+    let finish: () => void = () => undefined;
+    const closeProfile = vi
+      .spyOn(ShellHost.prototype, 'closeProfile')
+      .mockImplementation(() => new Promise<void>((resolve) => (finish = resolve)));
+    try {
+      const m = withMain();
+      const responses: Response[] = [];
+      m.renderer.onMessage((r) => responses.push(r as Response));
+      m.renderer.send({ id: 'c', method: 'conn.close', params: { profileId: 'p1' } });
+      await vi.waitFor(() => expect(closeProfile).toHaveBeenCalledWith('p1'));
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(responses.find((r) => r.id === 'c')).toBeUndefined();
+      finish();
+      expect(await m.answer('c')).toMatchObject({ ok: true, result: {} });
+    } finally {
+      closeProfile.mockRestore();
+    }
+  });
+
+  it('a conn.status broadcast to error or disconnected closes that profile’s shell sessions', async () => {
+    const closeProfile = vi
+      .spyOn(ShellHost.prototype, 'closeProfile')
+      .mockImplementation(() => Promise.resolve());
+    // The manager built by startBackend, caught on its first use (conn.status).
+    const statuses = vi.spyOn(ConnectionManager.prototype, 'statuses');
+    try {
+      const m = withMain();
+      m.renderer.send({ id: 's', method: 'conn.status', params: {} });
+      expect(await m.answer('s')).toMatchObject({ ok: true });
+      // The manager's deps.onStatus is what tunnelLost calls (manager.spec covers that call).
+      const manager = statuses.mock.contexts[0] as unknown as {
+        deps: { onStatus: (status: unknown) => void };
+      };
+      const onStatus = manager.deps.onStatus;
+      onStatus({ profileId: 'prod', state: 'connected' });
+      onStatus({ profileId: 'prod', state: 'connecting' });
+      expect(closeProfile).not.toHaveBeenCalled();
+      onStatus({
+        profileId: 'ssh',
+        state: 'error',
+        error: { code: 'SSH_ERROR', message: 'The SSH tunnel was closed' },
+      });
+      onStatus({ profileId: 'p1', state: 'disconnected' });
+      expect(closeProfile.mock.calls).toEqual([['ssh'], ['p1']]);
+    } finally {
+      closeProfile.mockRestore();
+      statuses.mockRestore();
+    }
+  });
+
+  it('a failing shell close on connection loss is logged; the status is still broadcast', async () => {
+    const closeProfile = vi
+      .spyOn(ShellHost.prototype, 'closeProfile')
+      .mockImplementation(() => Promise.reject(new Error('worker would not stop')));
+    const statuses = vi.spyOn(ConnectionManager.prototype, 'statuses');
+    try {
+      const m = withMain();
+      const events: Event[] = [];
+      m.renderer.onMessage((message) => {
+        const event = message as Partial<Event>;
+        if (event.stream === BROADCAST_STREAMS.connStatus) events.push(event as Event);
+      });
+      m.renderer.send({ id: 's', method: 'conn.status', params: {} });
+      expect(await m.answer('s')).toMatchObject({ ok: true });
+      const manager = statuses.mock.contexts[0] as unknown as {
+        deps: { onStatus: (status: unknown) => void };
+      };
+      const lost = {
+        profileId: 'ssh',
+        state: 'error',
+        error: { code: 'SSH_ERROR', message: 'The SSH tunnel was closed' },
+      };
+      expect(() => manager.deps.onStatus(lost)).not.toThrow();
+      await vi.waitFor(() =>
+        expect(m.log).toHaveBeenCalledWith(
+          'shell: closing the sessions of ssh failed: Error: worker would not stop',
+        ),
+      );
+      await vi.waitFor(() => expect(events).toHaveLength(1));
+      expect(events[0]).toMatchObject({ kind: 'data', payload: lost });
+      expect(closeProfile).toHaveBeenCalledWith('ssh');
+    } finally {
+      closeProfile.mockRestore();
+      statuses.mockRestore();
+    }
+  });
+
+  it('shell.open answers UNSUPPORTED without a shell worker once connected', async () => {
+    const parentPort: ParentPortLike = { on: () => undefined };
+    const configOf = vi
+      .spyOn(ConnectionManager.prototype, 'configOf')
+      .mockReturnValue({ uri: 'mongodb://db.example.test:27017', options: {} });
+    try {
+      const handlers = startBackend({ parentPort, pid: 1 });
+      const open = handlers['shell.open'] as Handler;
+      await expect(
+        Promise.resolve(
+          open({ profileId: 'p1' } as never, {
+            signal: new AbortController().signal,
+            requestId: 'r',
+          }),
+        ),
+      ).rejects.toMatchObject({ code: 'UNSUPPORTED' });
+    } finally {
+      configOf.mockRestore();
+    }
+  });
+
+  it('serves shell.* next to the conn, ssh, idx, docs, agg and io handlers (merged wiring)', () => {
+    const parentPort: ParentPortLike = { on: () => undefined };
+    const handlers = startBackend({ parentPort, pid: 1 });
+    expect(Object.keys(handlers)).toEqual(
+      expect.arrayContaining([
+        'backend.ping',
+        'conn.open',
+        'conn.close',
+        'conn.trustHostKey',
+        'db.listDatabases',
+        'docs.find',
+        'agg.run',
+        'idx.list',
+        'idx.create',
+        'io.import',
+        'shell.open',
+        'shell.eval',
+        'shell.complete',
+        'shell.close',
+      ]),
+    );
+    for (const method of ['shell.open', 'shell.eval', 'shell.complete', 'shell.close']) {
+      expect(typeof handlers[method]).toBe('function');
+    }
+  });
+
+  it('conn.close of a profile without shell sessions still answers {} (closeProfile is a no-op)', async () => {
+    const closeProfile = vi.spyOn(ShellHost.prototype, 'closeProfile');
+    try {
+      const m = withMain();
+      m.renderer.send({ id: 'c', method: 'conn.close', params: { profileId: 'p1' } });
+      expect(await m.answer('c')).toMatchObject({ ok: true, result: {} });
+      expect(closeProfile).toHaveBeenCalledWith('p1');
+    } finally {
+      closeProfile.mockRestore();
+    }
   });
 
   it('logs connection events with a prefix and without the password', async () => {

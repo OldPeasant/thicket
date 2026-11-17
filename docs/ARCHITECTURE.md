@@ -162,6 +162,20 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   none, and switching `secretMode` away from `saved` clears the saved password.
   `profilesHandlers` serve `profiles.list/get/save/delete/duplicate` and gate
   `profiles.setSecret` on the profile existing (`NOT_FOUND`).
+- Import/export (`src/profiles/import/`): `importExportHandlers` serve `profiles.importCompass`
+  (a file chosen with the native open dialog in `main`, at most `MAX_IMPORT_FILE_BYTES`),
+  `profiles.importUris` and `profiles.export` (native save dialog; the renderer never names a
+  path). `parseImportFile` reads a Compass export (`type: 'Compass Connections'`, version 1,
+  possibly as EJSON; passphrase-encrypted `connectionSecrets` are left out with a notice) or a
+  Thicket export; `profileFromUri` (`uri.ts`, mirrors the editor's `profileDraftFromState`) turns
+  a connection string into a profile and takes its secrets out (password, `proxyPassword`,
+  `tlsCertificateKeyFilePassword`, `AWS_SESSION_TOKEN`). Secrets go to `secrets.bin` only with a
+  `secure` keychain, else they are dropped and the profile asks (with a notice); entries equal in
+  name and connection string to an existing profile are skipped. `exportFile` writes
+  `{ type: 'Thicket Connections', version: 1, profiles: [Profile without id] }` with `saved`
+  turned into `ask` and secrets stripped from the connection string; importing such a file strips
+  them again and never stores a secret. The desktop app depends on `@thicket/core` for this
+  (`@thicket/core/uri`).
 - Connections (`packages/backend/src/connections/`, backend): `ConnectionManager` keeps one
   driver client per profile id (`connecting` → `connected` / `error`; closed ones are forgotten
   and report `disconnected`) and serves `conn.test/open/close/status/serverInfo`
@@ -418,8 +432,8 @@ Contract layout (`packages/contract/src/`):
   are the "start page" shown when no tab is active: `''` → `Welcome`, `NAV.connections`
   (`/connections`, manager), `NAV.newConnection` (`/connections/new`) and
   `editConnectionUrl(id)` (`/connections/:id`) → the connection pages (lazy, see "Connection
-  editor"), `NAV.importCompass` (`/connections/import/compass`) → a `PlannedPage` placeholder
-  that profiles-import-export replaces. Routes bind parameters to inputs
+  editor"), `NAV.importCompass` (`/connections/import/compass`) → `ImportExportPage` (lazy, see
+  "Connection editor"). Routes bind parameters to inputs
   (`withComponentInputBinding`). `dev/explorer` stays outside
   the shell. Any `NavigationEnd` shows the routed page (`WorkspaceService.showHome()`).
 - Tabs: `WorkspaceService` (`tabs`, `activeId`, `open/close/activate/cycle/move/showHome`); a tab is
@@ -455,6 +469,10 @@ Contract layout (`packages/contract/src/`):
   secrets are used), else the draft (+ the typed password, also in "ask" mode, never stored);
   errors show the code, `ERROR_MESSAGES` and the backend's message. After Save it calls
   `SidebarTreeService.reloadProfiles()`.
+- `ImportExportPage` (`connections/import/`, `/connections/import/compass`, linked from the
+  manager and the welcome page): import a Compass or Thicket file, import a list of connection
+  strings (one per line), export selected profiles without secrets; shows imported, skipped and
+  notices, then calls `SidebarTreeService.reloadProfiles()`.
 - `ConnectionsPage` (`/connections`): profiles grouped by folder (`groupByFolder`), edit,
   duplicate, delete (asked inline; closes the connection and its tabs). The sidebar links to it
   (`sidebar-manage`) and has "Edit connection…" in a connection's context menu.

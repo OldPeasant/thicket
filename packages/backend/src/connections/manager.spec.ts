@@ -1688,6 +1688,70 @@ describe('isOpenClient', () => {
   });
 });
 
+describe('ConnectionManager.configOf (task shell-backend)', () => {
+  it('answers the driver configuration of the open client, secrets resolved', async () => {
+    const { manager, created } = setup();
+    await manager.open('p1', undefined);
+    const config = manager.configOf('p1');
+    expect(config).toEqual({ uri: created[0]?.uri, options: created[0]?.options });
+    expect(config.uri).toBe('mongodb://db.example.test:27017');
+    expect(config.options.auth).toEqual({ username: 'alice', password: STORED_PASSWORD });
+    await manager.close('p1');
+  });
+
+  it('keeps the configurations of several profiles apart', async () => {
+    const { manager } = setup({
+      profiles: {
+        p1: savedProfile('p1'),
+        p2: savedProfile('p2', { connectionString: 'mongodb://other.example.test:27018' }),
+      },
+    });
+    await manager.open('p1', undefined);
+    await manager.open('p2', undefined);
+    expect(manager.configOf('p1').uri).toBe('mongodb://db.example.test:27017');
+    expect(manager.configOf('p2').uri).toBe('mongodb://other.example.test:27018');
+    await manager.closeAll();
+  });
+
+  it('answers NOT_CONNECTED for a profile that is not open, still connecting or closed', async () => {
+    const gate = deferred();
+    const { manager } = setup({ clients: [fakeClient(() => gate.promise)] });
+    const notConnected = expect.objectContaining({ code: 'NOT_CONNECTED' }) as unknown;
+    expect(() => manager.configOf('p1')).toThrow(notConnected as Error);
+    const opening = manager.open('p1', undefined);
+    expect(() => manager.configOf('p1')).toThrow(notConnected as Error);
+    gate.resolve();
+    await opening;
+    expect(manager.configOf('p1').uri).toBe('mongodb://db.example.test:27017');
+    await manager.close('p1');
+    expect(() => manager.configOf('p1')).toThrow(notConnected as Error);
+  });
+
+  it('answers NOT_CONNECTED after a failed connect', async () => {
+    const { manager } = setup({
+      clients: [fakeClient(() => Promise.reject(new Error('connect ECONNREFUSED')))],
+    });
+    await manager.open('p1', undefined).catch(() => undefined);
+    expect(() => manager.configOf('p1')).toThrow(
+      expect.objectContaining({ code: 'NOT_CONNECTED' }) as unknown as Error,
+    );
+  });
+
+  it('follows a reconnect: the configuration of the new client (e.g. a changed password)', async () => {
+    let password = STORED_PASSWORD;
+    const { manager } = setup({ loadSecrets: () => Promise.resolve({ password }) });
+    await manager.open('p1', undefined);
+    await manager.close('p1');
+    password = 'fictitious-rotated-Pw4';
+    await manager.open('p1', undefined);
+    expect(manager.configOf('p1').options.auth).toEqual({
+      username: 'alice',
+      password: 'fictitious-rotated-Pw4',
+    });
+    await manager.close('p1');
+  });
+});
+
 describe('ConnectionManager.cancelOnClose', () => {
   it('close aborts the running work and waits for it before closing the client', async () => {
     const { manager, created } = setup();

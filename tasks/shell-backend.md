@@ -1,11 +1,11 @@
 ---
 title: M4: mongosh host in the backend
-status: in_progress
+status: done
 owner: dell26/agent-3
 deps: [mongosh-spike,conn-manager]
 touches: [packages/backend/src/shell]
 prio: 2
-lease_until: 2026-11-17T03:31:13Z
+lease_until: 
 extended: 
 releases: 1
 ---
@@ -15,11 +15,14 @@ shell.open/eval/complete/close per connection following docs/mongosh.md; output 
 ## Acceptance criteria
 - [x] Integration tests: `use test; db.c.insertOne({a:1}); db.c.find()` returns the document as EJSON
   - verified (2026-11-17 03:42+0100 by dell26/agent-1): npx vitest run --config test/integration/vitest.config.ts test/integration/shell.int.spec.ts --reporter=verbose (MongoDB container via Podman, merged HEAD 369c532) -> 17 passed incl. 'shell.eval > use test; db.c.insertOne({a:1}); db.c.find() returns the document as EJSON'
+  - verified (2026-11-17 04:19+0100 by dell26/agent-3): npx vitest run --config test/integration/vitest.config.ts test/integration/shell.int.spec.ts --reporter=verbose (MongoDB container via Podman, HEAD 8fd9c3f merged with origin/main b739b48) -> 18 passed incl. 'use test; db.c.insertOne({a:1}); db.c.find() returns the document as EJSON'
 - [x] Interrupt stops `while(true){}` within 2 s (int test)
   - verified (2026-11-17 03:42+0100 by dell26/agent-1): npx vitest run --config test/integration/vitest.config.ts test/integration/shell.int.spec.ts --reporter=verbose (MongoDB container via Podman, merged HEAD 369c532) -> 17 passed incl. 'interrupt > stops while(true){} within 2 s and the session goes on' (1.7 s)
+  - verified (2026-11-17 04:19+0100 by dell26/agent-3): npx vitest run --config test/integration/vitest.config.ts test/integration/shell.int.spec.ts --reporter=verbose (MongoDB container via Podman, HEAD 8fd9c3f merged with origin/main b739b48) -> 18 passed incl. 'interrupt > stops while(true){} within 2 s and the session goes on' (1.6 s)
 - [x] complete('db.c.fi') suggests `find`, `findOne` (test)
   - verified (2026-11-17 03:42+0100 by dell26/agent-1): npx vitest run --config test/integration/vitest.config.ts test/integration/shell.int.spec.ts --reporter=verbose (MongoDB container via Podman, merged HEAD 369c532) -> 17 passed incl. 'shell.complete > complete(db.c.fi) suggests find and findOne' against the real mongosh runtime; plus handlers.spec.ts unit cases
   - verified (2026-11-17 03:42+0100 by dell26/agent-1): npx vitest run --config test/integration/vitest.config.ts test/integration/shell.int.spec.ts --reporter=verbose (MongoDB via Podman, merged HEAD 369c532) -> 'shell.complete > complete db.c.fi suggests find and findOne' passed against the real mongosh runtime
+  - verified (2026-11-17 04:19+0100 by dell26/agent-3): npx vitest run --config test/integration/vitest.config.ts test/integration/shell.int.spec.ts --reporter=verbose (MongoDB container via Podman, HEAD 8fd9c3f merged with origin/main b739b48) -> 18 passed incl. 'shell.complete > complete(db.c.fi) suggests find and findOne' against the real mongosh runtime
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
@@ -31,3 +34,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 03:07+0100 by dell26/agent-1): exit/quit (and exit()/quit()) are not passed to mongosh (it would close the session's client): the console prints that they are unavailable and the session goes on; closing the shell tab ends the session
 - extended by dell26/agent-1: Implementation complete; all 3 criteria verified on merged HEAD (shell int 17/17, npm run check pass); round-4 review 0 P0-P2. Main merged in 369c532 (conflict resolution in apps/desktop/scripts/build.mjs externals, packages/backend/package.json deps, src/index.ts exports, server/backend.ts ssh+indexes+shell wiring). done refuses: evidence stale after that resolution. Left: run test-writer + code-reviewer on current HEAD (scope: the merge resolution lines), update quality.json reviewed_revision, done.
 - release by dell26/agent-1: over budget after 2 sessions (~60 min) and a review that decided nothing; still resumable: continue from wip/shell-backend (see git log)
+- done by dell26/agent-3: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 62s on b9d381724; criteria verified 3/3
