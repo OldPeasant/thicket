@@ -422,6 +422,12 @@ export class SidebarTree {
           run: () => this.tree.openCurrentOps(id),
         },
         {
+          id: 'watch',
+          label: 'Watch changes',
+          disabled: !connected,
+          run: () => this.tree.openWatch(id),
+        },
+        {
           id: 'create-db',
           label: 'Create database…',
           write: true,
@@ -464,6 +470,11 @@ export class SidebarTree {
           run: () => this.tree.openGridfs(profileId, db),
         },
         {
+          id: 'watch',
+          label: 'Watch changes',
+          run: () => this.tree.openWatch(profileId, db),
+        },
+        {
           id: 'create-coll',
           label: 'Create collection…',
           write: true,
@@ -486,6 +497,12 @@ export class SidebarTree {
         label: 'Show counts and sizes',
         disabled: info.type === 'view',
         run: () => void this.tree.loadCollStats(profileId, db, info.name),
+      },
+      {
+        id: 'watch',
+        label: 'Watch changes',
+        disabled: info.type === 'view',
+        run: () => this.tree.openWatch(profileId, db, info.name),
       },
       {
         id: 'rename',

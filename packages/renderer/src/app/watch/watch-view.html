@@ -1,0 +1,170 @@
+<section class="watch" aria-label="Watch changes">
+  <header class="head">
+    <span class="live" [attr.data-state]="status().state" aria-hidden="true"></span>
+    <span class="code call" data-testid="watch-call">{{ call() }}</span>
+    <div class="actions">
+      <label class="check">
+        <input
+          #lookup
+          type="checkbox"
+          data-testid="watch-lookup"
+          [checked]="fullDocument() === 'updateLookup'"
+          (change)="setFullDocument(lookup.checked)"
+        />
+        Show the whole document on updates
+      </label>
+      @if (running()) {
+        <button type="button" class="btn" data-testid="watch-stop" (click)="stop()">Stop</button>
+      } @else {
+        <button type="button" class="btn primary" data-testid="watch-start" (click)="start()">
+          Start
+        </button>
+      }
+      <button
+        type="button"
+        class="btn quiet"
+        data-testid="watch-clear"
+        [disabled]="received() === 0"
+        (click)="clear()"
+      >
+        Clear
+      </button>
+    </div>
+  </header>
+
+  @switch (status().state) {
+    @case ('needsReplicaSet') {
+      <div class="notice" role="alert" data-testid="watch-needs-rs">
+        <p class="title">This server can't be watched: change streams need a replica set</p>
+        <p>
+          The connection goes to a standalone server. Change streams are only available on a replica
+          set or a sharded cluster. To watch a development server, start it as a single-member
+          replica set (<span class="code">mongod --replSet rs0</span>, then
+          <span class="code">rs.initiate()</span>).
+        </p>
+      </div>
+    }
+    @case ('error') {
+      <p class="note error" role="alert" data-testid="watch-error">
+        {{ errorMessage() }}
+      </p>
+    }
+    @case ('ended') {
+      <p class="note" role="status" data-testid="watch-ended">
+        The server ended the change stream (the watched collection or database was dropped or
+        renamed). Start to watch again.
+      </p>
+    }
+    @case ('stopped') {
+      @if (received() > 0) {
+        <p class="note" role="status" data-testid="watch-stopped">
+          Stopped. Changes made meanwhile are not shown; Start to watch again.
+        </p>
+      }
+    }
+  }
+
+  <div class="body" [class.split]="opened() !== null">
+    <div class="scroll">
+      @if (entries().length === 0) {
+        @if (running()) {
+          <p class="note" data-testid="watch-waiting">
+            {{
+              status().state === 'starting'
+                ? 'Starting the change stream…'
+                : 'Watching. Changes appear here as they happen.'
+            }}
+          </p>
+        }
+      } @else {
+        <ol class="events" data-testid="watch-events" aria-label="Change events, newest first">
+          @for (e of entries(); track e.seq) {
+            <li
+              class="event"
+              data-testid="watch-event"
+              [attr.data-op]="e.op"
+              [attr.data-kind]="e.kind"
+              [class.open]="expanded().has(e.seq)"
+            >
+              <div class="row">
+                <button
+                  type="button"
+                  class="toggle"
+                  [attr.aria-expanded]="expanded().has(e.seq)"
+                  [attr.aria-label]="'Event ' + e.seq + ': ' + e.op"
+                  (click)="toggle(e)"
+                ></button>
+                <span class="seq">{{ e.seq }}</span>
+                <span class="time code">{{ formatTime(e.time) }}</span>
+                <span class="op">{{ e.op }}</span>
+                @if (showNamespace()) {
+                  <span class="ns code" [title]="e.db + '.' + e.coll">{{
+                    e.coll ? e.db + '.' + e.coll : e.db
+                  }}</span>
+                }
+                <span class="id code" [title]="e.idLabel">{{ e.idLabel }}</span>
+                <span class="summary">{{ e.summary }}</span>
+                @if (e.openable) {
+                  <button
+                    type="button"
+                    class="btn quiet small"
+                    data-testid="watch-open"
+                    [attr.aria-label]="'Open document ' + e.idLabel"
+                    (click)="open(e)"
+                  >
+                    Open document
+                  </button>
+                }
+              </div>
+              @if (expanded().has(e.seq)) {
+                <pre class="code text" data-testid="watch-event-text">{{ e.text }}</pre>
+              }
+            </li>
+          }
+        </ol>
+      }
+    </div>
+
+    @if (opened(); as d) {
+      <aside class="doc" aria-label="Changed document" data-testid="watch-doc">
+        <header class="doc-head">
+          <span class="code" [title]="d.entry.db + '.' + d.entry.coll"
+            >{{ d.entry.db }}.{{ d.entry.coll }} {{ d.entry.idLabel }}</span
+          >
+          <button
+            type="button"
+            class="btn quiet small"
+            data-testid="watch-doc-close"
+            (click)="closeDocument()"
+          >
+            Close
+          </button>
+        </header>
+        @switch (d.state) {
+          @case ('loading') {
+            <p class="note">Loading the document…</p>
+          }
+          @case ('loaded') {
+            <p class="hint">As it is on the server now</p>
+            <pre class="code text" data-testid="watch-doc-text">{{ docText() }}</pre>
+          }
+          @case ('missing') {
+            <p class="note" data-testid="watch-doc-missing">
+              No document with this _id exists now: it was deleted (or its collection dropped).
+            </p>
+          }
+          @case ('error') {
+            <p class="note error" role="alert">{{ docError() }}</p>
+          }
+        }
+      </aside>
+    }
+  </div>
+
+  <p class="foot" aria-live="off" data-testid="watch-count">
+    {{ received() }} {{ received() === 1 ? 'event' : 'events' }}
+    @if (dropped() > 0) {
+      (showing the newest {{ entries().length }})
+    }
+  </p>
+</section>

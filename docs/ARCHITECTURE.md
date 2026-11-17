@@ -677,6 +677,25 @@ Contract layout (`packages/contract/src/`):
   through `WriteGuard.run` with `alwaysConfirm`, then reads again. `currentop.model.ts` reduces
   the EJSON entries. e2e: `test/e2e/currentop.e2e.ts`.
 
+## Watch changes (`packages/renderer/src/app/watch`, backend `src/admin/watch`)
+- Tab kind `watch`, id `watchTabId(profileId, db?, coll?)`, data `WatchTabData` (`profileId`,
+  `db?`, `coll?`; no `db` = the whole deployment); opened by "Watch changes" in the sidebar's
+  connection, database and collection menus (`SidebarTreeService.openWatch`; not for views).
+- Backend `admin.watch` (streamed): a `hello` first refuses a standalone server with
+  `UNSUPPORTED`, detail `{ reason: 'needsReplicaSet' }` (the request fails, no stream; server code
+  40573 maps the same way). Then a raw `aggregate` with `$changeStream` (deployment:
+  `allChangesForCluster` on `admin`; database: `aggregate: 1`) on the primary, the user's stages
+  after it, and a `getMore` loop (`maxTimeMS` 1 s) with `RAW` options, so events are lossless
+  canonical EJSON, one `{ event }` per data event in server order. Cancel or `conn.close` kills the
+  cursor and ends `CANCELLED`; an `invalidate` (drop/rename of the watched namespace) ends the
+  stream (`end`). No automatic resume after errors. Int tests
+  `test/integration/change-streams.int.spec.ts` (`mongo8rs`, `mongo8` for the standalone).
+- Renderer: starts on open (`fullDocument: 'updateLookup'` by default, a checkbox restarts without
+  it), Stop/Start/Clear, newest first, at most `MAX_EVENTS` (1000) kept. Each event expands to its
+  shell syntax; "Open document" loads the document as it is now with `docs.get` (side panel;
+  "No document with this _id" after a delete). The standalone answer shows a notice explaining
+  that change streams need a replica set. `watch.model.ts` reduces the events.
+
 ## Aggregation builder (`packages/renderer/src/app/aggregation`)
 - `AggregationView` is the `aggregation` tab view (id `aggregationTabId(profileId, db, coll)`,
   `data` like a collection tab), opened with "Aggregate…" (`open-aggregation`) on the
