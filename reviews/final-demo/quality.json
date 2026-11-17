@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "task": "final-demo",
+  "reviewed_revision": "9cd0d4156b0ffe922c3314a6e7ffab6625bc4c63",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/final-demo/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/final-demo/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/final-demo/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "shot() scrolls the target into view after each theme switch; tron-dark step-02-production regenerated and shows the checked Production box"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "fixtures start with Promise.allSettled and the started one is stopped on failure; AppImage path+mtime logged"},
+    {"id": "TW-1", "source": "test-writer", "severity": "Low", "disposition": "fixed",
+     "note": "the demo logs and annotates the AppImage path and mtime, so a stale build is visible"},
+    {"id": "TW-2", "source": "test-writer", "severity": "Low", "disposition": "fixed",
+     "note": "AppImage rebuilt with npm run dist on the rebased code and the demo re-run (2 passed)"},
+    {"id": "TW-3", "source": "test-writer", "severity": "Low", "disposition": "accepted",
+     "note": "step 4 jumps to page 3 via the page field + Enter instead of one click; same rows 101-150; recorded with tasks.py assume"},
+    {"id": "TW-4", "source": "test-writer", "severity": "Low", "disposition": "fixed",
+     "note": "AppImage rebuilt again at 98916ba (includes saved-pipelines) and npm run test:e2e -- demo re-run -> 2 passed; screenshots refreshed"}
+  ],
+  "validation": [
+    {"command": "npm run dist && npm run test:e2e -- demo (AppImage built at 98916ba; .deb target fails on host, libcrypt.so.1 missing)", "result": "pass"},
+    {"command": "npx vitest run --config test/integration/vitest.config.ts fixtures.int.spec.ts", "result": "pass"},
+    {"command": "sh -c \"$(head -1 .taskcheck)\"", "result": "pass"}
+  ]
+}
