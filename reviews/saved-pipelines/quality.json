@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "task": "saved-pipelines",
+  "reviewed_revision": "7724ccbe3cd8608a9724fddec0b666db3535ceb1",
+  "helpers": {
+    "test-writer": { "status": "completed", "report": "reviews/saved-pipelines/tests.md" },
+    "code-reviewer": { "status": "completed", "report": "reviews/saved-pipelines/review.md" },
+    "fixer": { "status": "completed", "report": "reviews/saved-pipelines/fixes.md" }
+  },
+  "fixes_required": true,
+  "findings": [
+    {
+      "id": "CR-1",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "stale panel message/list error and late save/rename/delete responses after a collection change; Saved vs Replaced wording"
+    },
+    {
+      "id": "CR-2",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "focus moves to rename input / confirm button and back; confirm Delete and Rename disabled while busy"
+    },
+    {
+      "id": "CR-3",
+      "source": "code-reviewer",
+      "severity": "P3",
+      "disposition": "fixed",
+      "note": "test for a late pipelines.list answer after a collection change added by the test-writer"
+    }
+  ],
+  "validation": [
+    { "command": "npx vitest run apps/desktop/src/pipelines packages/contract", "result": "pass" },
+    { "command": "cd packages/renderer && npx ng test --include src/app/aggregation", "result": "pass" },
+    { "command": "npm run check", "result": "pass" }
+  ]
+}
