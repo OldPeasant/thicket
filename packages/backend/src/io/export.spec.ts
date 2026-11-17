@@ -270,18 +270,6 @@ describe('exportToFile', () => {
     expect(lines.at(-1)).toBe(`{"_id":${String(2 * EXPORT_BATCH_SIZE - 1)},"pad":"${pad}"}`);
   });
 
-  it.each(['csv', 'bson'] as const)(
-    'refuses %s with UNSUPPORTED and creates no file',
-    async (format) => {
-      const server = fakeServer([docs(0, 1)]);
-      await expect(
-        exportToFile(server.client, params({ format }), path.join(dir, `x.${format}`)),
-      ).rejects.toMatchObject({ code: 'UNSUPPORTED' });
-      expect(server.sent).toEqual([]);
-      expect(await readdir(dir)).toEqual([]);
-    },
-  );
-
   it('removes the partial file and rejects with the server error when a getMore fails', async () => {
     let getMores = 0;
     const server = fakeServer([docs(0, 2), docs(2, 2)], (cmd) =>

@@ -1,23 +1,49 @@
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
+import path from 'node:path';
 
-import type { ErrorSummary, IoProgress } from '@thicket/contract';
+import type { CsvType, ErrorSummary, IoProgress } from '@thicket/contract';
 import { BSON, type Document } from 'mongodb';
 
 import { canonical, toNumber } from '../browse/browse';
 import type { ClientLike } from '../connections/manager';
 import { Operation } from '../docs/query/query';
 import { RpcError } from '../server/rpc';
+import {
+  BsonScanner,
+  createDumpIndexes,
+  createWithOptions,
+  metadataPath,
+  parseDumpedDocument,
+  readMetadata,
+} from './bson/bson';
+import { recordToDocument, resolveMapping, type CsvColumnMapping } from './csv/convert';
+import { CsvScanner } from './csv/csv';
 import { JsonScanner, LineScanner, ScanError, type Scanner, type ScannedValue } from './scanner';
 
 /**
- * `io.previewImport` / `io.import` for JSON and JSON Lines. The file is read as a stream: values
- * come out of the scanner as their chunks arrive, are parsed as EJSON (canonical or relaxed: type
- * wrappers such as `{"$oid": …}` are honoured, plain numbers become Int32 / Int64 / Double) and
- * inserted in batches; the next chunk is read only after the batch was written.
+ * `io.previewImport` / `io.import`. The file is read as a stream: values come out of the
+ * format's scanner as their chunks arrive, are turned into documents and inserted in batches;
+ * the next chunk is read only after the batch was written.
+ *
+ * - JSON / JSON Lines: parsed as EJSON (canonical or relaxed: type wrappers such as
+ *   `{"$oid": …}` are honoured, plain numbers become Int32 / Int64 / Double).
+ * - CSV: the first record is the header; each column is imported as a field path with a BSON
+ *   type (`csvMapping`, default: every named column under its name as `auto`).
+ * - BSON: a `mongodump` `.bson` file, each document exactly as dumped; its `.metadata.json`
+ *   (when present) creates a new collection with the dump's options and, after the documents,
+ *   the dump's indexes. Errors name the document's number instead of a line.
  */
 
 export type TextImportFormat = 'json' | 'jsonl';
+export type ImportFormat = TextImportFormat | 'csv' | 'bson';
+
+/** One CSV column to import (`io.import`'s `csvMapping`). */
+export interface CsvMappingEntry {
+  column: string;
+  path: string;
+  bsonType: CsvType;
+}
 
 /** Most documents per `insert` command. */
 export const IMPORT_BATCH_DOCS = 1000;
@@ -88,31 +114,164 @@ export async function* scanFile(
   }
 }
 
+/** One document of the file to import: where it starts, and how to get it (throws RpcError). */
+export interface ImportItem {
+  line: number;
+  parse(): Document;
+}
+
+/** A CSV record as an import item, with its cells as written. */
+interface CsvItem extends ImportItem {
+  cells: string[];
+}
+
+/**
+ * The records of a CSV file as items; the first record is the header (passed to `onHeader`, not
+ * an item). The mapping is checked against the header before any item comes out.
+ */
+async function* csvItems(
+  file: string,
+  mapping: readonly CsvMappingEntry[] | undefined,
+  signal: AbortSignal | undefined,
+  onHeader?: (header: string[]) => void,
+): AsyncGenerator<CsvItem> {
+  const scanner = new CsvScanner();
+  const stream = createReadStream(file, { encoding: 'utf8', highWaterMark: 256 * 1024 });
+  let header: string[] | undefined;
+  let columns: CsvColumnMapping[] = [];
+  const take = function* (records: { cells: string[]; line: number }[]): Generator<CsvItem> {
+    for (const record of records) {
+      if (header === undefined) {
+        header = record.cells;
+        columns = resolveMapping(header, mapping);
+        onHeader?.(header);
+        continue;
+      }
+      const known = header;
+      yield {
+        line: record.line,
+        cells: record.cells,
+        parse: () => recordToDocument(record.cells, record.line, known, columns),
+      };
+    }
+  };
+  try {
+    for await (const chunk of stream) {
+      if (signal?.aborted) throw new RpcError('CANCELLED', 'The operation was cancelled');
+      yield* take(scanner.feed(chunk as string));
+    }
+    yield* take(scanner.end());
+  } finally {
+    stream.destroy();
+  }
+}
+
+/** The documents of a `.bson` dump as items (`line` is the document's number). */
+async function* bsonItems(
+  file: string,
+  signal: AbortSignal | undefined,
+): AsyncGenerator<ImportItem> {
+  const scanner = new BsonScanner();
+  const stream = createReadStream(file, { highWaterMark: 1024 * 1024 });
+  try {
+    for await (const chunk of stream) {
+      if (signal?.aborted) throw new RpcError('CANCELLED', 'The operation was cancelled');
+      for (const doc of scanner.feed(chunk as Buffer)) {
+        yield { line: doc.line, parse: () => parseDumpedDocument(doc) };
+      }
+    }
+    scanner.end();
+  } finally {
+    stream.destroy();
+  }
+}
+
+/** The documents of a file to import, in order. A broken structure throws `ScanError`. */
+export async function* importItems(
+  file: string,
+  format: ImportFormat,
+  signal?: AbortSignal,
+  csvMapping?: readonly CsvMappingEntry[],
+): AsyncGenerator<ImportItem> {
+  if (format === 'csv') {
+    yield* csvItems(file, csvMapping, signal);
+  } else if (format === 'bson') {
+    yield* bsonItems(file, signal);
+  } else {
+    for await (const value of scanFile(file, format, signal)) {
+      yield { line: value.line, parse: () => parseImportedDocument(value) };
+    }
+  }
+}
+
+/** Rows of a CSV file whose cells the preview shows. */
+export const CSV_PREVIEW_ROWS = 20;
+
 export interface ImportPreview {
   sizeBytes: number;
   /** Canonical EJSON of the first documents that parse (values that don't are skipped). */
   sample: string[];
+  /** CSV: the header and the cells of the first rows. */
+  csvColumns?: string[];
+  csvRows?: string[][];
+  /** BSON: the name of the dump metadata file next to the file, when there is one. */
+  metadataFile?: string;
 }
 
-/** Reads the first `sampleSize` documents of a file for the import preview. */
+/** The CSV preview: header, first rows' cells, and the first rows imported with the default mapping. */
+async function previewCsv(
+  file: string,
+  sampleSize: number,
+  signal: AbortSignal | undefined,
+): Promise<Omit<ImportPreview, 'sizeBytes'>> {
+  let csvColumns: string[] = [];
+  const sample: string[] = [];
+  const csvRows: string[][] = [];
+  const rows = csvItems(file, undefined, signal, (header) => (csvColumns = header));
+  for await (const item of rows) {
+    if (csvRows.length < CSV_PREVIEW_ROWS) csvRows.push(item.cells);
+    if (sample.length < sampleSize) {
+      try {
+        sample.push(canonical(item.parse()));
+      } catch {
+        // A row that does not parse is left out of the sample (its cells are still shown).
+      }
+    }
+    if (csvRows.length >= CSV_PREVIEW_ROWS && sample.length >= sampleSize) break;
+  }
+  return { sample, csvColumns, csvRows };
+}
+
+/**
+ * Reads the first `sampleSize` documents of a file for the import preview (CSV: imported with
+ * the default mapping, plus the header and the first rows' cells; BSON: plus the name of the
+ * metadata file next to it).
+ */
 export async function previewFile(
   file: string,
-  format: TextImportFormat,
+  format: ImportFormat,
   sampleSize = DEFAULT_SAMPLE_SIZE,
   signal?: AbortSignal,
 ): Promise<ImportPreview> {
   try {
     const { size } = await stat(file);
+    if (format === 'csv') {
+      return { sizeBytes: size, ...(await previewCsv(file, sampleSize, signal)) };
+    }
     const sample: string[] = [];
-    for await (const value of scanFile(file, format, signal)) {
+    for await (const item of importItems(file, format, signal)) {
       try {
-        sample.push(canonical(parseImportedDocument(value)));
+        sample.push(canonical(item.parse()));
       } catch {
         continue;
       }
       if (sample.length >= sampleSize) break;
     }
-    return { sizeBytes: size, sample };
+    const preview: ImportPreview = { sizeBytes: size, sample };
+    if (format === 'bson' && (await readMetadata(file)) !== undefined) {
+      preview.metadataFile = path.basename(metadataPath(file));
+    }
+    return preview;
   } catch (error) {
     throw readError(error, file);
   }
@@ -125,9 +284,20 @@ export interface ImportOptions {
   ordered?: boolean;
   /** Stop the import at the first failed document (default true); else skip it and go on. */
   stopOnError?: boolean;
+  /** CSV only: the columns to import (default: every named column under its name, `auto`). */
+  csvMapping?: readonly CsvMappingEntry[];
   /** Called after every batch with the running totals (and once at the end). */
   progress?: (progress: IoProgress) => void;
   signal?: AbortSignal;
+}
+
+/** The dump metadata next to a `.bson` file (`undefined` without one). */
+async function readMetadataOf(file: string): Promise<Document | undefined> {
+  try {
+    return await readMetadata(file);
+  } catch (error) {
+    throw readError(error, metadataPath(file));
+  }
 }
 
 export interface ImportResult extends IoProgress {
@@ -168,7 +338,7 @@ function writeErrorsOf(reply: Document): WriteError[] {
 export async function importFile(
   client: ClientLike,
   file: string,
-  format: TextImportFormat,
+  format: ImportFormat,
   options: ImportOptions,
 ): Promise<ImportResult> {
   const ordered = options.ordered ?? true;
@@ -236,11 +406,11 @@ export async function importFile(
 
   /** Reads the file into batches until its end or a stop; a broken structure throws ScanError. */
   const readAll = async () => {
-    for await (const value of scanFile(file, format, options.signal)) {
+    for await (const value of importItems(file, format, options.signal, options.csvMapping)) {
       processed++;
       let doc: Document;
       try {
-        doc = parseImportedDocument(value);
+        doc = value.parse();
       } catch (error) {
         fail(value.line, (error as RpcError).toInfo());
         if (stop) break;
@@ -259,6 +429,8 @@ export async function importFile(
   // A broken file structure stops the import (whatever stopOnError says), like a stop.
   let broken: RpcError | undefined;
   try {
+    const metadata = format === 'bson' ? await readMetadataOf(file) : undefined;
+    if (metadata) await createWithOptions(op, client, options.db, options.coll, metadata);
     try {
       try {
         await readAll();
@@ -276,6 +448,7 @@ export async function importFile(
     // A stop comes from an earlier line than the broken structure: the import ended there.
     const failure = stop ?? broken;
     if (failure) throw failure;
+    if (metadata) await createDumpIndexes(op, options.coll, metadata);
     return { ...snapshot(), inserted };
   } finally {
     await op.close();

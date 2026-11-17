@@ -168,14 +168,6 @@ describe('ioHandlers', () => {
       expect(sent).toEqual([]);
     });
 
-    it.each(['csv', 'bson'])('answers UNSUPPORTED for %s without a dialog', async (format) => {
-      const { call, dialogs } = await setup();
-      await expect(call('io.export', exportParams({ format }))).rejects.toMatchObject({
-        code: 'UNSUPPORTED',
-      });
-      expect(dialogs.saveFile).not.toHaveBeenCalled();
-    });
-
     it('answers NOT_CONNECTED and INVALID_PARAMS before the dialog opens', async () => {
       const { call, dialogs } = await setup();
       await expect(call('io.export', exportParams({ profileId: 'p2' }))).rejects.toMatchObject({
@@ -256,14 +248,6 @@ describe('ioHandlers', () => {
       const result = await call('io.previewImport', { format: 'json' });
       expect(result).toBeNull();
       expect(parseResult('io.previewImport', result).ok).toBe(true);
-    });
-
-    it.each(['csv', 'bson'])('previewImport answers UNSUPPORTED for %s', async (format) => {
-      const { call, dialogs } = await setup();
-      await expect(call('io.previewImport', { format })).rejects.toMatchObject({
-        code: 'UNSUPPORTED',
-      });
-      expect(dialogs.openFile).not.toHaveBeenCalled();
     });
 
     it('imports the file of a token with the format it was previewed with', async () => {

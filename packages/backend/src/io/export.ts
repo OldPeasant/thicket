@@ -7,17 +7,19 @@ import { BSON, type Document } from 'mongodb';
 import type { ClientLike } from '../connections/manager';
 import { Operation, parseDocument, parseEjson } from '../docs/query/query';
 import { RpcError } from '../server/rpc';
+import { collectionMetadata, metadataPath, stringifyMetadata } from './bson/bson';
+import { cellText, collectPaths, valueAt } from './csv/convert';
+import { csvLine } from './csv/csv';
 
 /**
- * `io.export` for JSON and JSON Lines: reads the find or aggregation cursor batch by batch and
- * writes each batch to the file before it asks for the next one, so memory holds at most one
- * batch (the cursor's `batchSize`) plus the file stream's buffer, whatever the result size.
+ * `io.export`: reads the find or aggregation cursor batch by batch and writes each batch to the
+ * file before it asks for the next one, so memory holds at most one batch (the cursor's
+ * `batchSize`) plus the file stream's buffer, whatever the result size. Formats: JSON, JSON Lines,
+ * CSV (a header line of field paths, one line per document) and BSON (a `mongodump`-compatible
+ * `.bson` file plus its `.metadata.json`).
  */
 
 export type ExportParams = ParsedParamsOf<'io.export'>;
-
-/** Formats this module writes (CSV and BSON come with task io-advanced). */
-export const TEXT_EXPORT_FORMATS = ['json', 'jsonl'] as const;
 
 /** Documents per `getMore` while exporting. */
 export const EXPORT_BATCH_SIZE = 1000;
@@ -66,7 +68,7 @@ function brokenStream(stream: WriteStream): Error | undefined {
  * Writes `text`, waiting for `drain` when the stream's buffer is full (back pressure). Rejects at
  * once when the stream already failed: a destroyed stream emits neither `drain` nor `error` again.
  */
-function write(stream: WriteStream, text: string): Promise<void> {
+function write(stream: WriteStream, text: string | Uint8Array): Promise<void> {
   const broken = brokenStream(stream);
   if (broken) return Promise.reject(broken);
   if (stream.write(text)) return Promise.resolve();
@@ -121,6 +123,95 @@ function fileError(error: unknown, file: string): RpcError {
   return new RpcError('INTERNAL', `Could not write ${file}: ${message}`);
 }
 
+/** How a format writes documents: what comes before, for each batch, and after them. */
+interface Encoder {
+  /** Text before the documents; sees the first batch (CSV takes its columns from it). */
+  head(first: Document[]): string | Uint8Array;
+  batch(docs: Document[], written: number): string | Uint8Array;
+  tail(written: number): string | Uint8Array;
+}
+
+function jsonEncoder(array: boolean, relaxed: boolean): Encoder {
+  return {
+    head: () => (array ? '[' : ''),
+    batch: (docs, written) => {
+      let text = '';
+      let n = written;
+      for (const doc of docs) {
+        const json = BSON.EJSON.stringify(doc, { relaxed });
+        text += array ? `${n === 0 ? '\n' : ',\n'}${json}` : `${json}\n`;
+        n++;
+      }
+      return text;
+    },
+    tail: (written) => (array ? (written === 0 ? ']\n' : '\n]\n') : ''),
+  };
+}
+
+/** Documents whose paths name the CSV columns when the request names none. */
+export const CSV_SAMPLE_DOCS = 1000;
+
+/**
+ * CSV: the header is `fields`, or the flattened paths of the first batch (at most
+ * {@link CSV_SAMPLE_DOCS} documents, in the order first seen); then one line per document.
+ */
+function csvEncoder(fields: readonly string[] | undefined, relaxed: boolean): Encoder {
+  let columns: readonly string[] = fields ?? [];
+  return {
+    head: (first) => {
+      if (fields === undefined) {
+        const paths = new Set<string>();
+        for (const doc of first.slice(0, CSV_SAMPLE_DOCS)) collectPaths(doc, paths);
+        columns = [...paths];
+      }
+      return columns.length > 0 ? csvLine(columns) : '';
+    },
+    batch: (docs) => {
+      let text = '';
+      for (const doc of docs)
+        text += csvLine(columns.map((c) => cellText(valueAt(doc, c), relaxed)));
+      return text;
+    },
+    tail: () => '',
+  };
+}
+
+/** BSON: every document's bytes, one after another (what `mongodump` writes). */
+function bsonEncoder(): Encoder {
+  return {
+    head: () => '',
+    batch: (docs) => Buffer.concat(docs.map((doc) => BSON.serialize(doc))),
+    tail: () => '',
+  };
+}
+
+function encoderFor(p: ExportParams): Encoder {
+  const relaxed = p.ejsonMode !== 'canonical';
+  switch (p.format) {
+    case 'json':
+      return jsonEncoder(true, relaxed);
+    case 'jsonl':
+      return jsonEncoder(false, relaxed);
+    case 'csv':
+      return csvEncoder(p.csvFields, relaxed);
+    case 'bson':
+      return bsonEncoder();
+  }
+}
+
+/** Writes a whole small file (the dump metadata). */
+async function writeSmallFile(file: string, text: string): Promise<void> {
+  const stream = createWriteStream(file, { encoding: 'utf8' });
+  stream.on('error', () => undefined);
+  try {
+    await write(stream, text);
+    await finish(stream);
+  } catch (error) {
+    await closeStream(stream);
+    throw error;
+  }
+}
+
 export interface ExportOptions {
   /** Called with the running total after every batch (throttled) and once at the end. */
   progress?: (progress: IoProgress) => void;
@@ -130,8 +221,10 @@ export interface ExportOptions {
 /**
  * Exports the source's documents to `file` (created or truncated) and resolves with their
  * number. JSON writes one array (`[\n{…},\n{…}\n]\n`), JSON Lines one document per line; both in
- * relaxed EJSON unless `ejsonMode` is `canonical`. On failure or cancel the partial file is
- * removed.
+ * relaxed EJSON unless `ejsonMode` is `canonical`. CSV writes a header line and one line per
+ * document; BSON the documents' bytes, then the dump metadata next to the file
+ * ({@link metadataPath}; options and indexes only for a `find` export). On failure or cancel the
+ * partial files are removed.
  */
 export async function exportToFile(
   client: ClientLike,
@@ -139,14 +232,11 @@ export async function exportToFile(
   file: string,
   options: ExportOptions = {},
 ): Promise<number> {
-  if (p.format !== 'json' && p.format !== 'jsonl') {
-    throw new RpcError('UNSUPPORTED', `Export as ${p.format} is not supported yet`);
-  }
   const cmd = exportCommand(p);
-  const relaxed = p.ejsonMode !== 'canonical';
-  const array = p.format === 'json';
+  const encoder = encoderFor(p);
   const op = new Operation(client, p.db, p.coll, options.signal);
   const stream = createWriteStream(file, { encoding: 'utf8' });
+  const metadataFile = p.format === 'bson' ? metadataPath(file) : undefined;
   // Errors also surface through write()/finish(); this keeps an early one from being unhandled.
   let streamError: unknown;
   stream.on('error', (error) => (streamError ??= error));
@@ -157,30 +247,38 @@ export async function exportToFile(
     options.progress?.({ processed: written, failed: 0, errors: [] });
   };
   try {
-    if (array) await write(stream, '[');
     let batch = await op.open(cmd);
+    await write(stream, encoder.head(batch));
     for (;;) {
       if (batch.length > 0) {
-        let text = '';
-        for (const doc of batch) {
-          const json = BSON.EJSON.stringify(doc, { relaxed });
-          text += array ? `${written === 0 ? '\n' : ',\n'}${json}` : `${json}\n`;
-          written++;
-        }
-        await write(stream, text);
+        const chunk = encoder.batch(batch, written);
+        written += batch.length;
+        await write(stream, chunk);
         if (written - reported >= EXPORT_PROGRESS_EVERY) report();
       }
       if (!op.hasMore) break;
       batch = await op.more(EXPORT_BATCH_SIZE);
     }
-    if (array) await write(stream, written === 0 ? ']\n' : '\n]\n');
+    await write(stream, encoder.tail(written));
     if (streamError) throw streamError;
     await finish(stream);
+    if (metadataFile !== undefined) {
+      const metadata = await collectionMetadata(
+        client,
+        p.db,
+        p.coll,
+        p.source.kind === 'find',
+        options.signal,
+      );
+      if (options.signal?.aborted) throw new RpcError('CANCELLED', 'The operation was cancelled');
+      await writeSmallFile(metadataFile, `${stringifyMetadata(metadata)}\n`);
+    }
     report();
     return written;
   } catch (error) {
     await closeStream(stream);
     await rm(file, { force: true }).catch(() => undefined);
+    if (metadataFile !== undefined) await rm(metadataFile, { force: true }).catch(() => undefined);
     throw fileError(error, file);
   } finally {
     await op.close();

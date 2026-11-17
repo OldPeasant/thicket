@@ -11,7 +11,7 @@ import type {
 import { streamOnConnection, type ConnectionManager } from '../connections/manager';
 import { RpcError, type Handler, type HandlerContext } from '../server/rpc';
 import { exportCommand, exportToFile } from './export';
-import { importFile, previewFile, type TextImportFormat } from './import';
+import { importFile, previewFile, type ImportFormat } from './import';
 
 /** The native file dialogs `main` shows for the backend (privileged `dialog.*` methods). */
 export interface FileDialogs {
@@ -40,7 +40,7 @@ export function dialogsOverLink(
 /** Chosen import files the backend remembers per `fileToken` (the oldest are forgotten). */
 export const MAX_FILE_TOKENS = 100;
 
-const FILTERS: Record<TextImportFormat, { name: string; extensions: string[] }[]> = {
+const FILTERS: Record<ImportFormat, { name: string; extensions: string[] }[]> = {
   json: [
     { name: 'JSON', extensions: ['json'] },
     { name: 'All files', extensions: ['*'] },
@@ -49,12 +49,15 @@ const FILTERS: Record<TextImportFormat, { name: string; extensions: string[] }[]
     { name: 'JSON Lines', extensions: ['jsonl', 'ndjson', 'json'] },
     { name: 'All files', extensions: ['*'] },
   ],
+  csv: [
+    { name: 'CSV', extensions: ['csv'] },
+    { name: 'All files', extensions: ['*'] },
+  ],
+  bson: [
+    { name: 'BSON dump', extensions: ['bson'] },
+    { name: 'All files', extensions: ['*'] },
+  ],
 };
-
-function textFormat(format: string, what: string): TextImportFormat {
-  if (format === 'json' || format === 'jsonl') return format;
-  throw new RpcError('UNSUPPORTED', `${what} as ${format} is not supported yet`);
-}
 
 function needStreams(context: HandlerContext, method: string) {
   if (!context.openStream) throw new RpcError('INTERNAL', `${method} needs a streaming server`);
@@ -62,7 +65,7 @@ function needStreams(context: HandlerContext, method: string) {
 }
 
 /**
- * Handlers of `io.export`, `io.previewImport` and `io.import` (JSON and JSON Lines). The file is
+ * Handlers of `io.export`, `io.previewImport` and `io.import` (JSON, JSON Lines, CSV, BSON). The file is
  * chosen with `main`'s native dialog; a cancelled dialog answers `streamId: null` / `null`. The
  * renderer only ever gets an opaque `fileToken` for the chosen import file. Export and import run
  * as streams of `IoProgress` events on the profile's open connection; a cancel stops them (the
@@ -74,8 +77,8 @@ export function ioHandlers(
   manager: ConnectionManager,
   dialogs: FileDialogs,
 ): Record<string, Handler> {
-  const files = new Map<string, { file: string; format: TextImportFormat }>();
-  const remember = (file: string, format: TextImportFormat): string => {
+  const files = new Map<string, { file: string; format: ImportFormat }>();
+  const remember = (file: string, format: ImportFormat): string => {
     const token = `file-${randomUUID()}`;
     files.set(token, { file, format });
     for (const old of files.keys()) {
@@ -91,7 +94,7 @@ export function ioHandlers(
       c: HandlerContext,
     ): Promise<ResultOf<'io.export'>> => {
       const openStream = needStreams(c, 'io.export');
-      const format = textFormat(p.format, 'Export');
+      const format = p.format;
       // Fail on a closed connection or invalid params before the user picks a file.
       manager.client(p.profileId);
       exportCommand(p);
@@ -120,7 +123,7 @@ export function ioHandlers(
       p: ParsedParamsOf<'io.previewImport'>,
       c: HandlerContext,
     ): Promise<ResultOf<'io.previewImport'>> => {
-      const format = textFormat(p.format, 'Import');
+      const format = p.format;
       const file = await dialogs.openFile(
         { title: 'Import documents', filters: FILTERS[format] },
         c.signal,
@@ -132,6 +135,9 @@ export function ioHandlers(
         fileName: path.basename(file),
         sizeBytes: preview.sizeBytes,
         sample: preview.sample,
+        ...(preview.csvColumns !== undefined ? { csvColumns: preview.csvColumns } : {}),
+        ...(preview.csvRows !== undefined ? { csvRows: preview.csvRows } : {}),
+        ...(preview.metadataFile !== undefined ? { metadataFile: preview.metadataFile } : {}),
       };
     },
     'io.import': (p: ParsedParamsOf<'io.import'>, c: HandlerContext): ResultOf<'io.import'> => {
@@ -140,7 +146,7 @@ export function ioHandlers(
       if (!chosen) {
         throw new RpcError('NOT_FOUND', 'Unknown file: choose the file again (io.previewImport)');
       }
-      if (p.csvMapping !== undefined) {
+      if (p.csvMapping !== undefined && chosen.format !== 'csv') {
         throw new RpcError('INVALID_PARAMS', 'csvMapping is only for CSV files');
       }
       const client = manager.client(p.profileId);
@@ -152,6 +158,7 @@ export function ioHandlers(
             coll: p.coll,
             ...(p.ordered !== undefined ? { ordered: p.ordered } : {}),
             ...(p.stopOnError !== undefined ? { stopOnError: p.stopOnError } : {}),
+            ...(p.csvMapping !== undefined ? { csvMapping: p.csvMapping } : {}),
             signal,
             progress: (progress) => sink.send(progress),
           });
