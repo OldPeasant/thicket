@@ -5,7 +5,7 @@ owner: felix/agent-1
 deps: [x509-proxy]
 touches: [packages/backend/src/auth/oidc,apps/desktop/src/oidc,test/integration/fixtures/oidc]
 prio: 3
-lease_until: 2026-11-17T03:40:02Z
+lease_until: 2026-11-17T03:45:01Z
 ---
 ## Goal
 MONGODB-OIDC with authorization code flow in the system browser (main opens the URL, loopback redirect) and device flow fallback; tokens cached in the keychain and refreshed.
