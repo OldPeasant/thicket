@@ -4,7 +4,7 @@ import { type MethodName, parseParams, type SavedPipeline } from '@thicket/contr
 import { stringifyEJson } from '@thicket/core/bson';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
+import { type FakeOutcome, FakeThicketBridge, provideFakeThicket } from '../api/testing';
 import aggGroup from '../explain/fixtures/agg-group-8.2.json';
 import type { WorkspaceTab } from '../layout/workspace.service';
 import { ConfirmService } from '../safety/confirm.service';
@@ -2097,6 +2097,123 @@ describe('AggregationView', () => {
       fake.fail('pipelines.list', { code: 'INTERNAL', message: 'EACCES: pipelines.json' });
       await click(get('agg-saved'));
       expect(get('agg-saved-list-error').textContent).toContain('EACCES');
+    });
+
+    it('a list answer for the previous collection is ignored once the tab points elsewhere', async () => {
+      /** The answer of the latest pending `pipelines.list` request per collection. */
+      const pending = new Map<string, (outcome: FakeOutcome<'pipelines.list'>) => void>();
+      fake.handle(
+        'pipelines.list',
+        (params) => new Promise((resolve) => pending.set(params.coll, resolve)),
+      );
+      const ordersPipeline: SavedPipeline = {
+        pipelineId: 'pl-orders',
+        name: 'Orders only',
+        profileId: 'p1',
+        db: 'shop',
+        coll: 'orders',
+        stages: [],
+        updatedAt: '2026-11-17T04:00:00.000Z',
+      };
+
+      // Success arriving late: the list of shop.orders must not show for shop.invoices.
+      await click(get('agg-saved'));
+      fixture.componentRef.setInput('tab', {
+        ...TAB,
+        data: { profileId: 'p1', db: 'shop', coll: 'invoices', type: 'collection' },
+      });
+      await settle();
+      expect(fake.requestsFor('pipelines.list').map((r) => r.params)).toEqual([
+        { profileId: 'p1', db: 'shop', coll: 'orders' },
+        { profileId: 'p1', db: 'shop', coll: 'invoices' },
+      ]);
+      pending.get('invoices')?.({ pipelines: [] });
+      await settle();
+      pending.get('orders')?.({ pipelines: [ordersPipeline] });
+      await settle();
+      expect(get('agg-saved-empty').textContent).toContain('shop.invoices');
+      expect(all('agg-saved-item')).toHaveLength(0);
+
+      // Failure arriving late: the error of shop.invoices must not show for shop.customers.
+      await click(get('agg-saved'));
+      await click(get('agg-saved'));
+      expect(fake.requestsFor('pipelines.list')).toHaveLength(3);
+      fixture.componentRef.setInput('tab', {
+        ...TAB,
+        data: { profileId: 'p1', db: 'shop', coll: 'customers', type: 'collection' },
+      });
+      await settle();
+      pending.get('customers')?.({ pipelines: [] });
+      await settle();
+      pending.get('invoices')?.({ error: { code: 'INTERNAL', message: 'late failure' } });
+      await settle();
+      expect(q('agg-saved-list-error')).toBeNull();
+      expect(get('agg-saved-empty').textContent).toContain('shop.customers');
+    });
+
+    it('a failed save shows the error and keeps the builder and the list as they were', async () => {
+      await setBody(0, '{ a: 1 }');
+      fake.fail('pipelines.save', {
+        code: 'UNSUPPORTED',
+        message: 'pipelines.json has version 9, written by a newer Thicket',
+      });
+      await saveAs('Refused');
+      const message = get('agg-saved-message');
+      expect(message.textContent).toContain('newer Thicket');
+      expect(message.classList.contains('error')).toBe(true);
+      expect(q('agg-saved-empty')).not.toBeNull();
+      expect(view.stages().map((s) => s.body)).toEqual(['{ a: 1 }']);
+    });
+
+    it('saving in full-text mode with a syntax error is refused and sends nothing', async () => {
+      await click(get('agg-mode-text'));
+      const area = get<HTMLTextAreaElement>('agg-text');
+      area.value = '[ { $match: { a: } } ]';
+      area.dispatchEvent(new Event('input'));
+      await settle();
+      await saveAs('Broken text');
+      expect(get('agg-saved-message').textContent).toContain('Fix the pipeline text first');
+      expect(fake.requestsFor('pipelines.save')).toHaveLength(0);
+    });
+
+    it('a saved pipeline with an unreadable stage is not opened; the builder is unchanged', async () => {
+      // `{}` passes the contract (EJSON document text) but holds no stage operator.
+      saved.push({
+        pipelineId: 'pl-bad',
+        name: 'Hand edited',
+        profileId: 'p1',
+        db: 'shop',
+        coll: 'orders',
+        stages: [
+          { stage: '{"$match":{}}', enabled: true },
+          { stage: '{}', enabled: true },
+        ],
+        updatedAt: '2026-11-17T04:00:00.000Z',
+      });
+      await setBody(0, '{ kept: 1 }');
+      await click(get('agg-saved'));
+      await click(inItem('Hand edited', 'agg-saved-open'));
+      expect(get('agg-saved-message').textContent).toContain(
+        '"Hand edited" cannot be opened: stage 2 is not readable.',
+      );
+      expect(view.stages().map((s) => s.body)).toEqual(['{ kept: 1 }']);
+      expect(get<HTMLInputElement>('agg-save-name').value).toBe('');
+    });
+
+    it('a rename to a blank name is refused; a failed delete shows the error and keeps the item', async () => {
+      await saveAs('Keep me');
+      await click(inItem('Keep me', 'agg-saved-rename'));
+      await type('agg-rename-name', '   ');
+      await click(get('agg-rename-submit'));
+      expect(get('agg-saved-message').textContent).toContain('Type a name');
+      expect(fake.requestsFor('pipelines.rename')).toHaveLength(0);
+      await click(get('agg-rename-cancel'));
+
+      fake.fail('pipelines.delete', { code: 'INTERNAL', message: 'EIO: pipelines.json' });
+      await click(inItem('Keep me', 'agg-saved-delete'));
+      await click(inItem('Keep me', 'agg-saved-delete-confirm'));
+      expect(get('agg-saved-message').textContent).toContain('EIO');
+      expect(savedNames()).toEqual(['Keep me']);
     });
   });
 });
