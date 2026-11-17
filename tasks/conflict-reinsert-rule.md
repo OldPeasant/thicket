@@ -1,10 +1,11 @@
 ---
 title: Conflict view: one re-insert rule shared with DocumentActions
-status: todo
-owner:
+status: in_progress
+owner: dell26/agent-2
 deps: [conflict-partial-docs]
 touches: [packages/renderer/src/app/document/conflict,packages/renderer/src/app/document/document-actions.service.ts]
 prio: 3
+lease_until: 2026-11-17T05:40:54Z
 ---
 ## Goal
 Follow-up of conflict-partial-docs (reviews/conflict-partial-docs/review.md CR-4): the conflict view
