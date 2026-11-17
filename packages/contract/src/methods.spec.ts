@@ -302,7 +302,9 @@ const RESULTS: { [M in MethodName]: { valid: ResultOf<M>; invalid: unknown } } =
 
   'pipelines.list': {
     valid: { pipelines: [SAVED_PIPELINE] },
-    invalid: { pipelines: [{ ...SAVED_PIPELINE, stages: [{ stage: { $match: {} }, enabled: true }] }] },
+    invalid: {
+      pipelines: [{ ...SAVED_PIPELINE, stages: [{ stage: { $match: {} }, enabled: true }] }],
+    },
   },
   'pipelines.save': {
     valid: { saved: SAVED_PIPELINE },

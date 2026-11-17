@@ -3,6 +3,7 @@ import type { ParsedParamsOf, ResultOf, Settings } from '@thicket/contract';
 
 import { dialogHandlers, type NativeDialogs } from '../dialogs';
 import { oidcHandlers, type OidcMainDeps } from '../oidc';
+import { pipelinesHandlers, type PipelinesStore } from '../pipelines';
 import {
   importExportHandlers,
   profileForConnectHandler,
@@ -26,6 +27,8 @@ export interface MainHandlerDeps {
   profiles?: ProfilesStore;
   /** With `profiles`: serves `profiles.importCompass/importUris/export` (native file dialogs). */
   dialogs?: NativeDialogs;
+  /** Serves `pipelines.list/save/rename/delete` when given. */
+  pipelines?: PipelinesStore;
   /** Diagnostics of the handlers (e.g. an imported secret that could not be saved). */
   log?: (message: string) => void;
 }
@@ -45,6 +48,7 @@ export function mainHandlers(deps: MainHandlerDeps): Record<string, Handler> {
           ...(deps.log ? { log: deps.log } : {}),
         })
       : {}),
+    ...(deps.pipelines ? pipelinesHandlers(deps.pipelines) : {}),
   };
   const store = deps.settings;
   if (store) {

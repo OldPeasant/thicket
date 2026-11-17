@@ -11,9 +11,7 @@ import { defineMethods } from './define';
  */
 
 /** Id of a saved pipeline (assigned by `main`). */
-export const pipelineId = z
-  .string()
-  .min(1, { message: 'pipelineId must be a non-empty string' });
+export const pipelineId = z.string().min(1, { message: 'pipelineId must be a non-empty string' });
 
 /** Name of a saved pipeline: 1–200 characters after trimming. */
 export const pipelineName = z
@@ -40,11 +38,9 @@ export const savedPipeline = z.object({
   ...pipelineNamespace,
   stages: z.array(savedStage),
   /** When it was last saved or renamed (ISO 8601). */
-  updatedAt: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/, {
-      message: 'updatedAt must be an ISO 8601 UTC time',
-    }),
+  updatedAt: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/, {
+    message: 'updatedAt must be an ISO 8601 UTC time',
+  }),
 });
 
 export type SavedPipeline = z.infer<typeof savedPipeline>;

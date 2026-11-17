@@ -26,6 +26,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { NativeDialogs } from '../dialogs';
+import { PipelinesStore } from '../pipelines';
 import { ProfilesStore } from '../profiles';
 import { SecretsStore } from '../secrets';
 import { SettingsStore } from '../settings/store';
@@ -109,6 +110,17 @@ function profilesStore(): ProfilesStore {
   return profiles;
 }
 
+/** `pipelines.json` in `userData` (saved aggregation pipelines). */
+let pipelines: PipelinesStore | undefined;
+
+function pipelinesStore(): PipelinesStore {
+  pipelines ??= new PipelinesStore({
+    file: path.join(app.getPath('userData'), 'pipelines.json'),
+    log: (message) => log(`pipelines: ${message}`),
+  });
+  return pipelines;
+}
+
 /** File dialogs for the backend (io.*), attached to the focused window (or any window). */
 const nativeDialogs: NativeDialogs = {
   showSaveDialog: (options) => {
@@ -174,6 +186,7 @@ function createWindow(settings: SettingsStore): void {
       settings,
       profiles: profilesStore(),
       dialogs: nativeDialogs,
+      pipelines: pipelinesStore(),
       log: (message) => log(`profiles: ${message}`),
     }),
     broadcaster,
