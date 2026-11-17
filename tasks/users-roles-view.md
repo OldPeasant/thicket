@@ -5,7 +5,7 @@ owner: dell26/agent-2
 deps: [conn-manager,app-layout]
 touches: [packages/backend/src/admin/users,packages/renderer/src/app/admin/users]
 prio: 3
-lease_until: 2026-11-17T04:05:22Z
+lease_until: 2026-11-17T04:10:26Z
 ---
 ## Goal
 Per database: users with roles, roles with privileges and inherited roles (read-only).
