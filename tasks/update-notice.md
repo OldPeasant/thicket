@@ -1,11 +1,11 @@
 ---
 title: Release (Should): Update available notice
-status: in_progress
+status: done
 owner: dell26/agent-1
 deps: [app-settings,app-layout]
 touches: [apps/desktop/src/update,packages/renderer/src/app/update]
 prio: 3
-lease_until: 2026-11-17T07:02:06Z
+lease_until: 
 ---
 ## Goal
 Check the GitHub releases API at start (and daily) unless disabled in settings; show a non-modal notice with a link to the release.
@@ -22,3 +22,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 07:29+0100 by dell26/agent-1): Unpackaged runs (dev, e2e, version 0.0.0) never call GitHub unless THICKET_UPDATE_CHECK=1, so tests/CI don't hit the API and dev builds don't always show a notice.
 - ASSUMPTION (2026-11-17 07:29+0100 by dell26/agent-1): Daily re-check is a 24h timer in each window's renderer; main caches a successful answer for 1h and shares in-flight requests so several windows don't multiply requests. Dismissal is per window and not persisted.
 - ASSUMPTION (2026-11-17 07:29+0100 by dell26/agent-1): The notice link opens via window.open -> main's setWindowOpenHandler, which calls shell.openExternal only for https://github.com/OldPeasant/thicket/releases/... URLs and still denies the window (no contract change needed).
+- done by dell26/agent-1: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 70s on 821ca204d; criteria verified 2/2
