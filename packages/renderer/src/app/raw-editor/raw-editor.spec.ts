@@ -146,6 +146,50 @@ describe('RawEditor', () => {
       expect(editor().value).toBe('{\n  name: "x",\n  n: 1 +\n}');
       expect(q('raw-error')?.textContent).toMatch(/\(line 3, column 8\)/);
     });
+
+    it('keeps unapplied EJSON changes when switching back to shell syntax', async () => {
+      await click('raw-format-ejson');
+      await type(`{"_id":${ID},"name":"Grace","n":{"$numberLong":"5"}}`);
+      await click('raw-format-shell');
+      expect(button('raw-format-shell').getAttribute('aria-pressed')).toBe('true');
+      expect(editor().value).toBe(
+        '{\n  _id: ObjectId("65a1b2c3d4e5f60718293a4b"),\n  name: "Grace",\n  n: NumberLong(5)\n}',
+      );
+      expect(q('raw-dirty')).not.toBeNull();
+      expect(edits.modified()).toBe(false);
+    });
+
+    it('does not switch EJSON text that cannot be read, and marks its place', async () => {
+      await click('raw-format-ejson');
+      const text = `{\n  "_id": ${ID},\n  "a": 1,,\n}`;
+      await type(text);
+      await click('raw-format-shell');
+      expect(button('raw-format-ejson').getAttribute('aria-pressed')).toBe('true');
+      expect(editor().value).toBe(text);
+      expect(q('raw-error')?.textContent).toMatch(/\(line 3, column 10\)/);
+      expect(diagnostics()[0]).toMatchObject({ from: text.indexOf(',,') + 1 });
+    });
+
+    it('clicking the format already shown changes nothing', async () => {
+      const text = '{ a: ';
+      await type(text);
+      await click('raw-apply');
+      const error = editor().error();
+      await click('raw-format-shell');
+      expect(editor().value).toBe(text);
+      expect(editor().error()).toBe(error);
+      expect(q('raw-dirty')).not.toBeNull();
+    });
+
+    it('a successful switch clears an earlier unplaced error', async () => {
+      await type('{ _id: ObjectId("000000000000000000000000"), name: "x" }');
+      await click('raw-apply');
+      expect(q('raw-error')?.textContent).toContain('cannot be changed');
+      await click('raw-format-ejson');
+      expect(q('raw-error')).toBeNull();
+      expect(button('raw-format-ejson').getAttribute('aria-pressed')).toBe('true');
+      expect(editor().value).toContain('{"$oid":"000000000000000000000000"}');
+    });
   });
 
   describe('syntax errors', () => {
@@ -208,6 +252,16 @@ describe('RawEditor', () => {
       expect(diagnostics()[0]).toMatchObject({ from: 5, to: 6 });
     });
 
+    it('marks an error in empty text without a crash', async () => {
+      await type('');
+      await click('raw-apply');
+      expect(editor().error()).toMatchObject({ line: 1, column: 1, offset: 0 });
+      expect(q('raw-error')?.textContent).toMatch(/\(line 1, column 1\)/);
+      const marks = diagnostics();
+      expect(marks.every((m) => m.from >= 0 && m.to <= 0)).toBe(true);
+      expect(edits.modified()).toBe(false);
+    });
+
     it('refuses a top level that is not a document', async () => {
       await type('[1, 2]');
       await click('raw-apply');
@@ -252,6 +306,27 @@ describe('RawEditor', () => {
       await click('raw-apply');
       expect(edits.current(DOC)).toEqual(parseEJsonDocument(`{"_id":${ID},"name":"Lin"}`));
       expect(editor().value).toBe(stringifyEJson(edits.current(DOC), 2));
+    });
+
+    it('applies text that is already in printed form and keeps it as it is', async () => {
+      const text = '{\n  _id: ObjectId("65a1b2c3d4e5f60718293a4b"),\n  name: "Grace"\n}';
+      await type(text);
+      await click('raw-apply');
+      expect(edits.current(DOC)).toEqual(parseEJsonDocument(`{"_id":${ID},"name":"Grace"}`));
+      expect(editor().value).toBe(text);
+      expect(q('raw-dirty')).toBeNull();
+      expect(button('raw-apply').disabled).toBe(true);
+    });
+
+    it('applies the same text twice as one recorded state', async () => {
+      const text = '{ _id: ObjectId("65a1b2c3d4e5f60718293a4b"), name: "Grace" }';
+      await type(text);
+      await click('raw-apply');
+      const count = edits.changeCount();
+      expect(editor().apply()).toBe(true);
+      await fixture.whenStable();
+      expect(edits.changeCount()).toBe(count);
+      expect(edits.current(DOC)).toEqual(parseEJsonDocument(`{"_id":${ID},"name":"Grace"}`));
     });
 
     it('applies with Ctrl+Enter', async () => {

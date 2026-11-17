@@ -1,5 +1,6 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { EditorView } from '@codemirror/view';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -8,6 +9,7 @@ import { CollectionView } from '../collection/collection-view';
 import { EditModeService } from '../explorer/services/edit-mode.service';
 import type { WorkspaceTab } from '../layout/workspace.service';
 import { ProfileSafetyService } from '../safety/profile-safety.service';
+import { RawEditor } from './raw-editor';
 import { installJsdomLayoutStubs } from './testing';
 
 installJsdomLayoutStubs();
@@ -66,14 +68,18 @@ describe('Raw editor in a collection tab', () => {
     await click('view-list');
   };
 
+  /** What `docs.find` streams answer. */
+  let rows: string[];
+
   beforeEach(() => {
     fake = new FakeThicketBridge();
+    rows = [orderText(1), orderText(2)];
     let streams = 0;
     fake.handle('docs.find', () => {
       const id = `s${++streams}`;
       setTimeout(() => {
-        fake.data('docs.find', id, { docs: [orderText(1), orderText(2)] });
-        fake.end(id, { delivered: 2 });
+        fake.data('docs.find', id, { docs: rows });
+        fake.end(id, { delivered: rows.length });
       });
       return { streamId: id };
     });
@@ -124,6 +130,46 @@ describe('Raw editor in a collection tab', () => {
     expect(JSON.parse(update['update'] as string)).toEqual({
       $set: { total: { $numberInt: '99' }, note: 'raw' },
     });
+  });
+
+  it('passes a projected page to the editor as partial documents', async () => {
+    await start();
+    const projection = must(
+      el().querySelector<HTMLTextAreaElement | HTMLInputElement>(
+        '[data-testid="query-projection"]',
+      ),
+      'projection field',
+    );
+    projection.value = '{ total: 1 }';
+    projection.dispatchEvent(new Event('input'));
+    await click('query-run');
+    const doc = docItem(0);
+    await click('doc-raw-toggle', doc);
+    const editor = must(fixture.debugElement.query(By.directive(RawEditor)), 'raw editor');
+    expect((editor.componentInstance as RawEditor).partial()).toBe(true);
+  });
+
+  it('opens the editor per document and closes it again', async () => {
+    await start();
+    await click('doc-raw-toggle', docItem(1));
+    expect(docItem(0).querySelector('app-raw-editor')).toBeNull();
+    expect(docItem(1).querySelector('app-raw-editor')).not.toBeNull();
+    const editor = must(fixture.debugElement.query(By.directive(RawEditor)), 'raw editor');
+    expect((editor.componentInstance as RawEditor).partial()).toBe(false);
+    await click('doc-raw-toggle', docItem(1));
+    expect(docItem(1).querySelector('app-raw-editor')).toBeNull();
+    expect(docItem(1).querySelector('app-json-form')).not.toBeNull();
+    expect(q('doc-raw-toggle', docItem(1))?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('offers no raw editor for a document without _id', async () => {
+    rows = ['{"total":{"$numberInt":"5"}}'];
+    await start();
+    const toggle = must(q('doc-raw-toggle', docItem(0)), 'raw toggle');
+    expect(toggle.disabled).toBe(true);
+    toggle.click();
+    await settle();
+    expect(docItem(0).querySelector('app-raw-editor')).toBeNull();
   });
 
   it('shows a read-only editor for read-only profiles', async () => {
