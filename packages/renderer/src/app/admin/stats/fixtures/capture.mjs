@@ -3,9 +3,9 @@
 //   docker run -d --rm -p 27992:27017 docker.io/library/mongo:8.2 --replSet rs0
 //   node packages/renderer/src/app/admin/stats/fixtures/capture.mjs \
 //     mongodb://127.0.0.1:27991 mongodb://127.0.0.1:27992
-// Writes canonical EJSON, as `admin.serverStatus` / `admin.replSetStatus` return it: two
-// `serverStatus` samples two seconds apart with some load in between, the `serverStatus` and
-// `replSetGetStatus` of a one-member replica set. `serverStatus` is cut down to the sections the
+// Writes canonical EJSON without `$`-named fields, as `admin.serverStatus` / `admin.replSetStatus`
+// return it: two `serverStatus` samples two seconds apart with some load in between, the
+// `serverStatus` and `replSetGetStatus` of a one-member replica set. `serverStatus` is cut down to the sections the
 // dashboard reads (the full output is ~100 kB of storage engine and metrics counters).
 import { writeFile } from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -36,12 +36,28 @@ const KEEP = [
 
 const STATUS = { serverStatus: 1 };
 
+/** `doc` without `$`-named fields at any depth, like the backend's `withoutDollarFields`. */
+function withoutDollarFields(doc) {
+  const strip = (value) => {
+    if (Array.isArray(value)) return value.map(strip);
+    if (value === null || typeof value !== 'object') return value;
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) return value;
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => !key.startsWith('$'))
+        .map(([key, inner]) => [key, strip(inner)]),
+    );
+  };
+  return strip(doc);
+}
+
 function trim(status) {
   return Object.fromEntries(KEEP.filter((k) => k in status).map((k) => [k, status[k]]));
 }
 
 async function save(name, doc) {
-  const text = EJSON.stringify(doc, undefined, 2, { relaxed: false });
+  const text = EJSON.stringify(withoutDollarFields(doc), undefined, 2, { relaxed: false });
   await writeFile(new URL(`${name}.json`, dir), `${text}\n`);
   console.log('wrote', name);
 }

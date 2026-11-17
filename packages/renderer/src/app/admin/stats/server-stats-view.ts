@@ -177,7 +177,6 @@ export class ServerStatsView {
   protected readonly formatUptime = formatUptime;
   protected readonly formatLag = formatLag;
   protected readonly memberLevel = memberLevel;
-  protected readonly formatRate = (v: number) => `${formatCount(v)}/s`;
   protected readonly formatWhole = (v: number) => formatCount(Math.round(v));
   protected readonly formatBytesRate = (v: number) => `${formatBytes(v)}/s`;
   protected readonly formatMib = (v: number) => formatMebibytes(v);

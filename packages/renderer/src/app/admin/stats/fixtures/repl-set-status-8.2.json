@@ -268,25 +268,6 @@
   "ok": {
     "$numberInt": "1"
   },
-  "$clusterTime": {
-    "clusterTime": {
-      "$timestamp": {
-        "t": 1794897901,
-        "i": 17
-      }
-    },
-    "signature": {
-      "hash": {
-        "$binary": {
-          "base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-          "subType": "00"
-        }
-      },
-      "keyId": {
-        "$numberLong": "0"
-      }
-    }
-  },
   "operationTime": {
     "$timestamp": {
       "t": 1794897901,

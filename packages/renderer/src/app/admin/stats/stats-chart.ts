@@ -200,7 +200,7 @@ export class StatsChart {
     return Math.min(length - 1, Math.max(0, slot - (span - length)));
   }
 
-  /** Shows the tooltip of point `index` (`null` hides it); also for keyboard/tests. */
+  /** Shows the tooltip of point `index` (`null` hides it); called by tests (mouse hover sets `hoverIndex` directly). */
   showPoint(index: number | null): void {
     this.hoverIndex.set(index);
   }
