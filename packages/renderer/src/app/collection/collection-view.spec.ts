@@ -1407,6 +1407,15 @@ describe('CollectionView', () => {
         });
         await renameAndSave();
         expect(get('conflict-title').textContent).toContain('Deleted on the server');
+        // The note names the partial load (not a projection), and insert-again is not offered.
+        const notes = [...el().querySelectorAll('[data-testid="conflict-note"]')];
+        expect(notes).toHaveLength(1);
+        expect(notes[0]?.textContent).toContain('loaded only partly');
+        expect(notes[0]?.textContent).toContain('long arrays are read page by page');
+        expect(notes[0]?.textContent).toContain('Keep it deleted');
+        expect(notes[0]?.textContent).not.toContain("query's projection");
+        expect(q('conflict-overwrite')).toBeNull();
+        expect(get('conflict-keep-server').textContent?.trim()).toBe('Keep it deleted');
         const actions = fixture.debugElement.injector.get(DocumentActions);
         expect(await actions.overwrite('{"$numberInt":"1"}')).toBe(false);
         expect(actions.message()?.text).toContain('Not inserted');

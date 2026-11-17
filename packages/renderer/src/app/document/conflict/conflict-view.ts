@@ -42,7 +42,7 @@ interface ConflictItem {
   readonly differences: number;
 }
 
-/** A cut array as compared: `loaded` items of the local version, `total` on the server now. */
+/** A cut array as compared: the `loaded` items that were loaded, `total` on the server now. */
 interface CutArray {
   readonly path: string;
   readonly loaded: number;
@@ -100,12 +100,23 @@ function lines(doc: BsonDocument | null): string[] {
             projection that hides parts of fields or is no longer active, so they could change data
             you did not load. To use them, clear the projection, run the query again and edit again.
           </p>
+        } @else if (item.blocked === 'partial' && item.state === 'deleted') {
+          <p class="note" data-testid="conflict-note">
+            Inserting your version again is not available: the document was loaded only partly (with
+            a projection, or a large document whose long arrays are read page by page), so inserting
+            it again would lose the items that were not loaded. Keep it deleted.
+          </p>
         } @else if (item.blocked === 'partial') {
           <p class="note" data-testid="conflict-note">
             Overwrite and Merge manually are not available: the document was loaded only partly
             (with a projection, or a large document whose long arrays are read page by page), so
             they could change data that was not loaded. Keep the server version, then edit single
             values again.
+          </p>
+        } @else if (item.partial && item.local !== null) {
+          <p class="note" data-testid="conflict-note">
+            Only the fields loaded with the query's projection are compared; the others stay as they
+            are on the server.
           </p>
         }
 
@@ -115,11 +126,6 @@ function lines(doc: BsonDocument | null): string[] {
               <li>{{ cutText(array) }}</li>
             }
           </ul>
-        } @else if (item.partial && item.local !== null) {
-          <p class="note" data-testid="conflict-note">
-            Only the fields loaded with the query's projection are compared; the others stay as they
-            are on the server.
-          </p>
         }
 
         @if (item.state !== 'unknown') {
@@ -494,10 +500,12 @@ export class ConflictView {
     const cut: CutArray[] = [];
     if (server !== null && conflict.cut !== undefined) {
       for (const array of conflict.cut) {
-        const loaded = arrayAt(local, array.path)?.length ?? array.loaded;
+        // Cut to the items that were loaded, not to the local array's length: items appended
+        // locally must not reveal never-loaded server items, and loaded items removed locally
+        // still show as a difference.
         const total = arrayAt(server, array.path)?.length ?? null;
-        cut.push({ path: array.path, loaded, total });
-        server = truncateArray(server, array.path.split('.'), loaded);
+        cut.push({ path: array.path, loaded: array.loaded, total });
+        server = truncateArray(server, array.path.split('.'), array.loaded);
       }
     }
     const rows = conflict.current === undefined ? [] : diffLines(lines(local), lines(server));
@@ -511,7 +519,12 @@ export class ConflictView {
           : conflict.current === null
             ? 'deleted'
             : 'changed',
-      blocked: blockedBy(this.actions.resolveBlocker(conflict.key)),
+      // A cut document deleted on the server can't be inserted again (resolveWith refuses it):
+      // resolveBlocker never blocks a deleted document, so the view does.
+      blocked:
+        conflict.current === null && conflict.cut !== undefined
+          ? 'partial'
+          : blockedBy(this.actions.resolveBlocker(conflict.key)),
       cut,
       partial,
       rows,

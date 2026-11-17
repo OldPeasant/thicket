@@ -593,7 +593,7 @@ const PROJECTION_REINSERT_REFUSED =
 const PARTIAL_REINSERT_REFUSED =
   'Not inserted: this document was loaded only partly (with a projection, or a large document ' +
   'whose long arrays are read page by page), so inserting it would lose the data that was not ' +
-  'loaded. Keep it deleted, or run the query without a projection and edit again.';
+  'loaded. Keep it deleted.';
 
 /** `doc` with only the top-level fields that one of `shown` has (keeps `doc`'s field order). */
 export function visibleFields(doc: BsonDocument, shown: readonly BsonDocument[]): BsonDocument {

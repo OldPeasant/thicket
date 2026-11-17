@@ -1750,6 +1750,9 @@ describe('DocumentActions', () => {
       expect(actions.message()?.text).toContain('Not inserted');
       expect(actions.message()?.text).toContain('long arrays are read page by page');
       expect(actions.message()?.text).not.toContain('with a projection active');
+      // Running the query again can't bring a deleted document back (review CR-3).
+      expect(actions.message()?.text).toMatch(/Keep it deleted\.$/);
+      expect(actions.message()?.text).not.toContain('run the query');
       expect(fake.requests).toHaveLength(0);
       expect(changes).toEqual([]);
     });

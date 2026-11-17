@@ -200,16 +200,25 @@ describe('ConflictView with a partly loaded (cut-array) document', () => {
     expect(q('conflict-merge')).toBeNull();
   });
 
-  it('a deleted server version: no cut note, and re-inserting names the partial load', async () => {
+  it('a deleted server version: the partial-load note, no insert-again, and re-inserting is refused', async () => {
     const loaded = doc({ name: 'large order', items: skus(0, 100) });
     const edited = doc({ name: 'renamed order', items: skus(0, 100) });
     await conflictWith(loaded, edited, null);
 
     expect(text('conflict-title')).toContain('Deleted on the server');
     expect(q('conflict-cut-note')).toBeNull();
-    // Overwrite (insert again) stays offered as for any deleted document, and is refused.
-    (q('conflict-overwrite') as HTMLButtonElement).click();
-    await settle();
+    // One note, naming the partial load, not a projection (review CR-1).
+    expect(el().querySelectorAll('[data-testid="conflict-note"]')).toHaveLength(1);
+    expect(text('conflict-note')).toContain('loaded only partly');
+    expect(text('conflict-note')).toContain('long arrays are read page by page');
+    expect(text('conflict-note')).toContain('would lose the items that were not loaded');
+    expect(text('conflict-note')).not.toContain("query's projection");
+    // Insert again could only be refused, so it is not offered; Keep it deleted is.
+    expect(q('conflict-overwrite')).toBeNull();
+    expect(q('conflict-merge')).toBeNull();
+    expect(text('conflict-keep-server')).toBe('Keep it deleted');
+    // Called directly, re-inserting is still refused before any write.
+    expect(await actions.overwrite(KEY)).toBe(false);
     expect(actions.message()?.text).toContain('Not inserted');
     expect(actions.message()?.text).toContain('long arrays are read page by page');
     expect(actions.message()?.text).not.toContain('with a projection active');
@@ -240,6 +249,33 @@ describe('ConflictView with a partly loaded (cut-array) document', () => {
     expect(fake.requestsFor('docs.insert')).toHaveLength(0);
   });
 
+  it('a document blocked by a projection shows only the projection note (review CR-2)', async () => {
+    // Not cut; a dotted projection hides parts of fields, so Overwrite and Merge are blocked.
+    cut = undefined;
+    projection = '{"order.ref":{"$numberInt":"1"}}';
+    const loaded = doc({ order: { ref: 'R-1' } });
+    await conflictWith(loaded, doc({ order: { ref: 'R-2' } }), doc({ order: { ref: 'R-3' } }));
+
+    expect(actions.resolveBlocker(KEY)).toBe('projection');
+    expect(el().querySelectorAll('[data-testid="conflict-note"]')).toHaveLength(1);
+    expect(text('conflict-note')).toContain('was loaded with a projection');
+    expect(text('conflict-note')).not.toContain('Only the fields loaded');
+    expect(q('conflict-overwrite')).toBeNull();
+    expect(q('conflict-merge')).toBeNull();
+  });
+
+  it('a partial document under a top-level projection (not blocked) keeps the compare note', async () => {
+    cut = undefined;
+    projection = '{"name":{"$numberInt":"1"}}';
+    const loaded = doc({ name: 'small order' });
+    await conflictWith(loaded, doc({ name: 'renamed order' }), doc({ name: 'renamed elsewhere' }));
+
+    expect(actions.resolveBlocker(KEY)).toBeNull();
+    expect(el().querySelectorAll('[data-testid="conflict-note"]')).toHaveLength(1);
+    expect(text('conflict-note')).toContain('Only the fields loaded');
+    expect(q('conflict-overwrite')).not.toBeNull();
+  });
+
   describe('when the cut array was edited locally (raw editor) after the conflict', () => {
     const loaded = doc({ name: 'large order', items: skus(0, 100) });
     const server = doc({ name: 'renamed elsewhere', items: skus(0, 300) });
@@ -252,7 +288,12 @@ describe('ConflictView with a partly loaded (cut-array) document', () => {
       const serverText = column('conflict-server');
       expect(serverText).not.toContain(sku(100));
       expect(serverText).not.toContain(sku(299));
-      expect(text('conflict-cut-note')).toContain('(the server has 300 items)');
+      // The two loaded items removed locally are still a difference (observation O-1).
+      expect(serverText).toContain(sku(98));
+      expect(serverText).toContain(sku(99));
+      expect(text('conflict-cut-note')).toBe(
+        'items: read page by page, so only the first 100 items are compared (the server has 300 items).',
+      );
     });
 
     it('longer: never-loaded server items are neither shown nor counted as differences', async () => {
@@ -267,6 +308,17 @@ describe('ConflictView with a partly loaded (cut-array) document', () => {
       // Items 100 and 101 were never loaded (criterion 1).
       expect(serverText).not.toContain(sku(100));
       expect(serverText).not.toContain(sku(101));
+      // The appended items are only in the local version (a gap on the server side); the other
+      // differences are the name and the last loaded item's line (it gains a comma locally).
+      const serverCells = differing().map((r) =>
+        r.querySelector('[data-testid="conflict-server"]'),
+      );
+      expect(serverCells.filter((c) => c?.classList.contains('gap'))).toHaveLength(2);
+      expect(differing()).toHaveLength(4);
+      expect(serverCells.map((c) => c?.textContent ?? '').join('\n')).toContain(sku(99));
+      expect(text('conflict-cut-note')).toBe(
+        'items: read page by page, so only the first 100 items are compared (the server has 300 items).',
+      );
     });
   });
 });
