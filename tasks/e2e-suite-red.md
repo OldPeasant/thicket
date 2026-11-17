@@ -5,7 +5,7 @@ owner: felix/agent-2
 deps: [e2e-screenshot-repaint]
 touches: [test/e2e/layout.e2e.ts,test/e2e/ldap.e2e.ts,test/integration/fixtures/ldap.ts]
 prio: 2
-lease_until: 2026-11-17T06:30:51Z
+lease_until: 2026-11-17T06:35:56Z
 ---
 ## Goal
 `npm run test:e2e` on main (seen 2026-11-17 by e2e-screenshot-repaint, real display, 57 passed / 3 failed,
