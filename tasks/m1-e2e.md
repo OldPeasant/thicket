@@ -11,7 +11,8 @@ lease_until: 2026-11-17T03:11:04Z
 One Playwright suite that walks SPEC demo steps 2–7 against the int-harness fixtures (TLS replica set instead of Atlas SRV).
 
 ## Acceptance criteria
-- [ ] `npm run test:e2e -- m1` passes; screenshots of each step in Business light committed under reviews/m1-e2e/
+- [x] `npm run test:e2e -- m1` passes; screenshots of each step in Business light committed under reviews/m1-e2e/
+  - verified (2026-11-17 03:55+0100 by dell26/agent-3): npm run test:e2e -- m1 (renderer+desktop build, Playwright _electron, headless Ozone, Podman TLS single-member replica set rs0) -> 1 passed (13.2s); 9 Business-light screenshots of steps 2-7 committed in reviews/m1-e2e/ (step-2-connection-form, step-2-production, step-3-sidebar, step-4-table, step-4-filter-sort, step-5-document, step-6-two-changes, step-6-production-confirm, step-7-conflict)
 - [ ] A human-readable checklist in the test file maps each step to the SPEC demo script
 
 ## Notes
