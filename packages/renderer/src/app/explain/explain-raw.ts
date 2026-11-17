@@ -42,13 +42,42 @@ import { TableOrientationService } from '../explorer/services/table-orientation.
     SchemaService,
     TableOrientationService,
   ],
-  template: `<app-json-explorer [value]="value()" layout="form" />`,
+  template: `
+    @let v = value();
+    @if (v.ok) {
+      <app-json-explorer [value]="v.value" layout="form" />
+    } @else {
+      <p class="unreadable" data-testid="explain-raw-error">
+        The output can't be read as EJSON ({{ v.message }}); its text:
+      </p>
+      <pre class="text">{{ explain() }}</pre>
+    }
+  `,
+  styles: `
+    .unreadable {
+      margin: 0.5rem 0;
+      color: var(--text-muted);
+    }
+    .text {
+      margin: 0;
+      font-family: var(--font-mono);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+  `,
 })
 export class ExplainRaw {
   /** The explain output as canonical EJSON text. */
   readonly explain = input.required<string>();
 
-  protected readonly value = computed(() => toExplorerValue(parseEJson(this.explain())));
+  /** The output for the explorer; text that doesn't parse is shown as it is instead. */
+  protected readonly value = computed(() => {
+    try {
+      return { ok: true as const, value: toExplorerValue(parseEJson(this.explain())) };
+    } catch (e) {
+      return { ok: false as const, message: e instanceof Error ? e.message : String(e) };
+    }
+  });
 
   constructor() {
     inject(EditModeService).setReadOnly(true);

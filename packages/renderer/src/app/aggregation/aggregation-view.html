@@ -61,8 +61,11 @@
     </div>
   </header>
 
+  @if (explainError(); as error) {
+    <p class="error run-error" role="alert" data-testid="agg-explain-error">{{ error }}</p>
+  }
   @if (explainParams(); as params) {
-    <app-explain-panel [params]="params" (closed)="explainParams.set(null)" />
+    <app-explain-panel [params]="params" (closed)="closeExplain()" />
   }
 
   <div class="body">

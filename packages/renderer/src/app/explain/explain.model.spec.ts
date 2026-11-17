@@ -52,6 +52,10 @@ describe('summarizeExplain (captured MongoDB 8.2 output)', () => {
     expect(group?.nReturned).toBe(7);
     // The scan's output: the outermost SBE stage of plan node 1 (the filter).
     expect(group?.children[0]?.nReturned).toBe(1500);
+    // Its docs examined: the reads of the SBE `scan` stage of plan node 1.
+    expect(group?.children[0]?.docsExamined).toBe(2000);
+    expect(group?.children[0]?.keysExamined).toBeUndefined();
+    expect(group?.docsExamined).toBeUndefined();
     expect(s.root.details[0]).toEqual({ label: 'spec', value: '{"sortKey":{"total":-1}}' });
   });
 
@@ -333,6 +337,68 @@ describe('summarizeExplain (edge cases)', () => {
     });
     expect(s.root.nReturned).toBe(4);
     expect(s.root.timeMs).toBe(3);
+  });
+
+  it('slot-based keys/docs examined: the reads of the index and fetch stages per planNodeId', () => {
+    const s = summarizeExplain({
+      explainVersion: '2',
+      queryPlanner: {
+        winningPlan: {
+          queryPlan: {
+            stage: 'FETCH',
+            planNodeId: 2,
+            docsExamined: 99,
+            inputStage: { stage: 'IXSCAN', planNodeId: 1, indexName: 'a_1' },
+          },
+        },
+      },
+      executionStats: {
+        nReturned: 5,
+        totalKeysExamined: 6,
+        totalDocsExamined: 5,
+        executionStages: {
+          stage: 'nlj',
+          planNodeId: 2,
+          nReturned: 5,
+          outerStage: {
+            stage: 'nlj',
+            planNodeId: 1,
+            nReturned: 5,
+            outerStage: { stage: 'ixseek', planNodeId: 1, numReads: { $numberLong: '4' } },
+            innerStage: { stage: 'ixscan_generic', planNodeId: 1, numReads: 2 },
+          },
+          innerStage: { stage: 'seek', planNodeId: 2, numReads: 5 },
+        },
+      },
+    });
+    const fetch = s.root;
+    const ixscan = fetch.children[0];
+    // A number on the plan stage itself wins over the SBE reads.
+    expect(fetch.docsExamined).toBe(99);
+    expect(fetch.keysExamined).toBeUndefined();
+    // Reads of several index stages of the same node add up.
+    expect(ixscan?.keysExamined).toBe(6);
+    expect(ixscan?.docsExamined).toBeUndefined();
+    expect(ixscan?.nReturned).toBe(5);
+    // Totals still come from the execution stats.
+    expect(s.keysExamined).toBe(6);
+    expect(s.docsExamined).toBe(5);
+  });
+
+  it('slot-based fetch without a plan-stage number takes the seek reads', () => {
+    const s = summarizeExplain({
+      explainVersion: '2',
+      queryPlanner: { winningPlan: { queryPlan: { stage: 'FETCH', planNodeId: 2 } } },
+      executionStats: {
+        executionStages: {
+          stage: 'nlj',
+          planNodeId: 2,
+          innerStage: { stage: 'seek', planNodeId: 2, numReads: 7 },
+          outerStage: { stage: 'scan', planNodeId: 3 },
+        },
+      },
+    });
+    expect(s.root.docsExamined).toBe(7);
   });
 
   it('pipeline stages: stats keys and false flags are not details; other keys are', () => {

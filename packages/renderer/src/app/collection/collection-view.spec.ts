@@ -1326,6 +1326,18 @@ describe('CollectionView', () => {
       expect(explainTarget(0)['filter']).toBe('{"status":"open"}');
     });
 
+    it('an invalid query closes the plan of an earlier query', async () => {
+      click('query-explain');
+      await settle();
+      expect(q('explain-panel')).not.toBeNull();
+      type('query-filter', '{ status: ');
+      click('query-explain');
+      await settle();
+      expect(q('explain-panel')).toBeNull();
+      expect(q('query-error-filter')?.textContent).toContain('Filter:');
+      expect(explains()).toHaveLength(1);
+    });
+
     it('each Explain asks again, with the query bar at that moment', async () => {
       click('query-explain');
       await settle();

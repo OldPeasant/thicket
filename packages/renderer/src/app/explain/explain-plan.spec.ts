@@ -88,6 +88,22 @@ describe('ExplainPlan with captured MongoDB 8.2 explain output', () => {
     expect(text(el, 'explain-engine')).toBe('Slot-based');
     expect(text(el, 'explain-returned')).toBe('7');
     expect(el.querySelector('[data-stage="$sort"]')?.textContent).toContain('sortKey');
+    // The COLLSCAN row shows the docs its SBE scan read, and its flow bar the examined part.
+    const collscan = el.querySelector<HTMLElement>('[data-stage="COLLSCAN"]');
+    expect(collscan?.textContent?.replace(/\s+/g, ' ')).toContain(
+      `${(2000).toLocaleString()} docs`,
+    );
+    expect(collscan?.querySelector<HTMLElement>('.flow .examined')?.style.width).toBe('100%');
+    expect(collscan?.querySelector<HTMLElement>('.flow .returned')?.style.width).toBe('75%');
+  });
+
+  it('output that is not EJSON shows a message and the text, without throwing', async () => {
+    fixture.componentRef.setInput('explain', '{ not json');
+    await settle(fixture);
+    expect(text(el, 'explain-error')).toContain("can't be shown as a plan");
+    expect(text(el, 'explain-raw-error')).toContain("can't be read");
+    expect(el.querySelector('app-explain-raw')?.textContent).toContain('{ not json');
+    expect(el.querySelector('app-json-explorer')).toBeNull();
   });
 
   it('shows the raw output in the document viewer', async () => {

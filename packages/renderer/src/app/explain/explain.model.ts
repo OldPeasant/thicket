@@ -127,17 +127,40 @@ function details(stage: PlainObject): PlanDetail[] {
   return out;
 }
 
-/** Stats of SBE stages by `planNodeId`: the outermost stage of a node has its output. */
-type SbeStats = Map<number, { nReturned?: number; timeMs?: number }>;
+/**
+ * Stats of SBE stages by `planNodeId`: the outermost stage of a node has its output; the reads of
+ * its scan stages are its keys/docs examined (the `queryPlan` stages don't have them).
+ */
+type SbeStats = Map<
+  number,
+  { nReturned?: number; timeMs?: number; keysExamined?: number; docsExamined?: number }
+>;
+
+/** SBE stages whose `numReads` are documents read (collection scan, fetch by record id). */
+const SBE_DOC_READS = new Set(['scan', 'seek']);
+/** SBE stages whose `numReads` are index keys read. */
+const SBE_KEY_READS = new Set(['ixseek', 'ixscan', 'ixscan_generic']);
+
+function addReads(total: number | undefined, reads: number | undefined): number | undefined {
+  return reads === undefined ? total : (total ?? 0) + reads;
+}
 
 function collectSbe(stage: PlainObject | undefined, into: SbeStats): SbeStats {
   if (stage === undefined) return into;
   const id = num(stage['planNodeId']);
-  if (id !== undefined && !into.has(id)) {
-    into.set(id, {
-      nReturned: num(stage['nReturned']),
-      timeMs: num(stage['executionTimeMillisEstimate']),
-    });
+  if (id !== undefined) {
+    let entry = into.get(id);
+    if (entry === undefined) {
+      entry = {
+        nReturned: num(stage['nReturned']),
+        timeMs: num(stage['executionTimeMillisEstimate']),
+      };
+      into.set(id, entry);
+    }
+    const name = typeof stage['stage'] === 'string' ? stage['stage'] : '';
+    const reads = num(stage['numReads']);
+    if (SBE_DOC_READS.has(name)) entry.docsExamined = addReads(entry.docsExamined, reads);
+    if (SBE_KEY_READS.has(name)) entry.keysExamined = addReads(entry.keysExamined, reads);
   }
   for (const child of inputsOf(stage)) collectSbe(child, into);
   return into;
@@ -173,8 +196,8 @@ function planNode(stage: PlainObject, sbe?: SbeStats): PlanNode {
     stage: name,
     nReturned: num(stage['nReturned']) ?? fromSbe?.nReturned,
     timeMs: num(stage['executionTimeMillisEstimate']) ?? fromSbe?.timeMs,
-    keysExamined: num(stage['keysExamined']),
-    docsExamined: num(stage['docsExamined']),
+    keysExamined: num(stage['keysExamined']) ?? fromSbe?.keysExamined,
+    docsExamined: num(stage['docsExamined']) ?? fromSbe?.docsExamined,
     indexName,
     details: details(stage),
     children,

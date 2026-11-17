@@ -383,6 +383,8 @@ export class CollectionView {
     const parsed = parseQuery(this.text());
     if (!parsed.ok) {
       this.errors.set(parsed.errors);
+      // An earlier plan would pass for the edited query's.
+      this.explainParams.set(null);
       return;
     }
     this.errors.set({});

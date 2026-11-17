@@ -200,6 +200,8 @@ export class AggregationView {
   protected readonly runError = signal<string | null>(null);
   /** What the explain panel explains (the pipeline at the last Explain); `null`: closed. */
   protected readonly explainParams = signal<ExplainParams | null>(null);
+  /** Why the last Explain was refused (a stage with an error); `null`: none. */
+  protected readonly explainError = signal<string | null>(null);
   private runSub: Subscription | undefined;
 
   /** Export panel. */
@@ -259,6 +261,11 @@ export class AggregationView {
       const plans = this.previewPlans();
       const target = this.target();
       untracked(() => this.schedulePreviews(plans, target));
+    });
+    // A plan explains one collection: pointing the tab elsewhere closes it.
+    effect(() => {
+      this.target();
+      untracked(() => this.closeExplain());
     });
     inject(DestroyRef).onDestroy(() => {
       clearTimeout(this.previewTimer);
@@ -484,17 +491,30 @@ export class AggregationView {
    * pipeline with `$out`/`$merge`, which is only planned (running it would write).
    */
   explain(): void {
-    if (this.mode() === 'text' && !this.applyText()) return;
-    const pipeline = this.pipeline();
-    if (pipeline === null) {
-      this.failRun(this.fixFirst());
+    // A refused Explain closes an earlier plan (it would pass for the edited pipeline's) and
+    // leaves the shown run result alone.
+    if (this.mode() === 'text' && !this.applyText()) {
+      this.closeExplain();
       return;
     }
+    const pipeline = this.pipeline();
+    if (pipeline === null) {
+      this.closeExplain();
+      this.explainError.set(this.fixFirst());
+      return;
+    }
+    this.explainError.set(null);
     this.explainParams.set({
       ...this.target(),
       target: { kind: 'aggregate', pipeline: stringifyEJson({ type: 'array', items: pipeline }) },
       verbosity: writesOutput(pipeline) ? 'queryPlanner' : 'executionStats',
     });
+  }
+
+  /** Closes the explain panel and its refusal message. */
+  protected closeExplain(): void {
+    this.explainParams.set(null);
+    this.explainError.set(null);
   }
 
   /** Shows another page of the shown result: same pipeline and collection, even after edits. */

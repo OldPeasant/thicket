@@ -1422,12 +1422,69 @@ describe('AggregationView', () => {
       await click(get('agg-explain'));
       expect(explains()).toHaveLength(0);
       expect(q('explain-panel')).toBeNull();
-      expect(get('agg-run-error').textContent).toContain('Fix stage 2 first');
+      expect(get('agg-explain-error').textContent).toContain('Fix stage 2 first');
+      expect(q('agg-run-error')).toBeNull();
 
-      // Fixed, it explains.
+      // Fixed, it explains and the message goes.
       await setBody(1, '{ _id: "$customer" }');
       await click(get('agg-explain'));
       expect(explains()).toHaveLength(1);
+      expect(q('agg-explain-error')).toBeNull();
+    });
+
+    it('a refused Explain closes the earlier plan and keeps the shown run result', async () => {
+      await click(get('agg-run'));
+      expect(q('agg-results')).not.toBeNull();
+      await click(get('agg-explain'));
+      expect(q('explain-panel')).not.toBeNull();
+
+      await setBody(0, '{ status: ');
+      await click(get('agg-explain'));
+      expect(explains()).toHaveLength(1);
+      expect(q('explain-panel')).toBeNull();
+      expect(get('agg-explain-error').textContent).toContain('Fix stage 1 first');
+      expect(q('agg-results')).not.toBeNull();
+      expect(q('agg-run-error')).toBeNull();
+
+      // Fixed: the next Explain shows a plan and drops the message.
+      await setBody(0, '{}');
+      await click(get('agg-explain'));
+      expect(q('agg-explain-error')).toBeNull();
+      expect(q('explain-panel')).not.toBeNull();
+    });
+
+    it('in full-text mode, text that does not parse closes the earlier plan', async () => {
+      await click(get('agg-explain'));
+      expect(q('explain-panel')).not.toBeNull();
+      await click(get('agg-mode-text'));
+      const area = get<HTMLTextAreaElement>('agg-text');
+      area.value = '[{ $match: ';
+      area.dispatchEvent(new Event('input'));
+      await click(get('agg-explain'));
+      expect(explains()).toHaveLength(1);
+      expect(q('explain-panel')).toBeNull();
+    });
+
+    it('pointing the tab at another collection closes the panel', async () => {
+      await click(get('agg-explain'));
+      expect(q('explain-panel')).not.toBeNull();
+      fixture.componentRef.setInput('tab', {
+        ...TAB,
+        data: { profileId: 'p1', db: 'shop', coll: 'invoices', type: 'collection' },
+      });
+      await settle();
+      expect(q('explain-panel')).toBeNull();
+
+      // The next Explain explains the new collection.
+      await click(get('agg-explain'));
+      expect(explains().at(-1)).toMatchObject({ coll: 'invoices' });
+    });
+
+    it('the same collection given again keeps the panel', async () => {
+      await click(get('agg-explain'));
+      fixture.componentRef.setInput('tab', { ...TAB, data: { ...TAB.data } });
+      await settle();
+      expect(q('explain-panel')).not.toBeNull();
     });
 
     it('an invalid operator is refused the same way', async () => {
@@ -1435,7 +1492,7 @@ describe('AggregationView', () => {
       await settle();
       await click(get('agg-explain'));
       expect(explains()).toHaveLength(0);
-      expect(get('agg-run-error').textContent).toContain('Fix stage 1 first');
+      expect(get('agg-explain-error').textContent).toContain('Fix stage 1 first');
     });
 
     it('in full-text mode explains the text as typed', async () => {
