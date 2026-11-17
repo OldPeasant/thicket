@@ -398,4 +398,24 @@ describe('IndexCreateForm', () => {
     ]);
     expect(sent()).toEqual([]);
   });
+
+  it('clears the collation and wildcard projection errors when a key type changes', async () => {
+    await type('idx-key-field', '$**');
+    await select('idx-key-type', 'text');
+    await click('idx-more');
+    await type('idx-wildcard-projection', '{ secret: 0 }');
+    await type('idx-collation', '{ locale: "en" }');
+    await submit();
+    expect(errors()).toEqual([
+      'A text index does not support a collation.',
+      'A wildcard text index has no wildcard projection.',
+    ]);
+    await select('idx-key-type', '1');
+    expect(errors()).toEqual([]);
+    await submit();
+    expect(errors()).toEqual([]);
+    expect(sent()[0]).toMatchObject({
+      key: '{"$**":{"$numberInt":"1"}}',
+    });
+  });
 });

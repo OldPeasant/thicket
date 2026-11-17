@@ -119,7 +119,15 @@ export class IndexCreateForm {
       ...d,
       fields: d.fields.map((f, j) => (j === i ? { ...f, type } : f)),
     }));
-    this.clearError(`field.${i}`, 'ttl', 'unique', 'weights', 'defaultLanguage');
+    this.clearError(
+      `field.${i}`,
+      'ttl',
+      'unique',
+      'weights',
+      'defaultLanguage',
+      'collation',
+      'wildcardProjection',
+    );
   }
 
   protected addField(): void {
