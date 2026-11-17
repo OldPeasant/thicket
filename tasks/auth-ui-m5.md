@@ -17,3 +17,4 @@ Auth mechanism choices and their fields in the connection editor; OIDC 'sign in'
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 04:41+0100 by felix/agent-1): AWS IAM in the editor: 'Access key ID' = auth.username, 'Secret access key' = the password field/secret (saved or ask, like aws-auth's backend), session token = awsSessionToken secret stored on save (Test of an unsaved draft can't use a typed token). No key ID = default credential chain, saved with secretMode none. The key ID never goes into the connection string (driver refuses it); editing the URI tab keeps the form's key/secret, a pasted URI with user:password replaces them
+- ASSUMPTION (2026-11-17 04:41+0100 by felix/agent-1): LDAP, OIDC and AWS hide the authentication database field and drop authSource from the connection string (backend always uses $external), like X.509. Switching to/from AWS clears user name and password (an access key is no DB user)
