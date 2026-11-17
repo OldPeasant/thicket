@@ -5,7 +5,7 @@ owner: dell26/agent-3
 deps: [collection-view,app-settings]
 touches: [packages/renderer/src/app/collection/history,apps/desktop/src/history]
 prio: 2
-lease_until: 2026-11-17T04:47:08Z
+lease_until: 2026-11-17T04:52:10Z
 ---
 ## Goal
 Per-collection history of recent queries and named favorites, stored in main (history/ and favorites.json), re-run from a dropdown.
