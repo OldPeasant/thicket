@@ -6,6 +6,7 @@ deps: [doc-edit-save]
 touches: [packages/renderer/src/app/document/history]
 prio: 3
 lease_until: 2026-11-17T07:36:26Z
+extended: felix/agent-2
 ---
 ## Goal
 Keep the pre-save version of the last save per document; 'Undo last save' writes it back with the same conflict check.
@@ -20,3 +21,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 07:30+0100 by felix/agent-2): Undo is refused while the document has unsaved edits (button disabled, message: save or revert first), to avoid mixing the restored version with pending edits.
 - ASSUMPTION (2026-11-17 07:30+0100 by felix/agent-2): A conflicting undo (document changed or deleted on the server since the save) writes nothing, shows 'Not undone: ...' and drops the undo. It does not open the conflict view, because there are no local edits to resolve.
 - ASSUMPTION (2026-11-17 07:30+0100 by felix/agent-2): To restore the original field order, the undo of a whole (non-projected) document is sent as replaceOne of the pre-save version, with the same expected-values filter, when the minimal update would leave fields in another order (MongoDB appends a re-added field). Under a projection or for a partial document it stays the minimal update with Save's projection rules, so the order may differ.
+- extended by felix/agent-2: Implementation complete; round-2 fixes (CR-1 $expr whole-value check, TW-2 field order, TW-3 read-back) committed (925eed62). Round-3 code review committed: no material issues (2 optional P3s: multi-edit save leaves undo offered; SavedVersion.after doc comment). Round-3 test-writer added unit tests (apply-update.spec.ts, undo-last-save.spec.ts, committed) but did not write its tests.md, which is still round 2. npm run check passes (3883 tests). Left: re-run test-writer for round 3 on the final code to write tests.md (with coverage); decide the P3s (fix comment or record dispositions + assumption for multi-edit); run e2e test/e2e/undo-last-save.e2e.ts and record tasks.py verify for #1 and #2; write reviews/undo-last-save/quality.json (reviewed_revision = final hash); commit; tasks.py done.
