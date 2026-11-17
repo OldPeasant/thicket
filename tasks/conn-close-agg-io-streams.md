@@ -5,7 +5,7 @@ owner: dell26/agent-1
 deps: [conn-close-streams]
 touches: [packages/backend/src/agg/handlers.ts,packages/backend/src/io/handlers.ts]
 prio: 2
-lease_until: 2026-11-17T04:25:15Z
+lease_until: 2026-11-17T04:30:19Z
 ---
 ## Goal
 Contract `conn.close` cancels the profile's streams. conn-close-streams added
