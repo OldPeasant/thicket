@@ -2,6 +2,14 @@
 export const WORKSPACE = '@thicket/backend';
 
 export * from './agg';
+export {
+  DEFAULT_REDIRECT_URI,
+  OidcAuthenticator,
+  parseCachedTokens,
+  type CachedTokens,
+  type OidcEnvironment,
+  type OidcTarget,
+} from './auth/oidc';
 export * from './browse';
 export * from './connections';
 export * from './docs/query';

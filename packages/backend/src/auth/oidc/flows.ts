@@ -420,9 +420,17 @@ export async function deviceFlow(
     );
   }
   const http = { ...options.http, signal: options.signal };
+  // PKCE also for the device grant: IdPs that enforce it per client (Keycloak) refuse it
+  // otherwise, the others ignore the extra parameters.
+  const { verifier, challenge } = pkcePair();
   const answer = await idpRequest(
     endpoint,
-    { client_id: options.clientId, scope: options.scope },
+    {
+      client_id: options.clientId,
+      scope: options.scope,
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
+    },
     http,
   );
   const body = (answer.body ?? {}) as Record<string, unknown>;
@@ -470,6 +478,7 @@ export async function deviceFlow(
           grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
           device_code: deviceCode,
           client_id: options.clientId,
+          code_verifier: verifier,
         },
         http,
         now,

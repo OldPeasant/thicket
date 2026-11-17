@@ -78,6 +78,8 @@ function realm(user: { username: string; password: string }): unknown {
         firstName: 'Alice',
         lastName: 'Tester',
         credentials: [{ type: 'password', value: user.password, temporary: false }],
+        // Keycloak's default realm roles include it; an imported user gets only what is listed.
+        realmRoles: ['offline_access'],
       },
     ],
     clients: [
