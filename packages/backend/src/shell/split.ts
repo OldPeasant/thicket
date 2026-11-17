@@ -85,9 +85,12 @@ export function splitShellInput(code: string): string[] {
  * `/*`, so a comment glued to an argument is still a comment),
  * then optional trailing comments (`// ...` to the end of the line, `/* ... *\/` on the line),
  * ended by `;`, a line break or the end of the input. Group 1 is the command without comments.
+ * A block comment's body cannot contain `*\/` and a line comment runs as far as `.` matches (up
+ * to the `\r` of a CRLF line or the end), so each text has only one way to match: a failing match
+ * stays linear instead of trying every grouping of comments (TW-2).
  */
 const COMMAND =
-  /^((use|show|it|exit|quit)(?=$|[\s;]|\/[/*])(?:[^\S\n]+(?:(?!\/[/*])[^\s;])+)*)[^\S\n]*(?:(?:\/\*.*?\*\/|\/\/.*)[^\S\n]*)*(?:;|(?=\n)|$)/;
+  /^((use|show|it|exit|quit)(?=$|[\s;]|\/[/*])(?:[^\S\n]+(?:(?!\/[/*])[^\s;])+)*)[^\S\n]*(?:(?:\/\*(?:[^*\n]|\*(?!\/))*\*\/|\/\/.*(?!.))[^\S\n]*)*(?:;|(?=\n)|$)/;
 
 /** The shell command statement at `index`, if one starts there. */
 function commandAt(code: string, index: number): { text: string; end: number } | undefined {
