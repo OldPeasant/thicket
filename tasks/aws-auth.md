@@ -13,7 +13,8 @@ MONGODB-AWS with explicit keys/session token or the default credential chain via
 ## Acceptance criteria
 - [x] Unit tests: option mapping for explicit keys and default chain
   - verified (2026-11-17 03:26+0100 by felix/agent-2): npm test -w @thicket/backend -- src/auth/aws src/connections -> 257 passed (aws.spec: explicit keys/session token/ask/none/default chain/driver loads @aws-sdk/credential-providers; options.spec: real MongoClient accepts both mappings; manager/errors spec: secrets masked, MongoAWSError -> AUTH_FAILED); npm run check -> 3424 + 2154 passed, lint/typecheck clean
-- [ ] Real Atlas verification is the human task `aws-verify`
+- [~] Real Atlas verification is the human task `aws-verify`
+  - skipped (2026-11-17 03:26+0100 by felix/agent-2): Real Atlas/AWS verification is the separate human task aws-verify; no AWS account or Atlas here
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
