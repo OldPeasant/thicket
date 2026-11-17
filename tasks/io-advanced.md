@@ -1,11 +1,11 @@
 ---
 title: M3: CSV import/export and BSON dump
-status: in_progress
+status: done
 owner: dell26/agent-2
 deps: [io-basic-ui]
 touches: [packages/backend/src/io/csv,packages/backend/src/io/bson,packages/renderer/src/app/io]
 prio: 3
-lease_until: 2026-11-17T06:36:58Z
+lease_until: 
 ---
 ## Goal
 CSV export with field selection/flattening; CSV import with field mapping and a BSON type per column; export and import a collection as mongodump-compatible `.bson` (+ metadata JSON).
@@ -23,3 +23,4 @@ See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 06:44+0100 by dell26/agent-2): BSON dump: export writes <name>.metadata.json next to the chosen .bson (options+indexes+uuid like mongodump; empty options/indexes for aggregation sources, views and time series). Import applies a metadata file found next to the .bson automatically: creates a new collection with its options, creates its indexes after the documents. Errors name the document number instead of a line. mongodump/mongorestore compatibility is tested with the tools of the mongo:8.2 fixture image on the host network, not inside the shared fixture container.
 - ASSUMPTION (2026-11-17 07:05+0100 by dell26/agent-2): CSV date cells: only epoch millis or ISO 8601 with a T separator; a date-time without an offset is UTC; anything else is a cell error (machine-independent results).
 - ASSUMPTION (2026-11-17 07:05+0100 by dell26/agent-2): CSV header with a repeated or overlapping column name: preview and default mapping skip later duplicates/overlaps (first wins); explicit csvMapping entries carry the column index, and a repeated name without index is refused.
+- done by dell26/agent-2: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 86s on 161bf025a; criteria verified 2/2
