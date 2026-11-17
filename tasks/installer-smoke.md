@@ -5,7 +5,7 @@ owner: dell26/agent-2
 deps: [release-ci,e2e-harness]
 touches: [.github/workflows/release.yml,test/e2e/smoke]
 prio: 3
-lease_until: 2026-11-17T05:31:14Z
+lease_until: 2026-11-17T05:36:16Z
 ---
 ## Goal
 After building, each OS job starts the packaged app with Playwright: welcome screen shows; on Linux also connect to a containerized MongoDB.
