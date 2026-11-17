@@ -1047,6 +1047,124 @@ describe('CollectionView', () => {
       expect(edits.get('{"$numberInt":"1"}')?.partial).toBe(true);
     });
 
+    describe('and a save conflict (conflict-ui)', () => {
+      /** The server version someone else renamed; shortened to the loaded items for the test. */
+      const serverDoc = (n = 100) =>
+        JSON.stringify({
+          _id: { $numberInt: '1' },
+          name: 'renamed elsewhere (fictitious)',
+          items: skus(0, n),
+        });
+      const shownNames = () =>
+        [...el().querySelectorAll<HTMLInputElement>('input.val-input.str')].map((i) => i.value);
+
+      /** Renames and saves the large document into a conflict with `serverDoc(n)`. */
+      const saveIntoConflict = async (n?: number) => {
+        fake.fail('docs.update', {
+          code: 'CONFLICT',
+          message: 'changed (fictitious)',
+          detail: { current: serverDoc(n) },
+        });
+        await renameAndSave();
+        expect(fake.requestsFor('docs.update')).toHaveLength(1);
+      };
+
+      it('keeps the edit and the cut array paging through getSlice', async () => {
+        await saveIntoConflict();
+        expect(q('conflict-view')).not.toBeNull();
+        expect(fake.requestsFor('docs.get')).toHaveLength(0);
+        const edits = fixture.debugElement.injector.get(DocumentEdits);
+        expect(edits.get('{"$numberInt":"1"}')?.partial).toBe(true);
+        expect(shownNames()).toContain('renamed order');
+        expect(pagerRange()).toContain('1–100 of 50,000');
+        pagerButton('nested-pager-next')?.click();
+        await settle();
+        expect(slices.at(-1)).toMatchObject({ path: 'items', skip: 100, limit: 100 });
+      });
+
+      it('offers only Keep server version (Overwrite and Merge would replace unloaded items)', async () => {
+        await saveIntoConflict();
+        expect(q('conflict-keep-server')).not.toBeNull();
+        expect(q('conflict-overwrite')).toBeNull();
+        expect(q('conflict-merge')).toBeNull();
+      });
+
+      it('Keep server version reads the document back cut and keeps paging it', async () => {
+        await saveIntoConflict();
+        const gets: Record<string, unknown>[] = [];
+        fake.handle('docs.get', (params) => {
+          gets.push(params as unknown as Record<string, unknown>);
+          return { doc: serverDoc(), sliced: [{ path: 'items', total: 50_000, loaded: 100 }] };
+        });
+        click('conflict-keep-server');
+        await settle();
+        expect(gets).toEqual([
+          {
+            profileId: 'p1',
+            db: 'shop',
+            coll: 'orders',
+            id: '{"$numberInt":"1"}',
+            sliceAbove: 100,
+          },
+        ]);
+        expect(q('conflict-view')).toBeNull();
+        expect(shownNames()).toContain('renamed elsewhere (fictitious)');
+        expect(pagerRange()).toContain('1–100 of 50,000');
+        pagerButton('nested-pager-last')?.click();
+        await settle();
+        expect(slices.at(-1)).toMatchObject({ path: 'items', skip: 49_900, limit: 100 });
+        expect(shownSkus().at(-1)).toBe(sku(49_999));
+      });
+
+      it('Keep server version shows the conflict version, still cut, when the read-back fails', async () => {
+        // The conflict carries more items than were loaded; the array still spans the whole length.
+        await saveIntoConflict(300);
+        fake.fail('docs.get', { code: 'INTERNAL', message: 'not readable (fictitious)' });
+        click('conflict-keep-server');
+        await settle();
+        expect(fake.requestsFor('docs.get')).toHaveLength(1);
+        expect(shownNames()).toContain('renamed elsewhere (fictitious)');
+        expect(pagerRange()).toContain('1–100 of 50,000');
+        const before = slices.length;
+        pagerButton('nested-pager-next')?.click();
+        await settle();
+        // Items 100-199 are among the shown version's items: nothing is read for them.
+        expect(slices).toHaveLength(before);
+        expect(shownSkus()[0]).toBe(sku(100));
+        // The document is still partial for the next edit.
+        const name = [...el().querySelectorAll<HTMLInputElement>('input.val-input.str')].find(
+          (i) => i.value === 'renamed elsewhere (fictitious)',
+        );
+        if (!name) throw new Error('name of the kept document not editable');
+        name.value = 'renamed again';
+        name.dispatchEvent(new Event('blur'));
+        await settle();
+        const edits = fixture.debugElement.injector.get(DocumentEdits);
+        expect(edits.get('{"$numberInt":"1"}')?.partial).toBe(true);
+      });
+
+      it('an unknown server version: Keep server version leaves the cut document as loaded', async () => {
+        // No readable version in the conflict, and reading it fails: nothing to show instead.
+        fake.fail('docs.update', { code: 'CONFLICT', message: 'changed (fictitious)' });
+        fake.fail('docs.get', { code: 'INTERNAL', message: 'not readable (fictitious)' });
+        await renameAndSave();
+        expect(get('conflict-title').textContent).toContain('could not be read');
+        click('conflict-keep-server');
+        await settle();
+        const gets = fake.requestsFor('docs.get').map((r) => r.params as Record<string, unknown>);
+        expect(gets).toHaveLength(2);
+        expect(gets[1]).toMatchObject({ sliceAbove: 100 });
+        expect(q('conflict-view')).toBeNull();
+        // The edit is discarded; the loaded version stays, with its cut array.
+        expect(shownNames()).toContain('large order (fictitious)');
+        expect(shownNames()).not.toContain('renamed order');
+        expect(pagerRange()).toContain('1–100 of 50,000');
+        pagerButton('nested-pager-next')?.click();
+        await settle();
+        expect(slices.at(-1)).toMatchObject({ path: 'items', skip: 100, limit: 100 });
+      });
+    });
+
     it('starts the inner pages over when another page of documents is read', async () => {
       pagerButton('nested-pager-next')?.click();
       await settle();

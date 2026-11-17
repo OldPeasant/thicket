@@ -1616,4 +1616,130 @@ describe('DocumentActions', () => {
       expect(params('docs.insert')).toHaveLength(1);
     });
   });
+
+  // doc-paging x conflict-ui: a large document shown with its long arrays cut (`slicedOf`) goes
+  // through the reworked Save/conflict paths. Every read-back keeps the arrays cut (`sliceAbove`),
+  // and a version shown without a read-back keeps the cut flags; nothing is shown when there is
+  // no version to show (`saved === undefined`).
+  describe('a large document with cut arrays in the conflict paths', () => {
+    const ITEMS = [{ path: 'items', total: 50_000, loaded: 100 }] as const;
+    /** `{_id: 1, name, items: [n strings]}` as canonical EJSON (fictitious). */
+    const bigText = (name: string, n = 3) =>
+      JSON.stringify({
+        _id: { $numberInt: '1' },
+        name,
+        items: Array.from({ length: n }, (_, i) => `SKU-${i}`),
+      });
+    const big = (name: string, n?: number) => parseEJsonDocument(bigText(name, n));
+    let changes: [string, string | null, readonly unknown[] | undefined][];
+    let cut: { above: number; arrays: readonly (typeof ITEMS)[number][] } | undefined;
+
+    beforeEach(() => {
+      changes = [];
+      cut = { above: 100, arrays: ITEMS };
+      actions.setHost({
+        ...host(),
+        slicedOf: () => cut,
+        documentChanged: (key, doc, sliced) => changes.push([key, doc, sliced]),
+      });
+    });
+
+    /** Renames the large document (marked partial, as the collection view does) into a conflict. */
+    async function conflictWith(detail: unknown): Promise<void> {
+      fake.fail('docs.update', { code: 'CONFLICT', message: 'x', detail });
+      edits.edit(big('large order'), big('renamed order'), true);
+      expect(await actions.save(keyOf(1))).toBe(false);
+      fake.respond('docs.update', { modified: true });
+      fake.requests.length = 0;
+    }
+
+    it('a conflicting save keeps the edits and reports nothing changed to the host', async () => {
+      await conflictWith({ current: bigText('renamed elsewhere') });
+      expect(actions.conflicts().get(keyOf(1))?.current).toEqual(big('renamed elsewhere'));
+      expect(edits.get(keyOf(1))?.partial).toBe(true);
+      expect(changes).toEqual([]);
+    });
+
+    it('keepServer reads the server version back cut, with the sliced arrays it answers', async () => {
+      await conflictWith({ current: bigText('renamed elsewhere') });
+      fake.respond('docs.get', { doc: bigText('renamed elsewhere'), sliced: [...ITEMS] });
+      await actions.keepServer(keyOf(1));
+      expect(params('docs.get')).toEqual([
+        { profileId: 'p1', db: 'shop', coll: 'orders', id: keyOf(1), sliceAbove: 100 },
+      ]);
+      expect(changes).toEqual([[keyOf(1), bigText('renamed elsewhere'), ITEMS]]);
+      expect(edits.modified()).toBe(false);
+      expect(actions.conflicts().size).toBe(0);
+    });
+
+    it('keepServer passes no cut arrays when the read-back answers the document whole', async () => {
+      await conflictWith({ current: bigText('shrunk elsewhere') });
+      fake.respond('docs.get', { doc: bigText('shrunk elsewhere'), sliced: [] });
+      await actions.keepServer(keyOf(1));
+      expect(changes).toEqual([[keyOf(1), bigText('shrunk elsewhere'), undefined]]);
+    });
+
+    it('keepServer shows the conflict version with the cut flags when the read-back fails', async () => {
+      await conflictWith({ current: bigText('renamed elsewhere') });
+      fake.fail('docs.get', { code: 'SERVER_ERROR', message: 'connection reset' });
+      await actions.keepServer(keyOf(1));
+      expect(params('docs.get')[0]).toMatchObject({ sliceAbove: 100 });
+      expect(changes).toEqual([[keyOf(1), bigText('renamed elsewhere'), ITEMS]]);
+    });
+
+    it('keepServer of an unknown server version shows nothing when the read-back fails too', async () => {
+      // No readable version in the conflict, and reading it fails: the server version is unknown.
+      fake.fail('docs.get', { code: 'SERVER_ERROR', message: 'connection reset' });
+      await conflictWith({ current: 42 });
+      expect(actions.conflicts().get(keyOf(1))?.current).toBeUndefined();
+      await actions.keepServer(keyOf(1));
+      // `saved === undefined`: the page keeps what it shows (and its cut flags) untouched.
+      expect(params('docs.get')).toEqual([
+        { profileId: 'p1', db: 'shop', coll: 'orders', id: keyOf(1), sliceAbove: 100 },
+      ]);
+      expect(changes).toEqual([]);
+      expect(edits.modified()).toBe(false);
+      expect(actions.conflicts().size).toBe(0);
+    });
+
+    it('keepServer of an unknown server version shows the cut read-back when it works', async () => {
+      fake.fail('docs.get', { code: 'SERVER_ERROR', message: 'connection reset' });
+      await conflictWith({ current: 42 });
+      fake.respond('docs.get', { doc: bigText('renamed elsewhere'), sliced: [...ITEMS] });
+      await actions.keepServer(keyOf(1));
+      expect(changes).toEqual([[keyOf(1), bigText('renamed elsewhere'), ITEMS]]);
+    });
+
+    it('Overwrite and Merge manually are refused for the partial document, nothing is written', async () => {
+      await conflictWith({ current: bigText('renamed elsewhere') });
+      expect(actions.resolveBlocker(keyOf(1))).toBe('projection');
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      expect(await actions.saveMerged(keyOf(1), big('merged order'))).toBe(false);
+      expect(fake.requests).toHaveLength(0);
+      expect(changes).toEqual([]);
+      expect(edits.get(keyOf(1))?.current).toEqual(big('renamed order'));
+    });
+
+    it('re-inserting a large document deleted on the server is refused (it is partial)', async () => {
+      await conflictWith({ current: null });
+      expect(await actions.overwrite(keyOf(1))).toBe(false);
+      expect(fake.requests).toHaveLength(0);
+      expect(changes).toEqual([]);
+    });
+
+    it('a save after the conflict was kept reads back cut and passes the new cut arrays', async () => {
+      await conflictWith({ current: bigText('renamed elsewhere') });
+      fake.respond('docs.get', { doc: bigText('renamed elsewhere'), sliced: [...ITEMS] });
+      await actions.keepServer(keyOf(1));
+      edits.edit(big('renamed elsewhere'), big('renamed twice'), true);
+      fake.fail('docs.get', { code: 'SERVER_ERROR', message: 'connection reset' });
+      fake.requests.length = 0;
+      changes = [];
+      expect(await actions.save(keyOf(1))).toBe(true);
+      expect(params('docs.update')).toHaveLength(1);
+      expect(params('docs.get')[0]).toMatchObject({ sliceAbove: 100 });
+      // Not readable: the saved version (still cut) is shown with the cut flags.
+      expect(changes).toEqual([[keyOf(1), bigText('renamed twice'), ITEMS]]);
+    });
+  });
 });
