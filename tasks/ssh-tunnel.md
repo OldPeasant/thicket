@@ -5,7 +5,7 @@ owner: felix/agent-1
 deps: [conn-manager]
 touches: [packages/backend/src/ssh,test/integration/fixtures/ssh]
 prio: 2
-lease_until: 2026-11-17T01:38:49Z
+lease_until: 2026-11-17T01:43:51Z
 ---
 ## Goal
 ssh2-based tunnels with password, private key (+passphrase) or SSH agent; known_hosts in userData with a 'trust this host key' event to the renderer; replica sets get one forwarded port per member; SRV resolved before tunnelling.
