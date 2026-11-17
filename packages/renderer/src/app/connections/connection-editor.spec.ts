@@ -856,6 +856,225 @@ describe('ConnectionEditor', () => {
     });
   });
 
+  describe('M2: SSH, client certificate, proxy, tags and write concern', () => {
+    const SECRET = 'fictitious-ssh-Pa55';
+
+    it('saves an SSH tunnel with its password stored as the sshPassword secret', async () => {
+      await start();
+      await input(must('field-name'), 'Tunnelled');
+      await change(must<HTMLSelectElement>('field-mechanism'), 'NONE');
+      expect(el.querySelector('[data-testid="ssh-fields"]')).toBeNull();
+      await check('field-ssh');
+      await change(must('field-ssh-host'), 'bastion.example');
+      await change(must('field-ssh-username'), 'jumper');
+      expect(text('route')).toContain('SSH jumper@bastion.example');
+      await input(must('field-secret-sshPassword'), SECRET);
+      // SSH is not a connection string option.
+      expect(text('uri-preview')).not.toContain('bastion');
+      expect(text('uri-preview')).not.toContain(SECRET);
+
+      await click('save');
+      expect(savedDraft().ssh).toEqual({
+        host: 'bastion.example',
+        port: 22,
+        username: 'jumper',
+        method: 'password',
+      });
+      expect(JSON.stringify(savedDraft())).not.toContain(SECRET);
+      const secrets = fake.requestsFor('profiles.setSecret').map((r) => r.params);
+      expect(secrets).toEqual([{ profileId: 'new-id', kind: 'sshPassword', value: SECRET }]);
+    });
+
+    it('shows SSH field problems and the key file chooser fills the key file', async () => {
+      fake.respond('profiles.chooseFile', { path: '/fictitious/id_ed25519' });
+      await start();
+      await input(must('field-name'), 'Keys');
+      await check('field-ssh');
+      await click('ssh-method-privateKey');
+      await click('save');
+      expect(text('problems')).toContain('Enter the SSH server.');
+      expect(text('problems')).toContain('Enter the SSH user name.');
+      expect(text('problems')).toContain('Choose the SSH private key file.');
+      expect(fake.requestsFor('profiles.save')).toHaveLength(0);
+
+      await click('choose-ssh-key');
+      expect(fake.requestsFor('profiles.chooseFile')[0]?.params).toEqual({
+        purpose: 'sshPrivateKeyFile',
+      });
+      expect(must<HTMLInputElement>('field-ssh-key-file').value).toBe('/fictitious/id_ed25519');
+      expect(text('problems')).not.toContain('private key file');
+    });
+
+    it('refuses SSH together with a proxy', async () => {
+      await start();
+      await input(must('field-name'), 'Both');
+      await check('field-ssh');
+      await change(must('field-ssh-host'), 'bastion.example');
+      await change(must('field-ssh-username'), 'jumper');
+      await change(must('field-proxy-host'), 'socks.example');
+      await click('save');
+      expect(text('problems')).toContain('Use either an SSH tunnel or a SOCKS5 proxy, not both.');
+    });
+
+    it('loads a saved SSH profile and shows the saved secret as saved', async () => {
+      stored = saved({
+        ssh: { host: 'bastion.example', port: 2222, username: 'jumper', method: 'password' },
+      });
+      fake.handle('profiles.get', () => ({
+        profile: stored,
+        storedSecrets: ['password', 'sshPassword'],
+      }));
+      await start('p1');
+      expect(must<HTMLInputElement>('field-ssh').checked).toBe(true);
+      expect(must<HTMLInputElement>('field-ssh-port').value).toBe('2222');
+      expect(must<HTMLInputElement>('field-secret-sshPassword').placeholder).toBe(
+        'Saved; type to replace it',
+      );
+      await check('field-ssh', false);
+      await click('save');
+      expect(savedDraft().ssh).toBeUndefined();
+    });
+
+    it('proxy fields go into the URI; the proxy password is stored, never in the URI', async () => {
+      await start();
+      await input(must('field-name'), 'Proxied');
+      await change(must('field-proxy-host'), 'socks.example');
+      await change(must('field-proxy-port'), '1081');
+      await change(must('field-proxy-username'), 'pat');
+      await input(must('field-secret-proxyPassword'), SECRET);
+      const uri = text('uri-preview');
+      expect(uri).toContain('proxyHost=socks.example');
+      expect(uri).toContain('proxyPort=1081');
+      expect(uri).toContain('proxyUsername=pat');
+      expect(uri).not.toContain(SECRET);
+      await click('save');
+      expect(savedDraft().proxy).toEqual({ host: 'socks.example', port: 1081, username: 'pat' });
+      expect(fake.requestsFor('profiles.setSecret').map((r) => r.params)).toEqual([
+        { profileId: 'new-id', kind: 'proxyPassword', value: SECRET },
+      ]);
+    });
+
+    it('X.509: client certificate, key file and passphrase; URI follows', async () => {
+      fake.handle('profiles.chooseFile', ({ purpose }) => ({
+        path: purpose === 'tlsCertificateKeyFile' ? '/fictitious/client.pem' : null,
+      }));
+      await start();
+      await input(must('field-name'), 'Cert');
+      await change(must<HTMLSelectElement>('field-mechanism'), 'MONGODB-X509');
+      expect(el.querySelector('[data-testid="field-auth-source"]')).toBeNull();
+      expect(el.querySelector('[data-testid="field-password"]')).toBeNull();
+      await click('save');
+      expect(text('problems')).toContain(
+        'X.509 authentication needs TLS and a client certificate file.',
+      );
+      await check('field-tls');
+      await click('choose-cert');
+      expect(must<HTMLInputElement>('field-cert-file').value).toBe('/fictitious/client.pem');
+      expect(text('uri-preview')).toContain('authMechanism=MONGODB-X509');
+      expect(text('uri-preview')).toContain('tlsCertificateKeyFile=');
+      await change(must('field-key-file'), '/fictitious/client.key');
+      await input(must('field-secret-tlsKeyPassphrase'), SECRET);
+      expect(text('uri-preview')).not.toContain(SECRET);
+      await click('save');
+      expect(savedDraft().tls).toEqual({
+        enabled: true,
+        certificateKeyFile: '/fictitious/client.pem',
+        keyFile: '/fictitious/client.key',
+      });
+      expect(savedDraft().auth).toEqual({ mechanism: 'MONGODB-X509', secretMode: 'none' });
+      expect(fake.requestsFor('profiles.setSecret').map((r) => r.params)).toEqual([
+        { profileId: 'new-id', kind: 'tlsKeyPassphrase', value: SECRET },
+      ]);
+    });
+
+    it('a key file without a client certificate cannot be saved (CR-2)', async () => {
+      await start();
+      await input(must('field-name'), 'Key only');
+      await check('field-tls');
+      await change(must('field-cert-file'), '/fictitious/client.crt');
+      await change(must('field-key-file'), '/fictitious/client.key');
+      await change(must('field-cert-file'), '');
+      await click('save');
+      expect(text('problems')).toContain(
+        'A private key file needs the client certificate file it belongs to.',
+      );
+      expect(fake.requestsFor('profiles.save')).toHaveLength(0);
+    });
+
+    it('tag sets: edited in the form, synced to the URI, refused with primary (CR-3)', async () => {
+      await start();
+      await input(must('field-name'), 'Tags');
+      await click('add-tag-set');
+      await change(nth('field-tag-set', 0), 'dc:east, rack:1');
+      await click('add-tag-set');
+      await click('save');
+      expect(text('problems')).toContain(
+        'Read preference tags need a read preference other than Primary.',
+      );
+      await change(must<HTMLSelectElement>('field-read-preference'), 'nearest');
+      expect(text('uri-preview')).toMatch(/readPreferenceTags=dc(:|%3A)east(,|%2C)rack(:|%3A)1/);
+      await click('save');
+      expect(savedDraft().readPreference).toBe('nearest');
+      expect(savedDraft().readPreferenceTags).toEqual([
+        [
+          { name: 'dc', value: 'east' },
+          { name: 'rack', value: '1' },
+        ],
+        [],
+      ]);
+
+      // URI → form
+      await click('tab-uri');
+      await input(
+        must('field-uri'),
+        'mongodb://db1.example/?readPreference=secondary&readPreferenceTags=dc:west',
+      );
+      await click('tab-form');
+      expect(all('field-tag-set').map((i) => i.value)).toEqual(['dc:west']);
+      await click('remove-tag-set');
+      expect(all('field-tag-set')).toHaveLength(0);
+      expect(text('uri-preview')).not.toContain('readPreferenceTags');
+    });
+
+    it('write concern fields sync both ways', async () => {
+      await start();
+      await input(must('field-name'), 'WC');
+      await change(must('field-w'), 'majority');
+      await change(must<HTMLSelectElement>('field-journal'), 'true');
+      await change(must('field-wtimeout'), '2500');
+      for (const part of ['w=majority', 'journal=true', 'wtimeoutMS=2500']) {
+        expect(text('uri-preview')).toContain(part);
+      }
+      await change(must('field-w'), '2');
+      await click('save');
+      expect(savedDraft().writeConcern).toEqual({ w: 2, journal: true, wtimeoutMS: 2500 });
+
+      await click('tab-uri');
+      await input(must('field-uri'), 'mongodb://db1.example/?w=1&journal=false');
+      await click('tab-form');
+      expect(must<HTMLInputElement>('field-w').value).toBe('1');
+      expect(must<HTMLSelectElement>('field-journal').value).toBe('false');
+      expect(must<HTMLInputElement>('field-wtimeout').value).toBe('');
+    });
+
+    it('copies the connection string with the password masked', async () => {
+      const copied: string[] = [];
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText: (t: string) => (copied.push(t), Promise.resolve()) },
+      });
+      await start();
+      await change(must<HTMLSelectElement>('field-mechanism'), 'SCRAM-SHA-256');
+      await input(must('field-username'), 'alice');
+      await input(must('field-password'), SECRET);
+      await click('copy-uri');
+      expect(copied).toEqual(['mongodb://alice:****@localhost:27017/?authMechanism=SCRAM-SHA-256']);
+      expect(text('copy-state')).toBe('Copied, with the password masked.');
+      await input(must('field-username'), 'bob');
+      expect(el.querySelector('[data-testid="copy-state"]')).toBeNull();
+    });
+  });
+
   it('problems block saving and testing', async () => {
     await start();
     await change(nth('field-host', 0), '');

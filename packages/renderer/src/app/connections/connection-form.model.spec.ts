@@ -9,10 +9,14 @@ import {
   editorProblems,
   editorStateFromProfile,
   folderNames,
+  formatTagSet,
   hostSummary,
   newEditorState,
+  parseTagSet,
+  parseW,
   profileDraftFromState,
   stripUriSecrets,
+  usedSecretKinds,
   usesPassword,
   type EditorState,
 } from './connection-form.model';
@@ -555,6 +559,225 @@ describe('connection-form.model', () => {
         'Ports are whole numbers from 1 to 65535.',
         'Enter the user name, or choose "No authentication".',
       ]);
+    });
+  });
+
+  describe('M2 options: validation', () => {
+    const ssh = (patch: Partial<EditorState['ssh']> = {}): EditorState =>
+      withState({
+        ssh: {
+          enabled: true,
+          host: 'bastion.example.test',
+          port: 22,
+          username: 'jumper',
+          method: 'password',
+          ...patch,
+        },
+      });
+
+    it('accepts a complete SSH tunnel', () => {
+      expect(editorProblems(ssh())).toEqual([]);
+      expect(editorProblems(ssh({ method: 'agent' }))).toEqual([]);
+      expect(
+        editorProblems(ssh({ method: 'privateKey', privateKeyFile: '/fictitious/id_ed25519' })),
+      ).toEqual([]);
+    });
+
+    it('asks for the SSH server, port, user and the key file of the key method', () => {
+      expect(editorProblems(ssh({ host: ' ' }))).toEqual(['Enter the SSH server.']);
+      expect(editorProblems(ssh({ username: '' }))).toEqual(['Enter the SSH user name.']);
+      for (const port of [undefined, 0, 65536, 22.5]) {
+        expect(editorProblems(ssh({ port })), String(port)).toEqual([
+          'The SSH port is a whole number from 1 to 65535.',
+        ]);
+      }
+      expect(editorProblems(ssh({ method: 'privateKey' }))).toEqual([
+        'Choose the SSH private key file.',
+      ]);
+    });
+
+    it('ignores the SSH fields while the tunnel is off', () => {
+      const state = ssh({ host: '', username: '' });
+      state.ssh.enabled = false;
+      expect(editorProblems(state)).toEqual([]);
+      expect(profileDraftFromState(state).ssh).toBeUndefined();
+    });
+
+    it('refuses an SSH tunnel together with a proxy', () => {
+      const state = ssh();
+      state.model.proxy.host = 'socks.example.test';
+      expect(editorProblems(state)).toEqual([
+        'Use either an SSH tunnel or a SOCKS5 proxy, not both.',
+      ]);
+    });
+
+    it('needs a proxy host for a proxy user and a valid proxy port', () => {
+      const user = withState();
+      user.model.proxy.username = 'pat';
+      expect(editorProblems(user)).toEqual([
+        'Enter the proxy host, or remove the proxy user name.',
+      ]);
+      const port = withState();
+      port.model.proxy.host = 'socks.example.test';
+      port.model.proxy.port = 70000;
+      expect(editorProblems(port)).toEqual(['The proxy port is a whole number from 1 to 65535.']);
+    });
+
+    it('refuses a private key file without a client certificate (CR-2)', () => {
+      const state = withState({ tlsKeyFile: '/fictitious/client.key' });
+      state.model.tls.enabled = true;
+      expect(editorProblems(state)).toEqual([
+        'A private key file needs the client certificate file it belongs to.',
+      ]);
+      state.model.tls.certificateKeyFile = '/fictitious/client.crt';
+      expect(editorProblems(state)).toEqual([]);
+    });
+
+    it('refuses read preference tags with primary or no read preference (CR-3)', () => {
+      const problem = 'Read preference tags need a read preference other than Primary.';
+      const state = withState();
+      state.model.readPreference.tags = [{ dc: 'east' }];
+      expect(editorProblems(state)).toEqual([problem]);
+      state.model.readPreference.mode = 'primary';
+      expect(editorProblems(state)).toEqual([problem]);
+      state.model.readPreference.mode = 'nearest';
+      expect(editorProblems(state)).toEqual([]);
+    });
+
+    it('asks for a name for every tag', () => {
+      const state = withState();
+      state.model.readPreference.mode = 'secondary';
+      state.model.readPreference.tags = [{ '': 'east' }];
+      expect(editorProblems(state)).toEqual([
+        'Every read preference tag needs a name (name:value).',
+      ]);
+    });
+
+    it('X.509 needs TLS and a client certificate', () => {
+      const problem = 'X.509 authentication needs TLS and a client certificate file.';
+      const state = withState({ mechanism: 'MONGODB-X509', secretMode: 'none' });
+      expect(editorProblems(state)).toEqual([problem]);
+      state.model.tls.certificateKeyFile = '/fictitious/client.pem';
+      expect(editorProblems(state)).toEqual([problem]);
+      state.model.tls.enabled = true;
+      expect(editorProblems(state)).toEqual([]);
+    });
+  });
+
+  describe('M2 options: URI sync and draft', () => {
+    it('writes proxy, tags, write concern and the client certificate into the URI', () => {
+      const state = withState();
+      state.model.proxy = { host: 'socks.example.test', port: 1081, username: 'pat' };
+      state.model.readPreference = { mode: 'secondary', tags: [{ dc: 'east', rack: '1' }, {}] };
+      state.model.writeConcern = { w: 'majority', journal: true, wtimeoutMS: 5000 };
+      state.model.tls = { enabled: true, certificateKeyFile: '/fictitious/client.pem' };
+      const uri = uriOf(state);
+      expect(uri).toContain('proxyHost=socks.example.test');
+      expect(uri).toContain('proxyPort=1081');
+      expect(uri).toContain('proxyUsername=pat');
+      expect(uri).toContain('readPreference=secondary');
+      expect(uri).toMatch(/readPreferenceTags=dc(:|%3A)east(,|%2C)rack(:|%3A)1/);
+      expect(uri).toContain('w=majority');
+      expect(uri).toContain('journal=true');
+      expect(uri).toContain('wtimeoutMS=5000');
+      expect(uri).toContain('tlsCertificateKeyFile=');
+    });
+
+    it('a pasted URI fills the proxy, tag, write concern and X.509 fields', () => {
+      const state = applied(
+        withState(),
+        'mongodb://db1.example.test/?tls=true&tlsCertificateKeyFile=%2Ffictitious%2Fc.pem' +
+          '&authMechanism=MONGODB-X509&proxyHost=socks.example.test&proxyPort=1081' +
+          '&readPreference=nearest&readPreferenceTags=dc:east&readPreferenceTags=' +
+          '&w=2&journal=false&wtimeoutMS=100',
+      );
+      expect(state.mechanism).toBe('MONGODB-X509');
+      expect(state.secretMode).toBe('none');
+      expect(state.model.tls.certificateKeyFile).toBe('/fictitious/c.pem');
+      expect(state.model.proxy).toMatchObject({ host: 'socks.example.test', port: 1081 });
+      expect(state.model.readPreference.tags).toEqual([{ dc: 'east' }, {}]);
+      expect(state.model.writeConcern).toEqual({ w: 2, journal: false, wtimeoutMS: 100 });
+      const draft = profileDraftFromState(state);
+      expect(draft.auth).toEqual({ mechanism: 'MONGODB-X509', secretMode: 'none' });
+      expect(draft.readPreferenceTags).toEqual([[{ name: 'dc', value: 'east' }], []]);
+      expect(draft.proxy).toEqual({ host: 'socks.example.test', port: 1081 });
+      expect(draft.writeConcern).toEqual({ w: 2, journal: false, wtimeoutMS: 100 });
+    });
+
+    it('keeps SSH out of the URI and puts it in the draft (default port 22, key file only for keys)', () => {
+      const state = withState({
+        ssh: {
+          enabled: true,
+          host: 'bastion.example.test',
+          username: 'jumper',
+          method: 'password',
+          privateKeyFile: '/fictitious/id_ed25519',
+        },
+      });
+      expect(uriOf(state)).not.toMatch(/bastion|jumper/);
+      expect(profileDraftFromState(state).ssh).toEqual({
+        host: 'bastion.example.test',
+        port: 22,
+        username: 'jumper',
+        method: 'password',
+      });
+      state.ssh.method = 'privateKey';
+      expect(profileDraftFromState(state).ssh?.privateKeyFile).toBe('/fictitious/id_ed25519');
+      expect(profileDraftSchema.safeParse(profileDraftFromState(state)).success).toBe(true);
+    });
+
+    it('never puts typed SSH, proxy or key secrets into the URI or the draft', () => {
+      const state = withState({
+        ssh: { enabled: true, host: 'b.example.test', port: 22, username: 'u', method: 'password' },
+        secrets: { sshPassword: PW, proxyPassword: PW, tlsKeyPassphrase: PW, sshKeyPassphrase: PW },
+      });
+      expect(uriOf(state)).not.toContain(PW);
+      expect(JSON.stringify(profileDraftFromState(state))).not.toContain(PW);
+    });
+
+    it('usedSecretKinds lists only the secrets the settings use', () => {
+      const state = withState();
+      expect(usedSecretKinds(state)).toEqual([]);
+      state.ssh = { enabled: true, host: 'b', port: 22, username: 'u', method: 'password' };
+      expect(usedSecretKinds(state)).toEqual(['sshPassword']);
+      state.ssh.method = 'privateKey';
+      expect(usedSecretKinds(state)).toEqual(['sshKeyPassphrase']);
+      state.ssh.method = 'agent';
+      expect(usedSecretKinds(state)).toEqual([]);
+      state.ssh.enabled = false;
+      state.model.tls = { enabled: true, certificateKeyFile: '/fictitious/c.pem' };
+      expect(usedSecretKinds(state)).toEqual(['tlsKeyPassphrase']);
+      state.model.tls.enabled = false;
+      expect(usedSecretKinds(state)).toEqual([]);
+      state.model.proxy = { host: 'socks.example.test' };
+      expect(usedSecretKinds(state)).toEqual([]);
+      state.model.proxy.username = 'pat';
+      expect(usedSecretKinds(state)).toEqual(['proxyPassword']);
+    });
+
+    it('tag set text round trip', () => {
+      expect(parseTagSet(' dc : east , rack:1,')).toEqual({ dc: 'east', rack: '1' });
+      expect(parseTagSet('')).toEqual({});
+      expect(parseTagSet('ssd')).toEqual({ ssd: '' });
+      expect(formatTagSet({ dc: 'east', rack: '1' })).toBe('dc:east, rack:1');
+      expect(parseTagSet(formatTagSet({ dc: 'east', rack: '1' }))).toEqual({
+        dc: 'east',
+        rack: '1',
+      });
+    });
+
+    it('parseW takes numbers and names', () => {
+      expect(parseW(' 2 ')).toBe(2);
+      expect(parseW('majority')).toBe('majority');
+      expect(parseW('  ')).toBeUndefined();
+    });
+
+    it('loads SSH and the separate key file of a saved profile', () => {
+      const state = editorStateFromProfile(rich(), 'saved');
+      expect(state.ssh).toEqual({ enabled: true, ...rich().ssh });
+      expect(state.tlsKeyFile).toBe('/fictitious/client.key');
+      expect(state.secrets).toEqual({});
+      expect(editorStateFromProfile(profile(), 'saved').ssh.enabled).toBe(false);
     });
   });
 
