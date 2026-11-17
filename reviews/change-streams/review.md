@@ -4,23 +4,52 @@ Date: 2026-11-17
 
 Task: change-streams - M6 (Could): Watch changes
 
-Scope: `git diff acb303b0..c14793aa` (the four "change-streams: ..." commits), committed changes only
+Scope: `git diff e0c5399eb4626056de8746d47a1ed811c95cad96..0fe60e1b00a0bb64e67532689212f93983800e61` (final revision, re-review after fixes), committed changes only
 
 Requirements:
-- tasks/change-streams.md acceptance criteria (1) integration test: insert/update/delete events received in order; (2) standalone server shows a clear 'needs replica set' message (test)
-- Recorded assumptions #1-#3 for change-streams (`python tasks.py assumptions`)
-- SPEC.md M6 "Could" change streams, section 4 `admin.*` namespace
-- docs/ARCHITECTURE.md (new "Watch changes" section; "Read preference and write concern" / `ReadCursor` convention in packages/backend/src/browse/browse.ts)
+- tasks/change-streams.md acceptance criteria:
+  - (1) integration test: insert/update/delete events received in order;
+  - (2) a standalone server shows a clear 'needs replica set' message (test).
+- Recorded assumptions #1-#3 for change-streams (raw `$changeStream` aggregate without auto-resume; standalone refused via `hello` with `UNSUPPORTED`/`needsReplicaSet`; "open document" = `docs.get` side panel, `updateLookup` default, 1000 events kept)
+- SPEC.md M6 "Could" change streams
+- docs/ARCHITECTURE.md ("Watch changes" section; `ReadCursor` convention for cursor commands in packages/backend/src/browse/browse.ts)
 - AGENTS.md project notes
-- Contract `admin.watch` in packages/contract/src/admin.ts (unchanged by this task)
+- Previous review (CR-1, CR-2), reviews/change-streams/fixes.md, reviews/change-streams/tests.md
+- mongodb driver 7.9.0 sources in node_modules (`RunCommandCursor`, `AbstractCursor.tryNext`/`fetchBatch`, `GetMoreOperation`), used to check the fix
 
 Git range:
 - Branch: main
-- HEAD: c14793aa31b4b27bc0086b8f40a861035fb1342e
-- Base/start: acb303b04d810d7f1f060755633c8517ac45f4b0
-- Commits reviewed: 4 (9e9f6622, 40788a25, 7679fcef, c14793aa); working tree clean
+- HEAD: 0fe60e1b00a0bb64e67532689212f93983800e61
+- Base/start: e0c5399eb4626056de8746d47a1ed811c95cad96
+- Commits reviewed: 6 (d1e63bcc, 810ef00c, b7c8e438, 90daa343, 8b6b6966, 0fe60e1b); working tree clean
 
-Summary: 0 P0, 0 P1, 1 P2, 1 P3
+Summary: 0 P0, 0 P1, 0 P2, 1 P3
+
+## Verification of the previous findings
+
+- **Previous CR-1 (unpinned getMore/killCursors): fixed.** `streamChanges` now uses `db.runCursorCommand(command, { raw: true })` whenever the database has it (packages/backend/src/admin/watch/watch.ts:118-119). I checked this against the driver source:
+  - `RunCommandCursor.getMore` sends its `GetMoreOperation` to `this.server`, the server that answered the aggregate, and the cursor's `close()` sends `killCursors` to that same server.
+  - `setMaxTimeMS` sets `getMoreOptions.maxAwaitTimeMS`, and `GetMoreOperation` sends it as `getMore.maxTimeMS` (get_more.ts:77), so each round waits 1 s.
+  - The read preference defaults to primary, because no `readPreference` option is passed. This matches the docs.
+  - `tryNext` runs one `fetchBatch`. On the first call that is the aggregate, plus a single `getMore` if the first batch is empty. It does not loop over empty batches the way `hasNext` does.
+  - The loop condition `isOpenCursor(cursor.id)` prevents a `tryNext` on an exhausted cursor, which would throw `MongoCursorExhaustedError`.
+
+  The integration test at test/integration/change-streams.int.spec.ts:374 confirms all of this on the real fixture: exactly one aggregate, every getMore carries the same cursor id, `maxTimeMS` 1000 and the same address, and exactly one killCursors goes to that address.
+- **Previous CR-2 (cursor leaked when cancelled during the aggregate): fixed.** When a round is still in flight, the `finally` block at watch.ts:165-168 defers `close` until that round settles (`round.then(close, close)`). The handlers also absorb a late rejection, so it cannot surface as an unhandled rejection. The fake-only command path kills the cursor from the late reply (watch.ts:192-198). Two integration tests (change-streams.int.spec.ts:336, :354) check through `$currentOp` with `idleCursors` that no cursor is left on the server. The fixer's mutation check shows the second test detects the old behaviour.
+- `npx vitest run src/admin/watch` (packages/backend), run during this review: 2 files, 59 tests passed.
+
+## Acceptance criteria
+
+- (1) Met by change-streams.int.spec.ts:174, against the `mongo8rs` fixture through the served RPC path. It checks:
+  - the order insert, update, insert, delete;
+  - the documentKeys;
+  - the updateLookup `fullDocument`;
+  - lossless Int32, Double and Long values;
+  - non-decreasing clusterTime.
+- (2) Met at two levels:
+  - Backend: change-streams.int.spec.ts:446 runs against the `mongo8` standalone. It expects `UNSUPPORTED` with `NEEDS_REPLICA_SET_MESSAGE` and detail `needsReplicaSet`.
+  - Renderer: watch-view.spec.ts:110 checks that the dedicated notice is shown.
+- `python tasks.py verify change-streams` still shows both criteria unrecorded. The parent records them after the review. Not a finding.
 
 ## P0 Critical
 
@@ -32,31 +61,22 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | getMore/killCursors are not pinned to the server that opened the change stream (sharded with several mongos, load-balanced)**
-    - File: `packages/backend/src/admin/watch/watch.ts:126` (also `:113`, `:134`)
-    - Category: Integration
-    - Problem: `streamChanges` sends the `aggregate`, each `getMore` and the `killCursors` as independent `db.command(...)` calls. Each call selects a server again. That is the pattern the backend moved away from in task raw-cmd-read-pref: `ReadCursor` (packages/backend/src/browse/browse.ts:150-190) runs cursor commands through `runCursorCommand` so that "every `getMore` and the `killCursors` ... reach the server that answered the command". On a replica set every call goes to the primary, so this works, and the integration tests cover only that case. But `assertWatchable` explicitly lets sharded clusters and load-balanced deployments through (watch.ts:49). On a sharded cluster whose connection string lists several mongos, primary selection can pick a different mongos for a `getMore`, which then fails with CursorNotFound. In load-balanced mode the cursor is pinned to one connection, and a `getMore` sent on another pooled connection can fail the same way. The stream then ends with an error after the first round. The same happens after a replica-set failover, but that case is covered by the "no auto-resume" assumption.
-    - Why it matters: watching a sharded or load-balanced deployment, which the code advertises as supported, can fail at random. It also departs from the project's documented convention for cursor commands.
-    - Suggested fix: run the change stream through a pinned driver cursor, as `ReadCursor` does: `db.runCursorCommand(command, { raw: true })` with `setMaxTimeMS(WATCH_AWAIT_MS)` for the await time and `cursor.close()` instead of a raw `killCursors`. Extend `ReadCursor` if needed. Alternatively, refuse sharded and load-balanced deployments in `assertWatchable` and record that as an assumption. Add a unit test that the getMore goes through the cursor (or that these topologies are refused).
+None.
 
 ## P3 Low
 
-- [ ] **CR-2 | Cancel while the opening aggregate is in flight leaves the server-side change stream cursor open**
-    - File: `packages/backend/src/admin/watch/watch.ts:100-113`
+- [ ] **CR-1 | Choosing "Watch changes" again for an open watch tab silently restarts the stream, even after Stop**
+    - File: `packages/renderer/src/app/watch/watch-view.ts:110-115` (with `packages/renderer/src/app/layout/workspace.service.ts:49`, `packages/renderer/src/app/layout/app-shell.ts:106-116`)
     - Category: Correctness
-    - Problem: `run` wraps the `aggregate` in `abortable`. If the user presses Stop (or Start with a new mode) before the aggregate answers, `streamChanges` rejects `CANCELLED` and `id` is still undefined, so the `finally` block kills nothing. The aggregate still completes on the server and opens a change stream cursor that nobody kills. It lives until the server's idle cursor timeout (10 min by default). The unit test "a cancel before the aggregate answers ends CANCELLED without a cursor to kill" (watch.spec.ts:363) confirms this behaviour: the late reply carries cursor id 8 and only `aggregate` is ever sent.
-    - Why it matters: rapid Stop/Start or checkbox toggles leave orphaned cursors on the server. The waste is small and bounded, but avoidable.
-    - Suggested fix: when the signal aborts during the opening command, still await the original aggregate promise in the background and kill its cursor if one opened. Using a driver cursor (CR-1) and closing it would also cover this.
+    - Problem: the sidebar's `openWatch` calls `workspace.open(...)`. For a tab that is already open, `open` replaces it with a new object (`{ ...t, ...tab }`). The shell tracks tabs by id, so it keeps the same `WatchView` and only sets a new `tab` input. `target` is a `computed` that returns a fresh object each time. The constructor `effect` reads `target()` and calls `start()` whenever it changes. As a result, choosing "Watch changes" again for a collection whose watch tab is already open does two things. First, it cancels the running stream and opens a new one. Events committed between the old cursor's last getMore and the new aggregate are never shown. Second, a stream the user stopped with Stop starts again without being asked. No test covers re-opening an existing tab: watch-view.spec.ts sets the `tab` input only once per test, apart from the "no profile" case.
+    - Why it matters: the expected behaviour of "select the tab when it is already open" is a no-op. Instead the user loses events and Stop is overridden. The impact is small, because the list is kept and the gap is short.
+    - Suggested fix: start only when the watched target really changes. Either compare `profileId`/`db`/`coll` with the last started target, or give `target` an `equal` function that compares those fields. Add a view test that sets an equal `tab` input again and expects no second `admin.watch` call.
 
 ## Review conclusion
 
-No material issues found. Both acceptance criteria are implemented and tested:
-- (1) `test/integration/change-streams.int.spec.ts` checks the insert/update/insert/delete order, the documentKeys, lossless types and clusterTime order against the replica-set fixture.
-- (2) The standalone is refused at request time with `UNSUPPORTED` and detail `needsReplicaSet`. The integration test runs against the `mongo8` standalone fixture, and the renderer shows a dedicated notice (watch-view.spec.ts:110).
-
-Renderer state handling is sound:
-- stale-stream callbacks are ignored by subscription identity;
-- out-of-order `docs.get` answers are guarded with an AbortController;
+No material issues found. Both acceptance criteria are implemented and covered by integration tests that ran against the named fixtures. The fixes for the previous CR-1 and CR-2 are correct and complete, and they now follow the `ReadCursor` convention for pinned cursor commands. Renderer state handling is sound:
+- old stream callbacks are ignored by subscription identity;
+- out-of-order `docs.get` answers are guarded by an AbortController;
 - the stream is cancelled when the tab closes.
 
-CR-1 is worth fixing (or making an explicit, recorded scope decision on) before completing the task, because the code claims to support sharded and load-balanced deployments. CR-2 is optional.
+Rendering goes through Angular interpolation only, with no `innerHTML` or sanitizer bypass. The new CR-1 is optional, low-priority polish.
