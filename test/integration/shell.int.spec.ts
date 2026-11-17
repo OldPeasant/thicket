@@ -207,6 +207,12 @@ describe('shell.eval', () => {
     expect((dup.outputs.at(-1) as { text: string }).text).toContain('E11000');
   });
 
+  it('runs the lines after a shell command that has a trailing comment', async () => {
+    const outcome = await backend.evaluate(sessionId, `use ${DB} // switch first\ndb.getName()`);
+    expect(outcome.error).toBeUndefined();
+    expect(results(outcome).at(-1)?.text).toBe(DB);
+  });
+
   it('answers NOT_FOUND for an unknown session', async () => {
     const error = await failure(backend.call('shell.eval', { sessionId: 'nope', code: '1' }));
     expect(error.code).toBe('NOT_FOUND');
@@ -274,6 +280,18 @@ describe('shell.close', () => {
     await backend.call('shell.close', { sessionId });
     expect(backend.host.has(sessionId)).toBe(false);
     const error = await failure(backend.call('shell.close', { sessionId }));
+    expect(error.code).toBe('NOT_FOUND');
+  });
+
+  it('closeProfile (conn.close) ends every session of the profile', async () => {
+    const one = await backend.call('shell.open', { profileId: PROFILE.id });
+    const two = await backend.call('shell.open', { profileId: PROFILE.id, db: DB });
+    await backend.host.closeProfile(PROFILE.id);
+    expect(backend.host.has(one.sessionId)).toBe(false);
+    expect(backend.host.has(two.sessionId)).toBe(false);
+    const error = await failure(
+      backend.call('shell.eval', { sessionId: two.sessionId, code: '1' }),
+    );
     expect(error.code).toBe('NOT_FOUND');
   });
 });
