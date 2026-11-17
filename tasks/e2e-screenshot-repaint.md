@@ -20,3 +20,4 @@ On headless Linux (no DISPLAY, Chromium's headless Ozone), `page.screenshot()` h
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-17 06:30+0100 by dell26/agent-1): Criterion 2 (npm run test:e2e passes headless) not verified as a full headless run: the session could not unset DISPLAY. Assumed the other suites behave headless like screenshot.e2e.ts, since the root cause (headless Ozone's 1x1 screen) is fixed for every launch in headlessArgs(). The 3 failures with a display come from code older than this task and are tracked in e2e-suite-red, whose criteria include a headless run.
