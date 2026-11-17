@@ -3,6 +3,7 @@ import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
+import aggGroup from '../explain/fixtures/agg-group-8.2.json';
 import type { WorkspaceTab } from '../layout/workspace.service';
 import { ConfirmService } from '../safety/confirm.service';
 import { ProfileSafetyService } from '../safety/profile-safety.service';
@@ -1338,5 +1339,159 @@ describe('AggregationView', () => {
     expect(error.hasAttribute('role')).toBe(false);
     expect(error.hasAttribute('aria-live')).toBe(false);
     expect(inStage(0, 'agg-stage-body').getAttribute('aria-describedby')).toBe(error.id);
+  });
+
+  describe('Explain (explain-ui)', () => {
+    const explains = () =>
+      fake.requestsFor('agg.explain').map((r) => r.params as Record<string, unknown>);
+    const explainTarget = (i: number) =>
+      (explains()[i]?.['target'] ?? {}) as Record<string, unknown>;
+
+    beforeEach(() => {
+      fake.respond('agg.explain', { explain: JSON.stringify(aggGroup) });
+    });
+
+    it('explains the enabled stages with execution stats and shows the plan', async () => {
+      await buildDemo();
+      await click(inStage(2, 'agg-stage-enabled'));
+      const previewsBefore = previews().length;
+      expect(q('explain-panel')).toBeNull();
+      await click(get('agg-explain'));
+      expect(explains()).toEqual([
+        {
+          profileId: 'p1',
+          db: 'shop',
+          coll: 'orders',
+          target: {
+            kind: 'aggregate',
+            pipeline:
+              '[{"$match":{"status":"open"}},' +
+              '{"$group":{"_id":"$customer","total":{"$sum":"$total"}}}]',
+          },
+          verbosity: 'executionStats',
+        },
+      ]);
+      // Explain neither runs the pipeline nor previews again.
+      expect(runs()).toHaveLength(0);
+      expect(previews()).toHaveLength(previewsBefore);
+      expect(q('explain-panel')).not.toBeNull();
+      expect(all('explain-stage').map((s) => s.dataset['stage'])).toEqual([
+        '$sort',
+        '$cursor',
+        'GROUP',
+        'COLLSCAN',
+      ]);
+    });
+
+    it('a pipeline with $out is only planned (verbosity queryPlanner), without asking', async () => {
+      const confirms = TestBed.inject(ConfirmService);
+      let asked = 0;
+      confirms.confirm = () => {
+        asked++;
+        return Promise.resolve(true);
+      };
+      await click(get('agg-add-stage'));
+      await setOperator(1, '$out');
+      await click(get('agg-explain'));
+      expect(explains()).toHaveLength(1);
+      expect(explains()[0]?.['verbosity']).toBe('queryPlanner');
+      expect(operators(explainTarget(0)['pipeline'])).toEqual(['$match', '$out']);
+      expect(asked).toBe(0);
+      expect(runs()).toHaveLength(0);
+    });
+
+    it('a pipeline with $merge is only planned too', async () => {
+      await click(get('agg-add-stage'));
+      await setOperator(1, '$merge');
+      await click(get('agg-explain'));
+      expect(explains()[0]?.['verbosity']).toBe('queryPlanner');
+    });
+
+    it('a disabled $out stage does not limit the verbosity', async () => {
+      await click(get('agg-add-stage'));
+      await setOperator(1, '$out');
+      await click(inStage(1, 'agg-stage-enabled'));
+      await click(get('agg-explain'));
+      expect(explains()[0]?.['verbosity']).toBe('executionStats');
+      expect(operators(explainTarget(0)['pipeline'])).toEqual(['$match']);
+    });
+
+    it('an enabled stage with an error sends nothing and names the stage', async () => {
+      await buildDemo();
+      await setBody(1, '{ _id: ');
+      await click(get('agg-explain'));
+      expect(explains()).toHaveLength(0);
+      expect(q('explain-panel')).toBeNull();
+      expect(get('agg-run-error').textContent).toContain('Fix stage 2 first');
+
+      // Fixed, it explains.
+      await setBody(1, '{ _id: "$customer" }');
+      await click(get('agg-explain'));
+      expect(explains()).toHaveLength(1);
+    });
+
+    it('an invalid operator is refused the same way', async () => {
+      view.updateStage(view.stages()[0]?.id ?? 0, { operator: 'match', body: '{}' });
+      await settle();
+      await click(get('agg-explain'));
+      expect(explains()).toHaveLength(0);
+      expect(get('agg-run-error').textContent).toContain('Fix stage 1 first');
+    });
+
+    it('in full-text mode explains the text as typed', async () => {
+      await click(get('agg-mode-text'));
+      const area = get<HTMLTextAreaElement>('agg-text');
+      area.value = '[{ $match: { a: 1 } }, { $limit: 5 }]';
+      area.dispatchEvent(new Event('input'));
+      await click(get('agg-explain'));
+      expect(explains()).toHaveLength(1);
+      expect(explainTarget(0)['pipeline']).toBe(
+        '[{"$match":{"a":{"$numberInt":"1"}}},{"$limit":{"$numberInt":"5"}}]',
+      );
+      expect(view.mode()).toBe('text');
+    });
+
+    it('in full-text mode refuses text that does not parse and sends nothing', async () => {
+      await click(get('agg-mode-text'));
+      const area = get<HTMLTextAreaElement>('agg-text');
+      area.value = '[{ $match: { a: 1 } }, { $limit: }]';
+      area.dispatchEvent(new Event('input'));
+      await click(get('agg-explain'));
+      expect(explains()).toHaveLength(0);
+      expect(q('explain-panel')).toBeNull();
+      expect(get('agg-text-error').textContent).toMatch(/line 1/);
+    });
+
+    it('each Explain asks again with the pipeline at that moment; Close closes the panel', async () => {
+      await click(get('agg-explain'));
+      await setBody(0, '{ status: "open" }');
+      await click(get('agg-explain'));
+      expect(explains().map((_, i) => explainTarget(i)['pipeline'])).toEqual([
+        '[{"$match":{}}]',
+        '[{"$match":{"status":"open"}}]',
+      ]);
+      await click(get('explain-close'));
+      expect(q('explain-panel')).toBeNull();
+      expect(explains()).toHaveLength(2);
+    });
+
+    it('shows a failed explain in the panel, not as a run error', async () => {
+      fake.fail('agg.explain', { code: 'SERVER_ERROR', message: 'unknown operator $nope' });
+      await click(get('agg-explain'));
+      expect(get('explain-failed').textContent).toContain('unknown operator $nope');
+      expect(q('agg-run-error')).toBeNull();
+    });
+
+    it('explains on a read-only profile (it does not write)', async () => {
+      TestBed.inject(ProfileSafetyService).set({
+        id: 'p1',
+        name: 'Reporting',
+        readOnly: true,
+        production: false,
+      });
+      await settle();
+      await click(get('agg-explain'));
+      expect(explains()).toHaveLength(1);
+    });
   });
 });

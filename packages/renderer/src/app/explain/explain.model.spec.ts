@@ -138,3 +138,285 @@ describe('summarizeExplain (other shapes)', () => {
     ).toEqual({ a: 12, b: 'NaN', c: { $oid: 'x' }, d: [1] });
   });
 });
+
+describe('summarizeExplain (edge cases)', () => {
+  /** A classic find explain with execution stats around `executionStages`. */
+  const executed = (executionStages: object, totals: object = {}) => ({
+    explainVersion: '1',
+    queryPlanner: { winningPlan: { stage: 'IGNORED' } },
+    executionStats: { executionStages, ...totals },
+  });
+
+  it('toPlain: $numberDecimal and Infinity become numbers; null and undefined become null', () => {
+    expect(
+      toPlain({
+        dec: { $numberDecimal: '1.5' },
+        inf: { $numberDouble: 'Infinity' },
+        nil: null,
+        none: undefined,
+        flag: true,
+        // A wrapper key with a non-string value is not a number wrapper.
+        odd: { $numberInt: 1 },
+        // Two keys: not a wrapper.
+        two: { $numberInt: '1', x: '2' },
+      }),
+    ).toEqual({
+      dec: 1.5,
+      inf: Infinity,
+      nil: null,
+      none: null,
+      flag: true,
+      odd: { $numberInt: 1 },
+      two: { $numberInt: '1', x: '2' },
+    });
+  });
+
+  it('an already parsed array or primitive is refused like the text', () => {
+    expect(() => summarizeExplain([])).toThrow(/not a document/);
+    expect(() => summarizeExplain('1')).toThrow(/not a document/);
+    expect(() => summarizeExplain('null')).toThrow(/not a document/);
+  });
+
+  it('an aggregate with no usable stages has no query plan', () => {
+    expect(() => summarizeExplain({ stages: [] })).toThrow(/no query plan/);
+    expect(() => summarizeExplain({ stages: [{ nReturned: 1 }, 'x'] })).toThrow(/no query plan/);
+    expect(() => summarizeExplain({ shards: {} })).toThrow(/no query plan/);
+    expect(() => summarizeExplain({ shards: { a: 1, b: { ok: 1 } } })).toThrow(/no query plan/);
+  });
+
+  it('stats without a winning plan: the tree comes from executionStages', () => {
+    const s = summarizeExplain({
+      executionStats: {
+        nReturned: 1,
+        executionStages: { stage: 'COLLSCAN', nReturned: 1, docsExamined: 3 },
+      },
+    });
+    expect(s.root.stage).toBe('COLLSCAN');
+    expect(s.executed).toBe(true);
+    expect(s.engine).toBe('classic');
+  });
+
+  it('classic stats win over the winning plan for the tree (numbers per stage)', () => {
+    const s = summarizeExplain(
+      executed(
+        { stage: 'FETCH', nReturned: 2, inputStage: { stage: 'IXSCAN', indexName: 'a_1' } },
+        { nReturned: 2, totalKeysExamined: 2, totalDocsExamined: 2, executionTimeMillis: 0 },
+      ),
+    );
+    expect(s.root.stage).toBe('FETCH');
+    expect(s.root.nReturned).toBe(2);
+    expect(s.timeMs).toBe(0);
+  });
+
+  it('OR with inputStages: every index once, in plan order, plus a COLLSCAN', () => {
+    const s = summarizeExplain(
+      executed({
+        stage: 'SUBPLAN',
+        inputStage: {
+          stage: 'OR',
+          inputStages: [
+            { stage: 'IXSCAN', indexName: 'b_1' },
+            { stage: 'IXSCAN', indexName: 'a_1' },
+            { stage: 'IXSCAN', indexName: 'b_1' },
+            { stage: 'COLLSCAN' },
+            'not a stage',
+          ],
+        },
+      }),
+    );
+    expect(s.indexes).toEqual(['b_1', 'a_1']);
+    expect(s.collscan).toBe(true);
+    expect(s.root.children[0]?.children.map((c) => c.stage)).toEqual([
+      'IXSCAN',
+      'IXSCAN',
+      'IXSCAN',
+      'COLLSCAN',
+    ]);
+  });
+
+  it('joins: outer and inner stages in order', () => {
+    const s = summarizeExplain(
+      executed({
+        stage: 'EQ_LOOKUP',
+        foreignCollection: 'shop.customers',
+        localField: 'customer',
+        foreignField: '_id',
+        strategy: 'IndexedLoopJoin',
+        outerStage: { stage: 'COLLSCAN' },
+        innerStage: { stage: 'IXSCAN', indexName: '_id_' },
+      }),
+    );
+    expect(s.root.children.map((c) => c.stage)).toEqual(['COLLSCAN', 'IXSCAN']);
+    expect(s.root.details).toEqual([
+      { label: 'from', value: 'shop.customers' },
+      { label: 'local field', value: 'customer' },
+      { label: 'foreign field', value: '_id' },
+      { label: 'strategy', value: 'IndexedLoopJoin' },
+    ]);
+  });
+
+  it('express and _id stages read the _id index', () => {
+    for (const stage of ['IDHACK', 'EXPRESS_IXSCAN', 'EXPRESS_CLUSTERED_IXSCAN']) {
+      expect(summarizeExplain(executed({ stage })).indexes).toEqual(['_id_']);
+    }
+    // A named index wins over the _id default.
+    expect(
+      summarizeExplain(executed({ stage: 'EXPRESS_IXSCAN', indexName: 'x_1' })).indexes,
+    ).toEqual(['x_1']);
+  });
+
+  it('details: default direction and usedDisk false are left out, the rest is shown', () => {
+    const forward = summarizeExplain(
+      executed({ stage: 'IXSCAN', indexName: 'a_1', direction: 'forward', usedDisk: false }),
+    );
+    expect(forward.root.details).toEqual([]);
+    const backward = summarizeExplain(
+      executed({
+        stage: 'SORT',
+        direction: 'backward',
+        sortPattern: { a: { $numberInt: '-1' } },
+        memLimit: { $numberInt: '104857600' },
+        limitAmount: 5,
+        usedDisk: true,
+      }),
+    );
+    expect(backward.root.details).toEqual([
+      { label: 'direction', value: 'backward' },
+      { label: 'sort', value: '{"a":-1}' },
+      { label: 'limit', value: '5' },
+      { label: 'memory limit', value: '104857600' },
+      { label: 'used disk', value: 'true' },
+    ]);
+  });
+
+  it('a stage without a name is shown as "?"', () => {
+    expect(summarizeExplain(executed({ nReturned: 1 })).root.stage).toBe('?');
+  });
+
+  it('slot-based plan without execution stats: the queryPlan tree, not executed', () => {
+    const s = summarizeExplain({
+      explainVersion: '2',
+      queryPlanner: {
+        winningPlan: {
+          queryPlan: {
+            stage: 'FETCH',
+            planNodeId: 2,
+            inputStage: { stage: 'IXSCAN', planNodeId: 1, indexName: 'a_1' },
+          },
+          slotBasedPlan: { stages: '...' },
+        },
+      },
+    });
+    expect(s.engine).toBe('sbe');
+    expect(s.executed).toBe(false);
+    expect(s.root.stage).toBe('FETCH');
+    expect(s.root.nReturned).toBeUndefined();
+    expect(s.indexes).toEqual(['a_1']);
+  });
+
+  it('slot-based numbers: the outermost SBE stage of a planNodeId wins', () => {
+    const s = summarizeExplain({
+      explainVersion: '2',
+      queryPlanner: {
+        winningPlan: { queryPlan: { stage: 'COLLSCAN', planNodeId: 1 } },
+      },
+      executionStats: {
+        nReturned: 4,
+        executionStages: {
+          stage: 'filter',
+          planNodeId: 1,
+          nReturned: 4,
+          executionTimeMillisEstimate: 3,
+          inputStage: { stage: 'scan', planNodeId: 1, nReturned: 10 },
+        },
+      },
+    });
+    expect(s.root.nReturned).toBe(4);
+    expect(s.root.timeMs).toBe(3);
+  });
+
+  it('pipeline stages: stats keys and false flags are not details; other keys are', () => {
+    const s = summarizeExplain({
+      stages: [
+        {
+          $cursor: {
+            queryPlanner: { winningPlan: { stage: 'COLLSCAN' } },
+          },
+        },
+        {
+          $lookup: { from: 'customers', as: 'c' },
+          totalDocsExamined: 5,
+          usedDisk: false,
+          nReturned: 3,
+          executionTimeMillisEstimate: 1,
+        },
+      ],
+    });
+    expect(s.root.stage).toBe('$lookup');
+    expect(s.root.details).toEqual([
+      { label: 'spec', value: '{"from":"customers","as":"c"}' },
+      { label: 'totalDocsExamined', value: '5' },
+    ]);
+    // The pipeline stage has numbers, the $cursor was only planned: not executed.
+    expect(s.executed).toBe(false);
+    expect(s.nReturned).toBe(3);
+  });
+
+  it('a pipeline without $cursor (e.g. $documents) is executed when its stages have numbers', () => {
+    const s = summarizeExplain({
+      stages: [
+        { $documents: [{ a: 1 }], nReturned: 1 },
+        { $project: { a: 1 }, nReturned: 1, executionTimeMillisEstimate: 2 },
+      ],
+    });
+    expect(s.root.stage).toBe('$project');
+    expect(s.root.children[0]?.stage).toBe('$documents');
+    expect(s.executed).toBe(true);
+    expect(s.timeMs).toBe(2);
+    expect(s.indexes).toEqual([]);
+    expect(s.collscan).toBe(false);
+  });
+
+  it('a $cursor that is not a query plan keeps the chain but has no children', () => {
+    const s = summarizeExplain({ stages: [{ $cursor: { foo: 1 } }, { $count: 'n' }] });
+    expect(s.root.children[0]?.stage).toBe('$cursor');
+    expect(s.root.children[0]?.children).toEqual([]);
+  });
+
+  it('sharded aggregate: one shard only planned makes the whole plan not executed', () => {
+    const s = summarizeExplain({
+      shards: {
+        a: {
+          queryPlanner: { winningPlan: { stage: 'COLLSCAN' } },
+          executionStats: { nReturned: 2, executionStages: { stage: 'COLLSCAN' } },
+        },
+        b: { queryPlanner: { winningPlan: { stage: 'COLLSCAN' } } },
+      },
+    });
+    expect(s.executed).toBe(false);
+    expect(s.nReturned).toBe(2);
+    expect(s.keysExamined).toBeUndefined();
+    expect(s.root.details).toEqual([]);
+  });
+
+  it('sharded aggregate on the slot-based engine reports sbe', () => {
+    const s = summarizeExplain({
+      shards: {
+        a: { queryPlanner: { winningPlan: { queryPlan: { stage: 'COLLSCAN' } } } },
+      },
+    });
+    expect(s.engine).toBe('sbe');
+  });
+
+  it('sharded find: a shard without a plan is a leaf, a nameless shard is "?"', () => {
+    const s = summarizeExplain(
+      executed({
+        stage: 'SHARD_MERGE',
+        shards: [{ nReturned: 0 }, { shardName: 'rs1', winningPlan: { stage: 'EOF' } }],
+      }),
+    );
+    expect(s.root.children.map((c) => c.stage)).toEqual(['shard ?', 'shard rs1']);
+    expect(s.root.children[0]?.children).toEqual([]);
+    expect(s.root.children[1]?.children[0]?.stage).toBe('EOF');
+  });
+});

@@ -116,6 +116,88 @@ describe('ExplainPlan with captured MongoDB 8.2 explain output', () => {
     expect(text(el, 'explain-error')).toContain('no query plan');
     expect(el.querySelector('app-explain-raw')).not.toBeNull();
   });
+
+  it('several indexes and a collection scan: all indexes named, the scan mentioned', async () => {
+    await render({
+      queryPlanner: { winningPlan: { stage: 'IGNORED' } },
+      executionStats: {
+        nReturned: 1,
+        executionStages: {
+          stage: 'OR',
+          inputStages: [
+            { stage: 'IXSCAN', indexName: 'a_1' },
+            { stage: 'IXSCAN', indexName: 'b_1' },
+            { stage: 'COLLSCAN' },
+          ],
+        },
+      },
+    });
+    const verdict = byTestId(el, 'explain-verdict')[0];
+    expect(byTestId(el, 'explain-index').map((i) => i.textContent)).toEqual(['a_1', 'b_1']);
+    expect(verdict?.textContent).toContain('and a collection scan');
+    expect(verdict?.classList.contains('indexed')).toBe(true);
+    expect(verdict?.classList.contains('scan')).toBe(false);
+  });
+
+  it('neither an index nor a collection scan: "No index used." without the scan warning', async () => {
+    await render({ executionStats: { nReturned: 0, executionStages: { stage: 'EOF' } } });
+    const verdict = byTestId(el, 'explain-verdict')[0];
+    expect(verdict?.textContent?.trim()).toBe('No index used.');
+    expect(verdict?.classList.contains('scan')).toBe(false);
+    // Unknown totals are a dash, not 0.
+    expect(text(el, 'explain-keys')).toBe('–');
+    expect(text(el, 'explain-time')).toBe('– ms');
+  });
+
+  it('flow bars: a stage that returned a little still shows, keys count for index scans', async () => {
+    await render({
+      executionStats: {
+        nReturned: 1,
+        executionStages: {
+          stage: 'FETCH',
+          nReturned: 1,
+          docsExamined: 1,
+          inputStage: {
+            stage: 'IXSCAN',
+            indexName: 'a_1',
+            nReturned: 1,
+            keysExamined: 100_000,
+            docsExamined: 0,
+          },
+        },
+      },
+    });
+    const ixscan = el.querySelector('[data-stage="IXSCAN"]');
+    expect(ixscan?.querySelector<HTMLElement>('.flow .examined')?.style.width).toBe('100%');
+    // 1 of 100,000 would be 0.001%: shown as at least 1%.
+    expect(ixscan?.querySelector<HTMLElement>('.flow .returned')?.style.width).toBe('1%');
+    expect(ixscan?.textContent).toContain((100_000).toLocaleString());
+  });
+
+  it('planned only: no flow bars (nothing to compare)', async () => {
+    await render({
+      queryPlanner: {
+        winningPlan: { stage: 'FETCH', inputStage: { stage: 'IXSCAN', indexName: 'a_1' } },
+      },
+    });
+    expect(el.querySelectorAll('.flow')).toHaveLength(0);
+    expect(byTestId(el, 'explain-stage').map((s) => s.dataset['stage'])).toEqual([
+      'FETCH',
+      'IXSCAN',
+    ]);
+  });
+
+  it('a new explain output replaces the shown plan and keeps the chosen view', async () => {
+    await render(findCollscan);
+    byTestId(el, 'explain-view-raw')[0]?.click();
+    await settle(fixture);
+    await render(findIxscan);
+    expect(byTestId(el, 'explain-view-raw')[0]?.getAttribute('aria-pressed')).toBe('true');
+    expect(el.querySelector('app-explain-raw')?.textContent).toContain('status_1_n_1');
+    byTestId(el, 'explain-view-plan')[0]?.click();
+    await settle(fixture);
+    expect(text(el, 'explain-verdict')).toBe('Index used: status_1_n_1');
+  });
 });
 
 describe('ExplainPanel', () => {

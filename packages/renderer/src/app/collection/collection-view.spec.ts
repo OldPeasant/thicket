@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { FakeThicketBridge, provideFakeThicket } from '../api/testing';
 import { DocumentEdits } from '../document';
+import findIxscan from '../explain/fixtures/find-ixscan-8.2.json';
 import { WorkspaceService, type WorkspaceTab } from '../layout/workspace.service';
 import { ProfileSafetyService } from '../safety/profile-safety.service';
 import { CollectionView } from './collection-view';
@@ -1251,6 +1252,137 @@ describe('CollectionView', () => {
       await settle();
       const edits = fixture.debugElement.injector.get(DocumentEdits);
       expect(edits.get('{"$numberInt":"2"}')?.partial).toBe(false);
+    });
+  });
+
+  describe('Explain (explain-ui)', () => {
+    const explains = () =>
+      fake.requestsFor('agg.explain').map((r: Request) => r.params as Record<string, unknown>);
+    const explainTarget = (i: number) =>
+      (explains()[i]?.['target'] ?? {}) as Record<string, unknown>;
+
+    beforeEach(() => {
+      fake.respond('agg.explain', { explain: JSON.stringify(findIxscan) });
+    });
+
+    it('explains the parsed query bar as a find on the tab collection and shows the plan', async () => {
+      type('query-filter', '{ status: "open", n: { $gt: 100 } }');
+      type('query-projection', '{ name: 1 }');
+      type('query-sort', '{ n: -1 }');
+      type('query-collation', "{ locale: 'en' }");
+      type('query-limit', '7');
+      expect(q('explain-panel')).toBeNull();
+      click('query-explain');
+      await settle();
+      expect(explains()).toHaveLength(1);
+      expect(explains()[0]).toEqual({
+        profileId: 'p1',
+        db: 'shop',
+        coll: 'orders',
+        target: {
+          kind: 'find',
+          filter: '{"status":"open","n":{"$gt":{"$numberInt":"100"}}}',
+          projection: '{"name":{"$numberInt":"1"}}',
+          sort: '{"n":{"$numberInt":"-1"}}',
+          collation: '{"locale":"en"}',
+          limit: 7,
+        },
+      });
+      // Explain does not run the query.
+      expect(finds()).toHaveLength(1);
+      expect(q('explain-panel')).not.toBeNull();
+      expect(q('explain-verdict')?.textContent).toContain('status_1_n_1');
+    });
+
+    it('an empty query bar explains the empty filter without optional fields', async () => {
+      click('query-explain');
+      await settle();
+      expect(explainTarget(0)['kind']).toBe('find');
+      expect(explainTarget(0)['filter']).toBe('{}');
+      for (const key of ['projection', 'sort', 'collation', 'limit']) {
+        expect(explainTarget(0)[key]).toBeUndefined();
+      }
+    });
+
+    it('an invalid query shows the field errors and sends nothing', async () => {
+      type('query-filter', '{ status: "open"');
+      type('query-limit', '-1');
+      click('query-explain');
+      await settle();
+      expect(explains()).toHaveLength(0);
+      expect(q('explain-panel')).toBeNull();
+      expect(q('query-error-filter')?.textContent).toContain('Filter:');
+      expect(q('query-error-limit')?.textContent).toContain('whole number');
+      expect(finds()).toHaveLength(1);
+
+      // Fixed: Explain clears the errors and explains.
+      type('query-filter', '{ status: "open" }');
+      type('query-limit', '');
+      click('query-explain');
+      await settle();
+      expect(q('query-error-filter')).toBeNull();
+      expect(q('query-error-limit')).toBeNull();
+      expect(explains()).toHaveLength(1);
+      expect(explainTarget(0)['filter']).toBe('{"status":"open"}');
+    });
+
+    it('each Explain asks again, with the query bar at that moment', async () => {
+      click('query-explain');
+      await settle();
+      click('query-explain');
+      await settle();
+      type('query-filter', '{ a: 1 }');
+      click('query-explain');
+      await settle();
+      expect(explains().map((_, i) => explainTarget(i)['filter'])).toEqual([
+        '{}',
+        '{}',
+        '{"a":{"$numberInt":"1"}}',
+      ]);
+    });
+
+    it('shows a failed explain in the panel, not as a query error', async () => {
+      fake.fail('agg.explain', { code: 'SERVER_ERROR', message: 'unknown operator: $foo' });
+      click('query-explain');
+      await settle();
+      expect(q('explain-failed')?.textContent).toContain('unknown operator: $foo');
+      expect(q('results-error')).toBeNull();
+    });
+
+    it('Close closes the panel', async () => {
+      click('query-explain');
+      await settle();
+      click('explain-close');
+      await settle();
+      expect(q('explain-panel')).toBeNull();
+      expect(explains()).toHaveLength(1);
+    });
+
+    it('pointing the tab at another collection closes the panel', async () => {
+      click('query-explain');
+      await settle();
+      expect(q('explain-panel')).not.toBeNull();
+      fixture.componentRef.setInput('tab', {
+        ...TAB,
+        id: 'p1/shop.invoices',
+        data: { profileId: 'p1', db: 'shop', coll: 'invoices', type: 'collection' },
+      });
+      await settle();
+      expect(q('explain-panel')).toBeNull();
+      expect(explains()).toHaveLength(1);
+
+      // The next Explain explains the new collection.
+      click('query-explain');
+      await settle();
+      expect(explains().at(-1)).toMatchObject({ coll: 'invoices' });
+    });
+
+    it('the same collection opened again keeps the panel', async () => {
+      click('query-explain');
+      await settle();
+      fixture.componentRef.setInput('tab', { ...TAB, data: { ...TAB.data } });
+      await settle();
+      expect(q('explain-panel')).not.toBeNull();
     });
   });
 });
