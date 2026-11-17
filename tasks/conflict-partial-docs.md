@@ -13,7 +13,8 @@ array with the whole server document and blames a projection for the missing Ove
 
 ## Acceptance criteria
 - [ ] The conflict diff of a document with cut arrays does not list never-loaded items as differences and does not render the whole server array (component test with a 300-item server array, 100 loaded)
-- [ ] The conflict note and the refused-resolve message for a partly loaded document without a projection name the partial load, not a projection (same wording rule as Save's PARTIAL_REFUSED)
+- [ ] The conflict note, the refused-resolve message and the re-insert refusal (document-actions.service.ts, "with a projection active") for a partly loaded document without a projection name the partial load, not a projection (same wording rule as Save's PARTIAL_REFUSED)
+- [ ] Keep server version whose read-back fails (fallback to the conflict's complete server version, reviews/doc-paging/review.md CR-8) shows that version as whole: no cut flags, arrays editable, pager lengths match the real arrays (adjust the collection-view test that asserts "still cut")
 
 ## Notes
 See SPEC.md, docs/ARCHITECTURE.md "Paging inside documents", conflict-ui task.
