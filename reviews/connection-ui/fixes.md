@@ -4,7 +4,9 @@ Date: 2026-11-17
 
 Task: connection-ui - M1: Connection editor and manager
 
-Scope: current task. Findings approved by the parent worker from `reviews/connection-ui/tests.md` (TW-1) and `reviews/connection-ui/review.md` (CR-1, CR-2, CR-3, CR-5, CR-6). Task base 9d2524478e7bf26f37e1ec73ebb4f721753be056, fixes in commit dd51ff076c1ef0f5450b108b46fe15f11edfc3bc on top of 8ca68f6.
+Scope: current task, two rounds. Round 2 (at the end of this report) fixes the open P2 finding of the second review pass and the edits-during-password-store note from `tests.md`. Round 1: findings approved by the parent worker from `reviews/connection-ui/tests.md` (TW-1) and `reviews/connection-ui/review.md` (CR-1, CR-2, CR-3, CR-5, CR-6). Task base 9d2524478e7bf26f37e1ec73ebb4f721753be056, fixes in commit dd51ff076c1ef0f5450b108b46fe15f11edfc3bc on top of 8ca68f6.
+
+# Round 1
 
 ## Fixed findings
 
@@ -115,6 +117,69 @@ Remaining unresolved findings:
 0
 
 Task-scoped coverage was not rerun by the fixer; the test-writer's report asks for a rerun without the TW-1 filter, which is now possible because the test passes.
+
+Round 1 status: all validated findings fixed and validation passed.
+
+# Round 2
+
+Scope: second review pass `reviews/connection-ui/review.md` (open P2 finding, labelled CR-1 in that report; called CR-1 (pass 2) here) and the second "Unable to test" note of `reviews/connection-ui/tests.md`, as requested by the parent worker. Base HEAD 1562057, fix in commit 55339c5.
+
+## Fixed findings
+
+### CR-1 (pass 2) — Leaving a new profile while its Save runs still navigates the user back to the saved profile
+
+Files changed:
+- `packages/renderer/src/app/connections/connection-editor.ts`
+- `packages/renderer/src/app/connections/connection-editor.spec.ts`
+
+Problem:
+Confirmed in the code: the `DestroyRef` hook only aborted a running test. `connections/new` and `connections/:id` are separate route configs, so leaving `/connections/new` destroys the editor, but the generation guard in `save()` still saw the instance as current. When `profiles.save` (and `setSecret`) finished, it called `router.navigate(['/connections', id], { replaceUrl: true })` and replaced the page the user had moved to.
+
+Fix:
+The destroy hook now also increments `loadGeneration`, so `save()` treats a destroyed editor as stale. It skips the state, notice, error, storedSecrets and navigation updates. The sidebar reload and safety registration still run because they are not guarded. Pending `loadProfile` answers of a destroyed instance are also ignored by the same guard.
+
+Validation:
+- New spec `leaving a new profile while Save runs does not navigate back to it` (holds `profiles.save`, navigates to `/connections/elsewhere`, destroys the fixture, releases the save, asserts the URL is still `/connections/elsewhere` and `profiles.list` was reloaded) — Pass. With the destroy-hook line disabled, it fails (`expected '/connections/new-id' to be '/connections/elsewhere'`).
+
+### TW note — "Saved." shown although edits made during the password store are unsaved
+
+Files changed:
+- `packages/renderer/src/app/connections/connection-editor.ts`
+- `packages/renderer/src/app/connections/connection-editor.spec.ts`
+
+Problem:
+When `setSecret` finished after the user had edited the form, `save()` kept the edits (correct) but still set the "Saved." notice. The newer edits were not saved.
+
+Fix:
+The notice is set only when the state still is the one that Save set (`this.state() === pending`, the same check that already decides whether the state is replaced). Any edit already clears the notice in `update()`, so after an edit during the store, no notice is shown. The existing spec `edits made while the password is being stored are kept when Save finishes` now also asserts that no `saved-notice` is shown. With the fix disabled, that assertion fails.
+
+Validation:
+- `cd packages/renderer && npx ng test --watch=false --include='src/app/connections/**/*.spec.ts'` — Pass
+
+Left as is (noted, not changed): for a *new* profile, edits made while the password is being stored are still lost, because the editor then navigates to `/connections/:id` (a new editor instance that loads the saved profile and shows "Saved."). That notice is accurate for the page shown. Keeping those edits would need a change to the post-save navigation flow, which is beyond this small fix.
+
+## Not fixed
+
+None.
+
+## Validation summary
+
+Focused tests:
+- `cd packages/renderer && npx ng test --watch=false --include='src/app/connections/**/*.spec.ts'` — Pass (3 files, 125 tests)
+- Regression check: with both fix lines temporarily disabled, `connection-editor.spec.ts` failed exactly the two affected specs (2 failed, 35 passed). After restoring the fix, all passed.
+
+Full test suite:
+- `npm run check` (eslint --max-warnings 0, prettier --check, type checks, vitest 48 files / 2989 tests, renderer ng test 64 files / 1594 tests) — Pass
+- e2e not rerun (the change affects only in-component async handling that unit specs cover; no e2e criterion depends on it)
+
+Lint/type-check/build:
+- Included in `npm run check` — Pass
+
+`.taskcheck`:
+- Pass (it runs `npm run check`, see above)
+
+Remaining unresolved findings:
+0
 
 ## Final status
 
