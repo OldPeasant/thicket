@@ -25,3 +25,4 @@ Find each cause (test out of date vs. app bug vs. fixture/environment) and fix i
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md ("End-to-end tests").
+- ASSUMPTION (2026-11-17 06:52+0100 by felix/agent-2): layout.e2e.ts:36 (Compass import heading) was already fixed by e2e-layout-import-heading (page-heading test id on the import page); nothing more done for it here
