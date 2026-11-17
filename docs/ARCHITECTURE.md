@@ -556,6 +556,21 @@ Contract layout (`packages/contract/src/`):
   `WriteGuard.run`. Saving pipelines is task `saved-pipelines`. e2e:
   `test/e2e/aggregation.e2e.ts` (demo step 8).
 
+## Indexes tab (`packages/renderer/src/app/indexes`)
+- `IndexesView` is the `indexes` tab view (id `indexesTabId(profileId, db, coll)`, `data` like a
+  collection tab), opened with "Indexes…" (`open-indexes`) on the collection tab; dropping or
+  renaming the collection closes it too. It reads `idx.list` and `idx.stats` together (a failed
+  `idx.stats`, e.g. no `indexStats` privilege, only leaves size/usage empty) and shows one row per
+  index: key pattern (↑/↓ or the index type), option tags, size, uses with a meter relative to
+  the most used index. Drop (`alwaysConfirm`) and hide/unhide go through `WriteGuard`; `_id_`
+  has neither.
+- `IndexCreateForm`: key fields (direction or `text`/`2dsphere`/`2d`/`hashed`; `$**` /
+  `path.$**` is a wildcard) and options (name, unique, sparse, hidden, TTL, partial filter;
+  collation, text weights/language, wildcard projection under a disclosure). `buildIndex()`
+  (`index-form.model.ts`, pure) parses the shell-syntax options and refuses what the server
+  would (sparse + partial, TTL on a compound/special/`_id` key, unique hashed/wildcard, …) next to
+  the field; a live preview shows the `createIndex(…)` call. e2e: `test/e2e/indexes.e2e.ts`.
+
 ## Write safety in the renderer (`packages/renderer/src/app/safety`)
 - Every write UI sends writes through `WriteGuard.run(method, params, options)` (or `approve()`,
   which returns the params to send, e.g. for `agg.run` with `$out` over `ApiService.stream`).
