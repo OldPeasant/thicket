@@ -28,6 +28,24 @@ describe('uriLines / importSummary', () => {
       'Imported 2 connections, skipped 1.',
     );
     expect(importSummary({ imported: [], skipped: [] })).toMatch(/no connections/);
+    expect(
+      importSummary({
+        imported: [],
+        skipped: [
+          { source: 'a', reason: 'x' },
+          { source: 'b', reason: 'y' },
+        ],
+      }),
+    ).toBe('Imported 0 connections, skipped 2.');
+    // Notices don't change the counts.
+    expect(
+      importSummary({ imported: [p], skipped: [], notices: [{ source: 'a', reason: 'n' }] }),
+    ).toBe('Imported 1 connection.');
+  });
+
+  it('splits Windows and Unix line endings and ignores whitespace-only lines', () => {
+    expect(uriLines('mongodb://a\r\n\t \r\nmongodb://b\n')).toEqual(['mongodb://a', 'mongodb://b']);
+    expect(uriLines(' \n\t\n')).toEqual([]);
   });
 });
 
@@ -189,5 +207,112 @@ describe('ImportExportPage', () => {
     await settle();
     expect(fake.requestsFor('profiles.export')[0]?.params).toEqual({ profileIds: ['p2', 'p1'] });
     expect(all('transfer-outcome')).toEqual([]);
+  });
+
+  /** A promise and the function that settles it, to answer a request when the test says so. */
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((r) => (resolve = r));
+    return { promise, resolve };
+  }
+
+  it('sends one import while one is running and disables every action meanwhile', async () => {
+    const pending = deferred<{ imported: Profile[]; skipped: [] }>();
+    fake.handle('profiles.importCompass', () => pending.promise);
+    await start();
+    one<HTMLInputElement>('export-all').click();
+    await settle();
+    const fileButton = one<HTMLButtonElement>('import-file');
+    fileButton.click();
+    await settle();
+    expect(fileButton.disabled).toBe(true);
+    expect(one<HTMLButtonElement>('export-submit').disabled).toBe(true);
+    // A click that reaches the handler anyway (e.g. queued before the re-render) is ignored.
+    fileButton.disabled = false;
+    fileButton.click();
+    await settle();
+    expect(fake.requestsFor('profiles.importCompass')).toHaveLength(1);
+    pending.resolve({ imported: [], skipped: [] });
+    await settle();
+    expect(one<HTMLButtonElement>('import-file').disabled).toBe(false);
+    expect(one<HTMLButtonElement>('export-submit').disabled).toBe(false);
+    expect(one('import-summary').textContent).toMatch(/no connections/);
+  });
+
+  it('re-enables the buttons and shows the error when an export fails; the next action clears it', async () => {
+    fake.fail('profiles.export', { code: 'INTERNAL', message: 'disk is full' });
+    fake.respond('profiles.importCompass', { imported: [], skipped: [] });
+    await start();
+    one<HTMLInputElement>('export-all').click();
+    await settle();
+    one('export-submit').click();
+    await settle();
+    expect(one('transfer-error').textContent).toContain('disk is full');
+    expect(one<HTMLButtonElement>('export-submit').disabled).toBe(false);
+    expect(all('transfer-outcome')).toEqual([]);
+    one('import-file').click();
+    await settle();
+    expect(all('transfer-error')).toEqual([]);
+    expect(all('transfer-outcome')).toHaveLength(1);
+  });
+
+  it('unticks a single profile and keeps "All connections" in sync', async () => {
+    fake.respond('profiles.export', { path: '/tmp/x.json', exported: 1 });
+    await start();
+    const allBox = one<HTMLInputElement>('export-all');
+    allBox.click();
+    await settle();
+    expect(allBox.checked).toBe(true);
+    const billing = all('export-pick').find(
+      (n) => n.dataset['name'] === 'Billing',
+    ) as HTMLInputElement;
+    billing.click();
+    await settle();
+    expect(allBox.checked).toBe(false);
+    expect(one('export-submit').textContent.trim()).toBe('Export 1 connection…');
+    one('export-submit').click();
+    await settle();
+    expect(fake.requestsFor('profiles.export')[0]?.params).toEqual({ profileIds: ['p1'] });
+    expect(one('export-done').textContent).toContain('Exported 1 connection to /tmp/x.json');
+  });
+
+  it('reloads the sidebar profiles after importing connection strings; no notices without any', async () => {
+    fake.respond('profiles.importUris', {
+      imported: [profile('n1', { name: 'New one' })],
+      skipped: [],
+    });
+    await start();
+    const area = one<HTMLTextAreaElement>('import-uris');
+    area.value = 'mongodb://new.test';
+    area.dispatchEvent(new Event('input'));
+    await settle();
+    one('import-uris-submit').click();
+    await settle();
+    expect(fake.requestsFor('profiles.list')).toHaveLength(2);
+    expect(all('import-imported').map((n) => n.dataset['name'])).toEqual(['New one']);
+    expect(all('import-notice')).toEqual([]);
+    expect(all('import-skipped')).toEqual([]);
+  });
+
+  it('keeps the field and shows the error when importing connection strings fails', async () => {
+    fake.fail('profiles.importUris', { code: 'UNSUPPORTED', message: 'profiles are read-only' });
+    await start();
+    const area = one<HTMLTextAreaElement>('import-uris');
+    area.value = 'mongodb://a.test';
+    area.dispatchEvent(new Event('input'));
+    await settle();
+    one('import-uris-submit').click();
+    await settle();
+    expect(one('transfer-error').textContent).toContain('profiles are read-only');
+    expect(area.value).toBe('mongodb://a.test');
+    expect(fake.requestsFor('profiles.list')).toHaveLength(1);
+  });
+
+  it('has nothing to export without profiles', async () => {
+    profiles = [];
+    await start();
+    expect(el.textContent).toContain('No connections to export yet.');
+    expect(all('export-submit')).toEqual([]);
+    expect(all('export-all')).toEqual([]);
   });
 });

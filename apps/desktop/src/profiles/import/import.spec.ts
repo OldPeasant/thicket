@@ -13,8 +13,10 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import type { NativeDialogs } from '../../dialogs';
+import { ProfilesReadOnlyError } from '../store';
 import {
   ImportFileError,
+  MAX_IMPORT_FILE_BYTES,
   exportFile,
   importExportHandlers,
   parseImportFile,
@@ -428,5 +430,660 @@ describe('importExportHandlers', () => {
     );
     dialogs.cancel = true;
     expect(await call('profiles.export', {})).toEqual({ path: null, exported: 0 });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Edge cases (test-writer): secret stripping with odd casing / repeated options, Compass entries
+// with SSH + proxy, invalid SSH, EJSON ports and versions, BOM, oversize files, Thicket files.
+// ---------------------------------------------------------------------------------------------
+
+/** U+FEFF, the byte order mark some editors write before the JSON. */
+const BOM = String.fromCharCode(0xfeff);
+
+/** A Compass export around the given `connections` (version as Compass writes it). */
+const compassFile = (connections: unknown[], version: unknown = { $numberInt: '1' }): string =>
+  JSON.stringify({ type: 'Compass Connections', version, connections });
+
+const sshEntry = (sshTunnel: unknown, uri = 'mongodb://db.example.test:27017') => ({
+  connectionOptions: { connectionString: uri, sshTunnel },
+  favorite: { name: 'Tunnel' },
+});
+
+describe('secret stripping (odd casing, repeated options, unparsed properties)', () => {
+  it('strips secret options written in any case', () => {
+    const uri =
+      'mongodb://u:fake-pw@db.example.test/?authMechanism=MONGODB-AWS' +
+      '&AUTHMECHANISMPROPERTIES=aws_session_token:fake-lower-token' +
+      '&PROXYHOST=s.test&proxyusername=pu&PROXYPASSWORD=fake-upper-proxy' +
+      '&TLSCertificateKeyFile=%2Fc.pem&TlsCertificateKeyFilePassword=fake-mixed-tls';
+    const cleaned = uriWithoutSecrets(uri);
+    for (const secret of ['fake-pw', 'fake-lower-token', 'fake-upper-proxy', 'fake-mixed-tls'])
+      expect(cleaned).not.toContain(secret);
+    expect(cleaned).not.toMatch(/password|token/i);
+    const { draft, secrets } = profileFromUri(uri);
+    expect(draft.connectionString).toBe(cleaned.replace('u@', ''));
+    expect(secrets).toEqual(
+      expect.arrayContaining([
+        { kind: 'password', value: 'fake-pw' },
+        { kind: 'awsSessionToken', value: 'fake-lower-token' },
+        { kind: 'proxyPassword', value: 'fake-upper-proxy' },
+        { kind: 'tlsKeyPassphrase', value: 'fake-mixed-tls' },
+      ]),
+    );
+    expect(secrets).toHaveLength(4);
+  });
+
+  it('strips a mixed-case AWS_SESSION_TOKEN property and keeps the other properties', () => {
+    const { draft, secrets } = profileFromUri(
+      'mongodb://AKIAEXAMPLE:fake-secret@db.example.test/?authMechanism=MONGODB-AWS' +
+        '&authMechanismProperties=Aws_Session_Token:fake-token,SERVICE_NAME:svc',
+    );
+    expect(draft.connectionString).not.toContain('fake-token');
+    expect(draft.connectionString).toContain('SERVICE_NAME:svc');
+    expect(secrets).toContainEqual({ kind: 'awsSessionToken', value: 'fake-token' });
+  });
+
+  it('strips every copy of a repeated secret option and keeps the first value as the secret', () => {
+    const uri =
+      'mongodb://db.example.test/?proxyHost=s.test&proxyUsername=pu' +
+      '&proxyPassword=fake-first&ProxyPassword=fake-second&proxyPassword=fake-third' +
+      '&tls=true&tlsCertificateKeyFile=%2Fc.pem' +
+      '&tlsCertificateKeyFilePassword=fake-tls-1&tlscertificatekeyfilepassword=fake-tls-2';
+    const { draft, secrets } = profileFromUri(uri);
+    for (const s of ['fake-first', 'fake-second', 'fake-third', 'fake-tls-1', 'fake-tls-2']) {
+      expect(draft.connectionString).not.toContain(s);
+      expect(uriWithoutSecrets(uri)).not.toContain(s);
+    }
+    expect(secrets).toEqual([
+      { kind: 'proxyPassword', value: 'fake-first' },
+      { kind: 'tlsKeyPassphrase', value: 'fake-tls-1' },
+    ]);
+  });
+
+  it('takes the session token out of authMechanismProperties the parser could not read', () => {
+    // "FOO" without a value makes the parser keep the whole option verbatim (in `extra`).
+    const uri =
+      'mongodb://AKIAEXAMPLE:fake-secret@db.example.test/?authMechanism=MONGODB-AWS' +
+      '&authMechanismProperties=FOO,AWS_SESSION_TOKEN:fake-extra-token';
+    const { draft, secrets } = profileFromUri(uri);
+    expect(draft.connectionString).not.toContain('fake-extra-token');
+    expect(draft.connectionString).toContain('authMechanismProperties=FOO');
+    expect(uriWithoutSecrets(uri)).not.toContain('fake-extra-token');
+    expect(secrets).toContainEqual({ kind: 'awsSessionToken', value: 'fake-extra-token' });
+  });
+
+  it('drops a repeated authMechanismProperties that held only a session token', () => {
+    const uri =
+      'mongodb://db.example.test/?authMechanismProperties=SERVICE_NAME:svc' +
+      '&authMechanismProperties=AWS_SESSION_TOKEN:fake-t1' +
+      '&authMechanismProperties=OTHER:1,aws_session_token:fake-t2' +
+      '&authMechanismProperties=AWS_SESSION_TOKEN';
+    const cleaned = uriWithoutSecrets(uri);
+    expect(cleaned).not.toMatch(/fake-t1|fake-t2|session_token/i);
+    expect(cleaned).toContain('SERVICE_NAME:svc');
+    expect(cleaned).toContain('OTHER:1');
+    // Without MONGODB-AWS the token is not used: neither in the URI nor among the secrets.
+    expect(profileFromUri(uri).secrets).toEqual([]);
+  });
+
+  it('removes secrets the profile cannot use instead of keeping them', () => {
+    const { draft, secrets } = profileFromUri(
+      'mongodb://alice:fake-pw@db.example.test/?proxyHost=s.test&proxyPassword=fake-proxy' +
+        '&tlsCertificateKeyFilePassword=fake-tls&authMechanismProperties=AWS_SESSION_TOKEN:fake-tok',
+    );
+    for (const s of ['fake-proxy', 'fake-tls', 'fake-tok', 'fake-pw'])
+      expect(draft.connectionString).not.toContain(s);
+    // No proxy user, no client key file, not MONGODB-AWS: only the password is kept.
+    expect(secrets).toEqual([{ kind: 'password', value: 'fake-pw' }]);
+    expect(draft.proxy).toEqual({ host: 's.test', port: 1080 });
+  });
+
+  it('strips a percent-encoded secret option name', () => {
+    const cleaned = uriWithoutSecrets(
+      'mongodb://db.example.test/?proxyHost=s.test&proxy%50assword=fake-encoded-key',
+    );
+    expect(cleaned).not.toContain('fake-encoded-key');
+  });
+
+  it('never shows the password of an unparseable string (uriWithoutSecrets, parseUriList)', () => {
+    const bad = 'mongodb://u:fake-bad-pw@host.test:99999';
+    expect(uriWithoutSecrets(bad)).not.toContain('fake-bad-pw');
+    const parsed = parseUriList([bad]);
+    expect(parsed.entries).toEqual([]);
+    expect(JSON.stringify(parsed.skipped)).not.toContain('fake-bad-pw');
+  });
+
+  it('keeps the connection string unchanged apart from the secrets', () => {
+    const uri = 'mongodb://db.example.test:27017/shop?replicaSet=rs0&retryWrites=false';
+    expect(uriWithoutSecrets(uri)).toBe(uri);
+  });
+});
+
+describe('profileFromUri (mapped options)', () => {
+  it('mirrors TLS flags, tags, write concern, timeouts and the proxy port', () => {
+    const { draft } = profileFromUri(
+      'mongodb://db.example.test/?tls=true&tlsAllowInvalidHostnames=true' +
+        '&tlsAllowInvalidCertificates=false&readPreference=secondary' +
+        '&readPreferenceTags=dc:ny,rack:1&readPreferenceTags=dc:sf' +
+        '&w=majority&journal=true&wtimeoutMS=2500&serverSelectionTimeoutMS=7000' +
+        '&connectTimeoutMS=0&proxyHost=socks.test&proxyPort=9050',
+    );
+    expect(draft).toMatchObject({
+      tls: { enabled: true, allowInvalidHostnames: true, allowInvalidCertificates: false },
+      readPreference: 'secondary',
+      readPreferenceTags: [
+        [
+          { name: 'dc', value: 'ny' },
+          { name: 'rack', value: '1' },
+        ],
+        [{ name: 'dc', value: 'sf' }],
+      ],
+      writeConcern: { w: 'majority', journal: true, wtimeoutMS: 2500 },
+      serverSelectionTimeoutMS: 7000,
+      proxy: { host: 'socks.test', port: 9050 },
+    });
+    expect(draft.connectTimeoutMS).toBeUndefined();
+    expect(profileSchema.safeParse({ ...draft, id: 'p' }).success).toBe(true);
+  });
+
+  it('ignores read preference tags with the primary mode', () => {
+    const { draft } = profileFromUri(
+      'mongodb://db.example.test/?readPreference=primary&readPreferenceTags=dc:ny',
+    );
+    expect(draft.readPreference).toBe('primary');
+    expect(draft.readPreferenceTags).toBeUndefined();
+  });
+
+  it('uses the given mechanism, drops authSource for X.509 and asks nothing for it', () => {
+    const x509 = profileFromUri(
+      'mongodb://CN=client@db.example.test/?authMechanism=MONGODB-X509&authSource=%24external&tls=true',
+    );
+    expect(x509.draft.auth).toEqual({
+      mechanism: 'MONGODB-X509',
+      username: 'CN=client',
+      secretMode: 'none',
+    });
+    const plain = profileFromUri('mongodb://bob:fake-pw@db.example.test/?authMechanism=PLAIN');
+    expect(plain.draft.auth).toMatchObject({ mechanism: 'PLAIN', secretMode: 'saved' });
+    expect(plain.secrets).toEqual([{ kind: 'password', value: 'fake-pw' }]);
+    const def = profileFromUri('mongodb://bob@db.example.test/?authMechanism=DEFAULT');
+    expect(def.draft.auth?.mechanism).toBe('SCRAM-SHA-256');
+  });
+
+  it('uses a blank name as no name and trims a given one', () => {
+    expect(profileFromUri('mongodb://a.test', '   ').draft.name).toBe('a.test');
+    expect(profileFromUri('mongodb://a.test', '  Shop  ').draft.name).toBe('Shop');
+  });
+});
+
+describe('parseImportFile (Compass edge cases)', () => {
+  it('reads a file that starts with a byte order mark', () => {
+    const parsed = parseImportFile(`${BOM}${fixture('compass-plain.json')}`);
+    expect(parsed.entries).toHaveLength(5);
+  });
+
+  it('accepts the version as $numberInt, $numberLong, $numberDouble or a number', () => {
+    for (const version of [{ $numberInt: '1' }, { $numberLong: '1' }, { $numberDouble: '1.0' }, 1])
+      expect(parseImportFile(compassFile([], version)).entries).toEqual([]);
+    for (const version of [{ $numberInt: '' }, { $numberInt: 'x' }, '1', null, 2])
+      expect(() => parseImportFile(compassFile([], version))).toThrow(
+        /Unsupported Compass export version/,
+      );
+    expect(() => parseImportFile('{"type":"Compass Connections","connections":[]}')).toThrow(
+      /Unsupported Compass export version/,
+    );
+  });
+
+  it('reads EJSON, plain and string SSH ports; an invalid port falls back to 22', () => {
+    const portOf = (port: unknown) =>
+      parseImportFile(compassFile([sshEntry({ host: 'b.test', username: 'ops', port })])).entries[0]
+        ?.draft.ssh?.port;
+    expect(portOf({ $numberInt: '2222' })).toBe(2222);
+    expect(portOf({ $numberLong: '2200' })).toBe(2200);
+    expect(portOf(2201)).toBe(2201);
+    expect(portOf('2202')).toBe(2202);
+    expect(portOf(65535)).toBe(65535);
+    for (const bad of [0, 65536, -1, 22.5, '', 'abc', { $numberInt: '70000' }, null, undefined])
+      expect(portOf(bad)).toBe(22);
+  });
+
+  it('skips an SSH tunnel without host or user name', () => {
+    const parsed = parseImportFile(
+      compassFile([
+        sshEntry({ host: 'b.test' }),
+        sshEntry({ username: 'ops' }),
+        sshEntry({ host: '  ', username: 'ops' }),
+      ]),
+    );
+    expect(parsed.entries).toEqual([]);
+    expect(parsed.skipped).toHaveLength(3);
+    for (const s of parsed.skipped) expect(s.reason).toMatch(/SSH tunnel has no host or user/);
+  });
+
+  it('skips an entry with both an SSH tunnel and a SOCKS5 proxy, without leaking secrets', () => {
+    const parsed = parseImportFile(
+      compassFile([
+        sshEntry(
+          { host: 'b.test', username: 'ops', password: 'fake-ssh-pw' },
+          'mongodb://u:fake-db-pw@db.example.test/?proxyHost=socks.test&proxyUsername=pu&proxyPassword=fake-proxy',
+        ),
+      ]),
+    );
+    expect(parsed.entries).toEqual([]);
+    expect(parsed.skipped).toEqual([
+      { source: 'Tunnel', reason: 'it uses both an SSH tunnel and a SOCKS5 proxy' },
+    ]);
+    expect(JSON.stringify(parsed)).not.toMatch(/fake-/);
+  });
+
+  it('uses the key file (and its passphrase) over the SSH password', () => {
+    const [entry] = parseImportFile(
+      compassFile([
+        sshEntry({
+          host: 'b.test',
+          username: 'ops',
+          identityKeyFile: '/home/u/.ssh/id_rsa',
+          identityKeyPassphrase: 'fake-passphrase',
+          password: 'fake-ignored',
+        }),
+      ]),
+    ).entries;
+    expect(entry?.draft.ssh).toEqual({
+      host: 'b.test',
+      port: 22,
+      username: 'ops',
+      method: 'privateKey',
+      privateKeyFile: '/home/u/.ssh/id_rsa',
+    });
+    expect(entry?.secrets).toEqual([{ kind: 'sshKeyPassphrase', value: 'fake-passphrase' }]);
+  });
+
+  it('imports a password SSH tunnel without a password (asked later)', () => {
+    const [entry] = parseImportFile(
+      compassFile([sshEntry({ host: 'b.test', username: 'ops', password: '' })]),
+    ).entries;
+    expect(entry?.draft.ssh?.method).toBe('password');
+    expect(entry?.secrets).toEqual([]);
+  });
+
+  it('ignores an sshTunnel that is not an object', () => {
+    const [entry] = parseImportFile(compassFile([sshEntry(null)])).entries;
+    expect(entry?.draft.ssh).toBeUndefined();
+  });
+
+  it('names entries by position and skips ones that are not objects', () => {
+    const parsed = parseImportFile(
+      compassFile([
+        42,
+        null,
+        { connectionOptions: { connectionString: 'mongodb://a.test' }, favorite: 'not-object' },
+        { connectionOptions: 'nope', favorite: { name: 'No options' } },
+        { connectionOptions: { connectionString: '   ' } },
+      ]),
+    );
+    expect(parsed.entries.map((e) => [e.source, e.draft.name])).toEqual([
+      ['connection 3', 'a.test'],
+    ]);
+    expect(parsed.skipped).toEqual([
+      { source: 'connection 1', reason: 'not a connection object' },
+      { source: 'connection 2', reason: 'not a connection object' },
+      { source: 'No options', reason: 'it has no connection string' },
+      { source: 'connection 5', reason: 'it has no connection string' },
+    ]);
+  });
+
+  it('maps Compass color keys and hex colors; unknown colors are left out', () => {
+    const colorOf = (color: unknown) =>
+      parseImportFile(
+        compassFile([
+          { connectionOptions: { connectionString: 'mongodb://a.test' }, favorite: { color } },
+        ]),
+      ).entries[0]?.draft.color;
+    expect(colorOf('color1')).toBe('#5fc86e');
+    expect(colorOf('color10')).toBe('#a5aaaf');
+    expect(colorOf('#ABC')).toBe('#ABC');
+    for (const bad of ['color11', 'red', '#12345', 7, '']) expect(colorOf(bad)).toBeUndefined();
+  });
+
+  it('leaves out a color named like an object property (toString, constructor, __proto__)', () => {
+    // TW-1: COMPASS_COLORS is a plain object, so inherited keys resolve to functions/objects.
+    const colorOf = (color: unknown) =>
+      parseImportFile(
+        compassFile([
+          { connectionOptions: { connectionString: 'mongodb://a.test' }, favorite: { color } },
+        ]),
+      ).entries[0]?.draft.color;
+    for (const key of ['toString', 'constructor', '__proto__', 'hasOwnProperty'])
+      expect(colorOf(key)).toBeUndefined();
+  });
+
+  it('never shows the password of an entry whose connection string is invalid', () => {
+    const parsed = parseImportFile(
+      compassFile([
+        {
+          connectionOptions: { connectionString: 'mongodb://u:fake-invalid-pw@host.test:99999' },
+          favorite: { name: 'Bad port' },
+        },
+      ]),
+    );
+    expect(parsed.skipped).toHaveLength(1);
+    expect(parsed.skipped[0]?.source).toBe('Bad port');
+    expect(JSON.stringify(parsed.skipped)).not.toContain('fake-invalid-pw');
+  });
+
+  it('keeps plain credentials of an entry that also has encrypted ones, with a notice', () => {
+    const parsed = parseImportFile(
+      compassFile([
+        {
+          connectionOptions: { connectionString: 'mongodb://u:fake-pw@a.test' },
+          favorite: { name: 'Both' },
+          connectionSecrets: 'AAAA',
+        },
+        {
+          connectionOptions: { connectionString: 'mongodb://b.test' },
+          favorite: { name: 'Blank secrets' },
+          connectionSecrets: '  ',
+        },
+      ]),
+    );
+    expect(parsed.entries[0]?.secrets).toEqual([{ kind: 'password', value: 'fake-pw' }]);
+    expect(parsed.notices.map((n) => n.source)).toEqual(['Both']);
+  });
+
+  it('refuses JSON that is not an export object, naming both formats', () => {
+    for (const text of ['null', '"x"', '42', '{"type":"Other"}', '{"connections":[]}'])
+      expect(() => parseImportFile(text)).toThrow(/Compass Connections.*Thicket Connections/);
+    expect(() => parseImportFile('')).toThrow('The file is not JSON');
+  });
+});
+
+describe('parseImportFile (Thicket export)', () => {
+  const thicket = (profiles: unknown, version: unknown = 1) =>
+    JSON.stringify({ type: 'Thicket Connections', version, profiles });
+
+  it('imports valid profiles without their ids and skips invalid ones with the reason', () => {
+    const parsed = parseImportFile(
+      thicket([
+        {
+          id: 'old-id',
+          name: 'Shared',
+          connectionString: 'mongodb://a.test',
+          readOnly: true,
+          production: true,
+        },
+        { name: 'No URI', readOnly: false, production: false },
+        'nonsense',
+      ]),
+    );
+    expect(parsed.entries).toEqual([
+      {
+        source: 'Shared',
+        draft: {
+          name: 'Shared',
+          connectionString: 'mongodb://a.test',
+          readOnly: true,
+          production: true,
+        },
+        secrets: [],
+      },
+    ]);
+    expect(parsed.skipped.map((s) => s.source)).toEqual(['No URI', 'profile 3']);
+    expect(parsed.skipped[0]?.reason).toContain('connectionString');
+  });
+
+  it('skips a hand-edited profile with a password in its URI without echoing it', () => {
+    const parsed = parseImportFile(
+      thicket([
+        {
+          name: 'Leaky',
+          connectionString: 'mongodb://u:fake-leaked-pw@a.test',
+          readOnly: false,
+          production: false,
+        },
+      ]),
+    );
+    expect(parsed.entries).toEqual([]);
+    expect(parsed.skipped.map((s) => s.source)).toEqual(['Leaky']);
+    expect(JSON.stringify(parsed.skipped)).not.toContain('fake-leaked-pw');
+  });
+
+  it('refuses other versions and a missing profiles list', () => {
+    expect(() => parseImportFile(thicket([], 2))).toThrow(/Thicket export version 2/);
+    expect(() => parseImportFile(thicket([], { $numberInt: '1' }))).toThrow(ImportFileError);
+    expect(() => parseImportFile(thicket(undefined))).toThrow(/no profiles list/);
+  });
+});
+
+describe('exportFile (shape)', () => {
+  it('writes an empty profiles list and ends with a newline', () => {
+    const text = exportFile([]);
+    expect(text.endsWith('\n')).toBe(true);
+    expect(JSON.parse(text)).toEqual({ type: 'Thicket Connections', version: 1, profiles: [] });
+  });
+
+  it('does not change the profiles it is given', () => {
+    const p: Profile = {
+      id: 'p1',
+      name: 'Mine',
+      connectionString: 'mongodb://alice@a.test/?proxyHost=s.test&proxyPassword=fake-pp',
+      readOnly: false,
+      production: false,
+      auth: { mechanism: 'SCRAM-SHA-256', username: 'alice', secretMode: 'saved' },
+    };
+    const before = structuredClone(p);
+    const text = exportFile([p]);
+    expect(p).toEqual(before);
+    expect(text).not.toContain('fake-pp');
+    expect(text).toContain('"secretMode": "ask"');
+  });
+
+  it('keeps secretMode none and ask as they are', () => {
+    const base = { readOnly: false, production: false, connectionString: 'mongodb://a.test' };
+    const text = exportFile([
+      { ...base, id: 'a', name: 'X', auth: { mechanism: 'MONGODB-X509', secretMode: 'none' } },
+      {
+        ...base,
+        id: 'b',
+        name: 'Y',
+        auth: { mechanism: 'SCRAM-SHA-256', username: 'u', secretMode: 'ask' },
+      },
+    ]);
+    const parsed = JSON.parse(text) as { profiles: Profile[] };
+    expect(parsed.profiles.map((p) => p.auth?.secretMode)).toEqual(['none', 'ask']);
+  });
+});
+
+type Call = (method: string, params?: unknown) => Promise<unknown>;
+const caller =
+  (handlers: ReturnType<typeof importExportHandlers>): Call =>
+  (method, params = {}) =>
+    (handlers[method] as (p: unknown, c: unknown) => Promise<unknown>)(params, {});
+
+describe('importExportHandlers (edge cases)', () => {
+  it('refuses a file larger than MAX_IMPORT_FILE_BYTES before reading it', async () => {
+    const { profiles, secrets, dialogs } = setup();
+    let reads = 0;
+    const sizes = [MAX_IMPORT_FILE_BYTES + 1, MAX_IMPORT_FILE_BYTES];
+    const fs: ImportExportFs = {
+      stat: () => Promise.resolve({ size: sizes.shift() ?? 0 }),
+      readFile: () => {
+        reads++;
+        return Promise.resolve(compassFile([]));
+      },
+      writeFile: () => Promise.resolve(),
+    };
+    const call = caller(importExportHandlers({ profiles, secrets, dialogs, fs }));
+    await expect(call('profiles.importCompass')).rejects.toSatisfy(
+      (e) => e instanceof RpcError && e.code === 'INVALID_PARAMS' && /too large/.test(e.message),
+    );
+    expect(reads).toBe(0);
+    // Exactly at the limit is still read.
+    expect(await call('profiles.importCompass')).toEqual({
+      imported: [],
+      skipped: [],
+      notices: [],
+    });
+    expect(reads).toBe(1);
+  });
+
+  it('returns null when the open dialog gives no file; no path from the save dialog writes nothing', async () => {
+    const { profiles, secrets } = setup();
+    const dialogs: NativeDialogs = {
+      showOpenDialog: () => Promise.resolve({ canceled: false, filePaths: [] }),
+      showSaveDialog: () => Promise.resolve({ canceled: false }),
+    };
+    const call = caller(importExportHandlers({ profiles, secrets, dialogs }));
+    expect(await call('profiles.importCompass')).toBeNull();
+    expect(await call('profiles.export')).toEqual({ path: null, exported: 0 });
+  });
+
+  it('maps a BOM-prefixed file, a non-JSON file and a read-only store correctly', async () => {
+    const bom = setup({ file: `${BOM}${fixture('compass-encrypted.json')}` });
+    const result = (await bom.call('profiles.importCompass')) as { imported: Profile[] };
+    expect(result.imported).toHaveLength(2);
+
+    const notJson = setup({ file: 'not json at all' });
+    await expect(notJson.call('profiles.importCompass')).rejects.toSatisfy(
+      (e) => e instanceof RpcError && e.code === 'INVALID_PARAMS',
+    );
+
+    const readOnly = setup();
+    readOnly.profiles.save = () => Promise.reject(new ProfilesReadOnlyError(99));
+    await expect(
+      readOnly.call('profiles.importUris', { uris: ['mongodb://a.test'] }),
+    ).rejects.toSatisfy((e) => e instanceof RpcError && e.code === 'UNSUPPORTED');
+
+    const broken = setup();
+    broken.profiles.list = () => Promise.reject(new Error('disk on fire'));
+    await expect(
+      broken.call('profiles.importUris', { uris: ['mongodb://a.test'] }),
+    ).rejects.toThrow('disk on fire');
+  });
+
+  it('imports a Compass entry with a color named "constructor" instead of failing the import', async () => {
+    // TW-1: the inherited value is not a color, so saving the profile must not fail.
+    const { profiles, call } = setup({
+      file: compassFile([
+        { connectionOptions: { connectionString: 'mongodb://a.test' }, favorite: { name: 'A' } },
+        {
+          connectionOptions: { connectionString: 'mongodb://b.test' },
+          favorite: { name: 'B', color: 'constructor' },
+        },
+      ]),
+    });
+    const result = (await call('profiles.importCompass')) as { imported: Profile[] };
+    expect(result.imported.map((p) => [p.name, p.color])).toEqual([
+      ['A', undefined],
+      ['B', undefined],
+    ]);
+    expect(profiles.profiles).toHaveLength(2);
+  });
+
+  it('does not ask the keychain when no entry has a secret', async () => {
+    const { secrets, call } = setup({ level: 'weak' });
+    let asked = 0;
+    const status = secrets.status.bind(secrets);
+    secrets.status = () => {
+      asked++;
+      return status();
+    };
+    const result = (await call('profiles.importUris', {
+      uris: ['mongodb://a.test', 'mongodb://bob@b.test'],
+    })) as { imported: Profile[]; notices: unknown[] };
+    expect(asked).toBe(0);
+    expect(result.imported).toHaveLength(2);
+    expect(result.notices).toEqual([]);
+  });
+
+  it('skips duplicates inside one import, keeping the first', async () => {
+    const { profiles, call } = setup();
+    const result = (await call('profiles.importUris', {
+      uris: ['mongodb://a.test', 'mongodb://a.test', 'mongodb://b.test'],
+    })) as { imported: Profile[]; skipped: { source: string; reason: string }[] };
+    expect(result.imported.map((p) => p.name)).toEqual(['a.test', 'b.test']);
+    expect(result.skipped).toEqual([
+      { source: 'mongodb://a.test', reason: 'a connection with this name and address exists' },
+    ]);
+    expect(profiles.profiles).toHaveLength(2);
+  });
+
+  it('keeps secretMode when a non-password secret fails or is dropped on a weak keychain', async () => {
+    const tunnel = compassFile([
+      sshEntry({ host: 'b.test', username: 'ops', password: 'fake-ssh-pw' }, 'mongodb://u@a.test'),
+    ]);
+    const secure = setup({ file: tunnel });
+    secure.secrets.failKinds.add('sshPassword');
+    const failed = (await secure.call('profiles.importCompass')) as {
+      imported: Profile[];
+      notices: { source: string; reason: string }[];
+    };
+    expect(failed.imported[0]?.auth?.secretMode).toBe('ask');
+    expect(failed.notices).toEqual([
+      { source: 'Tunnel', reason: 'SSH password could not be saved; enter it when connecting' },
+    ]);
+
+    const weak = setup({ level: 'unavailable', file: tunnel });
+    const dropped = (await weak.call('profiles.importCompass')) as {
+      notices: { source: string; reason: string }[];
+    };
+    expect(weak.secrets.stored).toEqual([]);
+    expect(dropped.notices[0]?.reason).toMatch(/^SSH password not saved: .*not secure/);
+  });
+
+  it('a failing password secret turns saved into ask in the stored profile and the result', async () => {
+    const { profiles, secrets, call } = setup();
+    secrets.failKinds.add('password');
+    const result = (await call('profiles.importUris', {
+      uris: ['mongodb://alice:fake-pw@a.test'],
+    })) as { imported: Profile[] };
+    expect(result.imported[0]?.auth?.secretMode).toBe('ask');
+    expect(profiles.profiles).toHaveLength(1);
+    expect(profiles.profiles[0]?.auth?.secretMode).toBe('ask');
+    expect(result.imported[0]?.id).toBe(profiles.profiles[0]?.id);
+  });
+
+  it('reports the encrypted-credentials notice through the handler (contract-valid)', async () => {
+    const { call } = setup({ file: fixture('compass-encrypted.json') });
+    const result = await call('profiles.importCompass');
+    expect(parseResult('profiles.importCompass', result).ok).toBe(true);
+    expect((result as { notices: { source: string }[] }).notices.map((n) => n.source)).toEqual([
+      'Encrypted prod',
+    ]);
+  });
+
+  it('profiles.export with an empty selection exports nothing (not everything)', async () => {
+    const { written, call } = setup();
+    await call('profiles.importUris', { uris: ['mongodb://a.test', 'mongodb://b.test'] });
+    expect(await call('profiles.export', { profileIds: [] })).toEqual({
+      path: '/out.json',
+      exported: 0,
+    });
+    const file = JSON.parse(written[0]?.data ?? '{}') as { profiles: unknown[] };
+    expect(file.profiles).toEqual([]);
+  });
+
+  it('profiles.export writes UTF-8 with mode 0644; the file re-imports as new profiles', async () => {
+    const { profiles, secrets, dialogs } = setup();
+    const writes: { options: unknown; data: string }[] = [];
+    const fs: ImportExportFs = {
+      stat: () => Promise.resolve({ size: 10 }),
+      readFile: () => Promise.resolve(writes[0]?.data ?? ''),
+      writeFile: (_path, data, options) => {
+        writes.push({ data, options });
+        return Promise.resolve();
+      },
+    };
+    const call = caller(importExportHandlers({ profiles, secrets, dialogs, fs }));
+    await call('profiles.importUris', { uris: ['mongodb://alice:fake-pw@a.test'] });
+    await call('profiles.export');
+    expect(writes[0]?.options).toEqual({ encoding: 'utf8', mode: 0o644 });
+    expect(writes[0]?.data).not.toContain('fake-pw');
+    // Re-importing the export into the same store adds nothing (same name and address).
+    const again = (await call('profiles.importCompass')) as { imported: Profile[] };
+    expect(again.imported).toEqual([]);
+    profiles.profiles = [];
+    const fresh = (await call('profiles.importCompass')) as { imported: Profile[] };
+    expect(fresh.imported.map((p) => [p.name, p.auth?.secretMode])).toEqual([['a.test', 'ask']]);
   });
 });

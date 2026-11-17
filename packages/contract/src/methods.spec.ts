@@ -643,6 +643,36 @@ describe('profile connection strings', () => {
   });
 });
 
+describe('import results (profiles.importCompass / importUris)', () => {
+  const notice = { source: 'Encrypted prod', reason: 'credentials are encrypted' };
+
+  it('accept optional notices next to imported and skipped', () => {
+    for (const method of ['profiles.importCompass', 'profiles.importUris'] as const) {
+      expect(parseResult(method, { imported: [PROFILE], skipped: [] }).ok).toBe(true);
+      expect(parseResult(method, { imported: [PROFILE], skipped: [], notices: [] }).ok).toBe(true);
+      expect(
+        parseResult(method, { imported: [PROFILE], skipped: [notice], notices: [notice] }).ok,
+      ).toBe(true);
+    }
+    expect(parseResult('profiles.importCompass', null).ok).toBe(true);
+    expect(parseResult('profiles.importUris', null).ok).toBe(false);
+  });
+
+  it('reject malformed notices', () => {
+    for (const notices of [
+      [{ source: 'x' }],
+      [{ reason: 'y' }],
+      [{ source: 1, reason: 'y' }],
+      'none',
+      null,
+    ]) {
+      expect(parseResult('profiles.importUris', { imported: [], skipped: [], notices }).ok).toBe(
+        false,
+      );
+    }
+  });
+});
+
 describe('profiles.chooseFile', () => {
   it('is served by main and takes a known purpose', () => {
     expect(route('profiles.chooseFile')).toBe('main');
