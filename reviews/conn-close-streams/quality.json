@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "task": "conn-close-streams",
+  "reviewed_revision": "5236f6cddc6f53e86212ca8da9e860fd8e05b343",
+  "helpers": {
+    "test-writer": {"status": "completed", "report": "reviews/conn-close-streams/tests.md"},
+    "code-reviewer": {"status": "completed", "report": "reviews/conn-close-streams/review.md"},
+    "fixer": {"status": "completed", "report": "reviews/conn-close-streams/fixes.md"}
+  },
+  "fixes_required": true,
+  "findings": [
+    {"id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
+     "note": "int test counts the backend's own killOp commands (monitorCommands) instead of the server-wide serverStatus counter"},
+    {"id": "CR-2", "source": "code-reviewer", "severity": "P3", "disposition": "out_of_scope",
+     "note": "agg.run and io.export/import streams not wrapped with cancelOnClose; follow-up task conn-close-agg-io-streams created"},
+    {"id": "TW-1", "source": "test-writer", "severity": "Low", "disposition": "accepted",
+     "note": "conn.close may take up to ~4-5 s when the cancelled find's op is not visible in currentOp (cleanup retries, bounded by CANCEL_SETTLE_MS / CLOSE_CANCEL_GRACE_MS); no requirement sets a close latency"}
+  ],
+  "validation": [
+    {"command": "npm run check", "result": "pass"},
+    {"command": "npm run test:int -- test/integration/docs-query.int.spec.ts", "result": "pass"},
+    {"command": "cd packages/backend && npx vitest run src/connections/manager.spec.ts src/docs/query/handlers.spec.ts", "result": "pass"}
+  ]
+}
