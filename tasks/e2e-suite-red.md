@@ -26,3 +26,4 @@ Find each cause (test out of date vs. app bug vs. fixture/environment) and fix i
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md ("End-to-end tests").
 - ASSUMPTION (2026-11-17 06:52+0100 by felix/agent-2): layout.e2e.ts:36 (Compass import heading) was already fixed by e2e-layout-import-heading (page-heading test id on the import page); nothing more done for it here
+- ASSUMPTION (2026-11-17 06:52+0100 by felix/agent-2): Sidebar drag 283 vs 340: 283 = the pointer after the 2nd of 5 steps, the last point still over the narrow splitter, so pointer capture was not in effect and later moves/release missed the splitter (not reproducible here). Treated as an app bug: move/up/cancel now listened on the document and the release position sets the width
