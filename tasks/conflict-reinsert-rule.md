@@ -5,7 +5,7 @@ owner: dell26/agent-2
 deps: [conflict-partial-docs]
 touches: [packages/renderer/src/app/document/conflict,packages/renderer/src/app/document/document-actions.service.ts]
 prio: 3
-lease_until: 2026-11-17T05:41:16Z
+lease_until: 2026-11-17T05:46:27Z
 ---
 ## Goal
 Follow-up of conflict-partial-docs (reviews/conflict-partial-docs/review.md CR-4): the conflict view
