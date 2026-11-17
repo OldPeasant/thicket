@@ -430,3 +430,170 @@ describe('WriteGuard (with the fake API)', () => {
     expect(fake.requestsFor('docs.insert')).toHaveLength(1);
   });
 });
+
+describe('WriteGuard.approveAll (several writes, one confirm)', () => {
+  let fake: FakeThicketBridge;
+  let guard: WriteGuard;
+  let confirm: ConfirmService;
+
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+  /** One `docs.update` per id, as a batch edit of one field sends them. */
+  const updates = (profileId: string, ids: number[]) =>
+    ids.map((id) => ({
+      profileId,
+      db: 'shop',
+      coll: 'orders',
+      id: `{"$numberInt":"${id}"}`,
+      update: '{"$set":{"status":"shipped"}}',
+      expected: '{"status":{"$eq":"open"}}',
+    }));
+  const range = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
+
+  beforeEach(() => {
+    fake = new FakeThicketBridge();
+    TestBed.configureTestingModule({ providers: [provideFakeThicket(fake)] });
+    guard = TestBed.inject(WriteGuard);
+    confirm = TestBed.inject(ConfirmService);
+    const safety = TestBed.inject(ProfileSafetyService);
+    safety.set({ id: 'prod', name: 'prod-eu', readOnly: false, production: true });
+    safety.set({ id: 'dev', name: 'local', readOnly: false, production: false });
+    safety.set({ id: 'ro', name: 'reporting', readOnly: true, production: true });
+  });
+
+  it('an empty batch resolves with nothing and asks nothing', async () => {
+    await expect(guard.approveAll('docs.update', [], { alwaysConfirm: true })).resolves.toEqual([]);
+    expect(confirm.current()).toBeNull();
+  });
+
+  it('non-production without alwaysConfirm: no dialog, params returned without confirmed', async () => {
+    const withFlag = updates('dev', [1, 2]).map((p) => ({ ...p, confirmed: true }));
+    const approved = await guard.approveAll('docs.update', withFlag);
+    expect(confirm.current()).toBeNull();
+    expect(approved).toHaveLength(2);
+    for (const p of approved) expect(p).not.toHaveProperty('confirmed');
+    expect(approved.map((p) => p.id)).toEqual(['{"$numberInt":"1"}', '{"$numberInt":"2"}']);
+    // Nothing is sent: the caller sends the approved params.
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it('production: one dialog for the whole batch with the count; confirmed: true on every write', async () => {
+    const done = guard.approveAll('docs.update', updates('prod', [1, 2, 3]));
+    await flush();
+    expect(confirm.current()).toMatchObject({
+      title: 'Update document',
+      detail: 'Affects 3 documents.',
+      namespace: 'shop.orders',
+      connection: { name: 'prod-eu', production: true },
+      destructive: false,
+    });
+    expect(confirm.current()?.operation.match(/updateOne\(/g)).toHaveLength(3);
+    expect(confirm.current()?.operation).not.toContain('more');
+    confirm.answer(true);
+    const approved = await done;
+    expect(approved).toHaveLength(3);
+    for (const p of approved) expect(p).toMatchObject({ confirmed: true });
+    expect(approved.map((p) => p.id)).toEqual(updates('prod', [1, 2, 3]).map((p) => p.id));
+    expect(confirm.current()).toBeNull();
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it('alwaysConfirm asks on a non-production profile; options describe the dialog', async () => {
+    const done = guard.approveAll('docs.update', updates('dev', [1, 2]), {
+      alwaysConfirm: true,
+      title: 'Update 2 documents',
+      confirmLabel: 'Save 2 documents',
+      detail: 'Updates 2 documents, one updateOne each.',
+    });
+    await flush();
+    expect(confirm.current()).toMatchObject({
+      title: 'Update 2 documents',
+      confirmLabel: 'Save 2 documents',
+      detail: 'Updates 2 documents, one updateOne each.',
+      connection: { name: 'local', production: false },
+    });
+    confirm.answer(true);
+    await expect(done).resolves.toHaveLength(2);
+  });
+
+  it('cancel rejects with CANCELLED', async () => {
+    const done = guard.approveAll('docs.update', updates('prod', [1, 2]));
+    await flush();
+    confirm.answer(false);
+    await expect(done).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it('exactly 10 writes are all listed, without a "more" line', async () => {
+    const done = guard.approveAll('docs.update', updates('prod', range(10)));
+    await flush();
+    const operation = confirm.current()?.operation ?? '';
+    expect(operation.match(/updateOne\(/g)).toHaveLength(10);
+    expect(operation).not.toContain('more');
+    expect(confirm.current()?.detail).toBe('Affects 10 documents.');
+    confirm.answer(false);
+    await expect(done).rejects.toMatchObject({ code: 'CANCELLED' });
+  });
+
+  it('more than 10 writes: the first 10 operations, then how many more (formatted count)', async () => {
+    const done = guard.approveAll('docs.update', updates('prod', range(1011)));
+    await flush();
+    const operation = confirm.current()?.operation ?? '';
+    expect(operation.match(/updateOne\(/g)).toHaveLength(10);
+    // formatCount separates thousands with a narrow no-break space.
+    expect(operation.split('\n').at(-1)).toBe('// … and 1 001 more');
+    expect(confirm.current()?.detail).toBe('Affects 1 011 documents.');
+    // A batch of updates never needs the collection name typed.
+    expect(confirm.current()?.typeToConfirm).toBeUndefined();
+    confirm.answer(true);
+    await expect(done).resolves.toHaveLength(1011);
+  });
+
+  it('the count option overrides the number of writes in the dialog', async () => {
+    const done = guard.approveAll('docs.update', updates('prod', [1, 2]), { count: 7 });
+    await flush();
+    expect(confirm.current()?.detail).toBe('Affects 7 documents.');
+    confirm.answer(false);
+    await expect(done).rejects.toMatchObject({ code: 'CANCELLED' });
+  });
+
+  it('read-only is refused with READ_ONLY, also with alwaysConfirm', async () => {
+    await expect(
+      guard.approveAll('docs.update', updates('ro', [1, 2]), { alwaysConfirm: true }),
+    ).rejects.toMatchObject({ code: 'READ_ONLY', message: 'reporting is read-only.' });
+    expect(confirm.current()).toBeNull();
+  });
+
+  it('writes to several profiles in one batch are refused before any dialog', async () => {
+    await expect(
+      guard.approveAll('docs.update', [...updates('dev', [1]), ...updates('prod', [2])], {
+        alwaysConfirm: true,
+      }),
+    ).rejects.toThrow(/same profile/);
+    // Also when the read-only profile is not the first: no write slips past its check.
+    await expect(
+      guard.approveAll('docs.update', [...updates('dev', [1]), ...updates('ro', [2])]),
+    ).rejects.toThrow(/same profile/);
+    expect(confirm.current()).toBeNull();
+  });
+
+  it('an already aborted signal opens no dialog', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      guard.approveAll('docs.update', updates('prod', [1]), { signal: controller.signal }),
+    ).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(confirm.current()).toBeNull();
+  });
+
+  it('an abort while the dialog is open cancels the batch', async () => {
+    const controller = new AbortController();
+    const done = guard.approveAll('docs.update', updates('prod', [1, 2]), {
+      signal: controller.signal,
+    });
+    await flush();
+    expect(confirm.current()).not.toBeNull();
+    controller.abort();
+    confirm.answer(true);
+    await expect(done).rejects.toMatchObject({ code: 'CANCELLED' });
+  });
+});
