@@ -15,3 +15,4 @@ SPEC M3 "save pipelines": the aggregation builder (agg-ui, `packages/renderer/sr
 - [ ] Component test: save a pipeline with a disabled stage, reopen it in a new builder tab: same stages and enabled flags
 
 ## Notes
+- ASSUMPTION (2026-11-17 05:40+0100 by dell26/agent-2): Saved pipelines are per collection = profileId+db+coll (same scope as query favorites in query-history), not per db.coll across profiles; names unique per collection ignoring case; Save under a taken name replaces that pipeline (keeps its id), Rename to a taken name answers CONFLICT.
