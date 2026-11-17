@@ -40,7 +40,7 @@ Summary: 0 P0, 0 P1, 0 P2, 3 P3 (CR-1 accepted, CR-2 and CR-3 resolved)
 
 ### Implementation (unchanged since round 1)
 
-- **CR-8 (criterion 1).** `previewStatus(id, position)` (`aggregation-view.ts:471-479`) returns `Stage N: <count> from a sample` or `Stage N: preview failed: <message>`. It returns `''` while loading and for stages without a plan. N is `i + 1` from the `@for` (`aggregation-view.html:170`). The live region stays persistent and polite, and the visible "Loading preview…" note remains. Satisfied.
+- **CR-8 (criterion 1).** `previewStatus(id, position)` (`aggregation-view.ts:471-479`) returns `Stage N: 5 documents from a sample` or `Stage N: preview failed: the error message`. It returns `''` while loading and for stages without a plan. N is `i + 1` from the `@for` (`aggregation-view.html:170`). The live region stays persistent and polite, and the visible "Loading preview…" note remains. Satisfied.
 - **CR-9 (criterion 2).** The preview effect reads `mode()`. In text mode it calls `pausePreviews()`, which clears the debounce timer, aborts and forgets runs that have not finished, and keeps finished ones (`aggregation-view.ts:260-266`, `:392-404`). `applyText()` reuses ids by position (`:360-363`), so on return a stage whose `previewRuns` key is identical is skipped. A failed preview is retried; this is the documented exception, see CR-2. Satisfied.
 - **Side effects of reusing ids by position:**
   - Previews map. A stage keeps its old preview only when the collection and its full pipeline prefix are identical. Aborted runs never write.
