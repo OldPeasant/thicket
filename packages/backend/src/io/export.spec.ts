@@ -344,6 +344,33 @@ describe('exportToFile', () => {
     }
   });
 
+  it('a failed JSON export settles only after the late open, and leaves no file', async () => {
+    // JSON writes "[" before the server is asked: it is buffered in the stream while the open
+    // waits. The export must not settle (and remove the file) before the open has finished.
+    let release: (() => void) | undefined;
+    slowOpen.gate = new Promise<void>((resolve) => (release = resolve));
+    try {
+      let openDone = false;
+      const server = fakeServer([], () => {
+        void slowOpen.opened?.then(() => (openDone = true));
+        setTimeout(() => release?.(), 20);
+        return Promise.reject(new Error('connection reset'));
+      });
+      const file = path.join(dir, 'early.json');
+      const error = await exportToFile(server.client, params({ format: 'json' }), file).catch(
+        (e: unknown) => e,
+      );
+      expect(openDone).toBe(true);
+      expect(error).toMatchObject({ message: expect.stringMatching(/connection reset/) });
+      expect(existsSync(file)).toBe(false);
+      expect(await readdir(dir)).toEqual([]);
+    } finally {
+      release?.();
+      slowOpen.gate = undefined;
+      slowOpen.opened = undefined;
+    }
+  });
+
   it('rejects INTERNAL naming the file when it cannot be created (server answers at once)', async () => {
     const file = path.join(dir, 'missing-folder', 'x.jsonl');
     const error = await exportToFile(fakeServer([docs(0, 1)]).client, params(), file).catch(

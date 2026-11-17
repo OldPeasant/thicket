@@ -4,21 +4,43 @@ Date: 2026-11-17
 
 Task: io-basic-backend - M1: Export and import JSON / JSON Lines
 
-Scope: committed changes e0bf990..c7c85da on main (the task's 6 commits: 3cec5d5, 5f33da4, 59fa1a7, 9c0feb5, 28efdba, c7c85da). Uncommitted edits to `packages/backend/src/io/export.spec.ts` and `packages/backend/src/io/scanner.spec.ts` existed in the working tree during the review and were not reviewed.
+Scope: second review pass on the final code, task range 7906c6ca3aba897605b541415380aa044f49ec6f..e577190c905c650a1caa49729601060e5fed0ef3 on main (as given by the parent worker). Its focus is the fix commit e577190 (CR-1, CR-2, FX-1), and the whole task scope is checked again. Bash was not available to this reviewer, so `git diff` / `git log` could not be run. The review read the current files of the task scope in full instead: `packages/backend/src/io/{scanner,import,export,handlers}.ts`, their specs, `apps/desktop/src/dialogs/handlers.ts`, and the "Import/export" bullet of `docs/ARCHITECTURE.md`. The working tree was clean at the start of the session, so these files are the content of HEAD e577190.
 
 Requirements:
 - `tasks/io-basic-backend.md` acceptance criteria and its four ASSUMPTION notes
-- `SPEC.md` M1 "Import / export (basic)" and section 4 (API contract, `io.*` row)
-- `docs/ARCHITECTURE.md` (Processes, Privileged port, Streams, Import/export, Write guard, API between parts, File paths)
-- `AGENTS.md` and parent instructions (focus: streaming/memory bounds, cancellation, error handling, the renderer never sends file paths)
+- `SPEC.md` M1 "Import / export (basic)" and section 4 (`io.*`), as checked in the first pass
+- `docs/ARCHITECTURE.md` (Import/export, Streams, Privileged port, File paths, Write guard)
+- `AGENTS.md`; parent instructions (correctness, memory bounds, cancellation, the renderer never sends paths, tests, maintainability)
+- `reviews/io-basic-backend/review.md` (first pass) and `reviews/io-basic-backend/fixes.md`
 
 Git range:
 - Branch: main
-- HEAD: c7c85daf81e6bd1072ebe0b8e5e452558507d92b
-- Base/start: e0bf99087908fbf893e7b66445f51ef0f362c622
-- Commits reviewed: 6
+- HEAD: e577190c905c650a1caa49729601060e5fed0ef3
+- Base/start: 7906c6ca3aba897605b541415380aa044f49ec6f
+- Commits reviewed: the task commits up to and including e577190 (the commit list could not be printed without Bash; the latest five on main are e4c771f, 29ddec4, 68b9042, e676611 and e577190)
 
-Summary: 0 P0, 0 P1, 1 P2, 2 P3
+Summary: 0 P0, 0 P1, 0 P2, 1 P3
+
+## Status of earlier findings
+
+- **CR-1 (P2) Import scanners hold an unterminated value in memory without limit: Fixed.**
+    - `scanner.ts:38` adds `MAX_VALUE_CHARS` = 64 Mi characters, the 16 MiB BSON limit plus room for EJSON wrappers.
+    - `JsonScanner` counts the pending value in `size`. It is reset in `open()` (`:110-115`) and checked when a value closes (`:100-102`) and at the end of every chunk (`:172-176`). So a value of any kind is cut off at most one read chunk (256 KiB) past the cap: an unclosed `{`, an unterminated string (inside a string the loop `continue`s, but the check at the end of the chunk still runs), or a growing bare scalar.
+    - `LineScanner` now keeps the open line as parts with a running length (`:207-253`) and searches only the new chunk for `\n`. This also removes the earlier quadratic `carry + chunk` search. The error names line `this.line + 1`, which is correct because `line` counts the lines already pushed.
+    - Both scanners still return the values completed earlier in the same chunk and throw on the next call (`feed` try/catch). So `importFile` handles the error like any broken structure: it flushes the pending batch, sends a final progress event and rejects with `INVALID_PARAMS` "Line N: …". `previewFile` uses the same `scanFile`, so it is bounded too.
+    - Tests: `scanner.spec.ts:343-408` checks the limit, the boundary values (exactly the cap, under every split) and the early stop (`fed <= 10`). `import.spec.ts:675-700` checks the real constant end to end for import and preview, in JSON and JSONL.
+    - ARCHITECTURE documents the limit.
+- **CR-2 (P3) Stop mode can report a later line than the first failure: Fixed.**
+    - `import.ts:182, :190-202`: `fail()` keeps `stopLine` and replaces `stop` whenever a failure at an earlier line arrives.
+    - `errors` is kept in line order by a sorted insert, and the overflow drops the last entry. This keeps the first `MAX_REPORTED_ERRORS` lines also when failures arrive out of order.
+    - An ordered flush still stops resubmitting once `stop` is set (`:232`). So the documents between the refused line M and the bad line N are not inserted, and the import now reports M.
+    - Tests: `import.spec.ts:367-383` (stop mode reports line 2, not 3; errors `[2, 3]`), `:455-463` (continue mode keeps line order), and `:465-478` (a late refusal of line 1 after 105 parse failures: the kept errors are exactly lines 1..100).
+    - The ARCHITECTURE wording ("error of the earliest failed line") now matches the code.
+- **FX-1 (P3, raised by the fixer) A failed or cancelled export can leave its file behind: Fixed.**
+    - `export.ts:107-116` `closeStream()` destroys the stream and waits for `close`, or resolves at once when the stream is already `closed`. The error path awaits it before `rm` (`:181-184`), so a pending `open` can no longer recreate the file after the removal.
+    - `close` is always emitted for `fs` write streams (`emitClose` defaults to true), also after an open error, so the wait cannot hang in normal use.
+    - Regression test: `export.spec.ts:322-345`, with a gated `fs.open` through the stream's `fs` option. The fixer reports that it fails against the old code.
+- **CR-3 (P3) `FileDialogs` signal unused; `io.export` ignores `csvFields`: Still open, accepted by the parent worker.** The code at `handlers.ts:17-37` and `:88-113` is unchanged. Details are under P3 below.
 
 ## P0 Critical
 
@@ -30,46 +52,27 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | Import scanners hold an unterminated value in memory without limit**
-    - File: `packages/backend/src/io/scanner.ts:143` (JsonScanner `parts`), `packages/backend/src/io/scanner.ts:179-185` (LineScanner `carry`)
-    - Category: Correctness
-    - Problem: Nothing limits the size of one scanned value. `JsonScanner` adds every chunk to `this.parts` until the brackets balance. `LineScanner` keeps adding to `this.carry` until it sees a newline. So the whole file is buffered in these cases:
-        - a JSON file with an unclosed `{` near the start;
-        - a single-line (minified) file imported as JSON Lines;
-        - a binary file or other wrong file picked in the open dialog.
-
-      The whole file is then joined into one string (`parts.join('')` at line 77 or 164, `this.carry + chunk` at line 179). This applies to both `io.import` and `io.previewImport`, because `previewFile` also goes through `scanFile`. A valid document can never be larger than 16 MB of BSON, so text beyond a few tens of MB cannot become a valid document.
-    - Why it matters: The backend utilityProcess serves every window. A large file of the wrong shape uses as much memory as the file is big (UTF-16 strings, about twice the file size). Above V8's string limit (~512 M characters) the join throws a `RangeError`, which reaches the user as a vague `INTERNAL` error. Before that point the heap can fill up and the backend crashes: every connection is dropped and the backend has to restart. This defeats the module's claim that "the file is read as a stream" with bounded memory.
-    - Suggested fix: Track the pending value's length in both scanners. Once it goes past a cap (for example 16 MB of BSON plus a generous margin for EJSON text, such as 64 MB of characters), throw `ScanError('a value is larger than … (wrong format?)', valueLine)`. Add a unit test for each scanner that feeds a long unterminated value and expects the `ScanError` without buffering it all.
+None.
 
 ## P3 Low
 
-- [ ] **CR-2 | Stop mode can report a later line than the first failure**
-    - File: `packages/backend/src/io/import.ts:186`, `:230-231`, `:257`, `:262`
-    - Category: Correctness
-    - Problem: With `stopOnError` (the default), a value that does not parse at line N sets `stop` and ends reading. Then `flush()` inserts the pending batch of earlier lines. If one of those inserts is refused at line M < N (for example a duplicate `_id`), `fail()` does not replace the stop error (`stop ??=`). In an ordered insert the documents after line M are also not inserted. The stream then ends with "Import stopped: Line N: …", and `errors` lists `[N, M]`, not in line order. The comment at line 261 ("A stop comes from an earlier line…") and the documented rule ("ends the stream with the first failure's error", ARCHITECTURE Import/export and the task's ASSUMPTION) do not hold here. Example: re-importing a partially imported file that also has a bad line.
-    - Why it matters: The user is told the import stopped at line N, while lines M+1..N-1 were silently not inserted because of line M. To resume, they would fix the wrong place first.
-    - Suggested fix: Do not set `stop` on a parse failure until the pending batch has been flushed. Alternatively, when `flush()` records a write error from an earlier line, replace `stop` with that error (keep the earliest line), and keep `errors` in line order. Add a unit test: a duplicate in the pending batch followed by a bad line in stop mode.
-
-- [ ] **CR-3 | `FileDialogs` takes an abort signal that is never used; `io.export` silently ignores `csvFields`**
-    - File: `packages/backend/src/io/handlers.ts:17-37`, `packages/backend/src/io/handlers.ts:88-96`
+- [ ] **CR-3 | `FileDialogs` takes an abort signal that is never used; `io.export` silently ignores `csvFields`** (still open, accepted by the parent worker)
+    - File: `packages/backend/src/io/handlers.ts:17-37`, `packages/backend/src/io/handlers.ts:88-113`
     - Category: Quality
     - Problem:
-        1. `FileDialogs.saveFile/openFile` take a `signal`, and the handlers pass `c.signal`. But `dialogsOverLink` throws it away, and `RpcClient.call` has no cancel support. So a cancelled `io.export` or `io.previewImport` leaves the native dialog open. The interface suggests a cancel behavior that does not exist. Nothing breaks after the cancel: `serve()` never starts the stream, and `previewFile` stops on the aborted signal.
-        2. `io.import` refuses `csvMapping` for JSON files (`INVALID_PARAMS`, line 139). `io.export` accepts `csvFields` with `json`/`jsonl` and ignores it, which is inconsistent.
-    - Why it matters: A misleading contract makes it likely that a later caller relies on the cancel working. Inconsistent validation of format-specific fields makes renderer bugs harder to see.
-    - Suggested fix: Either drop the `signal` parameter from `FileDialogs`, or document that it is not honored (Electron cannot close a native dialog). Refuse `csvFields` for non-CSV exports, the same way `io.import` refuses `csvMapping`, or document why it is accepted.
+        1. `saveFile`/`openFile` take a `signal`, and the handlers pass `c.signal`, but `dialogsOverLink` drops it. A cancelled `io.export` / `io.previewImport` leaves the native dialog open.
+        2. `io.import` refuses `csvMapping` for JSON files (`:139-141`), while `io.export` accepts `csvFields` for `json`/`jsonl` and ignores it.
+    - Why it matters: The interface promises a cancel behavior that does not exist, and format-specific fields are validated inconsistently. Nothing breaks today: after a cancel, `serve()` never starts the stream, and `previewFile` stops on the aborted signal.
+    - Suggested fix: Drop the `signal` parameter from `FileDialogs`, or document that it is not honored. Refuse `csvFields` for non-CSV exports, or document why it is accepted. This can be done in io-advanced, which adds CSV.
 
 ## Verified without findings
 
-- AC1 (round trip of 10 000 documents in canonical EJSON): `test/integration/io.int.spec.ts:237-263` exports `rich` (most BSON types, including integral Doubles, Decimal128, Int64, Timestamp, MinKey/MaxKey) as JSON and JSONL, imports into a new collection, and compares the canonical EJSON of every document. The export reads raw values (types survive), and the import parses with `relaxed: false`.
-- AC2 (continue mode with a bad line): `io.int.spec.ts:318-356` checks the line numbers `[2, 5, 6]`, the error codes and the inserted documents for JSONL, and the JSON-array line numbers.
-- AC3 (export memory stays bounded): `exportToFile` writes each 1 000-document batch, with back pressure (`write()` waits for `drain`), before the next `getMore`. The int test (`io.int.spec.ts:377-418`) checks that the retained heap stays below 16 MB and that the file grows while the cursor is read.
-- The earlier test-writer findings TW-1/TW-2 (export resolving or hanging on file errors) are fixed in `export.ts:58-101`: `brokenStream` is checked before writes, the error argument of `end()` is used, and `close` is watched while waiting for `drain`.
-- Security: the renderer only ever sends `fileToken` (the contract has no path field). The paths come from `main`'s native dialogs over the privileged port. `dialog.*` is not in `methods`, so the renderer cannot call it (tested in `apps/desktop/src/main/handlers.spec.ts`). `io.import` has `write: 'always'` and goes through `guardWrites` in `startBackend` (int test with a read-only profile). No secrets, and no `eval`.
-- Routing change (`io.*` moved from `main` to `backend`): this matches SPEC section 4 (the file is still chosen in main with a native dialog). It is recorded as a task assumption and documented in ARCHITECTURE, and the contract tests were updated to match.
-- Acceptance-criterion evidence: `python tasks.py verify io-basic-backend` shows no evidence recorded yet for #1-#3. The parent worker records it before `done`, so this is not a finding at review time.
+- AC1 (10 000-document canonical round trip), AC2 (continue mode reports the bad line numbers and imports the rest) and AC3 (export memory stays bounded with 200 000 documents): the implementation paths checked in the first pass are unchanged by e577190, apart from the error path of `exportToFile`, which only runs on failure. The integration tests in `test/integration/io.int.spec.ts` were not re-read or re-run in this pass. Recorded criterion evidence could not be inspected (`python tasks.py verify io-basic-backend` needs Bash). The task file still shows the criteria unticked, so the parent worker must record the evidence (the actual `npm run test:int` run) before `done`.
+- Memory bounds after the fixes: import holds at most one batch (≤ 1 000 documents / 8 MB, or one document up to 16 MB), one pending value (≤ `MAX_VALUE_CHARS` plus one chunk) and one 256 KiB read chunk. Export holds one cursor batch plus the write stream buffer, with back pressure.
+- Cancellation: the import checks the signal per read chunk, and `Operation` kills server commands. The export cancels through `Operation`, then waits for the file to close and removes it. A cancel during reading flushes nothing (tested).
+- Security: the renderer only sends `fileToken`, and paths stay in the backend's token map (the last 100). `dialog.*` exists only on the privileged port. `io.import` stays behind the write guard. No secrets, `eval`, or paths built from renderer input. The default file name in the save dialog comes from the collection name, but the user confirms the path in the native dialog.
+- Maintainability: the fixes stay small and local and follow the existing patterns (the deferred `failure` in both scanners, `brokenStream` / `closeStream` in export). Comments match the behavior.
 
 ## Review conclusion
 
-Material issues found; fix before completing the task. CR-1 (P2) should be fixed or explicitly accepted by the parent worker. CR-2 and CR-3 are low-priority cleanups.
+No material issues found. CR-1 and CR-2 are fixed correctly and covered by regression tests, and FX-1 is fixed with a regression test. The only open finding is CR-3 (P3), which the parent worker accepted. Before `done`, the parent worker must still record the evidence for acceptance criteria #1-#3 with `tasks.py verify`, based on an actual integration test run.

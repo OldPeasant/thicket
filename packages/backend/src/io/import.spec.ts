@@ -382,6 +382,51 @@ describe('importFile', () => {
       ]);
     });
 
+    it('unordered: a refused earlier line found when flushing wins over a later bad line', async () => {
+      // Line 5 does not parse and stops reading; the unordered batch (lines 1-4) is then written,
+      // the server refuses line 2 and inserts the others: the import stopped at line 2.
+      const file = await fileWith(
+        'dup-bad-unordered.jsonl',
+        '{"_id":1}\n{"_id":1}\n{"_id":3}\n{"_id":4}\n{"bad": }\n{"_id":6}\n',
+      );
+      const server = fakeServer((documents, ordered) => duplicateAt(documents, 1, ordered));
+      const { result, progress } = await runImport(server.client, file, 'jsonl', {
+        ordered: false,
+      });
+      expect(result).toBeInstanceOf(RpcError);
+      expect(result).toMatchObject({ code: 'SERVER_ERROR' });
+      expect((result as Error).message).toBe('Import stopped: Line 2: E11000 duplicate key error');
+      // One unordered insert of the 4 lines read before the bad one; nothing is sent again.
+      expect(server.inserts.map((i) => [i.documents.length, i.ordered])).toEqual([[4, false]]);
+      expect(progress).toEqual([
+        {
+          processed: 5,
+          failed: 2,
+          errors: [
+            {
+              index: 2,
+              error: { code: 'SERVER_ERROR', message: 'Line 2: E11000 duplicate key error' },
+            },
+            { index: 5, error: expect.objectContaining({ code: 'INVALID_PARAMS' }) },
+          ],
+        },
+      ]);
+    });
+
+    it('a bad line after a refused line of an earlier flushed batch keeps the earlier stop', async () => {
+      // The refusal at line 2 (in a full batch) stops reading at once: a later bad line is
+      // never read, so it can neither replace the stop nor appear in the errors.
+      const count = IMPORT_BATCH_DOCS;
+      const lines = Array.from({ length: count }, (_, i) => `{"_id":${String(i)}}`);
+      const file = await fileWith('dup-then-bad.jsonl', `${lines.join('\n')}\n{"bad": }\n`);
+      const server = fakeServer((documents, ordered) => duplicateAt(documents, 1, ordered));
+      const { result, progress } = await runImport(server.client, file, 'jsonl');
+      expect((result as Error).message).toBe('Import stopped: Line 2: E11000 duplicate key error');
+      expect(server.inserts).toHaveLength(1);
+      expect(progress.at(-1)?.errors.map((e) => e.index)).toEqual([2]);
+      expect(progress.at(-1)).toMatchObject({ processed: count, failed: 1 });
+    });
+
     it('a bad element in a JSON array stops at its line', async () => {
       const file = await fileWith('stop.json', '[\n{"_id":1},\n42,\n{"_id":3}\n]');
       const server = fakeServer();

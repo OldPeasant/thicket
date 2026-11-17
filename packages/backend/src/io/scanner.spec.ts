@@ -405,4 +405,78 @@ describe('value size limit', () => {
       { text: '{"b":2}', line: 2 },
     ]);
   });
+
+  /** Scans `chunks` until the ScanError; the values returned before it and the error. */
+  function scanUntilError(scanner: Scanner, chunks: string[]) {
+    const values: ScannedValue[] = [];
+    try {
+      for (const chunk of chunks) values.push(...scanner.feed(chunk));
+      values.push(...scanner.end());
+    } catch (error) {
+      return { values, error };
+    }
+    throw new Error(`expected a ScanError for ${JSON.stringify(chunks)}`);
+  }
+
+  /** Asserts that every cut of `text` returns `before`, then refuses the value at `line`. */
+  function expectTooLongAnySplit(
+    make: Make,
+    text: string,
+    before: ScannedValue[],
+    line: number,
+    max: number,
+  ): void {
+    for (const chunks of splits(text)) {
+      const { values, error } = scanUntilError(make(), chunks);
+      const what = JSON.stringify(chunks);
+      expect(values, what).toEqual(before);
+      expect(error, what).toBeInstanceOf(ScanError);
+      expect((error as Error).message, what).toBe(
+        `Line ${String(line)}: a value is longer than ${String(max)} characters (is the file in the chosen format?)`,
+      );
+    }
+  }
+
+  // One character over the limit: the size counted over earlier chunks must be added when the
+  // value closes in a later chunk (a cut inside the value).
+  const over = '{"a":"123"}'; // 11 characters
+  const first = [{ text: '{"a":1}', line: 1 }];
+
+  it('JsonScanner refuses an array element one character over the limit, however it is cut', () => {
+    expectTooLongAnySplit(() => new JsonScanner(10), `[{"a":1},\n${over},{"b":2}]`, first, 2, 10);
+  });
+
+  it('JsonScanner refuses a sequence document one character over the limit, however it is cut', () => {
+    expectTooLongAnySplit(() => new JsonScanner(10), `{"a":1}\n${over}\n{"b":2}`, first, 2, 10);
+  });
+
+  it('JsonScanner refuses a bare scalar one character over the limit, however it is cut', () => {
+    expectTooLongAnySplit(() => new JsonScanner(10), '{"a":1}\n12345678901\n{"b":2}', first, 2, 10);
+    // Also when the scalar is the last value of the file (it ends at end()).
+    expectTooLongAnySplit(() => new JsonScanner(10), '{"a":1}\n12345678901', first, 2, 10);
+  });
+
+  it('LineScanner refuses a line one character over the limit, however it is cut', () => {
+    expectTooLongAnySplit(() => new LineScanner(10), `{"a":1}\n${over}\n{"b":2}\n`, first, 2, 10);
+  });
+
+  it('JsonScanner counts every value on its own: consecutive values at the limit are accepted', () => {
+    const doc = '{"a":"12"}';
+    const make = () => new JsonScanner(doc.length);
+    expectAnySplit(make, `[${doc},${doc},\n${doc}]`, [
+      { text: doc, line: 1 },
+      { text: doc, line: 1 },
+      { text: doc, line: 2 },
+    ]);
+    expectAnySplit(make, `${doc}${doc}\n${doc}`, [
+      { text: doc, line: 1 },
+      { text: doc, line: 1 },
+      { text: doc, line: 2 },
+    ]);
+    expectAnySplit(() => new JsonScanner(10), '1234567890 1234567890\n1234567890', [
+      { text: '1234567890', line: 1 },
+      { text: '1234567890', line: 1 },
+      { text: '1234567890', line: 2 },
+    ]);
+  });
 });
