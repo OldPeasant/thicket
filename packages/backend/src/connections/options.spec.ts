@@ -717,3 +717,75 @@ describe('clientConfig edge cases (task x509-proxy)', () => {
     });
   });
 });
+
+describe('clientConfig MONGODB-AWS (task aws-auth)', () => {
+  /** Fictitious AWS values; none of them is a real credential. */
+  const KEY_ID = 'AKIAFICTITIOUSKEY456';
+  const AWS_SECRET = 'fictitious/aws+Secret+Key6';
+  const AWS_TOKEN = 'fictitious-aws-session-Token5';
+
+  it('answers AUTH_FAILED for a user name in the connection string, before the driver sees it', () => {
+    const error = errorOf(() =>
+      clientConfig(
+        draft({
+          connectionString: `mongodb://${KEY_ID}@db.example.test:27017/?authMechanism=MONGODB-AWS`,
+          auth: { mechanism: 'MONGODB-AWS', secretMode: 'none' },
+        }),
+        {},
+      ),
+    );
+    expect(error?.code).toBe('AUTH_FAILED');
+    expect(error?.message).toContain('connection string');
+  });
+
+  it('replaces another authSource, also one in the connection string, with $external', () => {
+    const profile = draft({
+      connectionString: 'mongodb://db.example.test:27017/?authSource=admin',
+      auth: {
+        mechanism: 'MONGODB-AWS',
+        username: KEY_ID,
+        secretMode: 'saved',
+        authSource: 'admin',
+      },
+    });
+    const { uri, options } = clientConfig(profile, { awsSecretAccessKey: AWS_SECRET });
+    expect(options.authSource).toBe('$external');
+    const client = new MongoClient(uri, options);
+    expect(client.options.credentials).toMatchObject({
+      mechanism: 'MONGODB-AWS',
+      source: '$external',
+    });
+  });
+
+  it('keeps appName, TLS and proxy options next to the AWS options', async () => {
+    const { uri, options } = clientConfig(
+      draft({
+        appName: 'Reporting',
+        auth: { mechanism: 'MONGODB-AWS', username: KEY_ID, secretMode: 'saved' },
+        tls: { enabled: true, allowInvalidHostnames: false },
+        proxy: { host: 'proxy.example.test', port: 1080 },
+      }),
+      { awsSecretAccessKey: AWS_SECRET, awsSessionToken: AWS_TOKEN },
+    );
+    expect(options).toMatchObject({
+      appName: 'Reporting',
+      authMechanism: 'MONGODB-AWS',
+      authSource: '$external',
+      tls: true,
+      tlsAllowInvalidHostnames: false,
+      proxyHost: 'proxy.example.test',
+      proxyPort: 1080,
+    });
+    expect(options.auth).toBeUndefined();
+    expect(uri).not.toContain(AWS_SECRET);
+    expect(await options.authMechanismProperties?.AWS_CREDENTIAL_PROVIDER?.()).toEqual({
+      accessKeyId: KEY_ID,
+      secretAccessKey: AWS_SECRET,
+      sessionToken: AWS_TOKEN,
+    });
+    const client = new MongoClient(uri, options);
+    expect(client.options.credentials).toMatchObject({ mechanism: 'MONGODB-AWS' });
+    // The driver keeps the provider, not the secret, in its credentials.
+    expect(JSON.stringify(client.options.credentials)).not.toContain(AWS_SECRET);
+  });
+});

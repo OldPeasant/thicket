@@ -1,3 +1,4 @@
+import { MongoAWSError } from 'mongodb';
 import { describe, expect, it } from 'vitest';
 
 import { RpcError } from '../server/rpc';
@@ -243,6 +244,63 @@ describe('classifyCode', () => {
       });
       expect(classifyCode(unauthorized, true)).toBe('SERVER_ERROR');
       expect(classifyCode(sysError('ECONNREFUSED'), true)).toBe('NETWORK_ERROR');
+    });
+  });
+
+  describe('MongoAWSError (task aws-auth)', () => {
+    /** What the AWS SDK default chain throws when no source has credentials. */
+    function chainError(fields: Record<string, unknown> = {}): Error {
+      return driverError(
+        'CredentialsProviderError',
+        'Could not load credentials from any providers',
+        fields,
+      );
+    }
+
+    /** The driver wraps a failing credential provider like this (aws_temporary_credentials). */
+    function awsError(cause: Error = chainError()): MongoAWSError {
+      return new MongoAWSError('Could not load credentials from any providers', { cause });
+    }
+
+    it('the real driver class is AUTH_FAILED, with and without connecting', () => {
+      expect(awsError().name).toBe('MongoAWSError');
+      expect(classifyCode(awsError())).toBe('AUTH_FAILED');
+      expect(classifyCode(awsError(), true)).toBe('AUTH_FAILED');
+    });
+
+    it('is found as the cause of a wrapping driver error', () => {
+      const outer = driverError('MongoError', 'connect failed', { cause: awsError() });
+      expect(classifyCode(outer, true)).toBe('AUTH_FAILED');
+      const deeper = new Error('outer', {
+        cause: driverError('MongoError', 'mid', { cause: outer }),
+      });
+      expect(classifyCode(deeper, true)).toBe('AUTH_FAILED');
+    });
+
+    it('is found in the servers of a server selection failure (outranks its TIMEOUT)', () => {
+      expect(classifyCode(selectionError(undefined, awsError()), true)).toBe('AUTH_FAILED');
+    });
+
+    it.each([
+      ['ECONNREFUSED (instance metadata unreachable)', sysError('ECONNREFUSED')],
+      ['ETIMEDOUT (instance metadata timed out)', sysError('ETIMEDOUT')],
+      ['ENOTFOUND (STS host not resolved)', sysError('ENOTFOUND')],
+    ])('outranks a network cause inside it: %s', (_label, inner) => {
+      expect(classifyCode(awsError(chainError({ cause: inner })), true)).toBe('AUTH_FAILED');
+    });
+
+    it('toConnectError answers AUTH_FAILED with its prefix and removes secret values', () => {
+      const secret = 'fictitious/aws+secret+key';
+      const failure = toConnectError(
+        new MongoAWSError(`provider failed for key with secret ${secret}`),
+        [secret],
+        true,
+      );
+      expect(failure.code).toBe('AUTH_FAILED');
+      expect(failure.message).toBe(
+        'Authentication failed: provider failed for key with secret ****',
+      );
+      expect(failure.detail).toBeUndefined();
     });
   });
 
