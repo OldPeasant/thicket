@@ -1,11 +1,11 @@
 ---
 title: Flaky ssh2 ed25519 test host keys (~0.35% unparseable)
-status: in_progress
+status: done
 owner: felix/agent-1
 deps: []
 touches: [packages/backend/src/server/backend.spec.ts,packages/backend/src/ssh,test/integration/ssh.int.spec.ts]
 prio: 2
-lease_until: 2026-11-17T05:46:13Z
+lease_until: 
 ---
 ## Goal
 `ssh2`'s `utils.generateKeyPairSync('ed25519')` returns a private key that `ssh2` itself cannot parse in
@@ -25,3 +25,4 @@ SSH server host key then fail with "Cannot parse privateKey: Malformed OpenSSH p
 ## Notes
 Test-only change; production SSH code is not affected.
 - ASSUMPTION (2026-11-17 06:18+0100 by felix/agent-1): Also switched test/integration/fixtures/ssh.ts and test/e2e/demo/ssh-x509.ts (not in touches) to the helper, since they use the same flaky ed25519 generator; helper lives in packages/backend/src/ssh/testing.ts (test-only, like server/testing.ts)
+- done by felix/agent-1: `if [ -f package.json ]; then npm run check; else python3 tasks.py check; fi` passed in 102s on 91776cb70; criteria verified 2/2
