@@ -30,6 +30,31 @@ describe('diffLines', () => {
     ]);
   });
 
+  it('pairs uneven runs: changed rows first, the rest against a gap', () => {
+    expect(diffLines(['{', 'a: 1', 'b: 1', '}'], ['{', 'x: 2', '}'])).toEqual([
+      { kind: 'same', left: '{', right: '{' },
+      { kind: 'changed', left: 'a: 1', right: 'x: 2' },
+      { kind: 'left', left: 'b: 1', right: null },
+      { kind: 'same', left: '}', right: '}' },
+    ]);
+    expect(diffLines(['{', 'a', '}'], ['{', 'x', 'y', 'z', '}'])).toEqual([
+      { kind: 'same', left: '{', right: '{' },
+      { kind: 'changed', left: 'a', right: 'x' },
+      { kind: 'right', left: null, right: 'y' },
+      { kind: 'right', left: null, right: 'z' },
+      { kind: 'same', left: '}', right: '}' },
+    ]);
+  });
+
+  it('keeps a moved line aligned as common and repeated lines in order', () => {
+    const rows = diffLines(['a', 'b', 'a', 'c'], ['b', 'a', 'c', 'a']);
+    // Every line of each side appears once, in order.
+    expect(rows.flatMap((r) => (r.left === null ? [] : [r.left]))).toEqual(['a', 'b', 'a', 'c']);
+    expect(rows.flatMap((r) => (r.right === null ? [] : [r.right]))).toEqual(['b', 'a', 'c', 'a']);
+    // The LCS (b, a, c) is shown as same rows.
+    expect(rows.filter((r) => r.kind === 'same').map((r) => r.left)).toEqual(['b', 'a', 'c']);
+  });
+
   it('handles empty sides', () => {
     expect(diffLines([], ['a'])).toEqual([{ kind: 'right', left: null, right: 'a' }]);
     expect(diffLines(['a'], [])).toEqual([{ kind: 'left', left: 'a', right: null }]);

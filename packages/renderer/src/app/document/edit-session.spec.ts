@@ -281,6 +281,59 @@ describe('DocumentEdits', () => {
     });
   });
 
+  describe('resolve (conflict resolution)', () => {
+    const key1 = '{"$numberInt":"1"}';
+    const key2 = '{"$numberInt":"2"}';
+
+    it('makes the server version the baseline, so Save diffs from it', () => {
+      edits.edit(order(1), order(1, 15));
+      edits.resolve(key1, order(1, 77, 3), order(1, 15));
+      expect(ejson(edits.get(key1)?.original as BsonDocument)).toBe(ejson(order(1, 77, 3)));
+      expect(ejson(edits.get(key1)?.current as BsonDocument)).toBe(ejson(order(1, 15)));
+      // total 77 -> 15 and qty 3 -> 1: two changes against the server version.
+      expect(edits.changeCount()).toBe(2);
+      const pending = edits.pending().get(key1);
+      expect(pending?.ok && pending.diff.kind).toBe('update');
+    });
+
+    it("drops that document's undo and redo steps only", () => {
+      edits.edit(order(1), order(1, 15));
+      edits.edit(order(1), order(1, 15, 4));
+      edits.edit(order(2), order(2, 25));
+      edits.edit(order(2), order(2, 25, 7));
+      edits.undo(); // redo step for document 2
+      edits.resolve(key1, order(1, 77), order(1, 15, 4));
+      // Document 1's steps are gone: undo reaches document 2's first edit, not document 1.
+      edits.undo();
+      expect(edits.isModified(key2)).toBe(false);
+      expect(edits.canUndo()).toBe(false);
+      expect(ejson(edits.get(key1)?.current as BsonDocument)).toBe(ejson(order(1, 15, 4)));
+      edits.redo();
+      edits.redo();
+      expect(ejson(edits.current(order(2)))).toBe(ejson(order(2, 25, 7)));
+      expect(edits.canRedo()).toBe(false);
+    });
+
+    it('keeps the partial flag of an edited document', () => {
+      edits.edit(order(1), order(1, 15), true);
+      edits.resolve(key1, order(1, 77), order(1, 15));
+      expect(edits.get(key1)?.partial).toBe(true);
+    });
+
+    it('creates an unflagged entry for a document without edits', () => {
+      edits.resolve(key1, order(1, 77), order(1, 15));
+      expect(edits.get(key1)).toMatchObject({ key: key1, partial: false });
+      expect(edits.changeCount()).toBe(1);
+    });
+
+    it('leaves the document unmodified when the version equals the server version', () => {
+      edits.edit(order(1), order(1, 15));
+      edits.resolve(key1, order(1, 15), order(1, 15));
+      expect(edits.isModified(key1)).toBe(false);
+      expect(edits.canUndo()).toBe(false);
+    });
+  });
+
   it('reports a document whose _id was edited as not savable', () => {
     edits.edit(order(1), order(7, 10, 1));
     const pending = edits.pending().get('{"$numberInt":"1"}');
