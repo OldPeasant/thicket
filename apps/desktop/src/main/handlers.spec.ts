@@ -316,6 +316,63 @@ describe('the privileged port (main side)', () => {
   });
 });
 
+describe('the privileged port with native dialogs', () => {
+  const dialogs = {
+    showSaveDialog: vi.fn(() =>
+      Promise.resolve({ canceled: false, filePath: '/home/alice/a.json' }),
+    ),
+    showOpenDialog: vi.fn(() => Promise.resolve({ canceled: true, filePaths: [] })),
+  };
+
+  it('serves dialog.saveFile / dialog.openFile only when dialogs are given', () => {
+    const without = Object.keys(privilegedHandlers({ secrets: emptyStore() }));
+    const withDialogs = Object.keys(privilegedHandlers({ secrets: emptyStore(), dialogs }));
+    expect(without).not.toContain('dialog.saveFile');
+    expect(without).not.toContain('dialog.openFile');
+    // Adding the dialogs only adds the two dialog methods; nothing is replaced or lost.
+    expect(withDialogs.sort()).toEqual([...without, 'dialog.openFile', 'dialog.saveFile'].sort());
+    for (const name of withDialogs) expect(Object.hasOwn(privilegedMethods, name)).toBe(true);
+  });
+
+  it('keeps profiles.forConnect next to the dialogs', () => {
+    const secrets = emptyStore();
+    const profiles = new ProfilesStore({ file: '/nonexistent/thicket-test/c.json', secrets });
+    expect(Object.keys(privilegedHandlers({ secrets, profiles, dialogs }))).toEqual(
+      expect.arrayContaining(['profiles.forConnect', 'dialog.saveFile', 'dialog.openFile']),
+    );
+  });
+
+  it('answers dialog.* over the privileged port but never over a window port', async () => {
+    const privileged = fakePort();
+    serve(privileged, {
+      table: privilegedMethods,
+      route: 'main',
+      handlers: privilegedHandlers({ secrets: emptyStore(), dialogs }),
+    });
+    privileged.push({ id: 's', method: 'dialog.saveFile', params: { defaultName: 'a.json' } });
+    privileged.push({ id: 'o', method: 'dialog.openFile', params: {} });
+    await vi.waitFor(() => expect(privileged.sent).toHaveLength(2));
+    const byId = new Map(privileged.sent.map((r) => [r.id, r]));
+    expect(byId.get('s')).toEqual({ id: 's', ok: true, result: { path: '/home/alice/a.json' } });
+    expect(byId.get('o')).toEqual({ id: 'o', ok: true, result: { path: null } });
+
+    // Even a mistaken wiring that mixes them into a window's handlers must not expose them.
+    const window = fakePort();
+    serve(window, {
+      table: methods,
+      route: 'main',
+      handlers: {
+        ...mainHandlers(deps('1')),
+        ...privilegedHandlers({ secrets: emptyStore(), dialogs }),
+      },
+    });
+    window.push({ id: 'w', method: 'dialog.saveFile', params: {} });
+    await vi.waitFor(() => expect(window.sent).toHaveLength(1));
+    expect(window.sent[0]).toMatchObject({ ok: false, error: { code: 'UNKNOWN_METHOD' } });
+    expect(dialogs.showSaveDialog).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('app.settings handlers', () => {
   const SETTINGS: Settings = {
     style: 'business',

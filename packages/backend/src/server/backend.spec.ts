@@ -430,6 +430,64 @@ describe('startBackend: connections', () => {
     expect(await m.answer('p')).toMatchObject({ ok: false, error: { code: 'NOT_CONNECTED' } });
   });
 
+  it('io.* asks main for the file dialog over the privileged port; io.import is guarded', async () => {
+    const b = backend();
+    const [mainEnd, backendEnd] = portPair();
+    const openFile = vi.fn(() => ({ path: null }));
+    serve(mainEnd, {
+      table: privilegedMethods,
+      route: 'main',
+      handlers: {
+        'profiles.forConnect': (params: { profileId: string }) => ({
+          profile: profiles[params.profileId],
+        }),
+        'dialog.openFile': openFile,
+      },
+    });
+    b.send({ type: 'privileged' }, [mainPort(backendEnd)]);
+    const { renderer, answer } = rendererPort(b);
+
+    renderer.send({ id: 'pv', method: 'io.previewImport', params: { format: 'jsonl' } });
+    expect(await answer('pv')).toEqual({ id: 'pv', ok: true, result: null });
+    expect(openFile).toHaveBeenCalledWith(
+      { title: 'Import documents', filters: expect.any(Array) as unknown },
+      expect.anything(),
+    );
+
+    const io = { db: 'shop', coll: 'orders', fileToken: 'file-unknown' };
+    renderer.send({
+      id: 'ro',
+      method: 'io.import',
+      params: { profileId: 'ssh', confirmed: true, ...io },
+    });
+    renderer.send({ id: 'prod', method: 'io.import', params: { profileId: 'prod', ...io } });
+    renderer.send({
+      id: 'ok',
+      method: 'io.import',
+      params: { profileId: 'prod', confirmed: true, ...io },
+    });
+    // io.export is a read: not guarded, it reaches the handler (no open connection).
+    renderer.send({
+      id: 'ex',
+      method: 'io.export',
+      params: {
+        profileId: 'ssh',
+        db: 'shop',
+        coll: 'orders',
+        format: 'json',
+        source: { kind: 'find', filter: '{}' },
+      },
+    });
+    expect(await answer('ro')).toMatchObject({ ok: false, error: { code: 'READ_ONLY' } });
+    expect(await answer('prod')).toMatchObject({
+      ok: false,
+      error: { code: 'CONFIRMATION_REQUIRED' },
+    });
+    expect(await answer('ok')).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } });
+    expect(await answer('ex')).toMatchObject({ ok: false, error: { code: 'NOT_CONNECTED' } });
+    expect(openFile).toHaveBeenCalledTimes(1);
+  });
+
   it('browse reads are not guarded on a read-only profile (NOT_CONNECTED, not READ_ONLY)', async () => {
     const m = withMain();
     m.renderer.send({ id: 'l', method: 'db.listDatabases', params: { profileId: 'ssh' } });
