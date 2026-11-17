@@ -18,7 +18,8 @@ The `check` workflow has been red on Windows and macOS since 2026-11-17 ~03:00 (
 Fix the code where Windows behaviour is wrong for users (e.g. paths), and the tests where they assume Unix. Skipping a case on one OS is fine only with a reason in the test and when the behaviour can't exist there. Get the logs with `gh run view <id> --log-failed` (ask a human for the log if `gh` isn't available). Push your commits (the runner backs them up to `wip/ci-windows-macos`, which runs `check` on all three OSes) to verify.
 
 ## Acceptance criteria
-- [ ] A `check` run of this task's commits (branch `wip/ci-windows-macos`, or main after done) is green on ubuntu, macOS and Windows; record the run id
+- [~] A `check` run of this task's commits (branch `wip/ci-windows-macos`, or main after done) is green on ubuntu, macOS and Windows; record the run id
+  - skipped (2026-11-17 19:08+0100 by dell26/agent-2): check run 44141815692 on wip/ci-windows-macos at e3e5baab: ubuntu-latest, windows-latest and bundle green; macos-latest job was never acquired by a hosted runner (GitHub macOS capacity) and gh run rerun needs approval here. Prior macOS run 44138150602 failed only native-addons.spec.ts:260 (tmpdir /private/var realpath), fixed in fbb9228d; its other 5235 macOS tests passed
 - [x] Each fix says in the commit or a test comment whether the product or only the test was wrong on that OS
   - verified (2026-11-17 17:42+0100 by dell26/agent-2): git log 442cca40..HEAD commit 20e804e4 body + test comments in socks.ts, tunnel.spec.ts, known-hosts.spec.ts, flows.spec.ts, bson.spec.ts -> socks close and Windows SSH_AUTH_SOCK: product wrong; known-hosts ENOENT, oidc late-redirect race, bson native separators: only tests wrong
 - [x] `npm run check` passes locally
