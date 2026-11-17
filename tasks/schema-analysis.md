@@ -5,7 +5,7 @@ owner: felix/agent-2
 deps: [docs-query-backend,collection-view]
 touches: [packages/backend/src/schema,packages/renderer/src/app/schema-analysis]
 prio: 2
-lease_until: 2026-11-17T05:21:22Z
+lease_until: 2026-11-17T05:25:20Z
 ---
 ## Goal
 Sample-based (default 1 000) analysis with mongodb-schema: fields, types and shares, missing ratio, examples; shown in the table view; click a value to use it as a filter.
