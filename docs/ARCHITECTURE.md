@@ -657,6 +657,18 @@ Contract layout (`packages/contract/src/`):
   `usersInfo: 1`); credentials are never asked for and dropped if present. `admin.roles`:
   `rolesInfo: 1` with `showPrivileges` and `showBuiltinRoles`. Integration:
   `test/integration/users-roles.int.spec.ts`.
+- Changes (task users-roles-edit, backend `src/admin/users/edit`, renderer `admin/users/edit`):
+  write methods `admin.createUser` / `updateUser` / `dropUser` / `createRole` / `updateRole` /
+  `dropRole` / `grantRoles` / `revokeRoles` (`kind: 'user' | 'role'`, `name`), role lists as
+  `{ role, db }` (`roleRef`), privileges and custom data as EJSON text. Each is one command on the
+  primary in `db` (`editCommand`); a new user outside `$external` needs a password, an update
+  must change something (`INVALID_PARAMS`). Passwords go only to the server; the confirm dialog
+  shows `pwd: "<hidden>"`. Renderer: "New user/role" in the head and "Change …" open
+  `PrincipalEditor` (name, password twice, roles, custom data or privileges in shell syntax;
+  a change sends only what changed); the × on a direct role revokes it, the field under the
+  roles (`RoleInput`: `role` or `role@db`, suggestions) grants one; "Drop …" always confirms.
+  All through `WriteGuard`, off on read-only profiles; built-in roles can't be changed.
+  Int: `test/integration/users-edit.int.spec.ts`; e2e (auth fixture): `test/e2e/users-edit.e2e.ts`.
 
 ## Current operations (`packages/renderer/src/app/admin/currentop`, backend `src/admin/currentop`)
 - Tab kind `currentop`, id `currentOpTabId(profileId)`, data `CurrentOpTabData` (`profileId`);
