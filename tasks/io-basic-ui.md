@@ -1,10 +1,11 @@
 ---
 title: M1: Import/export dialogs
-status: todo
-owner:
+status: in_progress
+owner: dell26/agent-1
 deps: [io-basic-backend,collection-view,safety-ui]
 touches: [packages/renderer/src/app/io]
 prio: 2
+lease_until: 2026-11-17T01:18:30Z
 ---
 ## Goal
 Export current query results (JSON/JSONL, relaxed/canonical) and import a JSON/JSONL file with preview, options and progress.
