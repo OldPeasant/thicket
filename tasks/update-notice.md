@@ -1,10 +1,11 @@
 ---
 title: Release (Should): Update available notice
-status: todo
-owner:
+status: in_progress
+owner: dell26/agent-1
 deps: [app-settings,app-layout]
 touches: [apps/desktop/src/update,packages/renderer/src/app/update]
 prio: 3
+lease_until: 2026-11-17T06:42:27Z
 ---
 ## Goal
 Check the GitHub releases API at start (and daily) unless disabled in settings; show a non-modal notice with a link to the release.
