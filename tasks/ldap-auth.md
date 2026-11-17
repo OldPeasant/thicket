@@ -15,3 +15,4 @@ PLAIN auth against MongoDB Enterprise configured for LDAP, with an OpenLDAP cont
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-17 03:32+0100 by felix/agent-2): PLAIN always authenticates against $external (profile authSource ignored), like X.509/AWS: LDAP users live in $external on Enterprise and Atlas
