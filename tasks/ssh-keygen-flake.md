@@ -5,7 +5,7 @@ owner: felix/agent-1
 deps: []
 touches: [packages/backend/src/server/backend.spec.ts,packages/backend/src/ssh,test/integration/ssh.int.spec.ts]
 prio: 2
-lease_until: 2026-11-17T05:36:09Z
+lease_until: 2026-11-17T05:41:13Z
 ---
 ## Goal
 `ssh2`'s `utils.generateKeyPairSync('ed25519')` returns a private key that `ssh2` itself cannot parse in
