@@ -423,6 +423,21 @@ describe('UsersRolesView', () => {
     expect(get('user-detail').querySelector('.title')?.textContent).toContain('bob');
   });
 
+  it('a tab pointing at the same database of another profile loads it again', async () => {
+    await create();
+    fixture.componentRef.setInput('tab', {
+      ...TAB,
+      id: usersTabId('p2', 'shop'),
+      data: { profileId: 'p2', db: 'shop' },
+    });
+    await settle();
+    expect(fake.requestsFor('admin.users').map((r) => r.params)).toEqual([
+      { profileId: 'p1', db: 'shop' },
+      { profileId: 'p2', db: 'shop' },
+    ]);
+    expect(rolesParams().map((p) => p['profileId'])).toEqual(['p1', 'p2']);
+  });
+
   it('sends nothing for a tab without a profile or database', async () => {
     await create({ ...TAB, data: { profileId: 'p1' } });
     await create({ ...TAB, data: undefined });
