@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "task": "change-streams",
-  "reviewed_revision": "1577c362703a037ed94e6ea07bdc47cba6b75434",
+  "reviewed_revision": "b5e20ddef0d25be9ff8f21715c8e461c0c99770a",
   "helpers": {
     "test-writer":   {"status": "completed", "report": "reviews/change-streams/tests.md"},
     "code-reviewer": {"status": "completed", "report": "reviews/change-streams/review.md"},
@@ -14,11 +14,13 @@
     {"id": "CR-2 (first review)", "source": "code-reviewer", "severity": "P3", "disposition": "fixed",
      "note": "cursor leaked when cancelled while the opening aggregate was in flight; close deferred until the round settles (fixes.md CR-2, verified in re-review)"},
     {"id": "CR-1", "source": "code-reviewer", "severity": "P3", "disposition": "accepted",
-     "note": "re-selecting 'Watch changes' for an open watch tab restarts the stream after Stop; optional polish outside the acceptance criteria, recorded as an assumption in tasks/change-streams.md"}
+     "note": "re-selecting 'Watch changes' for an open watch tab restarts the stream after Stop; optional polish outside the acceptance criteria, recorded as an assumption in tasks/change-streams.md; re-listed as previously accepted in the post-merge re-review (b5e20dde), no new findings"}
   ],
+  "notes": "Post-merge re-run: test-writer found no production bugs and added 7 tests (watch handler registration in backend.spec.ts, watch tab view in app.spec.ts, malformed change events in watch.model.spec.ts); code-reviewer reviewed merge resolutions and the added tests at b5e20dde. Fixer not required for the re-run (no actionable findings).",
   "validation": [
-    {"command": "npx vitest run --config test/integration/vitest.config.ts test/integration/change-streams.int.spec.ts (Podman, mongo8rs + mongo8)", "result": "pass"},
-    {"command": "cd packages/renderer && npx ng test --include='src/app/watch/**/*.spec.ts'", "result": "pass"},
-    {"command": "npm run check (after merging origin/main incl. server-stats)", "result": "pass"}
+    {"command": "npx vitest run --config test/integration/vitest.config.ts test/integration/change-streams.int.spec.ts (Podman, mongo8rs + mongo8), re-run by test-writer at 5182f3c9", "result": "pass (10 passed)"},
+    {"command": "cd packages/renderer && npx ng test --include='src/app/app.spec.ts' --include='src/app/watch/**/*.spec.ts' (at b5e20dde)", "result": "pass (41 passed)"},
+    {"command": "npx vitest run packages/backend/src/server/backend.spec.ts (at b5e20dde)", "result": "pass (58 passed)"},
+    {"command": "npm run check at b5e20dde", "result": "pass"}
   ]
 }
