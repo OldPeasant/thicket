@@ -486,7 +486,10 @@ describe('ShellConsole', () => {
       expect(view.runs()[0]?.code).toBe('x = 3');
       expect(view.runs().at(-1)?.code).toBe(`x = ${total}`);
       expect(all('shell-run')).toHaveLength(TRANSCRIPT_LIMIT);
-    });
+      // Test-only fix (the product was right): ~200 runs with real macrotask waits take ~1 s on
+      // Linux but over the 5 s default on the Windows CI runner. A timed-out run of this loop also
+      // kept going into the next tests and broke them, so give it room.
+    }, 60_000);
 
     it('runs from the Run button, which is disabled for a blank input', async () => {
       await create();
