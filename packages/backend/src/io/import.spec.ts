@@ -485,6 +485,29 @@ describe('importFile', () => {
     expect(progress.at(-1)).toEqual({ processed: IMPORT_BATCH_DOCS + 2, failed: 0, errors: [] });
   });
 
+  it('continue mode: a broken structure after a bad element keeps the skipped line in the report', async () => {
+    const file = await fileWith('bad-broken.json', '[{"_id":1},\n42,\n{"_id":3},\n}');
+    const server = fakeServer();
+    const { result, progress } = await runImport(server.client, file, 'json', {
+      stopOnError: false,
+    });
+    expect(result).toBeInstanceOf(RpcError);
+    expect(result).toMatchObject({ code: 'INVALID_PARAMS' });
+    expect((result as Error).message).toBe('Line 4: unexpected }');
+    expect(server.inserts.map((i) => texts(i.documents))).toEqual([
+      ['{"_id":{"$numberInt":"1"}}', '{"_id":{"$numberInt":"3"}}'],
+    ]);
+    expect(progress).toEqual([
+      {
+        processed: 3,
+        failed: 1,
+        errors: [
+          { index: 2, error: { code: 'INVALID_PARAMS', message: 'Line 2: not a document' } },
+        ],
+      },
+    ]);
+  });
+
   it('a stop before the broken structure wins (its line comes first)', async () => {
     const file = await fileWith('dup-broken.json', '[{"_id":1},\n{"_id":1},\n{"_id":2}');
     const server = fakeServer((documents, ordered) => duplicateAt(documents, 1, ordered));

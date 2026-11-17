@@ -294,6 +294,24 @@ describe('exportToFile', () => {
     expect((error as Error).message).toContain(file);
   });
 
+  it.each(['jsonl', 'json'] as const)(
+    'rejects INTERNAL for an empty %s export when the file cannot be created',
+    { timeout: 3000 },
+    async (format) => {
+      // No document is written: only ending the stream can notice the failed open.
+      const file = path.join(dir, 'missing-folder', `empty.${format}`);
+      const outcome = await Promise.race([
+        exportToFile(fakeServer([[]]).client, params({ format }), file).then(
+          () => 'resolved',
+          (e: unknown) => e,
+        ),
+        new Promise((resolve) => setTimeout(() => resolve('still running after 2 s'), 2000)),
+      ]);
+      expect(outcome).toMatchObject({ code: 'INTERNAL' });
+      expect((outcome as Error).message).toContain(file);
+    },
+  );
+
   it(
     'rejects INTERNAL when the file cannot be created and the server answers after the open failed',
     { timeout: 3000 },
