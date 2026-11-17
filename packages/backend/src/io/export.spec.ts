@@ -567,14 +567,13 @@ describe('exportToFile as CSV', () => {
   });
 
   /** The documents an import of the CSV `text` makes (header from the first record). */
-  function importCsv(
-    text: string,
-    mapping?: Parameters<typeof resolveMapping>[1],
-  ): Document[] {
+  function importCsv(text: string, mapping?: Parameters<typeof resolveMapping>[1]): Document[] {
     const scanner = new CsvScanner();
     const [header, ...records] = [...scanner.feed(text), ...scanner.end()];
-    const columns = mapping ? resolveMapping(header.cells, mapping) : defaultMapping(header.cells);
-    return records.map((r) => recordToDocument(r.cells, r.line, header.cells, columns));
+    if (!header) throw new Error('the CSV text has no header record');
+    const names = header.cells;
+    const columns = mapping ? resolveMapping(names, mapping) : defaultMapping(names);
+    return records.map((r) => recordToDocument(r.cells, r.line, names, columns));
   }
 
   it('a one-column export keeps documents with an empty, null or missing value', async () => {
@@ -625,6 +624,30 @@ describe('exportToFile as CSV', () => {
         '2,only nested,"{""b"":""only nested""}",\n' +
         '3,,,"{""p.q"":""inner""}"\n',
     );
+  });
+
+  it('a one-column export of a named dotted field reads literal and nested values and keeps empty rows', async () => {
+    const docs = [
+      { 'a.b': 'literal', a: { b: 'nested' } },
+      { a: { b: 'only nested' } },
+      { 'a.b': '' },
+      { a: { c: 1 } },
+    ];
+    const file = path.join(dir, 'dotted-one.csv');
+    await exportToFile(fakeServer([docs]).client, csv({ csvFields: ['a.b'] }), file);
+    const text = await readFile(file, 'utf8');
+    expect(text).toBe('a.b\nliteral\nonly nested\n""\n""\n');
+    expect(importCsv(text, [{ column: 'a.b', path: 'a.b', bsonType: 'string' }])).toHaveLength(4);
+  });
+
+  it('a one-column export collected from the documents keeps documents whose only value is empty', async () => {
+    const file = path.join(dir, 'collected-one.csv');
+    await exportToFile(
+      fakeServer([[{ note: '' }, { note: 'x' }, { note: '' }]]).client,
+      csv(),
+      file,
+    );
+    expect(await readFile(file, 'utf8')).toBe('note\n""\nx\n""\n');
   });
 
   it('writes no metadata file for CSV', async () => {

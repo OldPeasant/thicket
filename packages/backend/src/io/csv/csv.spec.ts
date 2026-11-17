@@ -309,4 +309,18 @@ describe('csvCell and csvLine', () => {
     const text = csvLine(['email']) + csvLine(['a@x']) + csvLine(['']) + csvLine(['b@x']);
     expect(cells(scan(text))).toEqual([['email'], ['a@x'], [''], ['b@x']]);
   });
+
+  it('reads back consecutive and trailing one-empty-cell records, also split across chunks', () => {
+    const text = csvLine(['email']) + csvLine(['']) + csvLine(['']) + csvLine(['']);
+    expect(text).toBe('email\n""\n""\n""\n');
+    const expected = [['email'], [''], [''], ['']];
+    expect(cells(scan(text))).toEqual(expected);
+    expect(cells(scanChunks(['email\n"', '"\n""', '\n""']))).toEqual(expected);
+    expect(cells(scan(text.replaceAll('\n', '\r\n')))).toEqual(expected);
+  });
+
+  it('quotes a one-cell record that is only whitespace instead of writing a blank line', () => {
+    expect(csvLine([' '])).toBe('" "\n');
+    expect(cells(scan(csvLine(['h']) + csvLine([' '])))).toEqual([['h'], [' ']]);
+  });
 });

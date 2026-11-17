@@ -140,6 +140,49 @@ describe('collectPaths', () => {
         expect(text).toContain(value);
       }
     });
+
+    it('keeps flattening the documents a dotted key does not collide with', () => {
+      const doc: Document = { 'a.b': 1, c: { d: 2, e: { f: 3 } }, ab: { x: 4 } };
+      const paths = new Set<string>();
+      collectPaths(doc, paths);
+      expect([...paths]).toEqual(['a.b', 'c.d', 'c.e.f', 'ab.x']);
+    });
+
+    it('shadows the document named by the first segment of a deeper dotted key', () => {
+      const doc: Document = { 'a.b.c': 1, a: { b: { c: 2 } } };
+      const paths = new Set<string>();
+      collectPaths(doc, paths);
+      expect([...paths]).toEqual(['a.b.c', 'a']);
+      expect(valueAt(doc, 'a.b.c')).toBe(1);
+      expect(valueAt(doc, 'a')).toEqual({ b: { c: 2 } });
+    });
+
+    it('makes a colliding scalar or empty document one column as before', () => {
+      for (const a of [5, 'text', {}, null]) {
+        const paths = new Set<string>();
+        collectPaths({ 'a.b': 1, a }, paths);
+        expect([...paths], JSON.stringify(a)).toEqual(['a.b', 'a']);
+      }
+    });
+
+    it('does not flatten a nested document holding both a dotted key and a colliding document', () => {
+      const doc: Document = { x: { 'a.b': 1, a: { b: 2 } } };
+      const paths = new Set<string>();
+      collectPaths(doc, paths);
+      expect([...paths]).toEqual(['x']);
+      expect(valueAt(doc, 'x')).toEqual({ 'a.b': 1, a: { b: 2 } });
+    });
+
+    it('flattens the same document in other documents, which then also appear whole in its column', () => {
+      const docs: Document[] = [{ a: { b: 1, c: 2 } }, { 'a.b': 9, a: { b: 3, c: 4 } }];
+      const paths = new Set<string>();
+      for (const d of docs) collectPaths(d, paths);
+      expect([...paths]).toEqual(['a.b', 'a.c', 'a']);
+      expect(docs.map((d) => [...paths].map((p) => valueAt(d, p)))).toEqual([
+        [1, 2, { b: 1, c: 2 }],
+        [9, 4, { b: 3, c: 4 }],
+      ]);
+    });
   });
 });
 
@@ -165,6 +208,22 @@ describe('valueAt', () => {
     expect(valueAt(doc, 'tags.9')).toBeUndefined();
     expect(valueAt(doc, 'tags.first')).toBeUndefined();
     expect(valueAt(doc, 'tags.-1')).toBeUndefined();
+  });
+
+  it('reads a top-level key containing a dot before the nested path of the same name', () => {
+    expect(valueAt({ 'a.b': 'literal', a: { b: 'nested' } }, 'a.b')).toBe('literal');
+    expect(valueAt({ 'a.b': null, a: { b: 'nested' } }, 'a.b')).toBeNull();
+    expect(valueAt({ a: { b: 'nested' } }, 'a.b')).toBe('nested');
+    expect(valueAt({ 'tags.0': 'literal', tags: ['first'] }, 'tags.0')).toBe('literal');
+  });
+
+  it('reads a dotted key only at the top level, not inside a nested document', () => {
+    expect(valueAt({ x: { 'p.q': 1 } }, 'x.p.q')).toBeUndefined();
+  });
+
+  it('does not read inherited properties as dotted keys', () => {
+    const doc: Document = Object.create({ 'a.b': 'inherited' }) as Document;
+    expect(valueAt(doc, 'a.b')).toBeUndefined();
   });
 
   it('is undefined for missing paths and paths through scalars', () => {
@@ -445,12 +504,46 @@ describe('convertCell', () => {
       '+0100000-01-01',
       '+275761-01-01',
       '+275760-09-13T00:00-01:00',
-    ])(
-      'refuses the year form %j',
-      (text) => {
-        expect(() => convertCell(text, 'date')).toThrow(new CellError('is not a date'));
-      },
-    );
+    ])('refuses the year form %j', (text) => {
+      expect(() => convertCell(text, 'date')).toThrow(new CellError('is not a date'));
+    });
+
+    it('reads the first and last representable instants and refuses one millisecond beyond', () => {
+      expect(convertCell('-271821-04-20T00:00:00.000Z', 'date')).toEqual(new Date(-8.64e15));
+      expect(convertCell('+275760-09-13T00:00:00.000Z', 'date')).toEqual(new Date(8.64e15));
+      expect(convertCell('+275760-09-12T23:00-01:00', 'date')).toEqual(new Date(8.64e15));
+      for (const text of [
+        '-271821-04-19T23:59:59.999Z',
+        '+275760-09-13T00:00:00.001Z',
+        '-271821-04-20T00:00:00+00:01',
+        '-271822-01-01',
+        '+999999-12-31',
+      ]) {
+        expect(() => convertCell(text, 'date'), text).toThrow(new CellError('is not a date'));
+      }
+    });
+
+    it('applies leap years and day ranges to extended years', () => {
+      expect(convertCell('+010000-02-29', 'date')).toEqual(new Date(Date.UTC(10000, 1, 29)));
+      expect(convertCell('-000004-02-29', 'date')).toEqual(new Date(Date.UTC(-4, 1, 29)));
+      for (const text of ['+010100-02-29', '-000001-02-29', '+010000-13-01', '+010000-04-31']) {
+        expect(() => convertCell(text, 'date'), text).toThrow(new CellError('is not a date'));
+      }
+    });
+
+    it('reads +000000 as year 0 and applies offsets and time parts to extended years', () => {
+      expect(convertCell('+000000-01-01', 'date')).toEqual(convertCell('0000-01-01', 'date'));
+      expect(convertCell('+010000-01-01T01:30+01:30', 'date')).toEqual(
+        new Date(Date.UTC(10000, 0, 1)),
+      );
+      expect(convertCell('-000001-12-31T23:59:59,5Z', 'date')).toEqual(
+        new Date(Date.UTC(-1, 11, 31, 23, 59, 59, 500)),
+      );
+      expect(convertCell('  +010000-01-01  ', 'date')).toEqual(new Date(Date.UTC(10000, 0, 1)));
+      expect(() => convertCell('+010000-01-01T24:00', 'date')).toThrow(
+        new CellError('is not a date'),
+      );
+    });
 
     it('reads the offset forms Z, +hh:mm, -hh:mm and +hhmm', () => {
       const at = new Date(Date.UTC(2026, 2, 1, 10, 0));
