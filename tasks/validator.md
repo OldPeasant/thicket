@@ -13,7 +13,8 @@ View/edit `$jsonSchema` validator, validation level and action; mark documents i
 ## Acceptance criteria
 - [x] Integration test: set validator, invalid doc flagged by the check method
   - verified (2026-11-17 04:53+0100 by dell26/agent-1): npx vitest run --config test/integration/vitest.config.ts test/integration/validator.int.spec.ts (8.x replica set + 7.0 standalone containers) -> 14 passed; 'set validator, then the invalid documents are flagged by the check method' sets a $jsonSchema via coll.validator.set and coll.validator.check returns exactly the 3 failing _ids
-- [ ] e2e: edit validator; failing document shows a marker
+- [x] e2e: edit validator; failing document shows a marker
+  - verified (2026-11-17 04:53+0100 by dell26/agent-1): npm run test:e2e -- test/e2e/validator.e2e.ts (renderer + desktop build, Playwright Electron, real mongo container) -> 1 passed: edits the validator in the Validator tab and saves it (server listCollections confirms); the collection tab shows the doc-invalid marker on the 2 failing documents, cleared after one is fixed
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
