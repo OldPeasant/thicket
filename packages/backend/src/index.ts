@@ -1,6 +1,7 @@
 /** Name of this workspace. */
 export const WORKSPACE = '@thicket/backend';
 
+export * from './admin/currentop';
 export * from './admin/users';
 export * from './agg';
 export {
