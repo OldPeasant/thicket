@@ -252,3 +252,57 @@ describe('chart geometry', () => {
     expect(linePath([20], 100, 10, 10, 1)).toBe('M0 0');
   });
 });
+
+describe('recorded fixtures', () => {
+  // Canonical EJSON type wrappers: `{ $numberInt: '1' }`, `{ $binary: {...} }`, `{ $code, $scope }`.
+  const WRAPPERS = new Set([
+    '$numberInt',
+    '$numberLong',
+    '$numberDouble',
+    '$numberDecimal',
+    '$date',
+    '$timestamp',
+    '$oid',
+    '$binary',
+    '$regularExpression',
+    '$symbol',
+    '$code',
+    '$scope',
+    '$dbPointer',
+    '$minKey',
+    '$maxKey',
+    '$undefined',
+  ]);
+
+  /** Paths of `$`-named fields that are not part of an EJSON type wrapper. */
+  const dollarFields = (value: unknown, path = ''): string[] => {
+    if (Array.isArray(value)) return value.flatMap((v, i) => dollarFields(v, `${path}[${i}]`));
+    if (value === null || typeof value !== 'object') return [];
+    const keys = Object.keys(value);
+    const isWrapper = keys.length > 0 && keys.every((k) => WRAPPERS.has(k));
+    if (isWrapper) return [];
+    return Object.entries(value).flatMap(([key, inner]) => [
+      ...(key.startsWith('$') ? [`${path}.${key}`] : []),
+      ...dollarFields(inner, `${path}.${key}`),
+    ]);
+  };
+
+  it('have no $-named fields, like the backend answers (withoutDollarFields)', () => {
+    expect(dollarFields(status1)).toEqual([]);
+    expect(dollarFields(status2)).toEqual([]);
+    expect(dollarFields(statusRs)).toEqual([]);
+    expect(dollarFields(replSetStatus)).toEqual([]);
+    expect(replSetStatus).not.toHaveProperty('$clusterTime');
+    expect(replSetStatus).toHaveProperty('operationTime');
+  });
+
+  it('the check finds a $-named field next to normal fields, but not EJSON wrappers', () => {
+    expect(
+      dollarFields({
+        ok: { $numberInt: '1' },
+        $clusterTime: { clusterTime: { $timestamp: { t: 1, i: 1 } } },
+        members: [{ optimeDate: { $date: { $numberLong: '0' } }, x: { $regex: 'a' } }],
+      }),
+    ).toEqual(['.$clusterTime', '.members[0].x.$regex']);
+  });
+});
