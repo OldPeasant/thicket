@@ -11,7 +11,8 @@ lease_until: 2026-11-17T03:29:44Z
 Indexes tab per collection: list with stats, create dialog with all options, drop with confirm, hide/unhide. Use the frontend-design skill for the visual direction; respect the Business and Tron tokens (no hard-coded colors).
 
 ## Acceptance criteria
-- [ ] e2e: create a TTL index and a partial index, see them listed with options
+- [x] e2e: create a TTL index and a partial index, see them listed with options
+  - verified (2026-11-17 04:09+0100 by dell26/agent-1): npm run test:e2e -- test/e2e/indexes.e2e.ts (built renderer + Electron bundles, mongo8 Testcontainers fixture via Podman) -> 1 passed: TTL index createdAt_1 listed with 'TTL 3600 s', partial index open_status listed with 'unique','partial' and its filter; server listIndexes confirms expireAfterSeconds and partialFilterExpression; hide/unhide and drop-with-confirm exercised too
 - [ ] Component tests for the create form validation
 
 ## Notes
