@@ -945,6 +945,39 @@ describe('CollectionView', () => {
     expect(q('bulk-panel')).toBeNull();
   });
 
+  it('a profile turning read-only during a bulk write does not leave the toggles locked', async () => {
+    fake.respond('docs.previewMany', { matched: 3, sample: docs(1, 3) });
+    // The write never answers: the removed panel reports nothing more about it.
+    fake.handle('docs.deleteMany', () => new Promise(() => undefined));
+    const safety = TestBed.inject(ProfileSafetyService);
+    const confirm = TestBed.inject(ConfirmService);
+    click('bulk-open');
+    await settle();
+    click('bulk-mode-delete');
+    await settle();
+    click('bulk-preview');
+    await settle();
+    click('bulk-execute');
+    await settle();
+    confirm.answer(true);
+    await settle();
+    expect(fake.requestsFor('docs.deleteMany')).toHaveLength(1);
+    expect(get<HTMLButtonElement>('io-export').disabled).toBe(true);
+
+    safety.set({ id: 'p1', name: 'Reporting', readOnly: true, production: false });
+    await settle();
+    expect(q('bulk-panel')).toBeNull();
+    expect(get<HTMLButtonElement>('io-export').disabled).toBe(false);
+    // The sent write is not cancelled by removing the panel.
+    expect(fake.cancels).toEqual([]);
+
+    safety.set({ id: 'p1', name: 'Reporting', readOnly: false, production: false });
+    await settle();
+    for (const id of ['bulk-open', 'io-export', 'io-import']) {
+      expect(get<HTMLButtonElement>(id).disabled).toBe(false);
+    }
+  });
+
   /** Opens the import panel, chooses a file and imports it into `coll`; the stream ends at once. */
   const importInto = async (coll: string) => {
     fake.respond('io.previewImport', {

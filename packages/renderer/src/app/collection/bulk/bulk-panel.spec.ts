@@ -415,6 +415,117 @@ describe('BulkPanel', () => {
     expect(outcomes).toEqual([]);
   });
 
+  it('a sent updateMany can not be cancelled; writing ends with its answer', async () => {
+    let answer: (n: number) => void = () => undefined;
+    fake.handle(
+      'docs.updateMany',
+      () =>
+        new Promise((resolve) => {
+          answer = (n) => resolve({ matched: n, modified: n - 1 });
+        }),
+    );
+    const writing: boolean[] = [];
+    fixture.componentInstance.writing.subscribe((w) => writing.push(w));
+    matching = 12;
+    await typeUpdate('{ $set: { status: "archived" } }');
+    get('bulk-preview').click();
+    await settle();
+    get('bulk-execute').click();
+    await settle();
+    get('confirm-ok', dlg()).click();
+    await settle();
+    expect(fake.requestsFor('docs.updateMany')).toHaveLength(1);
+    expect(fake.requestsFor('docs.updateMany')[0]?.params).toMatchObject({
+      ...TARGET,
+      filter: QUERY.filter,
+      update: '{"$set":{"status":"archived"}}',
+      expectedCount: 12,
+      confirmed: true,
+    });
+    expect(writing).toEqual([true]);
+    expect(get<HTMLButtonElement>('bulk-close').disabled).toBe(true);
+    // The mode buttons, the update and Preview stay disabled while the write runs.
+    expect(get<HTMLButtonElement>('bulk-mode-delete').disabled).toBe(true);
+    expect(get<HTMLTextAreaElement>('bulk-update').disabled).toBe(true);
+    expect(get<HTMLButtonElement>('bulk-preview').disabled).toBe(true);
+    expect(q('bulk-cancel')).toBeNull();
+    // Even a forced cancel does not reach the sent write.
+    (fixture.componentInstance as unknown as { cancel(): void }).cancel();
+    await settle();
+    expect(fake.cancels).toEqual([]);
+
+    answer(12);
+    await settle();
+    expect(writing).toEqual([true, false]);
+    expect(outcomes).toEqual([{ mode: 'update', matched: 12, modified: 11 }]);
+    expect(text(get('bulk-outcome'))).toBe('Updated 11 documents (12 matched).');
+    expect(get<HTMLButtonElement>('bulk-close').disabled).toBe(false);
+  });
+
+  it('a CONFLICT answer to a sent write ends the running state: the panel can be closed again', async () => {
+    const writing: boolean[] = [];
+    let closed = 0;
+    fixture.componentInstance.writing.subscribe((w) => writing.push(w));
+    fixture.componentInstance.closed.subscribe(() => closed++);
+    fake.fail('docs.deleteMany', { code: 'CONFLICT', message: 'more documents match' });
+    await openDeleteConfirm();
+    get('confirm-ok', dlg()).click();
+    await settle();
+    expect(writing).toEqual([true, false]);
+    expect(get('bulk-error').textContent).toContain('preview again');
+    expect(get<HTMLButtonElement>('bulk-close').disabled).toBe(false);
+    get('bulk-close').click();
+    await settle();
+    expect(closed).toBe(1);
+  });
+
+  it('a write that is never sent (dialog cancelled, read-only) emits no writing state', async () => {
+    const writing: boolean[] = [];
+    fixture.componentInstance.writing.subscribe((w) => writing.push(w));
+    await openDeleteConfirm();
+    get('confirm-cancel', dlg()).click();
+    await settle();
+    expect(writing).toEqual([]);
+    expect(get<HTMLButtonElement>('bulk-close').disabled).toBe(false);
+
+    TestBed.inject(ProfileSafetyService).set({
+      id: 'p1',
+      name: 'local',
+      readOnly: true,
+      production: false,
+    });
+    get('bulk-execute').click();
+    await settle();
+    expect(fake.requestsFor('docs.deleteMany')).toHaveLength(0);
+    expect(writing).toEqual([]);
+    expect(get<HTMLButtonElement>('bulk-close').disabled).toBe(false);
+  });
+
+  it('a destroyed panel emits nothing when its sent write fails later', async () => {
+    let fail: () => void = () => undefined;
+    fake.handle(
+      'docs.deleteMany',
+      () =>
+        new Promise((resolve) => {
+          fail = () =>
+            resolve({ error: { code: 'SERVER_ERROR', message: 'write failed (fictitious)' } });
+        }),
+    );
+    const writing: boolean[] = [];
+    fixture.componentInstance.writing.subscribe((w) => writing.push(w));
+    await openDeleteConfirm();
+    get('confirm-ok', dlg()).click();
+    await settle();
+    expect(writing).toEqual([true]);
+    fixture.destroy();
+    await dialog.whenStable();
+    fail();
+    for (let i = 0; i < 3; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fake.cancels).toEqual([]);
+    expect(writing).toEqual([true]);
+    expect(outcomes).toEqual([]);
+  });
+
   it('the stale status says "document" for a preview of one', async () => {
     matching = 1;
     get('bulk-mode-delete').click();
