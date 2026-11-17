@@ -16,3 +16,4 @@ After building, each OS job starts the packaged app with Playwright: welcome scr
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-17 06:02+0100 by dell26/agent-2): Windows smoke test installs the NSIS .exe silently (/S /D=<temp>) rather than unzipping the portable zip; macOS tests only the arm64 dmg (macos-latest is Apple Silicon), not the x64 one under Rosetta; Linux tests only the AppImage, not deb/rpm.
