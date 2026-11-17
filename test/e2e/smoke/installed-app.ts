@@ -22,6 +22,18 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+/**
+ * Why the MongoDB smoke test is skipped on this host, or `undefined` when it runs: it runs on Linux
+ * or when `THICKET_SMOKE_MONGO=1` asks for it (a missing container runtime then fails the test).
+ */
+export function mongoSmokeSkipReason(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  if (platform === 'linux' || env['THICKET_SMOKE_MONGO'] === '1') return undefined;
+  return 'MongoDB containers are Linux-only in the smoke test (Windows runners have Windows containers only, macOS runners no Docker)';
+}
+
 /** Installer suffix `npm run dist` produces for this OS that `installApp` can start. */
 export function installerSuffix(platform: NodeJS.Platform = process.platform): string {
   if (platform === 'darwin') return '.dmg';
@@ -59,7 +71,8 @@ export async function findInstaller(releaseDir: string): Promise<string> {
  * - `.AppImage`: made executable and started as is (the AppImage runtime mounts or extracts it;
  *   set `APPIMAGE_EXTRACT_AND_RUN=1` where FUSE is missing).
  * - `.dmg` (macOS): mounted read-only with `hdiutil`, `Thicket.app` started from the image.
- * - `.exe` (Windows NSIS): silent per-user install (`/S /D=<temp dir>`), uninstalled afterwards.
+ * - `.exe` (Windows NSIS): silent per-user install (`/S /D=<temp dir>`), uninstalled afterwards;
+ *   on Windows only in CI or with `THICKET_SMOKE_ALLOW_INSTALL=1` (it replaces a real install).
  */
 export async function installApp(installer: string): Promise<InstalledApp> {
   const lower = installer.toLowerCase();
@@ -95,20 +108,45 @@ export async function installApp(installer: string): Promise<InstalledApp> {
   }
 
   if (lower.endsWith('.exe')) {
+    // The installer shares its uninstall entry (appId) with a real per-user Thicket and silently
+    // uninstalls that first: only on throwaway CI runners, or when explicitly allowed.
+    if (
+      process.platform === 'win32' &&
+      !process.env['CI'] &&
+      process.env['THICKET_SMOKE_ALLOW_INSTALL'] !== '1'
+    )
+      throw new Error(
+        'refusing to run the NSIS installer outside CI: it would replace (and the cleanup then ' +
+          'uninstall) an existing per-user Thicket installation. Set THICKET_SMOKE_ALLOW_INSTALL=1 ' +
+          'to run it anyway.',
+      );
     const dir = await mkdtemp(join(tmpdir(), 'thicket-smoke-install-'));
-    // NSIS: `/D=` must be the last argument and is taken verbatim (no quotes).
-    await run(installer, ['/S', `/D=${dir}`], { windowsVerbatimArguments: true });
+    const removeDir = () => rm(dir, { recursive: true, force: true }).catch(() => undefined);
     const executable = join(dir, 'Thicket.exe');
-    if (!(await exists(executable))) {
-      const found = await readdir(dir).catch(() => []);
-      throw new Error(`the installer put no Thicket.exe into ${dir} (found: ${found.join(', ')})`);
+    try {
+      // NSIS: `/D=` must be the last argument and is taken verbatim (no quotes).
+      await run(installer, ['/S', `/D=${dir}`], { windowsVerbatimArguments: true });
+      if (!(await exists(executable))) {
+        const found = await readdir(dir).catch(() => []);
+        throw new Error(
+          `the installer put no Thicket.exe into ${dir} (found: ${found.join(', ')})`,
+        );
+      }
+    } catch (error) {
+      await removeDir();
+      throw error;
     }
     return {
       executable,
       cleanup: async () => {
         const uninstaller = join(dir, 'Uninstall Thicket.exe');
-        if (await exists(uninstaller)) await run(uninstaller, ['/S']).catch(() => undefined);
-        await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+        // `_?=<dir>` (last, verbatim): the NSIS uninstaller runs in place and we wait for it,
+        // instead of it relaunching from %TEMP% and racing the `rm` below.
+        if (await exists(uninstaller))
+          await run(uninstaller, ['/S', `_?=${dir}`], { windowsVerbatimArguments: true }).catch(
+            () => undefined,
+          );
+        await removeDir();
       },
     };
   }

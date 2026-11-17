@@ -822,11 +822,18 @@ Windows: run `.taskcheck` and npm scripts from Git for Windows' bash (TFP runs t
   `test:e2e`) starts the packaged app from the installer in `THICKET_SMOKE_INSTALLER` (default: the
   newest `.AppImage`/`.dmg`/`.exe` for this OS in `apps/desktop/release/`, so run `npm run dist`
   first). `installed-app.ts` makes it runnable as a user would: AppImage as is, dmg mounted with
-  `hdiutil`, NSIS installed silently into a temp folder (and uninstalled). It checks the welcome
-  screen and connects to the `mongo8` fixture through the connection editor (skipped without
-  Docker/Podman; `THICKET_SMOKE_MONGO=1` makes that a failure). `release.yml` runs it after every
-  build: Linux under `xvfb-run` with `APPIMAGE_EXTRACT_AND_RUN=1` and MongoDB, macOS on the arm64
-  dmg, Windows on the NSIS installer.
+  `hdiutil`, NSIS installed silently into a temp folder (and uninstalled synchronously with
+  `_?=<dir>`). The NSIS installer shares its uninstall entry with a real per-user Thicket and
+  replaces it, so on Windows outside CI (`CI` unset) it refuses to run unless
+  `THICKET_SMOKE_ALLOW_INSTALL=1`. It checks the welcome screen and, on Linux only (MongoDB
+  containers are Linux-only here: Windows runners have Windows containers only, macOS runners no
+  Docker; `THICKET_SMOKE_MONGO=1` forces it elsewhere), connects to the `mongo8` fixture through the
+  connection editor (skipped without Docker/Podman; `THICKET_SMOKE_MONGO=1` makes that a failure).
+  `release.yml` runs it after every build: Linux under `xvfb-run` with `APPIMAGE_EXTRACT_AND_RUN=1`
+  and MongoDB, macOS on the arm64 dmg, Windows on the NSIS installer. `_electron.launch` drives the
+  packaged app through `--inspect`, so packaged builds must leave the Electron fuse
+  `EnableNodeCliInspectArguments` on: turning it off breaks this smoke test, and only on `v*` tag
+  releases, since `test:smoke` is not part of `.taskcheck`.
 
 ## Coverage
 - Tool: Vitest with `@vitest/coverage-v8`, reporters `text-summary`, `json-summary`, `lcov`.

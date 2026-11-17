@@ -3,7 +3,7 @@ import { access, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'n
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 
-import { findInstaller, installApp, installerSuffix } from './installed-app';
+import { findInstaller, installApp, installerSuffix, mongoSmokeSkipReason } from './installed-app';
 
 // Checks of the smoke test's own helpers (no Vitest project covers test/e2e, so they run here, in
 // `npm run test:smoke`, like test/e2e/harness-helpers.e2e.ts does for the e2e harness). They need no
@@ -25,6 +25,19 @@ async function withProcess<T>(
   } finally {
     for (const [key, descriptor] of Object.entries(saved))
       if (descriptor) Object.defineProperty(process, key, descriptor);
+  }
+}
+
+/** Sets (string) or deletes (undefined) environment variables until the test ends. */
+function setEnv(values: Record<string, string | undefined>): void {
+  for (const [key, value] of Object.entries(values)) {
+    const saved = process.env[key];
+    cleanups.push(async () => {
+      if (saved === undefined) Reflect.deleteProperty(process.env, key);
+      else process.env[key] = saved;
+    });
+    if (value === undefined) Reflect.deleteProperty(process.env, key);
+    else process.env[key] = value;
   }
 }
 
@@ -76,6 +89,41 @@ test.describe('installerSuffix', () => {
   test('defaults to the current platform', async () => {
     expect(installerSuffix()).toBe(installerSuffix(process.platform));
     await withProcess({ platform: 'win32' }, async () => expect(installerSuffix()).toBe('.exe'));
+  });
+});
+
+test.describe('mongoSmokeSkipReason', () => {
+  const reason =
+    'MongoDB containers are Linux-only in the smoke test (Windows runners have Windows containers only, macOS runners no Docker)';
+
+  test('runs the MongoDB test on Linux', () => {
+    expect(mongoSmokeSkipReason('linux', {})).toBeUndefined();
+    expect(mongoSmokeSkipReason('linux', { THICKET_SMOKE_MONGO: '1' })).toBeUndefined();
+  });
+
+  test('skips it on Windows and macOS with the reason', () => {
+    expect(mongoSmokeSkipReason('win32', {})).toBe(reason);
+    expect(mongoSmokeSkipReason('darwin', {})).toBe(reason);
+    expect(mongoSmokeSkipReason('win32', { THICKET_SMOKE_MONGO: '0' })).toBe(reason);
+  });
+
+  test('THICKET_SMOKE_MONGO=1 runs it on any OS', () => {
+    expect(mongoSmokeSkipReason('win32', { THICKET_SMOKE_MONGO: '1' })).toBeUndefined();
+    expect(mongoSmokeSkipReason('darwin', { THICKET_SMOKE_MONGO: '1' })).toBeUndefined();
+  });
+
+  test('defaults to the current platform and environment', async () => {
+    setEnv({ THICKET_SMOKE_MONGO: undefined });
+    await withProcess({ platform: 'win32' }, async () =>
+      expect(mongoSmokeSkipReason()).toBe(reason),
+    );
+    await withProcess({ platform: 'linux' }, async () =>
+      expect(mongoSmokeSkipReason()).toBeUndefined(),
+    );
+    setEnv({ THICKET_SMOKE_MONGO: '1' });
+    await withProcess({ platform: 'darwin' }, async () =>
+      expect(mongoSmokeSkipReason()).toBeUndefined(),
+    );
   });
 });
 
@@ -231,7 +279,10 @@ test.describe('installApp', () => {
       expect(await readFile(log, 'utf8')).toBe(`install /S /D=${installDir}\n`);
 
       await installed.cleanup();
-      expect(await readFile(log, 'utf8')).toBe(`install /S /D=${installDir}\nuninstall /S\n`);
+      // `_?=<dir>`: the NSIS uninstaller runs in place and is waited for.
+      expect(await readFile(log, 'utf8')).toBe(
+        `install /S /D=${installDir}\nuninstall /S _?=${installDir}\n`,
+      );
       expect(await exists(installDir)).toBe(false);
     });
 
@@ -255,18 +306,89 @@ test.describe('installApp', () => {
       expect(error?.message).toMatch(
         /^the installer put no Thicket\.exe into .+ \(found: Other\.exe\)$/,
       );
-      const installDir = /into (.+) \(found/.exec(error?.message ?? '')?.[1];
-      if (installDir) cleanups.push(() => rm(installDir, { recursive: true, force: true }));
+      const installDir = /into (.+) \(found/.exec(error?.message ?? '')?.[1] ?? '';
+      cleanups.push(() => rm(installDir, { recursive: true, force: true }));
+      expect(installDir.startsWith(join(tmpdir(), 'thicket-smoke-install-'))).toBe(true);
+      // The failed install leaves no temp folder behind.
+      expect(await exists(installDir)).toBe(false);
     });
 
-    test('fails when the installer exits with an error', async () => {
+    test('fails when the installer exits with an error and removes the temp folder', async () => {
       const dir = await tempDir('nsis-fail');
       // The failing installer leaves its install folder name only in its log.
       const log = join(dir, 'calls.log');
-      const installer = await script(join(dir, 'setup.exe'), `echo "\${2#/D=}" > '${log}'\nexit 2`);
+      const installer = await script(
+        join(dir, 'setup.exe'),
+        `echo "\${2#/D=}" > '${log}'\nprintf partial > "\${2#/D=}/partial"\nexit 2`,
+      );
       await expect(installApp(installer)).rejects.toThrow(/Command failed/);
       const installDir = (await readFile(log, 'utf8')).trim();
       cleanups.push(() => rm(installDir, { recursive: true, force: true }));
+      expect(installDir.startsWith(join(tmpdir(), 'thicket-smoke-install-'))).toBe(true);
+      expect(await exists(installDir)).toBe(false);
+    });
+
+    test.describe('on Windows', () => {
+      const refusal =
+        /^refusing to run the NSIS installer outside CI: it would replace .* existing per-user Thicket installation\. Set THICKET_SMOKE_ALLOW_INSTALL=1 to run it anyway\.$/;
+
+      /** A fictitious installer that logs its calls and installs Thicket.exe into the /D= folder. */
+      async function loggingInstaller(): Promise<{ installer: string; log: string }> {
+        const dir = await tempDir('nsis-win');
+        const log = join(dir, 'calls.log');
+        const installer = await script(
+          join(dir, 'setup.exe'),
+          `echo "install $*" >> '${log}'\nprintf app > "\${2#/D=}/Thicket.exe"`,
+        );
+        return { installer, log };
+      }
+
+      test('refuses to install outside CI without THICKET_SMOKE_ALLOW_INSTALL=1', async () => {
+        const { installer, log } = await loggingInstaller();
+        for (const allow of [undefined, '0', '']) {
+          setEnv({ CI: undefined, THICKET_SMOKE_ALLOW_INSTALL: allow });
+          await withProcess({ platform: 'win32' }, async () =>
+            expect(installApp(installer)).rejects.toThrow(refusal),
+          );
+        }
+        setEnv({ CI: '' });
+        await withProcess({ platform: 'win32' }, async () =>
+          expect(installApp(installer)).rejects.toThrow(refusal),
+        );
+        // The installer was never started.
+        expect(await exists(log)).toBe(false);
+      });
+
+      test('installs in CI', async () => {
+        const { installer, log } = await loggingInstaller();
+        setEnv({ CI: 'true', THICKET_SMOKE_ALLOW_INSTALL: undefined });
+        const installed = await withProcess({ platform: 'win32' }, () => installApp(installer));
+        const installDir = installed.executable.slice(0, -'/Thicket.exe'.length);
+        cleanups.push(() => rm(installDir, { recursive: true, force: true }));
+        expect(await readFile(log, 'utf8')).toBe(`install /S /D=${installDir}\n`);
+        await installed.cleanup();
+        expect(await exists(installDir)).toBe(false);
+      });
+
+      test('installs outside CI with THICKET_SMOKE_ALLOW_INSTALL=1', async () => {
+        const { installer, log } = await loggingInstaller();
+        setEnv({ CI: undefined, THICKET_SMOKE_ALLOW_INSTALL: '1' });
+        const installed = await withProcess({ platform: 'win32' }, () => installApp(installer));
+        const installDir = installed.executable.slice(0, -'/Thicket.exe'.length);
+        cleanups.push(() => rm(installDir, { recursive: true, force: true }));
+        expect(await readFile(log, 'utf8')).toBe(`install /S /D=${installDir}\n`);
+        await installed.cleanup();
+        expect(await exists(installDir)).toBe(false);
+      });
+
+      test('the guard applies to Windows only', async () => {
+        const { installer } = await loggingInstaller();
+        setEnv({ CI: undefined, THICKET_SMOKE_ALLOW_INSTALL: undefined });
+        const installed = await withProcess({ platform: 'linux' }, () => installApp(installer));
+        const installDir = installed.executable.slice(0, -'/Thicket.exe'.length);
+        cleanups.push(() => rm(installDir, { recursive: true, force: true }));
+        await installed.cleanup();
+      });
     });
   });
 
