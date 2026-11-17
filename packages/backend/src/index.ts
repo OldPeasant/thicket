@@ -18,6 +18,7 @@ export * from './docs/write';
 export * from './guard';
 export * from './indexes';
 export * from './io';
+export * from './schema';
 export * from './server/backend';
 export * from './server/handlers';
 export * from './server/ports';

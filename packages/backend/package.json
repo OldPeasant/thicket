@@ -22,6 +22,7 @@
     "@thicket/contract": "0.0.0",
     "@thicket/core": "0.0.0",
     "mongodb": "^7.9.0",
+    "mongodb-schema": "^12.7.0",
     "socks": "^2.8.10",
     "ssh2": "^1.17.0"
   },

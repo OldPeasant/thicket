@@ -7,17 +7,21 @@ import { defineMethods } from './define';
 export const schemaType = z.object({
   /** BSON type name as in `$type` (`objectId`, `string`, `int`, `array`, ...). */
   bsonType: z.string(),
-  /** Share of sampled documents having this type at this path (0..1). */
+  /** Share of the path's base (see `schemaField.probability`) having this type (0..1). */
   probability: z.number().min(0).max(1),
   count,
   /** A few example values. */
   examples: ejsonArray('example values'),
 });
 
-/** One field path (dotted; array items as `a.[]`). */
+/**
+ * One field path (dotted; array items as `a.[]`, documents in arrays below it: `a.[].b`).
+ * Shares are relative to the parent: the sampled documents for a top-level field, the sampled
+ * `a` values that are documents for `a.b`, all sampled items for `a.[]` (always 1).
+ */
 export const schemaField = z.object({
   path: z.string(),
-  /** Share of sampled documents having this field (0..1); missing ratio is `1 - probability`. */
+  /** Share of the parent having this field (0..1); missing ratio is `1 - probability`. */
   probability: z.number().min(0).max(1),
   count,
   types: z.array(schemaType),
