@@ -5,7 +5,7 @@ owner: felix/agent-1
 deps: [docs-query-backend,collection-view]
 touches: [packages/backend/src/admin/watch,packages/renderer/src/app/watch]
 prio: 4
-lease_until: 2026-11-17T07:47:13Z
+lease_until: 2026-11-17T07:52:14Z
 extended: felix/agent-1
 ---
 ## Goal
