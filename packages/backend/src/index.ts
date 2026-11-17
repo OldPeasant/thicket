@@ -7,6 +7,7 @@ export * from './connections';
 export * from './docs/query';
 export * from './docs/write';
 export * from './guard';
+export * from './indexes';
 export * from './io';
 export * from './server/backend';
 export * from './server/handlers';

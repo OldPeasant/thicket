@@ -134,8 +134,11 @@ async function run(client: ClientLike, db: string, command: Document): Promise<D
   }
 }
 
+/** Runs a command with `RAW` options; driver errors become `toBrowseError`s. */
+export const runCommand = run;
+
 /** Runs a cursor command (`listCollections`, `aggregate`) and collects every batch. */
-async function runCursor(
+export async function runCursor(
   client: ClientLike,
   db: string,
   command: Document,

@@ -8,6 +8,7 @@ import { ConnectionManager, connHandlers } from '../connections';
 import { docsQueryHandlers } from '../docs/query';
 import { docsWriteHandlers } from '../docs/write';
 import { guardWrites } from '../guard';
+import { indexHandlers } from '../indexes';
 import { dialogsOverLink, ioHandlers } from '../io';
 import { HostKeyPrompts, KnownHosts, sshHandlers } from '../ssh';
 import { wiringHandlers, type PrivilegedLink } from './handlers';
@@ -89,6 +90,7 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
       ...docsQueryHandlers(connections),
       ...docsWriteHandlers(connections),
       ...aggHandlers(connections),
+      ...indexHandlers(connections),
       // File dialogs can stay open as long as the user likes: no timeout.
       ...ioHandlers(
         connections,
