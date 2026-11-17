@@ -1514,6 +1514,235 @@ describe('ConnectionEditor', () => {
     });
   });
 
+  describe('M5: LDAP, OIDC and AWS IAM', () => {
+    const setName = async () => input(must('field-name'), 'M5');
+    const secretsSet = () =>
+      fake
+        .requestsFor('profiles.setSecret')
+        .map((r) => r.params as { kind: string; value: string });
+
+    it('LDAP: user name and password, no authentication database, PLAIN in the string', async () => {
+      await start();
+      await change(must<HTMLSelectElement>('field-mechanism'), 'PLAIN');
+      expect(el.querySelector('[data-testid="field-auth-source"]')).toBeNull();
+      expect(text('ldap-hint')).toContain('LDAP');
+      expect(el.querySelector('[data-testid="ldap-tls-warning"]')).not.toBeNull();
+      expect(must('field-password').closest('label')?.textContent).toContain('LDAP password');
+
+      await input(must('field-username'), 'alice');
+      await input(must('field-password'), 'pw');
+      expect(text('uri-preview')).toBe('mongodb://alice:****@localhost:27017/?authMechanism=PLAIN');
+      await check('field-tls');
+      expect(el.querySelector('[data-testid="ldap-tls-warning"]')).toBeNull();
+
+      await setName();
+      await click('save');
+      const draft = savedDraft();
+      expect(draft.auth).toEqual({ mechanism: 'PLAIN', username: 'alice', secretMode: 'saved' });
+      expect(draft.connectionString).not.toContain('pw');
+      expect(secretsSet()).toContainEqual(
+        expect.objectContaining({ kind: 'password', value: 'pw' }),
+      );
+    });
+
+    it('LDAP needs a user name', async () => {
+      await start();
+      await setName();
+      await change(must<HTMLSelectElement>('field-mechanism'), 'PLAIN');
+      await click('save');
+      expect(text('problems')).toContain('Enter the user name');
+      expect(fake.requestsFor('profiles.save')).toHaveLength(0);
+    });
+
+    it('LDAP from the connection string: user, password and an authSource that is dropped', async () => {
+      await start();
+      await click('tab-uri');
+      await input(
+        must<HTMLTextAreaElement>('field-uri'),
+        'mongodb://bob:secret@ldap.example:27017/?authMechanism=PLAIN&authSource=%24external',
+      );
+      await click('tab-form');
+      expect(must<HTMLSelectElement>('field-mechanism').value).toBe('PLAIN');
+      expect(must<HTMLInputElement>('field-username').value).toBe('bob');
+      expect(must<HTMLInputElement>('field-password').value).toBe('secret');
+      expect(text('uri-preview')).toBe(
+        'mongodb://bob:****@ldap.example:27017/?authMechanism=PLAIN',
+      );
+    });
+
+    it('OIDC: optional user name, sign-in flow and trusted endpoint', async () => {
+      await start();
+      await change(must<HTMLSelectElement>('field-mechanism'), 'MONGODB-OIDC');
+      expect(el.querySelector('[data-testid="field-password"]')).toBeNull();
+      expect(el.querySelector('[data-testid="field-auth-source"]')).toBeNull();
+      expect(must<HTMLInputElement>('oidc-flow-auto').checked).toBe(true);
+      expect(must<HTMLInputElement>('oidc-trusted-endpoint').checked).toBe(false);
+      expect(text('uri-preview')).toBe('mongodb://localhost:27017/?authMechanism=MONGODB-OIDC');
+
+      await setName();
+      await click('save');
+      expect(savedDraft().auth).toEqual({ mechanism: 'MONGODB-OIDC', secretMode: 'none' });
+
+      await input(must('field-username'), 'carol@example.com');
+      await check('oidc-flow-deviceCode');
+      await check('oidc-trusted-endpoint');
+      expect(text('uri-preview')).toBe(
+        'mongodb://carol%40example.com@localhost:27017/?authMechanism=MONGODB-OIDC',
+      );
+      await click('save');
+      expect(savedDraft().auth).toEqual({
+        mechanism: 'MONGODB-OIDC',
+        username: 'carol@example.com',
+        secretMode: 'none',
+        oidcFlow: 'deviceCode',
+        oidcTrustedEndpoint: true,
+      });
+      expect(secretsSet()).toHaveLength(0);
+    });
+
+    it('OIDC settings of a saved profile are shown and kept', async () => {
+      stored = saved({
+        connectionString: 'mongodb://idp-user@db1.example:27017/?authMechanism=MONGODB-OIDC',
+        auth: {
+          mechanism: 'MONGODB-OIDC',
+          username: 'idp-user',
+          secretMode: 'none',
+          oidcFlow: 'authCode',
+          oidcTrustedEndpoint: true,
+        },
+      });
+      await start('p1');
+      expect(must<HTMLSelectElement>('field-mechanism').value).toBe('MONGODB-OIDC');
+      expect(must<HTMLInputElement>('oidc-flow-authCode').checked).toBe(true);
+      expect(must<HTMLInputElement>('oidc-trusted-endpoint').checked).toBe(true);
+      // Editing the string keeps the OIDC settings (they are not part of it).
+      await click('tab-uri');
+      await input(
+        must<HTMLTextAreaElement>('field-uri'),
+        'mongodb://idp-user@db2.example:27017/?authMechanism=MONGODB-OIDC',
+      );
+      await click('tab-form');
+      expect(must<HTMLInputElement>('oidc-flow-authCode').checked).toBe(true);
+      await click('save');
+      expect(savedDraft().auth).toMatchObject({ oidcFlow: 'authCode', oidcTrustedEndpoint: true });
+      expect(savedDraft().connectionString).toContain('db2.example');
+    });
+
+    it('AWS: no key ID = default credential chain, no secret, no user in the string', async () => {
+      await start();
+      await change(must<HTMLSelectElement>('field-mechanism'), 'MONGODB-AWS');
+      expect(must('field-username').closest('label')?.textContent).toContain('Access key ID');
+      expect(el.querySelector('[data-testid="field-password"]')).toBeNull();
+      expect(el.querySelector('[data-testid="field-auth-source"]')).toBeNull();
+      expect(text('aws-hint')).toContain('default AWS credential chain');
+      expect(text('uri-preview')).toBe('mongodb://localhost:27017/?authMechanism=MONGODB-AWS');
+      await setName();
+      await click('save');
+      expect(savedDraft().auth).toEqual({ mechanism: 'MONGODB-AWS', secretMode: 'none' });
+    });
+
+    it('AWS: access key ID, secret access key and session token stay out of the string', async () => {
+      await start();
+      await change(must<HTMLSelectElement>('field-mechanism'), 'MONGODB-AWS');
+      await input(must('field-username'), 'AKIAEXAMPLE');
+      expect(must('field-password').closest('label')?.textContent).toContain('Secret access key');
+      await input(must('field-password'), 'wJalrSECRET');
+      await input(must('field-secret-awsSessionToken'), 'TOKEN123');
+      expect(text('uri-preview')).toBe('mongodb://localhost:27017/?authMechanism=MONGODB-AWS');
+
+      await setName();
+      await click('save');
+      const draft = savedDraft();
+      expect(draft.auth).toEqual({
+        mechanism: 'MONGODB-AWS',
+        username: 'AKIAEXAMPLE',
+        secretMode: 'saved',
+      });
+      expect(draft.connectionString).not.toMatch(/AKIA|SECRET|TOKEN/);
+      expect(secretsSet()).toEqual([
+        expect.objectContaining({ kind: 'password', value: 'wJalrSECRET' }),
+        expect.objectContaining({ kind: 'awsSessionToken', value: 'TOKEN123' }),
+      ]);
+    });
+
+    it('AWS: editing the string keeps the access key; a pasted one with keys replaces it', async () => {
+      await start();
+      await change(must<HTMLSelectElement>('field-mechanism'), 'MONGODB-AWS');
+      await input(must('field-username'), 'AKIAONE');
+      await input(must('field-password'), 'secret-one');
+      await click('tab-uri');
+      await input(
+        must<HTMLTextAreaElement>('field-uri'),
+        'mongodb://aws.example:27017/?authMechanism=MONGODB-AWS',
+      );
+      await click('tab-form');
+      expect(must<HTMLInputElement>('field-username').value).toBe('AKIAONE');
+      expect(must<HTMLInputElement>('field-password').value).toBe('secret-one');
+
+      await click('tab-uri');
+      await input(
+        must<HTMLTextAreaElement>('field-uri'),
+        'mongodb://AKIATWO:secret-two@aws.example:27017/?authMechanism=MONGODB-AWS' +
+          '&authMechanismProperties=AWS_SESSION_TOKEN:tok',
+      );
+      expect(text('dropped-secrets')).toContain('AWS_SESSION_TOKEN');
+      await click('tab-form');
+      expect(must<HTMLInputElement>('field-username').value).toBe('AKIATWO');
+      expect(must<HTMLInputElement>('field-password').value).toBe('secret-two');
+      expect(text('uri-preview')).toBe('mongodb://aws.example:27017/?authMechanism=MONGODB-AWS');
+    });
+
+    it('AWS profile on the default chain gets a secret mode once a key ID is entered', async () => {
+      stored = saved({
+        connectionString: 'mongodb://aws.example:27017/?authMechanism=MONGODB-AWS',
+        auth: { mechanism: 'MONGODB-AWS', secretMode: 'none' },
+      });
+      await start('p1');
+      expect(el.querySelector('[data-testid="field-password"]')).toBeNull();
+      await input(must('field-username'), 'AKIANEW');
+      expect(must<HTMLInputElement>('secret-saved').checked).toBe(true);
+      await click('save');
+      expect(savedDraft().auth).toEqual({
+        mechanism: 'MONGODB-AWS',
+        username: 'AKIANEW',
+        secretMode: 'saved',
+      });
+    });
+
+    it('switching to or from AWS clears the user name and password', async () => {
+      await start();
+      await change(must<HTMLSelectElement>('field-mechanism'), 'SCRAM-SHA-256');
+      await input(must('field-username'), 'admin');
+      await input(must('field-password'), 'pw');
+      await change(must<HTMLSelectElement>('field-mechanism'), 'MONGODB-AWS');
+      expect(must<HTMLInputElement>('field-username').value).toBe('');
+      await input(must('field-username'), 'AKIA1');
+      await input(must('field-password'), 'sk');
+      await change(must<HTMLSelectElement>('field-mechanism'), 'PLAIN');
+      expect(must<HTMLInputElement>('field-username').value).toBe('');
+      expect(must<HTMLInputElement>('field-password').value).toBe('');
+    });
+
+    it('Test connection of an AWS draft sends the typed secret access key', async () => {
+      fake.respond('conn.test', {
+        latencyMS: 1,
+        server: { version: '8.0.4', topology: 'standalone', enterprise: true, raw: '{}' },
+      });
+      await start();
+      await setName();
+      await change(must<HTMLSelectElement>('field-mechanism'), 'MONGODB-AWS');
+      await input(must('field-username'), 'AKIA1');
+      await input(must('field-password'), 'sk');
+      await click('test-connection');
+      const params = fake.requestsFor('conn.test')[0]?.params as {
+        profile: ProfileDraft;
+        password?: string;
+      };
+      expect(params.password).toBe('sk');
+      expect(params.profile.auth).toMatchObject({ mechanism: 'MONGODB-AWS', username: 'AKIA1' });
+    });
+  });
+
   it('problems block saving and testing', async () => {
     await start();
     await change(nth('field-host', 0), '');
