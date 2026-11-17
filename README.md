@@ -103,10 +103,13 @@ Download the installer for your system from the
 | Windows x64 | `thicket-<version>-win-x64.exe` (installer) or `thicket-<version>-win-x64.zip` (portable) |
 
 > [!IMPORTANT]
-> The builds are **not code-signed yet**. On macOS, Gatekeeper says the app "cannot be opened
-> because Apple cannot check it for malicious software". On Windows, SmartScreen says "Windows
-> protected your PC". To open the app anyway, follow the steps for your system in the
-> [install guide](docs/user/install.md).
+> The macOS builds are **not code-signed yet**: Gatekeeper says the app "cannot be opened
+> because Apple cannot check it for malicious software". The Windows installer and `Thicket.exe`
+> are signed from the first signed release on (publisher "SignPath Foundation", see
+> [code signing](docs/CODE_SIGNING.md)); older Windows releases are unsigned, and SmartScreen
+> says "Windows protected your PC" for them. A newly signed release can still get that warning
+> until it has built up download reputation. To open the app anyway, follow the steps for your
+> system in the [install guide](docs/user/install.md).
 
 Quick start on Linux with the AppImage:
 
@@ -153,6 +156,12 @@ Contributions are welcome. Open an issue first for larger changes.
 Thicket is licensed under the Apache License 2.0; see [LICENSE](LICENSE). It includes code from
 [JSON Canopy](https://github.com/OldPeasant/json-canopy); see [NOTICE](NOTICE) for that and for
 third-party components.
+
+## Code signing
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
+[SignPath Foundation](https://signpath.org). The [code signing policy](docs/CODE_SIGNING.md)
+says what is signed, who approves it, and Thicket's privacy policy.
 
 "MongoDB" is a registered trademark of MongoDB, Inc. Thicket is an independent project. It is not
 affiliated with, endorsed by or sponsored by MongoDB, Inc.

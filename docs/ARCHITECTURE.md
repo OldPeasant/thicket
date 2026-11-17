@@ -418,6 +418,11 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   over CDP, `--remote-debugging-port`, since `--inspect` is fused off; window, `thicket://app`,
   both pings, screenshot, fuse wire (not for AppImages), `ELECTRON_RUN_AS_NODE` / `--inspect` /
   dev env overrides ignored; AppImages run with `APPIMAGE_EXTRACT_AND_RUN=1`).
+- Windows code signing (`docs/CODE_SIGNING.md`): only in `.github/workflows/release.yml`, through
+  SignPath, when the `SIGNPATH_API_TOKEN` secret and `SIGNPATH_ORGANIZATION_ID` variable exist
+  (`apps/desktop/scripts/signpath-enabled.mjs`): `--dir` build, sign `Thicket.exe`, NSIS + zip
+  from the signed folder with `--prepackaged`, sign the installer. Local `npm run dist` stays
+  unsigned.
 - The Electron binary is downloaded by the `electron` package's postinstall; if
   `node_modules/electron/dist` is missing (install scripts disabled), run
   `node node_modules/electron/install.js`.

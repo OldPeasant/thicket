@@ -5,9 +5,10 @@ Each release lists the installers for every system and a `SHA256SUMS.txt` file w
 checksums. In the file names below, `<version>` is the release version without the `v`, for example
 `1.2.0`.
 
-The builds are **not code-signed yet** (no Apple Developer ID and no Windows code-signing
-certificate). macOS and Windows therefore warn the first time you open Thicket. The steps for each
-system below show how to open it anyway. Only do this for files downloaded from the official
+The macOS builds are **not code-signed yet** (no Apple Developer ID), so macOS warns the first
+time you open Thicket. Windows builds are signed from the first signed release on (publisher
+"SignPath Foundation", see [code signing](../CODE_SIGNING.md)); older Windows releases are
+unsigned, and Windows warns about them. The steps for each system below show how to open it anyway. Only do this for files downloaded from the official
 releases page whose checksum matches.
 
 - [Check the download](#check-the-download)
@@ -133,8 +134,10 @@ Two downloads are available for Windows x64:
 
 ### SmartScreen warning
 
-Because the installer is not code-signed, Microsoft Defender SmartScreen shows "Windows protected
-your PC" when you start it:
+Signed releases show the publisher "SignPath Foundation" in the Windows prompts (check it under
+*Properties* → *Digital Signatures*). For releases from before signing started, and sometimes for
+a newly signed release that has not yet built up download reputation, Microsoft Defender
+SmartScreen shows "Windows protected your PC" when you start the installer:
 
 1. Click **More info**.
 2. Check that the app is the `thicket-<version>-win-x64.exe` you downloaded, then click
