@@ -10,6 +10,7 @@ import {
 
 import { currentOpTabId, type CurrentOpTabData } from '../admin/currentop/currentop-view';
 import { serverStatsTabId, type ServerStatsTabData } from '../admin/stats/server-stats-view';
+import { watchTabId, watchTitle, type WatchTabData } from '../watch/watch.model';
 import { usersTabId, type UsersTabData } from '../admin/users/users-roles-view';
 import { gridfsTabId, type GridfsTabData } from '../gridfs/gridfs.model';
 import { ApiError, describeError } from '../api/api-error';
@@ -458,6 +459,25 @@ export class SidebarTreeService {
       kind: 'serverstats',
       title: 'Server stats',
       detail: profile?.name ?? profileId,
+      production: profile?.production === true,
+      data: { ...data },
+    });
+  }
+
+  /** Opens (or selects) the change-stream tab of a deployment, database or collection. */
+  openWatch(profileId: string, db?: string, coll?: string): void {
+    const profile = this.profile(profileId);
+    const data: WatchTabData = {
+      profileId,
+      ...(db !== undefined ? { db } : {}),
+      ...(db !== undefined && coll !== undefined ? { coll } : {}),
+    };
+    const name = profile?.name ?? profileId;
+    this.workspace.open({
+      id: watchTabId(profileId, data.db, data.coll),
+      kind: 'watch',
+      title: watchTitle(data),
+      detail: data.db === undefined ? name : `${name} / ${data.db}`,
       production: profile?.production === true,
       data: { ...data },
     });

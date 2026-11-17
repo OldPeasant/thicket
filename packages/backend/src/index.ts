@@ -4,6 +4,7 @@ export const WORKSPACE = '@thicket/backend';
 export * from './admin/currentop';
 export * from './admin/stats';
 export * from './admin/users';
+export * from './admin/watch';
 export * from './agg';
 export {
   DEFAULT_REDIRECT_URI,

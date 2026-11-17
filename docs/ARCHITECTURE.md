@@ -710,6 +710,28 @@ Contract layout (`packages/contract/src/`):
   and on "Reload", not live. Component tests use recorded `serverStatus`/`replSetGetStatus`
   (`fixtures/*.json`, `fixtures/capture.mjs`).
 
+## Watch changes (`packages/renderer/src/app/watch`, backend `src/admin/watch`)
+- Tab kind `watch`, id `watchTabId(profileId, db?, coll?)`, data `WatchTabData` (`profileId`,
+  `db?`, `coll?`; no `db` = the whole deployment); opened by "Watch changes" in the sidebar's
+  connection, database and collection menus (`SidebarTreeService.openWatch`; not for views).
+- Backend `admin.watch` (streamed): a `hello` first refuses a standalone server with
+  `UNSUPPORTED`, detail `{ reason: 'needsReplicaSet' }` (the request fails, no stream; server code
+  40573 maps the same way). Then a raw `aggregate` with `$changeStream` (deployment:
+  `allChangesForCluster` on `admin`; database: `aggregate: 1`) on the primary, the user's stages
+  after it, run as one raw driver cursor (`db.runCursorCommand(..., { raw: true })`, one `tryNext`
+  per round, `maxTimeMS` 1 s per `getMore`), so every `getMore` and the `killCursors` reach the
+  server (mongos, load-balanced connection) that opened the stream and events are lossless
+  canonical EJSON, one `{ event }` per data event in server order. Cancel or `conn.close` ends
+  `CANCELLED` at once and closes the cursor once the round in flight settles (also a cursor the
+  opening `aggregate` was still creating); an `invalidate` (drop/rename of the watched namespace) ends the
+  stream (`end`). No automatic resume after errors. Int tests
+  `test/integration/change-streams.int.spec.ts` (`mongo8rs`, `mongo8` for the standalone).
+- Renderer: starts on open (`fullDocument: 'updateLookup'` by default, a checkbox restarts without
+  it), Stop/Start/Clear, newest first, at most `MAX_EVENTS` (1000) kept. Each event expands to its
+  shell syntax; "Open document" loads the document as it is now with `docs.get` (side panel;
+  "No document with this _id" after a delete). The standalone answer shows a notice explaining
+  that change streams need a replica set. `watch.model.ts` reduces the events.
+
 ## Aggregation builder (`packages/renderer/src/app/aggregation`)
 - `AggregationView` is the `aggregation` tab view (id `aggregationTabId(profileId, db, coll)`,
   `data` like a collection tab), opened with "Aggregate…" (`open-aggregation`) on the

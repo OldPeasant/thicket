@@ -11,7 +11,8 @@ export type TabKind =
   | 'users'
   | 'currentop'
   | 'gridfs'
-  | 'serverstats';
+  | 'serverstats'
+  | 'watch';
 
 /** One tab of the workspace. `id` is stable: opening a tab with a known id selects it instead. */
 export interface WorkspaceTab {

@@ -4,6 +4,7 @@ import { BROADCAST_STREAMS, methods, type Event, type Profile } from '@thicket/c
 
 import { currentOpHandlers } from '../admin/currentop';
 import { statsHandlers } from '../admin/stats';
+import { watchHandlers } from '../admin/watch';
 import { usersEditHandlers, usersHandlers } from '../admin/users';
 import { aggHandlers } from '../agg';
 import { OidcAuthenticator } from '../auth/oidc';
@@ -147,6 +148,7 @@ export function startBackend(options: BackendOptions): Record<string, Handler> {
       ...usersEditHandlers(connections),
       ...currentOpHandlers(connections),
       ...statsHandlers(connections),
+      ...watchHandlers(connections),
       // File dialogs can stay open as long as the user likes: no timeout.
       ...ioHandlers(
         connections,

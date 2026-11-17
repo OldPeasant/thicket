@@ -7,6 +7,7 @@ import { provideRouter, withComponentInputBinding, withHashLocation } from '@ang
 
 import { CurrentOpView } from './admin/currentop';
 import { ServerStatsView } from './admin/stats';
+import { WatchView } from './watch';
 import { UsersRolesView } from './admin/users';
 import { GridfsView } from './gridfs';
 import { AggregationView } from './aggregation';
@@ -32,6 +33,7 @@ export const appConfig: ApplicationConfig = {
     provideTabView('gridfs', GridfsView),
     provideTabView('currentop', CurrentOpView),
     provideTabView('serverstats', ServerStatsView),
+    provideTabView('watch', WatchView),
     provideTabView('shell', ShellConsole),
     provideTabView('validator', ValidatorView),
   ],

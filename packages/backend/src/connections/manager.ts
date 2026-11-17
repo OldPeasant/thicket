@@ -34,6 +34,14 @@ export interface CursorLike {
   readBufferedDocuments(): unknown[];
   setComment(comment: unknown): unknown;
   setBatchSize(batchSize: number): unknown;
+  /**
+   * One round: the buffered document or else one batch (the cursor command or one `getMore`);
+   * `null` for an empty batch. Unlike `hasNext`, it does not loop over empty batches (change
+   * streams). Fakes may leave it out.
+   */
+  tryNext?(): Promise<unknown>;
+  /** The `maxTimeMS` of each `getMore` (the await time of a tailable cursor). Fakes may leave it out. */
+  setMaxTimeMS?(maxTimeMS: number): unknown;
   close(): Promise<void>;
 }
 
