@@ -16,3 +16,4 @@ Check the GitHub releases API at start (and daily) unless disabled in settings; 
 
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
+- ASSUMPTION (2026-11-17 07:29+0100 by dell26/agent-1): Repo for the check is OldPeasant/thicket (README release link); /releases list is used (not /releases/latest) so pre-releases are filtered explicitly: flagged prerelease, drafts and tags with a semver pre-release suffix are ignored.
