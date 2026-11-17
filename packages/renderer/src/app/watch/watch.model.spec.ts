@@ -88,6 +88,63 @@ describe('watch model', () => {
     expect(entry).toMatchObject({ op: 'unknown', openable: false, text: 'not json', time: null });
   });
 
+  it('reads a relaxed ISO wallTime; an unreadable one falls back to the cluster time, else null', () => {
+    const iso = toWatchEntry(
+      JSON.stringify({ operationType: 'insert', wallTime: { $date: '2023-11-14T22:13:20.250Z' } }),
+      1,
+    );
+    expect(iso.time?.getTime()).toBe(1_700_000_000_250);
+
+    const unreadable = toWatchEntry(
+      JSON.stringify({
+        operationType: 'insert',
+        wallTime: { $date: 'not a date' },
+        clusterTime: { $timestamp: { t: 1_700_000_000, i: 1 } },
+      }),
+      2,
+    );
+    expect(unreadable.time?.getTime()).toBe(1_700_000_000_000);
+
+    const none = toWatchEntry(
+      JSON.stringify({ operationType: 'insert', wallTime: { $date: 'not a date' } }),
+      3,
+    );
+    expect(none.time).toBeNull();
+  });
+
+  it('labels an _id that is not valid EJSON with its JSON text instead of failing', () => {
+    const entry = toWatchEntry(
+      JSON.stringify({
+        operationType: 'delete',
+        ns: { db: 'shop', coll: 'orders' },
+        documentKey: { _id: { $oid: 'not-an-object-id' } },
+      }),
+      1,
+    );
+    expect(entry.id).toBe('{"$oid":"not-an-object-id"}');
+    expect(entry.idLabel).toBe('{"$oid":"not-an-object-id"}');
+    expect(entry.openable).toBe(true);
+  });
+
+  it('summarises odd update descriptions without failing', () => {
+    const summary = (updateDescription: unknown) =>
+      toWatchEntry(JSON.stringify({ operationType: 'update', updateDescription }), 1).summary;
+    expect(summary({ removedFields: 'd', truncatedArrays: [] })).toBe('');
+    expect(summary({ updatedFields: { a: 1 }, removedFields: [7, 'b'] })).toBe('set a; unset b');
+    const many = Object.fromEntries(Array.from({ length: 80 }, (_, i) => [`field${i}`, i]));
+    const long = summary({ updatedFields: many });
+    expect(long).toHaveLength(200);
+    expect(long.endsWith('…')).toBe(true);
+  });
+
+  it('an event with an _id but no collection cannot be opened', () => {
+    const entry = toWatchEntry(
+      JSON.stringify({ operationType: 'insert', ns: { db: 'shop' }, documentKey: { _id: 1 } }),
+      1,
+    );
+    expect(entry).toMatchObject({ id: '1', idLabel: '1', openable: false });
+  });
+
   it('formats event times with milliseconds', () => {
     expect(formatEventTime(null)).toBe('');
     expect(formatEventTime(new Date(2026, 0, 2, 3, 4, 5, 6))).toBe('03:04:05.006');

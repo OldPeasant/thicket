@@ -10,6 +10,7 @@ import { ShellConsole } from './console';
 import { GridfsView } from './gridfs';
 import { IndexesView } from './indexes';
 import { TAB_VIEWS } from './layout/tab-views';
+import { WatchView } from './watch';
 
 describe('App', () => {
   it('creates the root component and renders the start page in the layout', async () => {
@@ -69,6 +70,15 @@ describe('App', () => {
     const views = TestBed.inject(TAB_VIEWS);
 
     expect(views.find((view) => view.kind === 'gridfs')?.component).toBe(GridfsView);
+  });
+
+  it('registers the change-stream view for the watch tab kind', () => {
+    TestBed.configureTestingModule({ providers: appConfig.providers });
+    const views = TestBed.inject(TAB_VIEWS);
+
+    expect(views.filter((view) => view.kind === 'watch').map((view) => view.component)).toEqual([
+      WatchView,
+    ]);
   });
 
   it('runs zoneless: zone.js is not loaded', () => {

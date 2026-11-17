@@ -338,6 +338,15 @@ describe('startBackend: connections', () => {
     );
   });
 
+  it('serves admin.watch (change streams) next to the other admin handlers (merged wiring)', () => {
+    const parentPort: ParentPortLike = { on: () => undefined };
+    const handlers = startBackend({ parentPort, pid: 1 });
+    expect(Object.keys(handlers)).toEqual(
+      expect.arrayContaining(['admin.watch', 'admin.currentOp', 'admin.serverStatus']),
+    );
+    expect(typeof handlers['admin.watch']).toBe('function');
+  });
+
   it('serves the idx.* index handlers', () => {
     const parentPort: ParentPortLike = { on: () => undefined };
     expect(Object.keys(startBackend({ parentPort, pid: 1 }))).toEqual(
@@ -551,6 +560,17 @@ describe('startBackend: connections', () => {
     expect(await answer('ok')).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } });
     expect(await answer('ex')).toMatchObject({ ok: false, error: { code: 'NOT_CONNECTED' } });
     expect(openFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('admin.watch is served and not guarded on a read-only profile (a read)', async () => {
+    const m = withMain();
+    m.renderer.send({
+      id: 'w',
+      method: 'admin.watch',
+      params: { profileId: 'ssh', db: 'shop', coll: 'orders' },
+    });
+    expect(await m.answer('w')).toMatchObject({ ok: false, error: { code: 'NOT_CONNECTED' } });
+    expect(m.forConnect).not.toHaveBeenCalled();
   });
 
   it('browse reads are not guarded on a read-only profile (NOT_CONNECTED, not READ_ONLY)', async () => {
