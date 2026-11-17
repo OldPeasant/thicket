@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { JsonScanner, LineScanner, ScanError, type Scanner, type ScannedValue } from './scanner';
+import {
+  JsonScanner,
+  LineScanner,
+  MAX_VALUE_CHARS,
+  ScanError,
+  type Scanner,
+  type ScannedValue,
+} from './scanner';
 
 type Make = () => Scanner;
 
@@ -318,5 +325,84 @@ describe('LineScanner (JSON Lines)', () => {
     expect(scanner.feed(':1}\n{"b":2}')).toEqual([{ text: '{"a":1}', line: 1 }]);
     expect(scanner.end()).toEqual([{ text: '{"b":2}', line: 2 }]);
     expect(scanner.end()).toEqual([]);
+  });
+});
+
+/** Feeds `head`, then 10-character chunks until the scanner throws; the error and chunks fed. */
+function growUntilError(scanner: Scanner, head: string, chunk: string) {
+  const first = scanner.feed(head);
+  let fed = 0;
+  try {
+    for (; fed < 1000; fed++) scanner.feed(chunk);
+  } catch (error) {
+    return { first, error, fed };
+  }
+  throw new Error('expected a ScanError');
+}
+
+describe('value size limit', () => {
+  it('MAX_VALUE_CHARS leaves room for a 16 MiB document in EJSON', () => {
+    expect(MAX_VALUE_CHARS).toBeGreaterThanOrEqual(3 * 16 * 1024 * 1024);
+  });
+
+  it.each([
+    ['an array element', '[{"a":1},\n\n{"b":"', 3],
+    ['a document in a sequence (unclosed {)', '{"a":1}\n\n{"b":"', 3],
+    ['a bare scalar in a sequence', '{"a":1}\n\ntrue', 3],
+  ])(
+    'JsonScanner refuses %s that grows past the limit, naming its first line',
+    (_w, head, line) => {
+      const { first, error, fed } = growUntilError(new JsonScanner(100), head, 'x'.repeat(10));
+      expect(first).toEqual([{ text: '{"a":1}', line: 1 }]);
+      expect(error).toBeInstanceOf(ScanError);
+      expect(error).toMatchObject({ line });
+      expect((error as Error).message).toMatch(
+        new RegExp(`^Line ${String(line)}: a value is longer than 100 characters`),
+      );
+      // It stops as soon as the value is too long, not at the end of the file.
+      expect(fed).toBeLessThanOrEqual(10);
+    },
+  );
+
+  it('JsonScanner refuses a value completed in one chunk that is too long', () => {
+    expect(() => new JsonScanner(10).feed('{"a":"0123456789"}')).toThrow(
+      /^Line 1: a value is longer than 10 /,
+    );
+    // Values completed before it in the same chunk still come out; the error follows.
+    const scanner = new JsonScanner(10);
+    expect(scanner.feed('[{"a":1},\n{"a":"0123456789"}]')).toEqual([{ text: '{"a":1}', line: 1 }]);
+    expect(() => scanner.end()).toThrow(/^Line 2: a value is longer than 10 /);
+  });
+
+  it('JsonScanner accepts a value of exactly the limit, however it is cut', () => {
+    const doc = '{"a":"12"}';
+    expectAnySplit(() => new JsonScanner(doc.length), `[${doc}]`, [{ text: doc, line: 1 }]);
+    expectAnySplit(() => new JsonScanner(doc.length), doc, [{ text: doc, line: 1 }]);
+  });
+
+  it('LineScanner refuses a line that grows past the limit (a minified file), naming it', () => {
+    const { first, error, fed } = growUntilError(new LineScanner(100), '{"a":1}\n\n[{"b":', 'x,');
+    expect(first).toEqual([{ text: '{"a":1}', line: 1 }]);
+    expect(error).toBeInstanceOf(ScanError);
+    expect(error).toMatchObject({ line: 3 });
+    expect((error as Error).message).toMatch(/^Line 3: a value is longer than 100 characters/);
+    expect(fed).toBeLessThanOrEqual(50);
+  });
+
+  it('LineScanner returns the lines before a too long one, then throws on the next call', () => {
+    const scanner = new LineScanner(10);
+    expect(scanner.feed('{"a":1}\n{"a":"0123456789"}\n{"b":2}\n')).toEqual([
+      { text: '{"a":1}', line: 1 },
+    ]);
+    expect(() => scanner.feed('{"c":3}\n')).toThrow(/^Line 2: a value is longer than 10 /);
+    expect(() => scanner.end()).toThrow(/^Line 2: a value is longer than 10 /);
+    expect(() => new LineScanner(10).feed('{"a":"0123456789"}')).toThrow(/^Line 1: /);
+  });
+
+  it('LineScanner accepts a line of exactly the limit, however it is cut', () => {
+    expectAnySplit(() => new LineScanner(7), '{"a":1}\n{"b":2}', [
+      { text: '{"a":1}', line: 1 },
+      { text: '{"b":2}', line: 2 },
+    ]);
   });
 });

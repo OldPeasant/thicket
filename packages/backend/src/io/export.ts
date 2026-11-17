@@ -100,6 +100,21 @@ function finish(stream: WriteStream): Promise<void> {
   });
 }
 
+/**
+ * Destroys the stream and waits until its file is closed. An open still running finishes (and
+ * creates the file) first, so a removal after this cannot be undone by a late open.
+ */
+function closeStream(stream: WriteStream): Promise<void> {
+  return new Promise((resolve) => {
+    if (stream.closed) {
+      resolve();
+      return;
+    }
+    stream.once('close', () => resolve());
+    stream.destroy();
+  });
+}
+
 function fileError(error: unknown, file: string): RpcError {
   if (error instanceof RpcError) return error;
   const message = error instanceof Error ? error.message : String(error);
@@ -164,7 +179,7 @@ export async function exportToFile(
     report();
     return written;
   } catch (error) {
-    stream.destroy();
+    await closeStream(stream);
     await rm(file, { force: true }).catch(() => undefined);
     throw fileError(error, file);
   } finally {

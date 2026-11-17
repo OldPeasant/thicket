@@ -19,7 +19,7 @@ import {
   scanFile,
   type ImportOptions,
 } from './import';
-import type { ScannedValue } from './scanner';
+import { MAX_VALUE_CHARS, type ScannedValue } from './scanner';
 
 const value = (text: string, line = 1): ScannedValue => ({ text, line });
 
@@ -364,6 +364,24 @@ describe('importFile', () => {
       expect(progress.at(-1)).toMatchObject({ processed: 2, failed: 1 });
     });
 
+    it('a refused earlier line found when flushing wins over a later bad line', async () => {
+      // Line 3 does not parse and stops reading; the pending batch (lines 1-2) is then written
+      // and the server refuses line 2: the import stopped there, not at line 3.
+      const file = await fileWith('dup-bad.jsonl', '{"_id":1}\n{"_id":1}\n{"bad": }\n{"_id":4}\n');
+      const server = fakeServer((documents, ordered) => duplicateAt(documents, 1, ordered));
+      const { result, progress } = await runImport(server.client, file, 'jsonl');
+      expect(result).toBeInstanceOf(RpcError);
+      expect(result).toMatchObject({ code: 'SERVER_ERROR' });
+      expect((result as Error).message).toBe('Import stopped: Line 2: E11000 duplicate key error');
+      expect(server.inserts.map((i) => i.documents.length)).toEqual([2]);
+      expect(progress).toHaveLength(1);
+      expect(progress[0]).toMatchObject({ processed: 3, failed: 2 });
+      expect(progress[0]?.errors.map((e) => [e.index, e.error.code])).toEqual([
+        [2, 'SERVER_ERROR'],
+        [3, 'INVALID_PARAMS'],
+      ]);
+    });
+
     it('a bad element in a JSON array stops at its line', async () => {
       const file = await fileWith('stop.json', '[\n{"_id":1},\n42,\n{"_id":3}\n]');
       const server = fakeServer();
@@ -432,6 +450,31 @@ describe('importFile', () => {
         [2, 'Line 2: dup 1'],
         [4, 'Line 4: dup 2'],
       ]);
+    });
+
+    it('reports errors in line order when a refused line comes before a bad one', async () => {
+      const file = await fileWith('order.jsonl', '{"_id":1}\n{"_id":1}\n{"bad": }\n{"_id":4}\n');
+      const server = fakeServer((documents, ordered, call) =>
+        call === 1 ? duplicateAt(documents, 1, ordered) : { n: documents.length, ok: 1 },
+      );
+      const { result } = await runImport(server.client, file, 'jsonl', { stopOnError: false });
+      expect(result).toMatchObject({ processed: 4, failed: 2, inserted: 2 });
+      expect((result as IoProgress).errors.map((e) => e.index)).toEqual([2, 3]);
+    });
+
+    it(`keeps the first ${String(MAX_REPORTED_ERRORS)} lines when errors come out of order`, async () => {
+      // Line 1 is refused by the server only after every bad line after it was read.
+      const bad = MAX_REPORTED_ERRORS + 5;
+      const file = await fileWith('late-dup.jsonl', `{"_id":1}\n${'{"x": }\n'.repeat(bad)}`);
+      const server = fakeServer((documents, ordered) => duplicateAt(documents, 0, ordered));
+      const { result } = await runImport(server.client, file, 'jsonl', { stopOnError: false });
+      expect(result).toMatchObject({ processed: bad + 1, failed: bad + 1, inserted: 0 });
+      const errors = (result as IoProgress).errors;
+      expect(errors).toHaveLength(MAX_REPORTED_ERRORS);
+      expect(errors.map((e) => e.index)).toEqual(
+        Array.from({ length: MAX_REPORTED_ERRORS }, (_, k) => k + 1),
+      );
+      expect(errors[0]?.error.code).toBe('SERVER_ERROR');
     });
 
     it(`keeps only the first ${String(MAX_REPORTED_ERRORS)} errors but counts all`, async () => {
@@ -628,6 +671,33 @@ describe('importFile', () => {
     // Only the progress of the written batch: no final flush, no final progress.
     expect(progress).toEqual([{ processed: IMPORT_BATCH_DOCS, failed: 0, errors: [] }]);
   });
+
+  it.each([
+    ['json', 'unclosed.json', '{"_id":1}\n{"s":"'],
+    ['jsonl', 'minified.jsonl', '{"_id":1}\n[{"s":"'],
+  ] as const)(
+    'a %s value longer than MAX_VALUE_CHARS stops the import with INVALID_PARAMS naming its line',
+    async (format, name, head) => {
+      const file = await fileWith(name, `${head}${'x'.repeat(MAX_VALUE_CHARS + 1024)}`);
+      const server = fakeServer();
+      const { result, progress } = await runImport(server.client, file, format, {
+        stopOnError: false,
+      });
+      expect(result).toBeInstanceOf(RpcError);
+      expect(result).toMatchObject({ code: 'INVALID_PARAMS' });
+      expect((result as Error).message).toMatch(/^Line 2: a value is longer than \d+ characters/);
+      expect(server.inserts.map((i) => texts(i.documents))).toEqual([
+        ['{"_id":{"$numberInt":"1"}}'],
+      ]);
+      expect(progress).toEqual([{ processed: 1, failed: 0, errors: [] }]);
+
+      const preview = await previewFile(file, format).catch((e: unknown) => e);
+      expect(preview).toBeInstanceOf(RpcError);
+      expect(preview).toMatchObject({ code: 'INVALID_PARAMS' });
+      expect((preview as Error).message).toMatch(/^Line 2: a value is longer than/);
+    },
+    60_000,
+  );
 
   it('a file that no longer exists answers NOT_FOUND', async () => {
     const { result } = await runImport(fakeServer().client, path.join(dir, 'gone.jsonl'), 'jsonl');

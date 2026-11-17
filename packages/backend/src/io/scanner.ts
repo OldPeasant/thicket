@@ -7,6 +7,10 @@
  *   It only tracks strings and bracket depth, so a malformed document whose brackets balance
  *   (`{"a": }`) still comes out on its own and fails alone when parsed.
  * - {@link LineScanner}: JSON Lines, one document per non-empty line.
+ *
+ * Both refuse a value longer than {@link MAX_VALUE_CHARS} (`ScanError` naming the line where it
+ * starts), so a file of the wrong shape (an unclosed `{`, a minified file read as JSON Lines, a
+ * binary file) never makes them hold the whole file in memory.
  */
 
 /** The text of one value in the file and the line where it starts. */
@@ -25,6 +29,19 @@ export class ScanError extends Error {
     this.name = 'ScanError';
   }
 }
+
+/**
+ * Most characters of one value. A document is at most 16 MiB of BSON; its EJSON text can be a few
+ * times longer (type wrappers such as `{"$numberDouble":"…"}`, base64 binary), so 64 Mi characters
+ * leave room for any valid document while bounding the memory a wrong file can take.
+ */
+export const MAX_VALUE_CHARS = 64 * 1024 * 1024;
+
+const tooLarge = (line: number, max: number) =>
+  new ScanError(
+    `a value is longer than ${String(max)} characters (is the file in the chosen format?)`,
+    line,
+  );
 
 const isSpace = (c: string) =>
   c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\uFEFF';
@@ -52,8 +69,14 @@ export class JsonScanner implements Scanner {
   /** In a sequence: the current top-level value is a bare scalar (no brackets). */
   private scalar = false;
 
+  /** Characters of the value being read, in `parts` and the current chunk. */
+  private size = 0;
+
   /** A structure error found after values of the same chunk: thrown by the next call. */
   private failure: ScanError | undefined;
+
+  /** @param maxValueChars longest value accepted (tests use a small one). */
+  constructor(private readonly maxValueChars = MAX_VALUE_CHARS) {}
 
   feed(chunk: string): ScannedValue[] {
     if (this.failure) throw this.failure;
@@ -73,7 +96,12 @@ export class JsonScanner implements Scanner {
     let from = this.parts ? 0 : -1;
     const close = (to: number) => {
       const parts = this.parts ?? [];
-      if (from >= 0) parts.push(chunk.slice(from, to));
+      if (from >= 0) {
+        if (this.size + to - from > this.maxValueChars) {
+          throw tooLarge(this.valueLine, this.maxValueChars);
+        }
+        parts.push(chunk.slice(from, to));
+      }
       const text = parts.join('').trim();
       if (text.length > 0) out.push({ text, line: this.valueLine });
       this.parts = undefined;
@@ -81,6 +109,7 @@ export class JsonScanner implements Scanner {
     };
     const open = (at: number) => {
       this.parts = [];
+      this.size = 0;
       this.valueLine = this.line;
       from = at;
     };
@@ -140,7 +169,11 @@ export class JsonScanner implements Scanner {
       this.track(c);
       if (this.depth === 0 && !this.scalar && this.parts) close(i + 1);
     }
-    if (this.parts && from >= 0) this.parts.push(chunk.slice(from));
+    if (this.parts && from >= 0) {
+      this.size += chunk.length - from;
+      if (this.size > this.maxValueChars) throw tooLarge(this.valueLine, this.maxValueChars);
+      this.parts.push(chunk.slice(from));
+    }
   }
 
   /** Updates string and depth state for one character outside a string. */
@@ -171,26 +204,52 @@ export class JsonScanner implements Scanner {
 
 /** JSON Lines: every non-empty line is one value. */
 export class LineScanner implements Scanner {
-  private carry = '';
+  /** Parts of the line not ended yet (searched for `\n` only once, as their chunk came in). */
+  private carry: string[] = [];
+  private carryChars = 0;
   private line = 0;
+  /** A line too long, found after values of the same chunk: thrown by the next call. */
+  private failure: ScanError | undefined;
+
+  /** @param maxValueChars longest line accepted (tests use a small one). */
+  constructor(private readonly maxValueChars = MAX_VALUE_CHARS) {}
 
   feed(chunk: string): ScannedValue[] {
+    if (this.failure) throw this.failure;
     const out: ScannedValue[] = [];
-    const text = this.carry + chunk;
     let start = 0;
-    for (let nl = text.indexOf('\n'); nl >= 0; nl = text.indexOf('\n', start)) {
-      this.push(text.slice(start, nl), out);
-      start = nl + 1;
+    try {
+      for (let nl = chunk.indexOf('\n'); nl >= 0; nl = chunk.indexOf('\n', start)) {
+        this.take(chunk.slice(start, nl));
+        this.push(this.carry.join(''), out);
+        this.carry = [];
+        this.carryChars = 0;
+        start = nl + 1;
+      }
+      if (start < chunk.length) this.take(chunk.slice(start));
+    } catch (error) {
+      if (!(error instanceof ScanError) || out.length === 0) throw error;
+      this.failure = error;
     }
-    this.carry = text.slice(start);
     return out;
   }
 
   end(): ScannedValue[] {
+    if (this.failure) throw this.failure;
     const out: ScannedValue[] = [];
-    if (this.carry.length > 0) this.push(this.carry, out);
-    this.carry = '';
+    if (this.carryChars > 0) this.push(this.carry.join(''), out);
+    this.carry = [];
+    this.carryChars = 0;
     return out;
+  }
+
+  /** Adds text to the current line, refusing a line longer than the limit. */
+  private take(part: string): void {
+    this.carryChars += part.length;
+    if (this.carryChars > this.maxValueChars) {
+      throw tooLarge(this.line + 1, this.maxValueChars);
+    }
+    this.carry.push(part);
   }
 
   private push(raw: string, out: ScannedValue[]): void {

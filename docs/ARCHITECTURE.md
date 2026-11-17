@@ -244,10 +244,13 @@ tasks/                 TFP task board (managed by tasks.py, never edited by hand
   `io.import` streams the file (`JsonScanner`: one array or documents one after another, split by
   bracket depth, so a malformed document fails alone; `LineScanner` for JSONL), parses each value
   with `EJSON.parse(relaxed: false)` and inserts raw `insert` commands of ≤ 1 000 docs / 8 MB.
-  `IoProgress.index` of an error is the 1-based line where the document starts; the first 100
-  errors are kept. `stopOnError` (default true) ends the stream with the first failure's error
-  after a last progress event (earlier lines stay inserted); otherwise failed documents are
-  skipped, and an ordered insert continues after the failed one. A broken file structure always
+  `IoProgress.index` of an error is the 1-based line where the document starts; the errors of the
+  first 100 lines are kept, in line order. `stopOnError` (default true) ends the stream with the
+  error of the earliest failed line (a server refusal found while flushing wins over a later line
+  that did not parse) after a last progress event (earlier lines stay inserted); otherwise failed
+  documents are skipped, and an ordered insert continues after the failed one. A broken file
+  structure, or one value longer than `MAX_VALUE_CHARS` (64 Mi characters: an unclosed `{`, a
+  minified file read as JSONL; this bounds the memory, also for `io.previewImport`), always
   stops the same way (earlier documents inserted, last progress, `INVALID_PARAMS` "Line N: …");
   a failed write to the export file (cannot be created, disk full) answers `INTERNAL`. `end.delivered` is the number of
   documents written (export) or inserted (import). `io.import` is behind the write guard.

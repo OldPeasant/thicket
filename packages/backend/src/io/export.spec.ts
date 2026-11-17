@@ -5,9 +5,43 @@ import path from 'node:path';
 
 import type { IoProgress } from '@thicket/contract';
 import { BSON, Int32, Long, ObjectId, type Document } from 'mongodb';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ClientLike } from '../connections/manager';
+
+/**
+ * Set `gate` in a test: export streams open their file only once it resolves; `opened` then
+ * resolves when that open has finished (the file exists).
+ */
+const slowOpen = vi.hoisted(() => ({
+  gate: undefined as Promise<void> | undefined,
+  opened: undefined as Promise<void> | undefined,
+}));
+
+vi.mock('node:fs', async (importOriginal) => {
+  const fs = await importOriginal<typeof import('node:fs')>();
+  type Open = (...args: unknown[]) => void;
+  const createWriteStream = (file: string, options: Record<string, unknown>) => {
+    const gate = slowOpen.gate;
+    if (!gate) return fs.createWriteStream(file, options);
+    let opened: (() => void) | undefined;
+    slowOpen.opened = new Promise<void>((resolve) => (opened = resolve));
+    const open: Open = (...args) => {
+      const callback = args.pop() as (...result: unknown[]) => void;
+      void gate.then(() =>
+        (fs.open as unknown as Open)(...args, (...result: unknown[]) => {
+          opened?.();
+          callback(...result);
+        }),
+      );
+    };
+    return fs.createWriteStream(file, {
+      ...options,
+      fs: { open, write: fs.write, writev: fs.writev, close: fs.close },
+    });
+  };
+  return { ...fs, default: { ...fs, createWriteStream }, createWriteStream };
+});
 import { RpcError } from '../server/rpc';
 import {
   EXPORT_BATCH_SIZE,
@@ -283,6 +317,31 @@ describe('exportToFile', () => {
     ).rejects.toMatchObject({ code: 'CANCELLED' });
     expect(server.sent.some((c) => 'killOp' in c)).toBe(true);
     expect(await readdir(dir)).toEqual([]);
+  });
+
+  it('a failure before the file is open removes the file once the open completed', async () => {
+    // The open is held until 20 ms after the server failed: removing the file at once would run
+    // before the open creates it, and the empty file would stay behind.
+    let release: (() => void) | undefined;
+    slowOpen.gate = new Promise<void>((resolve) => (release = resolve));
+    try {
+      const server = fakeServer([], () => {
+        setTimeout(() => release?.(), 20);
+        return Promise.reject(new Error('connection reset'));
+      });
+      const file = path.join(dir, 'early.jsonl');
+      const error = await exportToFile(server.client, params(), file).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(RpcError);
+      expect((error as Error).message).toMatch(/connection reset/);
+      // Whenever the open finished, the file must not exist afterwards.
+      await slowOpen.opened;
+      expect(existsSync(file)).toBe(false);
+      expect(await readdir(dir)).toEqual([]);
+    } finally {
+      release?.();
+      slowOpen.gate = undefined;
+      slowOpen.opened = undefined;
+    }
   });
 
   it('rejects INTERNAL naming the file when it cannot be created (server answers at once)', async () => {

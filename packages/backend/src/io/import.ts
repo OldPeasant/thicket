@@ -158,9 +158,10 @@ function writeErrorsOf(reply: Document): WriteError[] {
  * Imports a JSON / JSON Lines file into `db.coll` (created by the first insert if missing).
  * Every document that fails (it is not valid JSON/EJSON, not a document, or the server refuses
  * it, e.g. a duplicate `_id`) is counted in `failed` and its line reported in `errors` (the first
- * {@link MAX_REPORTED_ERRORS}). With `stopOnError` (the default) the import ends at the first
- * failure: documents of earlier lines stay inserted, and the call rejects with that failure's
- * error after a last progress report. A broken file structure (the scanner cannot find where the
+ * {@link MAX_REPORTED_ERRORS} lines, in line order). With `stopOnError` (the default) the import
+ * ends at the first failure (the earliest line, also when a parse failure was found before the
+ * server refused an earlier line of the pending batch): documents of earlier lines stay
+ * inserted, and the call rejects with that failure's error after a last progress report. A broken file structure (the scanner cannot find where the
  * documents are) always stops the import the same way: the documents read before it are
  * inserted, a last progress is sent, and the call rejects with INVALID_PARAMS naming its line.
  */
@@ -178,12 +179,26 @@ export async function importFile(
   let inserted = 0;
   const errors: { index: number; error: ErrorSummary }[] = [];
   let stop: RpcError | undefined;
+  let stopLine = Infinity;
 
   const snapshot = (): IoProgress => ({ processed, failed, errors: [...errors] });
+  /**
+   * Records a failed document. Failures do not always come in line order: a value that does not
+   * parse is found while reading, the server's refusals of earlier lines when their batch is
+   * written. So `errors` keeps the first lines (in line order), and a stop the earliest line.
+   */
   const fail = (line: number, error: ErrorSummary) => {
     failed++;
-    if (errors.length < MAX_REPORTED_ERRORS) errors.push({ index: line, error });
-    if (stopOnError) stop ??= new RpcError(error.code, `Import stopped: ${error.message}`);
+    let at = errors.length;
+    while (at > 0 && (errors[at - 1]?.index ?? 0) > line) at--;
+    if (at < MAX_REPORTED_ERRORS) {
+      errors.splice(at, 0, { index: line, error });
+      if (errors.length > MAX_REPORTED_ERRORS) errors.pop();
+    }
+    if (stopOnError && line < stopLine) {
+      stop = new RpcError(error.code, `Import stopped: ${error.message}`);
+      stopLine = line;
+    }
   };
 
   let batch: Pending[] = [];
