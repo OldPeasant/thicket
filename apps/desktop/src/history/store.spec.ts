@@ -277,4 +277,185 @@ describe('HistoryStore', () => {
     });
     expect(await call('history.clear', ORDERS)).toEqual({ entries: [] });
   });
+
+  describe('edge cases', () => {
+    /** The real file system, with the given operations replaced. */
+    const patched = (overrides: Partial<HistoryFs>): HistoryFs => ({
+      readFile: (p, e) => fs.readFile(p, e),
+      writeFile: (p, d, o) => fs.writeFile(p, d, o),
+      rename: (a, b) => fs.rename(a, b),
+      unlink: (p) => fs.unlink(p),
+      mkdir: (p, o) => fs.mkdir(p, o),
+      ...overrides,
+    });
+
+    it('re-running the oldest query at the limit moves it up without dropping another', async () => {
+      const store = open({ limit: 3 });
+      for (const n of [1, 2, 3]) await store.add(ORDERS, query(`{ n: ${n} }`));
+      const entries = await store.add(ORDERS, query('{ n: 1 }'));
+      expect(entries.map((e) => e.query.filter)).toEqual(['{ n: 1 }', '{ n: 3 }', '{ n: 2 }']);
+    });
+
+    it('treats a limit below 1 as 1', async () => {
+      const store = open({ limit: 0 });
+      await store.add(ORDERS, query('{ a: 1 }'));
+      const entries = await store.add(ORDERS, query('{ b: 1 }'));
+      expect(entries.map((e) => e.query.filter)).toEqual(['{ b: 1 }']);
+    });
+
+    it('reads at most `limit` entries from a file written with a larger limit', async () => {
+      const big = open({ limit: 5 });
+      for (let i = 1; i <= 5; i++) await big.add(ORDERS, query(`{ n: ${i} }`));
+      const small = open({ limit: 2 });
+      expect((await small.history(ORDERS)).map((e) => e.query.filter)).toEqual([
+        '{ n: 5 }',
+        '{ n: 4 }',
+      ]);
+      await small.add(ORDERS, query('{ n: 6 }'));
+      expect(await open({ limit: 5 }).history(ORDERS)).toHaveLength(2);
+    });
+
+    it('an all-empty query leaves an existing history unchanged', async () => {
+      const store = open();
+      await store.add(ORDERS, query('{ a: 1 }'));
+      const entries = await store.add(ORDERS, query(' ', { sort: '\t', limit: '\n' }));
+      expect(entries.map((e) => e.query.filter)).toEqual(['{ a: 1 }']);
+      expect(entries[0]?.at).toBe('2026-01-01T00:00:00.000Z');
+    });
+
+    it('records a query whose only non-empty field is not the filter', async () => {
+      const entries = await open().add(ORDERS, query('', { limit: ' 5 ' }));
+      expect(entries.map((e) => e.query)).toEqual([query('', { limit: '5' })]);
+    });
+
+    it('returns copies: changing a returned list does not change the store', async () => {
+      const store = open();
+      const entries = await store.add(ORDERS, query('{ a: 1 }'));
+      entries.length = 0;
+      const favorites = await store.saveFavorite(ORDERS, 'F', query('{ f: 1 }'));
+      const [first] = favorites;
+      if (first) first.query.filter = '{ changed: 1 }';
+      expect(first).toBeDefined();
+      expect(await store.history(ORDERS)).toHaveLength(1);
+      expect((await store.favoritesOf(ORDERS))[0]?.query.filter).toBe('{ f: 1 }');
+    });
+
+    it('leaves no temporary file behind after a write', async () => {
+      const store = open();
+      await store.add(ORDERS, query('{ a: 1 }'));
+      await store.saveFavorite(ORDERS, 'F', query('{ f: 1 }'));
+      expect(await readdir(dir)).toEqual(expect.not.arrayContaining(['favorites.json.tmp']));
+      expect((await readdir(path.join(dir, 'history'))).filter((n) => n.endsWith('.tmp'))).toEqual(
+        [],
+      );
+    });
+
+    it('treats a history file with an unknown layout (version 0) as corrupt', async () => {
+      await mkdir(path.join(dir, 'history'));
+      const file = path.join(dir, 'history', historyFileName(ORDERS));
+      await writeFile(file, JSON.stringify({ version: 0, ...ORDERS, entries: [] }));
+      const logs: string[] = [];
+      const store = new HistoryStore({ dir, log: (m) => logs.push(m), now: () => new Date(0) });
+      expect(await store.history(ORDERS)).toEqual([]);
+      expect(await readdir(path.join(dir, 'history'))).toEqual([
+        `${historyFileName(ORDERS)}.corrupt-1970-01-01T00-00-00-000Z`,
+      ]);
+      expect(logs.join('\n')).toContain('is not valid; moved it to');
+    });
+
+    it('fails and logs when a corrupt file cannot be moved aside', async () => {
+      await writeFile(path.join(dir, 'favorites.json'), 'not json');
+      const logs: string[] = [];
+      const store = new HistoryStore({
+        dir,
+        log: (m) => logs.push(m),
+        fs: patched({ rename: () => Promise.reject(new Error('read-only volume')) }),
+      });
+      await expect(store.favoritesOf(ORDERS)).rejects.toThrow('read-only volume');
+      expect(logs.join('\n')).toContain('could not be moved aside');
+      // The file is untouched, so nothing is lost.
+      expect(await readFile(path.join(dir, 'favorites.json'), 'utf8')).toBe('not json');
+    });
+
+    it('logs a file that cannot be read', async () => {
+      const logs: string[] = [];
+      const store = new HistoryStore({
+        dir,
+        log: (m) => logs.push(m),
+        fs: patched({
+          readFile: () => Promise.reject(Object.assign(new Error('denied'), { code: 'EACCES' })),
+        }),
+      });
+      await expect(store.favoritesOf(ORDERS)).rejects.toThrow('denied');
+      expect(logs.join('\n')).toContain('could not read');
+    });
+
+    it('keeps serving requests after a failed one', async () => {
+      let failures = 1;
+      const store = open({
+        fs: patched({
+          writeFile: async (p, d, o) => {
+            if (failures-- > 0) throw new Error('disk full');
+            await fs.writeFile(p, d, o);
+          },
+        }),
+      });
+      const [failed, ok] = await Promise.allSettled([
+        store.add(ORDERS, query('{ a: 1 }')),
+        store.add(ORDERS, query('{ b: 1 }')),
+      ]);
+      expect(failed.status).toBe('rejected');
+      expect(ok).toMatchObject({ status: 'fulfilled' });
+      expect((await open().history(ORDERS)).map((e) => e.query.filter)).toEqual(['{ b: 1 }']);
+    });
+
+    it('clears a history whose file was already removed', async () => {
+      const store = open();
+      await store.add(ORDERS, query('{ a: 1 }'));
+      await rm(path.join(dir, 'history', historyFileName(ORDERS)));
+      expect(await store.clear(ORDERS)).toEqual([]);
+      expect(await store.history(ORDERS)).toEqual([]);
+    });
+
+    it('fails clear (keeping the history) when the file cannot be removed', async () => {
+      const store = open({
+        fs: patched({
+          unlink: () => Promise.reject(Object.assign(new Error('busy'), { code: 'EBUSY' })),
+        }),
+      });
+      await store.add(ORDERS, query('{ a: 1 }'));
+      await expect(store.clear(ORDERS)).rejects.toThrow('busy');
+      expect(await store.history(ORDERS)).toHaveLength(1);
+    });
+
+    it('does not write favorites.json when deleting an unknown id', async () => {
+      expect(await open().deleteFavorite(ORDERS, 'missing')).toEqual([]);
+      expect(await readdir(dir)).toEqual([]);
+    });
+
+    it('saves the same name concurrently as one favorite', async () => {
+      const store = open();
+      await Promise.all([
+        store.saveFavorite(ORDERS, 'Open', query('{ a: 1 }')),
+        store.saveFavorite(ORDERS, 'open ', query('{ a: 2 }')),
+      ]);
+      const favorites = await open().favoritesOf(ORDERS);
+      expect(favorites).toEqual([
+        { id: 'f1', name: 'open', query: query('{ a: 2 }'), at: expect.any(String) },
+      ]);
+    });
+
+    it('keeps a favorite with every field empty (it runs the whole collection)', async () => {
+      const favorites = await open().saveFavorite(ORDERS, 'All', query(''));
+      expect(favorites.map((f) => f.query)).toEqual([query('')]);
+    });
+
+    it('keeps favorites of a collection apart from the same-named one of another profile', async () => {
+      const store = open();
+      await store.saveFavorite(ORDERS, 'Same', query('{ a: 1 }'));
+      await store.saveFavorite(OTHER_PROFILE, 'Same', query('{ b: 1 }'));
+      expect(await store.deleteFavorite(OTHER_PROFILE, 'f1')).toHaveLength(1);
+      expect((await store.favoritesOf(ORDERS))[0]?.query.filter).toBe('{ a: 1 }');
+    });
+  });
 });

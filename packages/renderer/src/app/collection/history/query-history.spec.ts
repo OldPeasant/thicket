@@ -269,6 +269,73 @@ describe('CollectionView query history and favorites', () => {
     expect(value('history-favorite-name')).toBe('x');
   });
 
+  it('a favorite saved from an invalid bar fills the bar and shows the error without running', async () => {
+    favorites = [
+      {
+        id: 'f1',
+        name: 'Broken',
+        query: { filter: '{ a: ', projection: '', sort: '', collation: '', limit: '' },
+        at: '',
+      },
+    ];
+    fixture.componentRef.setInput('tab', { ...TAB, data: { ...TAB.data, coll: 'users' } });
+    await settle();
+    const before = finds().length;
+    click('history-toggle');
+    await settle();
+    all('history-favorite')[0]?.click();
+    await settle();
+    expect(value('query-filter')).toBe('{ a: ');
+    expect(get('query-filter').getAttribute('aria-invalid')).toBe('true');
+    expect(finds()).toHaveLength(before);
+    expect(fake.requestsFor('history.add')).toHaveLength(0);
+  });
+
+  it('records a run on the collection the tab shows now', async () => {
+    fixture.componentRef.setInput('tab', { ...TAB, data: { ...TAB.data, coll: 'users' } });
+    await settle();
+    type('query-filter', '{ u: 1 }');
+    click('query-run');
+    await settle();
+    expect(fake.requestsFor('history.add').map((r) => r.params)).toEqual([
+      expect.objectContaining({ profileId: 'p1', db: 'shop', coll: 'users' }),
+    ]);
+  });
+
+  it('Enter with a blank name neither saves nor runs the query', async () => {
+    click('history-toggle');
+    await settle();
+    type('history-favorite-name', '   ');
+    await settle();
+    expect(get<HTMLButtonElement>('history-favorite-save').disabled).toBe(true);
+    get('history-favorite-name').dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+    );
+    await settle();
+    expect(fake.requestsFor('history.saveFavorite')).toHaveLength(0);
+    expect(finds()).toHaveLength(1);
+  });
+
+  it('Escape with the panel closed is left to the surrounding view', async () => {
+    const seen: string[] = [];
+    el().addEventListener('keydown', (event) => seen.push(event.key));
+    get('history-toggle').dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+    );
+    await settle();
+    expect(seen).toEqual(['Escape']);
+  });
+
+  it('the History button toggles the panel', async () => {
+    click('history-toggle');
+    await settle();
+    expect(q('history-panel')).not.toBeNull();
+    click('history-toggle');
+    await settle();
+    expect(q('history-panel')).toBeNull();
+    expect(get('history-toggle').getAttribute('aria-expanded')).toBe('false');
+  });
+
   it('Escape closes the panel and returns focus to the History button', async () => {
     document.body.appendChild(el());
     click('history-toggle');

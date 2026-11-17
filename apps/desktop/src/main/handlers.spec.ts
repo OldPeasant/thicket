@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { HistoryStore } from '../history';
 import { ProfilesStore } from '../profiles';
 import { SecretsStore } from '../secrets';
 import { FakeSafeStorage } from '../secrets/testing';
@@ -120,6 +121,85 @@ describe("a window's main port (served with the renderer contract)", () => {
     });
     expect(byId.get('p')).toMatchObject({ ok: false, error: { code: 'UNKNOWN_METHOD' } });
     expect(byId.get('c')).toMatchObject({ ok: false, error: { code: 'UNKNOWN_METHOD' } });
+  });
+});
+
+describe('main handlers with a HistoryStore (task query-history)', () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'thicket-main-history-'));
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const HISTORY_METHODS = [
+    'history.list',
+    'history.add',
+    'history.clear',
+    'history.saveFavorite',
+    'history.deleteFavorite',
+  ];
+  const TARGET = { profileId: 'p1', db: 'shop', coll: 'orders' };
+  const QUERY = { filter: '{ a: 1 }', projection: '', sort: '', collation: '', limit: '' };
+
+  it('serves history.* only when a HistoryStore is given, never on the privileged port', () => {
+    const without = Object.keys(mainHandlers(deps('1')));
+    expect(without.filter((name) => name.startsWith('history.'))).toEqual([]);
+    const withHistory = Object.keys(
+      mainHandlers({ ...deps('1'), history: new HistoryStore({ dir }) }),
+    );
+    expect(withHistory).toEqual(expect.arrayContaining(HISTORY_METHODS));
+    for (const name of HISTORY_METHODS) expect(route(name)).toBe('main');
+    const privileged = Object.keys(privilegedHandlers({ secrets: emptyStore() }));
+    expect(privileged.filter((name) => name.startsWith('history.'))).toEqual([]);
+  });
+
+  it('answers history.* over a window port within the contract; invalid params write nothing', async () => {
+    const port = fakePort();
+    serve(port, {
+      table: methods,
+      route: 'main',
+      handlers: mainHandlers({ ...deps('1'), history: new HistoryStore({ dir }) }),
+    });
+    port.push({
+      id: 'bad',
+      method: 'history.saveFavorite',
+      params: { ...TARGET, name: '  ', query: QUERY },
+    });
+    port.push({
+      id: 'extra',
+      method: 'history.add',
+      params: { ...TARGET, query: { ...QUERY, hint: 'x' } },
+    });
+    await vi.waitFor(() => expect(port.sent).toHaveLength(2));
+    for (const answer of port.sent) {
+      expect(answer).toMatchObject({ ok: false, error: { code: 'INVALID_PARAMS' } });
+    }
+    expect(await readdir(dir)).toEqual([]);
+
+    port.push({ id: 'add', method: 'history.add', params: { ...TARGET, query: QUERY } });
+    await vi.waitFor(() => expect(port.sent).toHaveLength(3));
+    port.push({
+      id: 'fav',
+      method: 'history.saveFavorite',
+      params: { ...TARGET, name: '  Open ', query: QUERY },
+    });
+    await vi.waitFor(() => expect(port.sent).toHaveLength(4));
+    port.push({ id: 'list', method: 'history.list', params: TARGET });
+    await vi.waitFor(() => expect(port.sent).toHaveLength(5));
+    const byId = new Map(port.sent.map((r) => [r.id, r]));
+    expect(byId.get('fav')).toMatchObject({
+      ok: true,
+      result: { favorites: [{ name: 'Open', query: QUERY }] },
+    });
+    const list = byId.get('list');
+    expect(list).toMatchObject({
+      ok: true,
+      result: { entries: [{ query: QUERY }], favorites: [{ name: 'Open' }] },
+    });
+    if (list?.ok) expect(parseResult('history.list', list.result).ok).toBe(true);
+    expect((await readdir(dir)).sort()).toEqual(['favorites.json', 'history']);
   });
 });
 
