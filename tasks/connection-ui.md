@@ -13,7 +13,8 @@ Profile list (folders, colors), editor with form and connection-string tabs kept
 ## Acceptance criteria
 - [x] Component tests: editing the form updates the URI and vice versa; masked password
   - verified (2026-11-17 01:28+0100 by felix/agent-2): cd packages/renderer && npx ng test --watch=false --include='src/app/connections/**/*.spec.ts' at 0414a53 -> 3 files, 127 passed (editor spec: form edits update URI and URI paste updates form; password field masked and URI shows **** / secret URI options stripped and masked)
-- [ ] e2e: create a profile for the int-harness fixture, Test connection succeeds; wrong password shows AUTH_FAILED text
+- [x] e2e: create a profile for the int-harness fixture, Test connection succeeds; wrong password shows AUTH_FAILED text
+  - verified (2026-11-17 01:28+0100 by felix/agent-2): npm run test:e2e -- test/e2e/connections.e2e.ts (Electron app built from 0414a53, int-harness mongo fixture container) -> 'create a profile for the fixture: Test connection succeeds, a wrong password is AUTH_FAILED' passed
 - [ ] Ask-each-time prompts for the password on connect and does not store it (e2e checks secrets.bin unchanged)
 
 ## Notes
