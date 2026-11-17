@@ -217,6 +217,101 @@ test.describe('endProcessTree with a process group (POSIX)', () => {
   });
 });
 
+test.describe('endProcessTree with a child that leads no process group (POSIX)', () => {
+  test.skip(process.platform === 'win32', POSIX_ONLY);
+
+  /**
+   * Starts a non-detached child (in the test runner's group). With `ignoreTerm` it ignores SIGTERM
+   * and records each one as the file `sigterm`; it writes `ready` once its handler is installed.
+   */
+  async function startLoneChild({ ignoreTerm }: { ignoreTerm: boolean }) {
+    const dir = await tempDir('lone');
+    const child = spawnNode(
+      `
+      const fs = require('node:fs');
+      const path = require('node:path');
+      const dir = process.argv[1];
+      process.on('SIGTERM', () => {
+        fs.writeFileSync(path.join(dir, 'sigterm'), '');
+        if (process.argv[2] !== 'ignore-term') process.exit(0);
+      });
+      setInterval(() => undefined, 1000);
+      fs.writeFileSync(path.join(dir, 'ready'), '');
+      `,
+      [dir, ignoreTerm ? 'ignore-term' : 'default'],
+      { detached: false },
+    );
+    await expect.poll(() => exists(join(dir, 'ready')), { timeout: 15_000 }).toBe(true);
+    expect(processGroupAlive(pidOf(child)), 'the child leads no process group').toBe(false);
+    return { child, dir };
+  }
+
+  test('sends SIGTERM to the child alone and returns once it has exited', async () => {
+    const { child, dir } = await startLoneChild({ ignoreTerm: false });
+
+    await endProcessTree(child, { graceMs: 5_000 });
+
+    expect(exitedOf(child), 'the child has exited').toBe(true);
+    expect(await exists(join(dir, 'sigterm')), 'the child got SIGTERM').toBe(true);
+    expect(child.exitCode, 'the child exited from its SIGTERM handler').toBe(0);
+  });
+
+  test('sends SIGKILL to a child still running after graceMs', async () => {
+    const { child, dir } = await startLoneChild({ ignoreTerm: true });
+
+    await endProcessTree(child, { graceMs: 300 });
+
+    expect(await exists(join(dir, 'sigterm')), 'SIGTERM was sent first').toBe(true);
+    expect(child.signalCode, 'the child was killed').toBe('SIGKILL');
+  });
+
+  test('terminate: false sends no SIGTERM and kills the child after graceMs', async () => {
+    const { child, dir } = await startLoneChild({ ignoreTerm: true });
+
+    await endProcessTree(child, { terminate: false, graceMs: 300 });
+
+    expect(child.signalCode, 'the child was killed').toBe('SIGKILL');
+    expect(await exists(join(dir, 'sigterm')), 'no SIGTERM was sent').toBe(false);
+  });
+
+  test('terminate: false waits for a child that exits by itself within graceMs', async () => {
+    const dir = await tempDir('lone');
+    const child = spawnNode(
+      `
+      const fs = require('node:fs');
+      const path = require('node:path');
+      const dir = process.argv[1];
+      fs.writeFileSync(path.join(dir, 'ready'), '');
+      setTimeout(() => process.exit(4), 300);
+      `,
+      [dir],
+      { detached: false },
+    );
+    await expect.poll(() => exists(join(dir, 'ready')), { timeout: 15_000 }).toBe(true);
+
+    await endProcessTree(child, { terminate: false, graceMs: 10_000 });
+
+    expect(child.exitCode, 'the child exited by itself').toBe(4);
+    expect(child.signalCode, 'the child was not killed').toBeNull();
+  });
+
+  test('returns at once for a child that has exited already', async () => {
+    const child = spawnNode('process.exit(5)', [], { detached: false });
+    await new Promise((r) => child.once('exit', r));
+    const kill = child.kill.bind(child);
+    const signals: (NodeJS.Signals | number | undefined)[] = [];
+    child.kill = (signal) => {
+      signals.push(signal);
+      return kill(signal);
+    };
+
+    await endProcessTree(child);
+
+    expect(child.exitCode).toBe(5);
+    expect(signals, 'no signal was sent to the exited child').toEqual([]);
+  });
+});
+
 test.describe('processGroupAlive and waitForProcessGroupExit (POSIX)', () => {
   test.skip(process.platform === 'win32', POSIX_ONLY);
 
