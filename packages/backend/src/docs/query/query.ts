@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 
-import type { ParsedParamsOf, ResultOf, SlicedArray } from '@thicket/contract';
+import type { DocsBatch, ParsedParamsOf, ResultOf, SlicedArray } from '@thicket/contract';
 import {
   DEFAULT_SORT,
   findPlan,
@@ -319,6 +319,38 @@ export function buildFind(p: ParsedParamsOf<'docs.find'>): FindCommand {
   return { command: cmd, reverse: plan.reverseResults };
 }
 
+/**
+ * A large document (BSON size above `docBytes`) with its top-level arrays of more than `above`
+ * items cut to their first `above` items, for `docs.find`'s `slice`. Only arrays `docs.getSlice`
+ * can read the rest of: field names without `.` or a leading `$` and not all digits, returned
+ * whole by the projection (none of its keys names the field's inside, and the field itself only
+ * as a plain inclusion). Smaller documents and other fields are returned unchanged.
+ */
+export function sliceLargeArrays(
+  doc: Document,
+  above: number,
+  docBytes: number,
+  projection?: Document,
+): { doc: Document; arrays: SlicedArray[] } {
+  const arrays: SlicedArray[] = [];
+  if (BSON.calculateObjectSize(doc) <= docBytes) return { doc, arrays };
+  const keys = projection === undefined ? [] : Object.keys(projection);
+  let out: Document | undefined;
+  for (const [field, value] of Object.entries(doc)) {
+    if (!Array.isArray(value) || value.length <= above) continue;
+    if (field.includes('.') || field.startsWith('$') || /^\d+$/.test(field)) continue;
+    const named = keys.filter((k) => relatedPath(k, field));
+    const whole =
+      named.length === 0 ||
+      (named.length === 1 && named[0] === field && isIncluded(projection?.[field]));
+    if (!whole) continue;
+    out ??= { ...doc };
+    out[field] = value.slice(0, above);
+    arrays.push({ path: field, total: value.length, loaded: above });
+  }
+  return { doc: out ?? doc, arrays };
+}
+
 /** Largest batch of documents sent in one `data` event when no `batchSize` is given. */
 export const DEFAULT_EVENT_BATCH = 100;
 
@@ -330,18 +362,29 @@ export const DEFAULT_EVENT_BATCH = 100;
 export async function streamFind(
   client: ClientLike,
   p: ParsedParamsOf<'docs.find'>,
-  send: (batch: { docs: string[] }) => void,
+  send: (batch: DocsBatch) => void,
   signal?: AbortSignal,
   built: FindCommand = buildFind(p),
 ): Promise<number> {
   const { command: cmd, reverse } = built;
   const op = new Operation(client, p.db, p.coll, signal);
   const size = p.batchSize ?? DEFAULT_EVENT_BATCH;
+  const projection = cmd['projection'] as Document | undefined;
   let delivered = 0;
   const emit = (docs: Document[]) => {
     for (let i = 0; i < docs.length; i += size) {
       const chunk = docs.slice(i, i + size);
-      send({ docs: chunk.map(canonical) });
+      if (p.slice === undefined) {
+        send({ docs: chunk.map(canonical) });
+      } else {
+        const sliced: NonNullable<DocsBatch['sliced']> = [];
+        const texts = chunk.map((doc, index) => {
+          const cut = sliceLargeArrays(doc, p.slice!.above, p.slice!.docBytes, projection);
+          if (cut.arrays.length > 0) sliced.push({ index, arrays: cut.arrays });
+          return canonical(cut.doc);
+        });
+        send(sliced.length > 0 ? { docs: texts, sliced } : { docs: texts });
+      }
       delivered += chunk.length;
     }
   };
