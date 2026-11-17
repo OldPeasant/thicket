@@ -12,6 +12,7 @@ import {
 import { Router, RouterLink } from '@angular/router';
 import {
   READ_PREFERENCES,
+  type Profile,
   type ProfileDraft,
   type ResultOf,
   type SecretKind,
@@ -493,47 +494,76 @@ export class ConnectionEditor {
     this.attempted.set(true);
     if (this.problems().length > 0 || this.saving()) return;
     const state = this.state();
+    // A profile switch while saving (same editor instance) must not show the saved profile.
+    const gen = this.loadGeneration;
+    const current = (): boolean => gen === this.loadGeneration;
     this.saving.set(true);
     this.saveError.set(null);
     try {
-      const { profile } = await this.api.request('profiles.save', {
-        profile: profileDraftFromState(state),
-      });
-      const password = state.password;
-      if (usesPassword(state.mechanism) && state.secretMode === 'saved' && password !== '') {
-        await this.api.request('profiles.setSecret', {
-          profileId: profile.id,
-          kind: 'password',
-          value: password,
-        });
-        this.storedSecrets.update((kinds) =>
-          kinds.includes('password') ? kinds : [...kinds, 'password'],
-        );
-      } else if (state.secretMode !== 'saved') {
-        this.storedSecrets.update((kinds) => kinds.filter((k) => k !== 'password'));
+      let profile: Profile;
+      try {
+        ({ profile } = await this.api.request('profiles.save', {
+          profile: profileDraftFromState(state),
+        }));
+      } catch (error) {
+        if (current()) this.saveError.set(describeError(error));
+        return;
       }
+      // The profile exists now: adopt it before storing the password, so a retry after a
+      // failed setSecret updates it instead of creating a second one.
       this.safety.set({
         id: profile.id,
         name: profile.name,
         readOnly: profile.readOnly,
         production: profile.production,
       });
+      void this.tree.reloadProfiles();
       const fallback = this.storage()?.defaultSecretMode ?? 'ask';
-      const saved = { ...editorStateFromProfile(profile, fallback), password: '' };
-      this.state.set(saved);
-      this.loadedDraft = this.draftKey(saved);
+      const adopted: EditorState = { ...editorStateFromProfile(profile, fallback), password: '' };
+      if (state.droppedSecrets) adopted.droppedSecrets = state.droppedSecrets;
+      // Keeps the typed password until it is stored.
+      const pending: EditorState = { ...adopted, password: state.password };
+      if (current()) {
+        this.state.set(pending);
+        this.loadedDraft = this.draftKey(adopted);
+      }
+
+      const password = state.password;
+      if (usesPassword(state.mechanism) && state.secretMode === 'saved' && password !== '') {
+        try {
+          await this.api.request('profiles.setSecret', {
+            profileId: profile.id,
+            kind: 'password',
+            value: password,
+          });
+        } catch (error) {
+          if (current()) {
+            this.saveError.set(
+              `Saved, but the password could not be stored: ${describeError(error)}`,
+            );
+          }
+          return;
+        }
+        if (current()) {
+          this.storedSecrets.update((kinds) =>
+            kinds.includes('password') ? kinds : [...kinds, 'password'],
+          );
+        }
+      } else if (state.secretMode !== 'saved' && current()) {
+        this.storedSecrets.update((kinds) => kinds.filter((k) => k !== 'password'));
+      }
+      if (!current()) return;
+      // Edits made while the password was being stored stay.
+      this.state.update((s) => (s === pending ? adopted : s));
       this.attempted.set(false);
       this.savedNotice.set(true);
-      void this.tree.reloadProfiles();
-      if (state.id === undefined) {
+      if (this.id() === undefined) {
         // Continue on the saved profile's own page (a new editor instance shows the notice).
         void this.router.navigate(['/connections', profile.id], {
           replaceUrl: true,
           state: { [SAVED_STATE]: true },
         });
       }
-    } catch (error) {
-      this.saveError.set(describeError(error));
     } finally {
       this.saving.set(false);
     }

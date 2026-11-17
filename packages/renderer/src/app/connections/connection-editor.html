@@ -37,12 +37,12 @@
               (input)="setName(value($event))"
             />
           </label>
-          <p class="where">
-            <span data-testid="page-heading">{{ heading() }}</span>
+          <div class="where">
+            <h1 class="where-heading" data-testid="page-heading">{{ heading() }}</h1>
             @if (state().folder) {
               <span class="in-folder">in {{ state().folder }}</span>
             }
-          </p>
+          </div>
         </div>
         <div class="head-actions">
           @if (test().status === 'running') {
@@ -98,6 +98,12 @@
         }
         @if (savedNotice()) {
           <p class="result ok" data-testid="saved-notice">Saved.</p>
+        }
+        @if (state().droppedSecrets; as dropped) {
+          <p class="warning" role="note" data-testid="dropped-secrets">
+            Not stored: {{ dropped.join(', ') }} from the connection string. Thicket keeps secrets
+            only in the OS keychain, and this editor does not save these yet.
+          </p>
         }
         @if (saveError(); as error) {
           <p class="result error" role="alert" data-testid="save-error">{{ error }}</p>

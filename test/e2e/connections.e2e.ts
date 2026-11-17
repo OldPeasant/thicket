@@ -102,10 +102,30 @@ test('ask each time: connecting prompts for the password and stores nothing', as
   mongo,
   userDataDir,
 }) => {
-  const user = await createUser(mongo.uri);
-  const before = await secretsFile(userDataDir);
-
+  // Control: in this environment a password saved in `saved` mode does change secrets.bin, so
+  // the "unchanged" checks below would catch a write (they prove nothing if no secret store
+  // could be written here).
+  const control = await createUser(mongo.uri);
   await window.getByTestId('welcome-new').click();
+  await fillServer(window, {
+    name: 'Saved control',
+    host: mongo.host,
+    port: mongo.port,
+    ...control,
+  });
+  await expect(window.getByTestId('no-keychain')).toHaveCount(0);
+  await window.getByTestId('secret-saved').check();
+  const empty = await secretsFile(userDataDir);
+  await window.getByTestId('save').click();
+  await expect(window.getByTestId('saved-notice')).toBeVisible();
+  const before = await secretsFile(userDataDir);
+  expect(before).not.toBeNull();
+  expect(before).not.toEqual(empty);
+
+  const user = await createUser(mongo.uri);
+  await window.getByTestId('sidebar-manage').click();
+  await window.getByTestId('manager-new').click();
+  await expect(window.getByTestId('page-heading')).toHaveText('New connection');
   await fillServer(window, { name: 'Ask fixture', host: mongo.host, port: mongo.port, ...user });
   await window.getByTestId('secret-ask').check();
   await expect(window.getByTestId('ask-hint')).toBeVisible();

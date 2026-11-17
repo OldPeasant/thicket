@@ -551,6 +551,100 @@ describe('ConnectionEditor', () => {
     });
   });
 
+  describe('review fixes', () => {
+    const SECRET = 'fictitious-Pr0xy';
+
+    it('secret URI options are masked, never saved, and the editor says they were not stored', async () => {
+      await start();
+      await input(must('field-name'), 'Proxied');
+      await click('tab-uri');
+      await input(
+        must('field-uri'),
+        `mongodb://dave@db.example:27017/?proxyHost=socks.example&proxyPassword=${SECRET}` +
+          `&tlsCertificateKeyFile=%2Fk.pem&tlsCertificateKeyFilePassword=${SECRET}` +
+          `&authMechanismProperties=AWS_SESSION_TOKEN:${SECRET}`,
+      );
+      await click('tab-form');
+      expect(text('uri-preview')).not.toContain(SECRET);
+      expect(text('dropped-secrets')).toContain('proxyPassword');
+      expect(text('dropped-secrets')).toContain('tlsCertificateKeyFilePassword');
+      expect(text('dropped-secrets')).toContain('AWS_SESSION_TOKEN');
+      await click('tab-uri');
+      expect(must<HTMLTextAreaElement>('field-uri').value).not.toContain(SECRET);
+
+      await click('save');
+      expect(JSON.stringify(savedDraft())).not.toContain(SECRET);
+      await click('test-connection');
+      expect(JSON.stringify(fake.requestsFor('conn.test'))).not.toContain(SECRET);
+    });
+
+    it('the ready editor has a level-1 page heading', async () => {
+      await start('p1');
+      expect(must('page-heading').tagName).toBe('H1');
+      expect(text('page-heading')).toBe('Edit connection');
+    });
+
+    it('a failed setSecret keeps the new profile: a retry updates it instead of creating another', async () => {
+      fake.fail('profiles.setSecret', {
+        code: 'INTERNAL',
+        message: 'keychain locked (fictitious)',
+      });
+      await start();
+      await input(must('field-name'), 'Fresh');
+      await change(must<HTMLSelectElement>('field-mechanism'), 'SCRAM-SHA-256');
+      await input(must('field-username'), 'fay');
+      await input(must('field-password'), 'typed-pw');
+      await check('secret-saved');
+      await click('save');
+
+      expect(text('save-error')).toContain('Saved, but the password could not be stored');
+      expect(text('save-error')).toContain('keychain locked (fictitious)');
+      expect(text('page-heading')).toBe('Edit connection');
+      expect(must<HTMLInputElement>('field-password').value).toBe('typed-pw');
+      expect(fake.requestsFor('profiles.list').length).toBeGreaterThan(1);
+      expect(TestBed.inject(Router).url).not.toBe('/connections/new-id');
+
+      fake.respond('profiles.setSecret', { secureStorage: true });
+      await click('save');
+      const saves = fake.requestsFor('profiles.save');
+      expect(saves).toHaveLength(2);
+      expect(savedDraft().id).toBe('new-id');
+      expect(fake.requestsFor('profiles.setSecret').map((r) => r.params)).toEqual([
+        { profileId: 'new-id', kind: 'password', value: 'typed-pw' },
+        { profileId: 'new-id', kind: 'password', value: 'typed-pw' },
+      ]);
+      expect(el.querySelector('[data-testid="save-error"]')).toBeNull();
+      expect(TestBed.inject(Router).url).toBe('/connections/new-id');
+    });
+
+    it('switching to another profile while Save runs shows the new profile, not the saved one', async () => {
+      fake.handle('profiles.get', ({ profileId }) => ({
+        profile: saved({ id: profileId, name: `Name ${profileId}` }),
+        storedSecrets: [],
+      }));
+      let release: (() => void) | undefined;
+      fake.handle(
+        'profiles.save',
+        ({ profile }) =>
+          new Promise((resolve) => {
+            release = () => resolve({ profile: { ...profile, id: profile.id ?? 'x' } });
+          }),
+      );
+      await start('p1');
+      await input(must('field-name'), 'Renamed p1');
+      await click('save');
+      fixture.componentRef.setInput('id', 'p2');
+      await settle();
+      expect(must<HTMLInputElement>('field-name').value).toBe('Name p2');
+      release?.();
+      await settle();
+      expect(must<HTMLInputElement>('field-name').value).toBe('Name p2');
+      expect(el.querySelector('[data-testid="saved-notice"]')).toBeNull();
+      expect(el.querySelector('[data-testid="save-error"]')).toBeNull();
+      expect(must<HTMLButtonElement>('save').disabled).toBe(false);
+    });
+  });
+
   it('problems block saving and testing', async () => {
     await start();
     await change(nth('field-host', 0), '');

@@ -12,6 +12,7 @@ import {
   hostSummary,
   newEditorState,
   profileDraftFromState,
+  stripUriSecrets,
   usesPassword,
   type EditorState,
 } from './connection-form.model';
@@ -589,6 +590,97 @@ describe('connection-form.model', () => {
       ];
       expect(folderNames(profiles)).toEqual(['Alpha/One', 'Zeta']);
       expect(folderNames([])).toEqual([]);
+    });
+  });
+
+  describe('secret URI options (review fix CR-1)', () => {
+    const base = 'mongodb://alice@db1.example.test/?authMechanism=SCRAM-SHA-256';
+    const cases: { option: string; query: string; dropped: string }[] = [
+      {
+        option: 'proxyPassword',
+        query: `proxyHost=p.test&proxyPassword=${PW}`,
+        dropped: 'proxyPassword',
+      },
+      {
+        option: 'tlsCertificateKeyFilePassword',
+        query: `tlsCertificateKeyFile=%2Fc.pem&tlsCertificateKeyFilePassword=${PW}`,
+        dropped: 'tlsCertificateKeyFilePassword',
+      },
+      {
+        option: 'AWS_SESSION_TOKEN',
+        query: `authMechanismProperties=AWS_SESSION_TOKEN:${PW},SERVICE_NAME:mongodb`,
+        dropped: 'authMechanismProperties AWS_SESSION_TOKEN',
+      },
+      {
+        option: 'proxyPassword in other case',
+        query: `PROXYPASSWORD=${PW}`,
+        dropped: 'proxyPassword',
+      },
+      {
+        option: 'a repeated proxyPassword (kept in extra)',
+        query: `proxyPassword=${PW}&proxyPassword=${PW}2`,
+        dropped: 'proxyPassword',
+      },
+      {
+        option: 'an invalid authMechanismProperties (kept in extra)',
+        query: `authMechanismProperties=AWS_SESSION_TOKEN:${PW},broken`,
+        dropped: 'authMechanismProperties',
+      },
+    ];
+
+    for (const { option, query, dropped } of cases) {
+      it(`${option}: not in the draft, not shown, reported as not stored`, () => {
+        const state = applied(withState({ name: 'S' }), `${base}&${query}`);
+        expect(state.droppedSecrets).toContain(dropped);
+        expect(JSON.stringify(profileDraftFromState(state))).not.toContain(PW);
+        expect(uriOf(state)).not.toContain(PW);
+      });
+
+      it(`${option}: a saved profile holding it loads without it`, () => {
+        const state = editorStateFromProfile(
+          profile({ connectionString: `${base}&${query}` }),
+          'saved',
+        );
+        expect(state.droppedSecrets).toContain(dropped);
+        expect(JSON.stringify(profileDraftFromState(state))).not.toContain(PW);
+      });
+
+      it(`${option}: a model holding it is cleaned when the draft is built`, () => {
+        const state = withState({ name: 'S' });
+        // Bypass applyConnectionString: put the secret straight into the model.
+        const raw = applied(state, `${base}&${query}`);
+        const model = structuredClone(raw.model);
+        if (option === 'proxyPassword') model.proxy.password = PW;
+        if (option === 'tlsCertificateKeyFilePassword') model.tls.certificateKeyFilePassword = PW;
+        if (option === 'AWS_SESSION_TOKEN') {
+          model.auth.mechanismProperties = { AWS_SESSION_TOKEN: PW };
+        }
+        const dirty = { ...raw, model };
+        expect(JSON.stringify(profileDraftFromState(dirty))).not.toContain(PW);
+        expect(uriOf(dirty)).not.toContain(PW);
+      });
+    }
+
+    it('keeps the non-secret parts of the options', () => {
+      const state = applied(
+        withState({ name: 'S' }),
+        `${base}&proxyHost=p.test&proxyUsername=pat&proxyPassword=${PW}` +
+          `&authMechanismProperties=AWS_SESSION_TOKEN:${PW},SERVICE_NAME:mongodb`,
+      );
+      const uri = profileDraftFromState(state).connectionString;
+      expect(uri).toContain('proxyHost=p.test');
+      expect(uri).toContain('proxyUsername=pat');
+      expect(uri).toContain('authMechanismProperties=SERVICE_NAME:mongodb');
+    });
+
+    it('a connection string without secrets reports none', () => {
+      expect(applied(withState({ name: 'S' }), base).droppedSecrets).toBeUndefined();
+      const state = applied(withState({ name: 'S' }), `${base}&proxyPassword=${PW}`);
+      expect(applied(state, base).droppedSecrets).toBeUndefined();
+    });
+
+    it('stripUriSecrets reports nothing for a clean model', () => {
+      expect(stripUriSecrets(emptyConnectionModel())).toEqual([]);
     });
   });
 });

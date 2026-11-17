@@ -108,6 +108,14 @@
   color: var(--text-muted);
 }
 
+/* The page's level-1 heading, styled as the quiet line under the name. */
+.where-heading {
+  display: inline;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+}
+
 .head-actions {
   display: flex;
   gap: 0.5rem;
