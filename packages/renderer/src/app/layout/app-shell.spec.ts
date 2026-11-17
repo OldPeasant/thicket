@@ -1048,6 +1048,66 @@ describe('AppShell', () => {
       expect(counts()).toEqual([0, 0, 0]);
     });
 
+    /**
+     * Counts the pointer listeners currently attached to the document. Installed before the shell
+     * is created, so listeners registered at creation (host bindings) count too.
+     */
+    const trackDocumentPointerListeners = () => {
+      const types = ['pointermove', 'pointerup', 'pointercancel'];
+      const active = new Map<string, Set<EventListenerOrEventListenerObject>>();
+      const add = document.addEventListener.bind(document);
+      const remove = document.removeEventListener.bind(document);
+      vi.spyOn(document, 'addEventListener').mockImplementation((type, listener, options) => {
+        if (types.includes(type) && listener) {
+          const set = active.get(type) ?? new Set();
+          set.add(listener);
+          active.set(type, set);
+        }
+        add(type, listener, options);
+      });
+      vi.spyOn(document, 'removeEventListener').mockImplementation((type, listener, options) => {
+        if (listener) active.get(type)?.delete(listener);
+        remove(type, listener, options);
+      });
+      return () => types.map((type) => active.get(type)?.size ?? 0);
+    };
+
+    it('creating the shell attaches no document pointer listeners', async () => {
+      const counts = trackDocumentPointerListeners();
+      await start();
+      await settle();
+      expect(counts()).toEqual([0, 0, 0]);
+      // A move anywhere outside a drag still changes nothing.
+      onDocument('pointermove', 700);
+      await settle();
+      expect(width()).toBe('300px');
+      // Destroying the shell without a drag running is fine and leaves nothing behind.
+      harness.fixture.destroy();
+      expect(counts()).toEqual([0, 0, 0]);
+    });
+
+    it("another pointer's release or cancel and a secondary press keep the drag's listeners", async () => {
+      const counts = trackDocumentPointerListeners();
+      await start();
+      await settle();
+      pointer('pointerdown', 500);
+      expect(counts()).toEqual([1, 1, 1]);
+      onDocument('pointerup', 700, 2);
+      onDocument('pointercancel', 700, 2);
+      pointer('pointerdown', 700, { button: 2 });
+      expect(counts()).toEqual([1, 1, 1]);
+      // The drag keeps going from its own start, then ends and removes its listeners.
+      onDocument('pointermove', 520);
+      await settle();
+      expect(width()).toBe('320px');
+      onDocument('pointerup', 525);
+      await settle();
+      expect(counts()).toEqual([0, 0, 0]);
+      expect(fake.requestsFor('app.settings.set').map((r) => r.params)).toEqual([
+        { settings: { sidebarWidth: 325 } },
+      ]);
+    });
+
     it('a click on the splitter without moving saves nothing', async () => {
       await start();
       pointer('pointerdown', 500);

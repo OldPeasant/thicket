@@ -4,27 +4,30 @@ Date: 2026-11-17
 
 Task: e2e-suite-red - Test: fix failing e2e tests (layout Compass heading, sidebar drag, LDAP fixture start)
 
-Scope: committed task changes 99822f17..0afc4384 (commits 19f1b5f6 and 0afc4384). An uncommitted modification of `packages/renderer/src/app/layout/app-shell.spec.ts` present in the working tree during the review is outside the reviewed scope.
+Scope: second review round on the final code. Committed task changes 99822f17..8d46a2d2 (commits 19f1b5f6, 0afc4384, 91295397, 8d46a2d2), including the fixer's change to `packages/renderer/src/app/layout/app-shell.ts` (CR-2 of round one) and the test-writer's new tests (`test/integration/ldap-fixture-start.int.spec.ts`, `test/integration/ldap-fixture.int.spec.ts`, `packages/renderer/src/app/layout/app-shell.spec.ts`). The working tree was clean. Playwright/e2e was not run by the reviewer, as the parent instructed.
 
 Requirements:
 - tasks/e2e-suite-red.md acceptance criteria and its ASSUMPTION notes
-- SPEC.md, docs/ARCHITECTURE.md ("End-to-end tests"), AGENTS.md, docs/QUALITY.md
-- Parent instructions (document listener interference, multiple AppShell instances, pointercancel semantics, maintainability)
+- SPEC.md, docs/ARCHITECTURE.md ("End-to-end tests"), AGENTS.md, docs/QUALITY.md ("Freshness")
+- Parent instructions: review the whole task diff at the final revision; criterion 1 will be recorded as passing on this host (display and headless), with a note that ldap.e2e skips on hosts with kernels 6.19.0-7.0.13
+- reviews/e2e-suite-red/fixes.md and reviews/e2e-suite-red/tests.md
 
 Git range:
 - Branch: main
-- HEAD: 0afc438492cfcde840e1e9669a5659206a37ff39
+- HEAD: 8d46a2d2d2b4313f98c496b9ff5cdb984e63bdc9
 - Base/start: 99822f17381bb12183df3ac07f81791afd91c511
-- Commits reviewed: 2
+- Commits reviewed: 4
 
-Summary: 0 P0, 0 P1, 1 P2, 1 P3
+Summary: 0 P0, 0 P1, 1 P2, 0 P3
 
 Checked and not reported:
-- Interference with other pointer interactions: `dragMove`/`dragEnd` return immediately unless a splitter drag is active and the pointer id matches; they call neither `preventDefault` nor `stopPropagation`, so tab drag, sidebar tree (`document:mousedown`), the query history menu (`document:pointerdown`) and the column menu are not affected.
-- Multiple AppShell instances: there is one AppShell per window (one document each); `drag` state is per instance and guarded by pointer id.
-- pointercancel: still ends the drag and saves the last previewed width, as before; only pointerup takes the release position. A click without movement still saves nothing (`commit` sees the unchanged stored value).
-- LDAP fixture: containers and the network are still stopped on the new error path (the existing `catch` calls `stop()`); the unsupported error is only raised when the Enterprise container actually failed to start, on Linux, with a kernel in the affected range, and it keeps the original reason in its message. The other failures are rethrown unchanged.
-- The app-bug criterion (#2) is covered: `app-shell.spec.ts` dispatches move/up on another element (bubbling to the document) and checks the preview, the saved width, that later moves do nothing, and that a release without intermediate moves takes the release position.
+- Round-one CR-2 (document host listeners scheduled change detection on every pointer move) is resolved. The `(document:pointer*)` host bindings and the old splitter `(pointermove)/(pointerup)/(pointercancel)` bindings are gone. `dragStart` attaches plain DOM listeners to the injected `DOCUMENT` only after a primary-button press (`listenToDrag`). `listenToDrag` first removes any listeners already attached, so a second press cannot leave duplicates. `dragEnd` removes them for the dragging pointer's release or cancel, and `DestroyRef.onDestroy` removes them when the shell is destroyed. The width preview is a signal (`SidebarWidthService.preview`), so it still renders in the zoneless app without Angular's listener wrapping.
+- With pointer capture in effect, events are retargeted to the splitter and still bubble to the document, so the document listeners cover both the captured and the uncaptured case. The handlers call neither `preventDefault` nor `stopPropagation`, so other document-level pointer handlers (tab drag, sidebar tree, query history menu) are not affected.
+- `dragEnd(event, atPointer)`: pointerup takes the release position (clamped by the service), and pointercancel keeps the last previewed width. A cancel or a click without movement saves nothing, because `commit` sees the unchanged width. Events from another pointer id are ignored.
+- LDAP fixture: `LdapFixtureUnsupportedError` is only raised when the Enterprise container start was rejected, `process.platform === 'linux'` and `os.release()` is in 6.19.0-7.0.13. The message keeps the original reason. Other failures are rethrown unchanged, OpenLDAP first, which is the same order as before. On every error path, the existing `catch` stops the containers that started and the network. `ldap.e2e.ts` only turns that specific error into a skip with its message, and still fails on any other error.
+- `kernelBreaksMongo80` parses major.minor[.patch] and returns false for unparsable input. The boundaries (6.19.0, 7.0.13 and 7.0.14) are tested.
+- Tests: `ldap-fixture-start.int.spec.ts` replaces `testcontainers` and `os.release` with fakes, restores `process.platform` and the `release` mock after each test, and checks that resources are cleaned up. The new `app-shell.spec.ts` drag tests dispatch on other elements or on the document itself. They cover the app-bug criterion (#2): moves and the release off the splitter, the release position, cancel semantics, other pointer ids, a second drag, no effect without a splitter press, and listener removal on release, cancel and destroy. The `addEventListener` spies in the fixer's test are undone by the describe block's `afterEach(() => vi.restoreAllMocks())`.
+- No secrets: the fixture passwords are generated per run (`secret()`), and the test fixtures use only fictitious error strings.
 
 ## P0 Critical
 
@@ -36,22 +39,19 @@ None.
 
 ## P2 Medium
 
-- [ ] **CR-1 | On affected hosts the LDAP e2e test is skipped rather than passing, and the cause is unconfirmed**
-    - File: `test/e2e/ldap.e2e.ts:28` (with `test/integration/fixtures/ldap.ts:183`)
+- [ ] **CR-1 | On affected hosts the LDAP e2e test is skipped, not passing, and any Enterprise start failure there is classified as "unsupported"**
+    - File: `test/integration/fixtures/ldap.ts:183` (used by `test/e2e/ldap.e2e.ts:28`)
     - Category: Tests
-    - Problem: Criterion #1 says "the three tests pass". The change does not make `ldap.e2e.ts:33` pass on the host where it failed. It makes the test skip there, based on a kernel-range hypothesis (SERVER-121912) that, according to the task's own ASSUMPTION note, could not be reproduced here (kernel 7.1.3 is outside the range). On such a host, any Enterprise-container start failure (for example an image pull or a log-wait timeout for another reason) is also reported as "unsupported" and skipped.
-    - Why it matters: if the hypothesis is wrong, the original failure on that host becomes a silent skip and the criterion's "pass" is not met there. A skip is visible in the report with the reason, but it is not a pass.
-    - Suggested fix: no code change needed if humans accept the assumption. When recording evidence for criterion #1, say exactly where the LDAP test passed (this host, under a display and headless) and that it skips on hosts with kernels 6.19.0-7.0.13 because the cause there was not reproduced. Do not record it as passing everywhere. Optionally, raise `LdapFixtureUnsupportedError` only when the container log or reason matches the known refusal, so other start failures still fail.
+    - Problem: This is unchanged from round one. On a Linux host with a kernel between 6.19.0 and 7.0.13, every rejected Enterprise container start becomes `LdapFixtureUnsupportedError`, and `ldap.e2e.ts` then skips. That includes an image pull failure or a log-wait timeout with a different cause. The SERVER-121912 attribution was not reproduced: this host runs 7.1.3, as the task's ASSUMPTION note and tests.md say.
+    - Why it matters: Criterion #1 says "pass". On the host where the original failure was seen, the test now skips, so the criterion is met only on unaffected hosts. If the kernel hypothesis is wrong, a real fixture failure on such a host is hidden as a skip. The skip reason is visible in the report, which limits the impact.
+    - Suggested fix: The parent's announced evidence wording handles the evidence side. It records criterion #1 as passing on this host (display and headless) and states that ldap.e2e skips on hosts with kernels 6.19.0-7.0.13. The recorded ASSUMPTION is still for humans to confirm. If more certainty is wanted, raise the unsupported error only when the container's exit log or the rejection reason matches the known refusal, so that other start failures still fail.
 
 ## P3 Low
 
-- [ ] **CR-2 | Document-level pointermove host listener triggers a change-detection pass on every pointer move**
-    - File: `packages/renderer/src/app/layout/app-shell.ts:71`
-    - Category: Quality
-    - Problem: the app is zoneless (`provideZonelessChangeDetection()` in `app.config.ts`). Angular template and host listeners mark their view dirty and schedule an application tick each time they fire, even when the handler returns early. `(document:pointermove)` on the root AppShell therefore schedules a tick for every mouse move anywhere in the window, not only during a splitter drag. Before this change, pointermove was only listened to on the splitter.
-    - Why it matters: AppShell and the explorer hosts are OnPush, so each tick is cheap. Still, this is avoidable work on the hottest event in the UI (hovering large result tables). It also makes `(document:pointermove)` a pattern that others may copy.
-    - Suggested fix: add the document `pointermove`/`pointerup`/`pointercancel` listeners in `dragStart` (for example with `Renderer2.listen` or `addEventListener`, outside Angular's listener wrapping) and remove them in `dragEnd` and on destroy. The preview is signal-based, so it still renders without the listener marking the view dirty.
+None.
 
 ## Review conclusion
 
-No material issues found. CR-1 concerns how criterion #1 is evidenced, and the human-reviewed assumption, rather than a code defect. CR-2 is optional.
+No material issues found. CR-1 is about how criterion #1 is evidenced and about the human-reviewed assumption, not a code defect. The parent's planned evidence wording covers it.
+
+Process note for the parent (not a code finding): `reviews/e2e-suite-red/tests.md` was written at 91295397, before the fixer's code change in 8d46a2d2. It still describes the removed host bindings (coverage note on "lines 67-73") and reports 72 app-shell tests, while there are now 73. Under docs/QUALITY.md "Freshness", the test-writer evidence is stale for the final revision until the test-writer runs again on 8d46a2d2.
