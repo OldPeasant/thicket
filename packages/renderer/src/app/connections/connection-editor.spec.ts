@@ -340,6 +340,24 @@ describe('ConnectionEditor', () => {
       expect(text('test-ok')).toContain('Connected in < 1 ms');
     });
 
+    it.each([
+      [0, '< 1'],
+      [0.49, '< 1'],
+      [0.5, '1'],
+      [1.49, '1'],
+      [1.5, '2'],
+      [12, '12'],
+      [1234.56, '1235'],
+    ])('Test connection latency %s ms is shown as "%s ms"', async (latencyMS, shown) => {
+      fake.respond('conn.test', {
+        latencyMS,
+        server: { version: '8.2.1', topology: 'standalone', enterprise: false, raw: '{}' },
+      });
+      await start('p1');
+      await click('test-connection');
+      expect(text('test-ok')).toMatch(new RegExp(`^Connected in ${shown} ms to MongoDB 8\\.2\\.1`));
+    });
+
     it('a failed test shows the error code, its explanation and the message', async () => {
       fake.fail('conn.test', {
         code: 'AUTH_FAILED',

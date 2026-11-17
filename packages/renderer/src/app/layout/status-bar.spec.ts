@@ -94,6 +94,58 @@ describe('StatusBar', () => {
     expect(ops()?.querySelector('.more')?.textContent).toBe('+2 more');
   });
 
+  describe('connection input', () => {
+    it("shows the input connection instead of the status service's", async () => {
+      status.setConnection({ name: 'service-conn', state: 'error' });
+      fixture.componentRef.setInput('connection', {
+        name: 'tab-conn',
+        state: 'connected',
+        production: true,
+        readonly: true,
+      });
+      await render();
+      expect(conn()?.querySelector('.name')?.textContent).toBe('tab-conn');
+      expect(conn()?.querySelector('.state')?.textContent).toBe('Connected');
+      expect(conn()?.querySelector('.dot')?.getAttribute('data-state')).toBe('connected');
+      expect(conn()?.textContent).not.toContain('service-conn');
+      expect(conn()?.querySelector('.flag.production')?.textContent).toBe('Production');
+      expect(conn()?.querySelector('.flag.readonly')?.textContent).toBe('Read-only');
+      const host = fixture.nativeElement as HTMLElement;
+      expect(host.classList).toContain('production');
+      expect(host.classList).toContain('readonly');
+    });
+
+    it('shows the input connection when the status service has none', async () => {
+      fixture.componentRef.setInput('connection', { name: 'tab-only', state: 'connecting' });
+      await render();
+      expect(conn()?.querySelector('.name')?.textContent).toBe('tab-only');
+      expect(conn()?.querySelector('.state')?.textContent).toBe('Connecting…');
+      expect(conn()?.textContent).not.toContain('No connection');
+    });
+
+    it("falls back to the status service's connection when the input is cleared", async () => {
+      const host = fixture.nativeElement as HTMLElement;
+      status.setConnection({ name: 'service-conn', state: 'disconnected' });
+      fixture.componentRef.setInput('connection', {
+        name: 'tab-conn',
+        state: 'connected',
+        production: true,
+      });
+      await render();
+      expect(host.classList).toContain('production');
+      fixture.componentRef.setInput('connection', undefined);
+      await render();
+      expect(conn()?.querySelector('.name')?.textContent).toBe('service-conn');
+      expect(conn()?.querySelector('.state')?.textContent).toBe('Disconnected');
+      expect(conn()?.querySelector('.flag')).toBeNull();
+      expect(host.classList).not.toContain('production');
+      expect(host.classList).not.toContain('readonly');
+      status.setConnection(null);
+      await render();
+      expect(conn()?.textContent).toContain('No connection');
+    });
+  });
+
   it('announces operations politely', () => {
     expect(ops()?.getAttribute('role')).toBe('status');
     expect(ops()?.getAttribute('aria-live')).toBe('polite');

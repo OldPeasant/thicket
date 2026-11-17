@@ -1078,6 +1078,110 @@ describe('AppShell', () => {
       expect(conn()).toContain('No connection');
       expect(bar().classList).not.toContain('production');
     });
+
+    describe('active tab connection edge cases', () => {
+      const dev: Profile = {
+        id: 'p-dev',
+        name: 'Dev Sandbox',
+        connectionString: 'mongodb://localhost:27017',
+        readOnly: false,
+        production: false,
+      };
+      const prod: Profile = {
+        id: 'p-prod',
+        name: 'Fictitious Prod',
+        connectionString: 'mongodb://localhost:27018',
+        readOnly: false,
+        production: true,
+      };
+      const conn = () => el.querySelector('[data-testid="status-connection"]')?.textContent ?? '';
+      const bar = () => must(el.querySelector<HTMLElement>('app-status-bar'));
+      const collTab = (profileId: unknown, extra: Partial<WorkspaceTab> = {}) =>
+        tab(`collection:${String(profileId)}:db.c`, {
+          data: { profileId, db: 'db', coll: 'c', type: 'collection' },
+          ...extra,
+        });
+
+      beforeEach(() => {
+        fake.respond('profiles.list', { profiles: [dev, prod] });
+        fake.respond('conn.status', { connections: [{ profileId: 'p-dev', state: 'connected' }] });
+      });
+
+      it("a tab of an unknown profile shows the status service's connection", async () => {
+        await start();
+        await settle();
+        TestBed.inject(StatusService).setConnection({ name: 'service-conn', state: 'connecting' });
+        ws.open(collTab('p-deleted'));
+        await settle();
+        expect(conn()).toContain('service-conn');
+        expect(conn()).toContain('Connecting…');
+      });
+
+      it('a non-string profileId is not looked up', async () => {
+        await start();
+        await settle();
+        ws.open(collTab(42));
+        await settle();
+        expect(conn()).toContain('No connection');
+      });
+
+      it("the active tab's connection wins over the status service's", async () => {
+        await start();
+        await settle();
+        TestBed.inject(StatusService).setConnection({ name: 'service-conn', state: 'error' });
+        ws.open(collTab('p-dev'));
+        await settle();
+        expect(conn()).toContain('Dev Sandbox');
+        expect(conn()).toContain('Connected');
+        expect(conn()).not.toContain('service-conn');
+        expect(conn()).not.toContain('Production');
+        expect(conn()).not.toContain('Read-only');
+        expect(bar().classList).not.toContain('production');
+        expect(bar().classList).not.toContain('readonly');
+      });
+
+      it('a profile without a known connection state is shown as disconnected', async () => {
+        await start();
+        await settle();
+        ws.open(collTab('p-prod'));
+        await settle();
+        expect(conn()).toContain('Fictitious Prod');
+        expect(conn()).toContain('Disconnected');
+      });
+
+      it("uses the profile's production flag when the tab has none, the tab's otherwise", async () => {
+        await start();
+        await settle();
+        ws.open(collTab('p-prod'));
+        await settle();
+        expect(conn()).toContain('Production');
+        expect(bar().classList).toContain('production');
+
+        ws.open(
+          tab('collection:p-prod:db.other', {
+            production: false,
+            data: { profileId: 'p-prod', db: 'db', coll: 'other', type: 'collection' },
+          }),
+        );
+        await settle();
+        expect(conn()).toContain('Fictitious Prod');
+        expect(conn()).not.toContain('Production');
+        expect(bar().classList).not.toContain('production');
+      });
+
+      it('switching between tabs of two profiles follows the active one', async () => {
+        await start();
+        await settle();
+        ws.open(collTab('p-dev'));
+        ws.open(collTab('p-prod'));
+        await settle();
+        expect(conn()).toContain('Fictitious Prod');
+        ws.activate('collection:p-dev:db.c');
+        await settle();
+        expect(conn()).toContain('Dev Sandbox');
+        expect(conn()).not.toContain('Fictitious Prod');
+      });
+    });
   });
 
   it('is the layout component of the root route', async () => {
