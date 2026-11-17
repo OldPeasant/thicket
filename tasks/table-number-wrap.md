@@ -18,3 +18,4 @@ In the Table view, narrow columns break values mid-token: an Int32 `10421` rende
 ## Notes
 See SPEC.md and docs/ARCHITECTURE.md.
 - ASSUMPTION (2026-11-17 07:06+0100 by dell26/agent-3): Scalar = every BSON leaf type except non-UUID Binary, Regex, Code, Code w/ scope and Symbol (their text can be long, so they keep wrapping anywhere); UUID, Timestamp, MinKey/MaxKey, DBPointer and Undefined count as scalar. No explicit min-width: nowrap makes each column's min-content the full value, so the table (already overflow:auto) scrolls horizontally.
+- ASSUMPTION (2026-11-17 07:07+0100 by dell26/agent-3): Long strings keep the existing pre-wrap + overflow-wrap:break-word, so in a squeezed column they wrap word by word (one word per line in the screenshot); no extra min-width for strings to avoid widening every short-string column.
